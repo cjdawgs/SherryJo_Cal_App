@@ -31,10 +31,12 @@ body {
   word-break: break-word !important;
 }
 
+
+/* ✅ STRONGER VISUAL SEPARATION */
 .fc-event {
-  height: auto !important;
-  border-width: 2px !important;
+  border-left: 4px solid rgba(0,0,0,0.2);
 }
+
 
 /* ✅ inner container */
 .topbar-inner {
@@ -48,6 +50,16 @@ body {
   text-align: center;
 }
 
+
+.providerBtn {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+
+.providerBtn img {
+  width: 20px;
+  height: 20px;
+}
 
 /* ✅ TITLE (bigger + bold + centered) */
 .appTitle {
@@ -77,15 +89,23 @@ body {
 /* ✅ SECOND ROW (Create / Sync / Logout) */
 .actionButtons {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   justify-content: center;
+  margin-top: 8px;
 }
 
-/* ✅ CONNECTED ACCOUNTS DISPLAY */
+/* =====================================================
+✅ CONNECTED ACCOUNTS DISPLAY (POLISHED CHIP STYLE)
+===================================================== */
+
 .accounts {
-  text-align: center;
-  font-size: 13px;
-  color: #444;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+
+  gap: 8px;
+  margin-top: 6px;
 }
 
 /* ✅ hidden when no accounts */
@@ -93,11 +113,69 @@ body {
   display: none;
 }
 
-/* ✅ spacing between account rows */
+/* =====================================================
+✅ ACCOUNT CHIP
+===================================================== */
+
 .accounts div {
-  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 3px 9px;
+  border-radius: 999px;
+
+  background: #f1f3f4;
+
+  border: 1px solid rgba(0, 0, 0, 0.08);
+
+  line-height: 1;
+  font-size: 13px;
+
+  transition: transform 0.1s ease, background 0.1s ease;
 }
 
+/* ✅ HOVER (interactive feel) */
+.accounts div:hover {
+  transform: scale(1.05);
+  background: #e8eaed;
+  cursor: pointer;   /* ready for filtering later */
+}
+
+/* =====================================================
+✅ COLOR DOT (FIRST SPAN)
+===================================================== */
+
+.accounts div span:first-child {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* =====================================================
+✅ LABEL TEXT (SECOND SPAN)
+===================================================== */
+
+.accounts div span:last-child {
+  font-weight: 500;
+  color: #333;
+
+  max-width: 120px;         /* prevents overflow */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =====================================================
+✅ OPTIONAL: ACTIVE / SELECTED CHIP (READY FOR NEXT STEP)
+===================================================== */
+
+.accounts div.active {
+  background: #dbeafe;      /* light blue highlight */
+  border-color: #93c5fd;
+}
 
 /* =====================================================
 ✅ MAIN LAYOUT (CALENDAR + SIDEBAR)
@@ -358,4 +436,60 @@ button:active {
 /* ✅ SMALL BUTTON POLISH INSIDE MODAL */
 .modal button {
   padding: 6px 10px;
+}
+
+/* =====================================================
+✅ EVENT PILLS (PRO LOOK)
+===================================================== */
+/* ✅ EVENT PILL IMPROVED */
+.event-pill {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+
+
+/* =====================================================
+✅ LEGEND (ACCOUNT KEY)
+===================================================== */
+.calendarLegend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ✅ LEGEND DOT */
+.legendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* =====================================================
+✅ CLEAN SIDEBAR EVENT STRIP (MATCH COLORS)
+===================================================== */
+.sidebarEvent {
+  border-left: 4px solid #ccc;
+  padding-left: 6px;
+}
+
+/* =====================================================
+✅ HOVER POLISH
+===================================================== */
+.fc-daygrid-day:hover {
+  background-color: #f9fafb;
+  cursor: pointer;
 }

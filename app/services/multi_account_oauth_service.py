@@ -180,10 +180,26 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
             return None
 
     # --------------------------------------------------
-    # ❌ INVALID ACCOUNT
+    # ✅ RECOVERY MODE (FIXES YOUR BUG)
     # --------------------------------------------------
     if not expires:
-        print(f"❌ Missing expires_at: {account.account_email}")
+        print(f"⚠️ Missing expires_at → attempting recovery: {account.account_email}")
+
+        # ✅ Try refresh if possible
+        if account.refresh_token:
+            try:
+                if account.provider == "google":
+                    return _refresh_google_token(db, account)
+
+                if account.provider == "microsoft":
+                    return _refresh_ms_token(db, account)
+
+            except Exception as e:
+                print("❌ Recovery refresh failed:", e)
+                db.rollback()
+                return None
+
+        print(f"🚫 No refresh token → cannot recover: {account.account_email}")
         return None
 
     # --------------------------------------------------
@@ -247,9 +263,15 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
         return None
 
     account.access_token = data["access_token"]
+
+    # ✅ CRITICAL FIX: Microsoft rotates refresh tokens
+    if "refresh_token" in data:
+        account.refresh_token = data["refresh_token"]
+
     account.token_expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=data.get("expires_in", 3600)
     )
+
 
     safe_commit(db)
 
@@ -288,6 +310,11 @@ def _refresh_ms_token(db: Session, account: OAuthAccount):
         return None
 
     account.access_token = data["access_token"]
+
+    # ✅ CRITICAL FIX: Microsoft rotates refresh tokens
+    if "refresh_token" in data:
+        account.refresh_token = data["refresh_token"]
+
     account.token_expires_at = datetime.now(timezone.utc) + timedelta(
         seconds=data.get("expires_in", 3600)
     )

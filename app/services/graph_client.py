@@ -36,31 +36,54 @@ class GraphClient:
     # ==================================================
     # ✅ FETCH EVENTS
     # ==================================================
-
-    def get_events_with_token(self, access_token):
+    def get_events_with_token(self, access_token, start=None, end=None):
         """
         ✅ PURPOSE:
-        Fetch all Outlook calendar events for a single account
+        Fetch Outlook events WITH recurring expansion (calendarView)
 
-        ✅ SAFE DESIGN:
-        - never crashes system
-        - returns empty list on failure
+        ✅ FIX:
+        Uses /calendarView instead of /events
         """
 
-        url = f"{GRAPH_BASE_URL}/me/events"
+        if not start or not end:
+            # fallback window (safe default)
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            start = now - timedelta(days=180)
+            end = now + timedelta(days=365)
+
+        url = f"{GRAPH_BASE_URL}/me/calendarView"
 
         headers = {
             "Authorization": f"Bearer {access_token}"
         }
 
-        response = requests.get(url, headers=headers)
+        params = {
+            "startDateTime": start.isoformat(),
+            "endDateTime": end.isoformat()
+        }
 
-        # ✅ FAIL SAFE (DO NOT BREAK ENTIRE SYNC)
-        if response.status_code != 200:
-            print("❌ Microsoft events fetch failed:", response.text)
-            return {"value": []}
+        events = []
 
-        return response.json()
+        while url:
+            response = requests.get(url, headers=headers, params=params)
+
+            if response.status_code != 200:
+                print("❌ Microsoft calendarView failed:", response.text)
+                break
+
+            data = response.json()
+
+            batch = data.get("value", [])
+            events.extend(batch)
+
+            # ✅ pagination support
+            url = data.get("@odata.nextLink")
+
+            # ✅ only include params first call
+            params = None
+
+        return {"value": events}
 
     # ==================================================
     # ✅ UPDATE EVENT

@@ -2,7 +2,7 @@
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
-
+import requests
 from app.services.graph_client import GraphClient
 from app.services.google_calendar_service import GoogleCalendarService
 from app.models import Event
@@ -152,10 +152,35 @@ class CalendarService:
                 # ========================
                 elif acc.provider == "microsoft":
 
-                    data = self.graph.get_events_with_token(token) or {}
-                    events = data.get("value", [])
+                    # ✅ EXPAND RECURRING EVENTS PROPERLY
+                    url = "https://graph.microsoft.com/v1.0/me/calendarView"
 
-                    print(f"✅ Microsoft returned: {len(events)}")
+                    params = {
+                        "startDateTime": start_date.isoformat(),
+                        "endDateTime": future_limit.isoformat()
+                    }
+
+                    events = []
+
+                    while url:
+                        res = requests.get(
+                            url,
+                            headers={"Authorization": f"Bearer {token}"},
+                            params=params
+                        )
+
+                        data = res.json()
+
+                        batch = data.get("value", [])
+                        events.extend(batch)
+
+                        # ✅ handle pagination
+                        url = data.get("@odata.nextLink")
+
+                        # ✅ only send params first time
+                        params = None
+
+                    print(f"✅ Microsoft expanded instances: {len(events)}")
 
                     for e in events:
                         start_val = e.get("start", {}).get("dateTime")

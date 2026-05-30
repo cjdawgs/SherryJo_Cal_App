@@ -50,7 +50,8 @@ let lastGoodEvents = [];
 let selectedDate = new Date();
 
 // ✅ NEW: account filter
-let activeAccountFilter = null;
+let activeAccountFilters = new Set();
+
 /**************************************************************
  * ✅ INIT APP
  **************************************************************/
@@ -97,7 +98,15 @@ function handleOAuthRedirect() {
  **************************************************************/
 function initCalendar(el) {
 
-  calendar = new FullCalendar.Calendar(el, {
+  
+    calendar = new FullCalendar.Calendar(el, {
+
+      initialView: "dayGridMonth",
+
+      // ✅ ✅ CRITICAL FIX
+      dayMaxEventRows: false,
+      dayMaxEvents: false,
+
 
     initialView: "dayGridMonth",
 
@@ -122,49 +131,68 @@ function initCalendar(el) {
           ? data.events
 
               // ✅ STEP A: REMOVE BAD EVENTS
-              .filter(ev => ev.start)
+              .filter(ev => ev.start || ev.start?.dateTime)
 
-              // ✅ STEP B: APPLY ACCOUNT FILTER (NEW)
+              // ✅ STEP B: APPLY ACCOUNT FILTER (FIXED + NORMALIZED)
               .filter(ev => {
 
-                // ✅ show everything if no filter selected
-                if (!activeAccountFilter) return true;
+                // ✅ show everything if no filters selected
+                if (activeAccountFilters.size === 0) return true;
 
-                const email = ev.account || "";
-                const key = `${ev.source}:${email}`;
+                // ✅ normalize values (CRITICAL FIX)
+                const email = (ev.account || "").toLowerCase();
+                const source = (ev.source || "").toLowerCase();
 
-                return key === activeAccountFilter;
+                // ✅ FIX: normalize outlook → microsoft
+                const normalizedSource =
+                  source === "outlook" ? "microsoft" : source;
+
+                // ✅ allow events without account (prevents loss)
+                if (!email) return true;
+
+                const key = `${normalizedSource}:${email}`;
+
+                return activeAccountFilters.has(key);
               })
 
               // ✅ STEP C: MAP (UNCHANGED LOGIC)
               .map(ev => {
-                const safeStart = new Date(ev.start);
-                if (isNaN(safeStart)) return null;
-                
-                const safeEnd = ev.end ? new Date(ev.end) : null;
+
+                // ✅ SUPPORT GOOGLE + MICROSOFT FORMATS
+                const rawStart = ev.start?.dateTime || ev.start;
+                const rawEnd = ev.end?.dateTime || ev.end;
+
+                const safeStart = rawStart ? new Date(rawStart) : null;
+                if (!safeStart || isNaN(safeStart)) return null;
+
+                const safeEnd = rawEnd ? new Date(rawEnd) : null;
+
+                const email = ev.account || "";
 
                 return {
-                  id: ev.id,
+                  id: `${ev.id}_${rawStart}`,
                   title: ev.title || "Untitled",
 
-                  start: safeStart.toISOString(),
-                  end: safeEnd ? safeEnd.toISOString() : null,
-
-                  backgroundColor: ev.color || "#999",
-                  borderColor: ev.color || "#999",
+                  // ✅ DO NOT convert to ISO (CRITICAL FIX)
+                  start: safeStart,
+                  end: safeEnd || null,
 
                   extendedProps: {
                     source: ev.source,
-                    account: ev.account,
+                    account: email,
                     conflict: !!ev.conflict,
                     notes: ev.notes || []
                   }
                 };
-              
+
               })
+
               .filter(Boolean)   // ✅ ← ADD THIS LINE
 
           : [];
+
+        console.log(events.filter(e => e.extendedProps.source === "microsoft").map(e => e.id));
+
         // ✅ SAFE accounts
         renderAccounts?.(data?.accounts || []);
 
@@ -195,16 +223,30 @@ function initCalendar(el) {
     },
 
     eventDidMount: (info) => {
-      // ✅ SHOW RED BORDER IF CONFLICT
-      if (info.event.extendedProps.conflict) {
-        info.el.style.border = "2px solid red";
-      }
 
-      // ✅ TOOLTIP
-      info.el.title =
-        info.event.extendedProps.source + " | " +
-        (info.event.extendedProps.account || "");
-    },
+    // ✅ ✅ APPLY NEW COLOR SYSTEM
+    applyEventColor(info.el, {
+      extendedProps: {
+        account_email: info.event.extendedProps.account
+      }
+    });
+
+    // ✅ Keep your styling
+    info.el.style.border = "none";
+    info.el.style.borderRadius = "6px";
+    info.el.style.padding = "2px 4px";
+    info.el.style.fontWeight = "500";
+
+    // ✅ Conflict override (unchanged)
+    if (info.event.extendedProps.conflict) {
+      info.el.style.border = "2px solid red";
+    }
+
+    // ✅ Tooltip (unchanged)
+    info.el.title =
+      info.event.extendedProps.source + " | " +
+      (info.event.extendedProps.account || "");
+  },
 
     /**************************************************
      * CLICK EVENT
@@ -295,99 +337,332 @@ function initCalendar(el) {
      * NOTES UI
      **************************************************/
     eventContent: (arg) => {
+
       const notes = arg.event.extendedProps.notes || [];
+      const source = arg.event.extendedProps.source;
 
       const wrap = document.createElement("div");
 
+      // ✅ ROW CONTAINER (icon + text inline)
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "4px";
+
+      // ✅ ICON (BRAND STYLE MINI)
+      const icon = document.createElement("span");
+
+      icon.style.display = "flex";
+      icon.style.alignItems = "center";
+      icon.style.justifyContent = "center";
+      icon.style.width = "12px";
+      icon.style.height = "12px";
+      icon.style.borderRadius = "3px";
+      icon.style.flexShrink = "0";
+
+      icon.style.opacity = "0.9";      // ✅ subtle polish
+      icon.style.marginRight = "3px";  // ✅ spacing
+
+      if (source === "google") {
+        icon.textContent = "G";
+        icon.style.fontSize = "9px";
+        icon.style.fontWeight = "bold";
+        icon.style.color = "#fff";
+        icon.style.backgroundColor = "#34a853"; // Google green
+      }
+      else if (source === "microsoft") {
+        // ✅ mimic Microsoft tile
+        icon.textContent = "■";
+        icon.style.fontSize = "8px";
+        icon.style.color = "#fff";
+        icon.style.backgroundColor = "#2563eb";
+      }
+      
+
+
+      // ✅ TITLE (clean + ellipsis)
       const title = document.createElement("div");
       title.textContent = arg.event.title;
-      wrap.appendChild(title);
+      title.style.fontSize = "12px";
+      title.style.whiteSpace = "nowrap";
+      title.style.overflow = "hidden";
+      title.style.textOverflow = "ellipsis";
+      title.style.fontWeight = "500";
 
+      // ✅ BUILD ROW
+      row.appendChild(icon);
+      row.appendChild(title);
+      wrap.appendChild(row);
+
+      // ✅ NOTES (unchanged)
       notes.forEach(note => {
-        const icon = document.createElement("span");
-        icon.textContent = "📝";
-        icon.title = stripHtml(note.content);
+        const noteIcon = document.createElement("span");
+        noteIcon.textContent = "📝";
+        noteIcon.title = stripHtml(note.content);
 
-        icon.onclick = (e) => {
+        noteIcon.onclick = (e) => {
           e.stopPropagation();
           editNote(arg.event.id, note.id);
         };
 
-        wrap.appendChild(icon);
+        wrap.appendChild(noteIcon);
       });
 
       return { domNodes: [wrap] };
     }
+
   });
 
   calendar.render();
 }
 
-/**************************************************************
- * ✅ ACCOUNT DISPLAY (HIDDEN IF EMPTY)
- **************************************************************/
+/* =====================================================
+✅ COLOR ENGINE (CENTRALIZED + SCALABLE)
+===================================================== */
+
+// ✅ Base colors per provider
+const BASE_COLORS = {
+  google: "#1f9d55",
+  microsoft: "#1d4ed8",
+  apple: "#dc2626",
+  other: "#eab308"
+};
+
+// ✅ Store final color per account
+let accountColorMap = {};
+
+// ✅ Lighten function
+function lightenColor(hex, percent) {
+  const num = parseInt(hex.replace("#", ""), 16);
+
+  let r = (num >> 16) & 0xff;
+  let g = (num >> 8) & 0xff;
+  let b = num & 0xff;
+
+  r = Math.min(255, Math.floor(r + (255 - r) * percent));
+  g = Math.min(255, Math.floor(g + (255 - g) * percent));
+  b = Math.min(255, Math.floor(b + (255 - b) * percent));
+
+  return "#" + [r, g, b]
+    .map(x => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// ✅ NON-LINEAR contrast (fixes your “greens too close” issue)
+function getAccountColor(provider, index) {
+  const base = BASE_COLORS[provider] || BASE_COLORS.other;
+
+  // ✅ THIS IS THE SECRET SAUCE
+  // First step has a minimum jump → avoids subtle differences
+  const percent = Math.min(0.20 + (index * 0.32), 0.75);
+
+  return lightenColor(base, percent);
+}
+
+/* =====================================================
+✅ LEGEND (AUTO-SYNC WITH COLORS)
+===================================================== 
+
+function renderLegend(accounts) {
+  const container = document.getElementById("calendarLegend");
+  if (!container) return;
+
+  container.innerHTML = "";
+
+  accounts.forEach(acc => {
+    const email = acc.account_email || acc.email;
+    const color = accountColorMap[email];
+
+    const item = document.createElement("div");
+    item.className = "legendItem";
+
+    const dot = document.createElement("span");
+    dot.className = "legendDot";
+    dot.style.backgroundColor = color;
+
+    const label = document.createElement("span");
+    label.textContent = email;
+
+    item.appendChild(dot);
+    item.appendChild(label);
+
+    container.appendChild(item);
+  });
+}
+*/
+
+/* =====================================================
+✅ APPLY COLOR TO EVENT ELEMENT
+===================================================== */
+
+function applyEventColor(el, event) {
+  const email =
+    event.extendedProps?.account_email ||
+    event.extendedProps?.email;
+
+  const color = accountColorMap[email];
+  if (!color) return;
+
+  // ✅ Background
+  el.style.backgroundColor = color;
+
+  // ✅ PERFECT READABILITY (tuned threshold)
+  const num = parseInt(color.replace("#", ""), 16);
+  const r = (num >> 16) & 0xff;
+  const g = (num >> 8) & 0xff;
+  const b = num & 0xff;
+
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+  // ✅ Slightly more aggressive threshold (fix washed text)
+  el.style.color = brightness > 155 ? "#000" : "#fff";
+
+  // ✅ Visual separator (huge UX win)
+  el.style.borderLeft = "4px solid rgba(0,0,0,0.25)";
+}
+
+// ✅ REUSABLE ICON BUILDER (USE EVERYWHERE)
+function createSourceIcon(source) {
+
+  const icon = document.createElement("span");
+
+  icon.style.display = "flex";
+  icon.style.alignItems = "center";
+  icon.style.justifyContent = "center";
+  icon.style.width = "12px";
+  icon.style.height = "12px";
+  icon.style.borderRadius = "3px";
+  icon.style.flexShrink = "0";
+  icon.style.opacity = "0.9";
+  icon.style.marginRight = "4px";
+
+  if (source === "google") {
+    icon.textContent = "G";
+    icon.style.fontSize = "9px";
+    icon.style.fontWeight = "bold";
+    icon.style.color = "#fff";
+    icon.style.backgroundColor = "#34a853";
+  }
+  else if (source === "microsoft") {
+    icon.textContent = "■";
+    icon.style.fontSize = "8px";
+    icon.style.color = "#fff";
+    icon.style.backgroundColor = "#2563eb";
+  }
+  else {
+    icon.style.backgroundColor = "#999";
+  }
+
+  return icon;
+}
+
+/* =====================================================
+✅ ACCOUNT LIST + COLOR MAP BUILDER (WITH HIDE SUPPORT)
+===================================================== */
 function renderAccounts(accounts) {
   const el = document.getElementById("accounts");
   if (!el) return;
 
-  if (!accounts || accounts.length === 0) {
-    el.classList.add("hidden");
-    return;
+  // ✅ ✅ KEEP THIS (restores original behavior)
+  
+if (!accounts || accounts.length === 0) {
+  el.classList.add("hidden");
+
+  const legend = document.getElementById("calendarLegend");
+  if (legend) {
+    legend.innerHTML = '<span style="color:#888;">No connected accounts</span>';
   }
+
+  return;
+}
+
 
   el.classList.remove("hidden");
 
+  // ✅ Reset map
+  accountColorMap = {};
+  const providerCounts = {};
 
-  el.innerHTML = accounts.map(acc => {
-    const icon = acc.provider === "google" ? "🟢" : "🔵";
-    const email = acc.account_email || acc.email || "UNKNOWN";
+  el.innerHTML = "";
 
-    return `
-      <div 
-        style="
-          margin: 4px 0;
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-        "
-        onclick="setAccountFilter('${acc.provider}:${email}')"
-          style="
-            margin:4px 0;
-            cursor:pointer;
-            padding:4px;
-            border-radius:4px;
-            background:${
-              activeAccountFilter === `${acc.provider}:${email}`
-                ? '#e8f0fe'
-                : 'transparent'
-            };
-          "
-      >
-        ${icon}
-        <span style="color:#333;">${email}</span>
-      </div>
-    `;
-  }).join("");
-} //✅ ← THIS WAS MISSING
+  accounts.forEach(acc => {
+    const provider = (acc.provider || "other").toLowerCase();
+    const email = acc.account_email || acc.email;
 
-  /**************************************************************
-   * ✅ ACCOUNT FILTER HANDLER
-   **************************************************************/
-  function setAccountFilter(filterKey) {
-
-    console.log("🎯 Filter selected:", filterKey);
-
-    // ✅ toggle behavior
-    if (activeAccountFilter === filterKey) {
-      activeAccountFilter = null; // unselect
-      console.log("✅ Filter cleared");
-    } else {
-      activeAccountFilter = filterKey;
+    if (!providerCounts[provider]) {
+      providerCounts[provider] = 0;
     }
 
-    // ✅ reload calendar data
-    calendar.refetchEvents();
-  }
+    const index = providerCounts[provider]++;
+    const color = getAccountColor(provider, index);
+
+    accountColorMap[email] = color;
+
+    /* ---------- UI ROW ---------- */
+    const row = document.createElement("div");
+
+    // ✅ normalize provider (match filter logic)
+    const normalizedProvider =
+      provider === "outlook" ? "microsoft" : provider;
+
+    const key = `${normalizedProvider}:${email.toLowerCase()}`;
+    row.dataset.key = key;
+
+    // ✅ HOVER FULL EMAIL
+    row.title = email;
+
+    // ✅ DOT (ONLY ONCE)
+    const dot = document.createElement("span");
+    dot.style.backgroundColor = color;
+    row.appendChild(dot);
+
+    // ✅ LABEL
+    const shortName = email.split("@")[0];
+
+    let suffix = "";
+    if (provider === "google") suffix = "(G)";
+    if (provider === "microsoft") suffix = "(MS)";
+
+    const label = document.createElement("span");
+    label.textContent = `${shortName} ${suffix}`;
+    row.appendChild(label);
+
+    // ✅ CLICK HANDLER
+    row.onclick = () => {
+      if (activeAccountFilters.has(key)) {
+        activeAccountFilters.delete(key);
+      } else {
+        activeAccountFilters.add(key);
+      }
+
+      updateChipSelectionUI();
+      calendar.refetchEvents();
+    };
+
+    // ✅ APPEND
+    el.appendChild(row);
+
+  });
+
+  updateChipSelectionUI();
+
+  //renderLegend(accounts);
+}
+
+function updateChipSelectionUI() {
+
+  document.querySelectorAll("#accounts div").forEach(row => {
+    const key = row.dataset.key;
+
+    if (!key) return;
+
+    if (activeAccountFilters.has(key)) {
+      row.classList.add("active");
+    } else {
+      row.classList.remove("active");
+    }
+  });
+}
 
 
 //✅ ✅ DAY DETAILS FUNCTION
@@ -398,7 +673,12 @@ function updateDayDetails(date) {
 
   if (!titleEl || !listEl || !calendar) return;
 
-  const selectedDate = date.toISOString().split("T")[0];
+  
+  const selected = new Date(date);
+
+  // ✅ NORMALIZE
+  selected.setHours(0,0,0,0);
+
 
   // ✅ Softer, cleaner header
   titleEl.innerHTML = `
@@ -412,9 +692,17 @@ function updateDayDetails(date) {
     </div>
   `;
 
-  let events = calendar.getEvents().filter(ev =>
-    ev.startStr.startsWith(selectedDate)
-  );
+  let events = calendar.getEvents().filter(ev => {
+    if (!ev.start) return false;
+
+    const evDate = new Date(ev.start);
+
+    // ✅ NORMALIZE EVENT DATE
+    evDate.setHours(0,0,0,0);
+
+    return evDate.getTime() === selected.getTime();
+  });
+
 
   events.sort((a, b) => new Date(a.start) - new Date(b.start));
 
@@ -433,28 +721,39 @@ function updateDayDetails(date) {
       ? new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : "";
 
-    li.innerHTML = `
-      <div style="
-        display:flex;
-        align-items:center;
-        gap:6px;
-        margin-bottom:6px;
-        font-size:13px;
-        cursor:pointer;
-        transition: background 0.15s ease;
-        padding:2px 4px;
-        border-radius:4px;
-      ">
-        <span style="
-          width:4px;
-          height:14px;
-          background:${ev.backgroundColor};
-        "></span>
+    const row = document.createElement("div");
 
-        <span style="color:#555;">${time}</span>
-        ${ev.title}
-      </div>
-    `;
+    row.style.display = "flex";
+    row.style.alignItems = "center";
+    row.style.gap = "6px";
+    row.style.marginBottom = "6px";
+    row.style.fontSize = "13px";
+    row.style.cursor = "pointer";
+    row.style.transition = "background 0.15s ease";
+    row.style.padding = "3px 6px";
+    row.style.borderRadius = "6px";
+
+    // ✅ NEW ICON
+    const icon = createSourceIcon(ev.extendedProps.source);
+
+    // ✅ TIME
+    const timeEl = document.createElement("span");
+    timeEl.textContent = time;
+    timeEl.style.color = "#777";
+    timeEl.style.fontSize = "11px";
+
+    // ✅ TITLE
+    const titleEl = document.createElement("span");
+    titleEl.textContent = ev.title;
+    titleEl.style.fontWeight = "500";
+
+    // ✅ BUILD
+    row.appendChild(icon);
+    row.appendChild(timeEl);
+    row.appendChild(titleEl);
+
+    li.appendChild(row);
+
     li.onmouseenter = () => {
       li.firstChild.style.background = "#f5f7fa";
     };
@@ -494,23 +793,29 @@ function updateWeekView() {
   // ✅ USE selected date OR fallback to today
   const baseDate = selectedDate || new Date();
 
+  // ✅ START OF WEEK
   const start = new Date(baseDate);
   start.setDate(baseDate.getDate() - baseDate.getDay());
 
+  // ✅ NORMALIZE START (CRITICAL)
+  start.setHours(0,0,0,0);
+
   const end = new Date(start);
   end.setDate(start.getDate() + 7);
+
+  // ✅ NORMALIZE END (CRITICAL)
+  end.setHours(0,0,0,0);
+
 
   let weekEvents = events.filter(ev => {
     if (!ev.start) return false;
 
     const evDate = new Date(ev.start);
-    const evDay = evDate.toISOString().split("T")[0];
 
-    const startDay = start.toISOString().split("T")[0];
-    const endDay = end.toISOString().split("T")[0];
-
-    return evDay >= startDay && evDay < endDay;
+    // ✅ PURE DATE COMPARISON (correct)
+    return evDate >= start && evDate < end;
   });
+
 
   container.innerHTML = "";
 
@@ -566,46 +871,50 @@ function updateWeekView() {
       row.firstChild.style.background = "transparent";
     };
 
+    console.log("WEEK RANGE:", start, end);
 
+    const inner = document.createElement("div");
 
-    row.innerHTML = `
-        <div style="
-          display:flex;
-          align-items:center;
-          gap:6px;
-          margin-left:10px;
-          margin-bottom:4px;
-          font-size:13px;
-          cursor:pointer;
-          transition: background 0.15s ease;
-          padding:2px 4px;
-          border-radius:4px;
-        ">
+    inner.style.display = "flex";
+    inner.style.alignItems = "center";
+    inner.style.gap = "6px";
+    inner.style.marginLeft = "10px";
+    inner.style.marginBottom = "4px";
+    inner.style.fontSize = "13px";
+    inner.style.cursor = "pointer";
+    inner.style.transition = "background 0.15s ease";
+    inner.style.padding = "2px 4px";
+    inner.style.borderRadius = "4px";
 
-          <span style="
-            width:4px;
-            height:12px;
-            background:${ev.backgroundColor};
-          "></span>
+    // ✅ NEW ICON
+    const icon = createSourceIcon(ev.extendedProps.source);
 
-          <span style="color:#555;">${time}</span>
-          ${ev.title}
+    // ✅ TIME
+    const timeEl = document.createElement("span");
+    timeEl.textContent = time;
+    timeEl.style.color = "#555";
 
-        </div>
-      `;
+    // ✅ TITLE
+    const titleEl = document.createElement("span");
+    titleEl.textContent = ev.title;
 
+    // ✅ BUILD
+    inner.appendChild(icon);
+    inner.appendChild(timeEl);
+    inner.appendChild(titleEl);
 
+    row.appendChild(inner);
 
-    // ✅ CLICK → OPEN MODAL
-    row.onclick = () => {
-      openCreateModal(null, ev);
+        // ✅ CLICK → OPEN MODAL
+        row.onclick = () => {
+          openCreateModal(null, ev);
 
-      // ✅ scroll selected item into view
-      row.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest"
-      });
-    };
+          // ✅ scroll selected item into view
+          row.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest"
+          });
+        };
 
     // ✅ HOVER TOOLTIP
     row.title = ev.title;
@@ -881,10 +1190,15 @@ function scrollWeekToDate(date) {
 }
 
 
-function getColor(source) {
-  if (source === "google") return "blue";
-  if (source === "microsoft") return "green";
-  return "gray";
+// ✅ CENTRALIZED COLOR LOGIC (DO NOT SCATTER THIS)
+function getEventClass(event) {
+  const source = event.extendedProps?.source;
+
+  if (source === "google") return "event-pill event-google";
+  if (source === "google_alt") return "event-pill event-google-alt";
+  if (source === "microsoft") return "event-pill event-microsoft";
+
+  return "event-pill"; // fallback
 }
 
 function stripHtml(html) {
