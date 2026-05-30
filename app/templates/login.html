@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+
+  <style>
+    body {
+      font-family: Arial;
+      text-align: center;
+      margin-top: 100px;
+    }
+
+    input {
+      padding: 10px;
+      margin: 10px;
+      width: 250px;
+    }
+
+    button {
+      padding: 10px 20px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+
+<body>
+
+  <h2>Login</h2>
+
+  <!-- ✅ Email input -->
+  <input id="email" type="text" placeholder="Email"><br>
+
+  <!-- ✅ Password input -->
+  <input id="password" type="password" placeholder="Password"><br>
+
+  <!-- ✅ Button triggers login() -->
+  <button onclick="login()">Login</button>
+
+
+  <script>
+    
+    /**************************************************************
+    * ✅ AUTO-REDIRECT IF ALREADY LOGGED IN
+    **************************************************************/
+    const existingToken = localStorage.getItem("token");
+
+    if (existingToken) {
+        console.log("✅ Already logged in, redirecting...");
+        window.location.href = "/calendar-ui";
+    }
+
+
+    /**************************************************************
+     * ✅ LOGIN FUNCTION (TOKENS + API)
+     **************************************************************/
+    async function login() {
+      try {
+
+        // ✅ Get user input
+        const email = document.getElementById("email").value;
+        const password = document.getElementById("password").value;
+
+        // ✅ Call backend login endpoint
+        const response = await fetch('/auth/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            email: email,
+            password: password
+          })
+        });
+
+        // ✅ Parse response
+        const data = await response.json();
+
+        // ✅ DEBUG: See what backend returned
+        console.log("🔐 LOGIN RESPONSE:", data);
+
+        // ✅ Support BOTH formats:
+        // some backends return { token: "..." }
+        // others return { access_token: "..." }
+        const token = data.token || data.access_token;
+
+        // ✅ If no token → login failed
+        if (!token) {
+          alert("Login failed: no token returned");
+          return;
+        }
+
+        // ✅ SAVE TOKEN TO BROWSER STORAGE
+        localStorage.setItem("token", token);
+
+        console.log("✅ Token saved to localStorage");
+
+        // ✅ Redirect to calendar UI
+        window.location.href = "/calendar-ui";
+
+      } catch (error) {
+        console.error("❌ Login error:", error);
+        alert("Login failed. Check console.");
+      }
+    }
+  </script>
+
+</body>
+</html>

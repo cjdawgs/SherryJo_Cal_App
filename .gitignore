@@ -1,0 +1,26 @@
+# Python
+.venv/
+.venv-1/
+__pycache__/
+*.pyc
+.env
+
+# Archives
+*.zip
+
+# Logs
+*.log
+*.txt
+
+# Specific log file
+commit_sherryjo_cal_app_log.txt
+
+# Database
+app.db
+*.db
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+``

@@ -1,0 +1,104 @@
+{
+    "": [
+        ".env",
+        ".gitignore",
+        "alembic.ini",
+        "app.db",
+        "commit_sherryjo_cal_app_log.txt",
+        "README.md",
+        "requirements.freeze.txt",
+        "requirements.txt",
+        "run.py"
+    ],
+    "alembic": [
+        "env.py",
+        "README",
+        "script.py.mako"
+    ],
+    "alembic\\versions": [
+        "216c0eb14fc0_update_events_model.py",
+        "3221a313666d_add_notes_table.py",
+        "d1b8cd601114_initial_tables.py",
+        "f2e5e37554d3_add_status_column.py"
+    ],
+    "app": [
+        "app.db",
+        "config.py",
+        "database.py",
+        "deps.py",
+        "main.py",
+        "models.py",
+        "security.py",
+        "__init__.py"
+    ],
+    "app\\auth": [
+        "oauth.py",
+        "token_handler.py"
+    ],
+    "app\\config": [
+        "constants.py",
+        "settings.py"
+    ],
+    "app\\models": [
+        "event_model.py",
+        "task_model.py"
+    ],
+    "app\\routers": [
+        "auth.py",
+        "calendar.py",
+        "display.py",
+        "events.py",
+        "notes.py",
+        "tasks.py",
+        "users.py",
+        "websocket.py",
+        "__init__.py"
+    ],
+    "app\\routes": [
+        "auth_routes.py",
+        "calendar_routes.py",
+        "task_routes.py"
+    ],
+    "app\\services": [
+        "calendar_service.py",
+        "graph_client.py",
+        "task_service.py"
+    ],
+    "app\\static": [
+        "calendar.js",
+        "style.css"
+    ],
+    "app\\static\\backgrounds": [
+        "flat-lay-summer-composition-with-sea-shells.jpg",
+        "template1.jpg",
+        "template2.jpg"
+    ],
+    "app\\templates": [
+        "display.html",
+        "index.html"
+    ],
+    "app\\tests": [
+        "conftest.py",
+        "test_admin.py",
+        "test_api.py",
+        "test_auth.py",
+        "test_basic.py",
+        "test_calendar.py",
+        "test_database.py",
+        "test_db.py",
+        "test_events_tasks.py",
+        "test_notes.py",
+        "test_users.py"
+    ],
+    "data": [],
+    "data\\processed": [],
+    "data\\raw": [],
+    "scripts": [
+        "Copilot Prompt.txt",
+        "project_structure.json",
+        "smart_setup.py"
+    ],
+    "tests": [
+        "test_auth.py"
+    ]
+}

@@ -1,0 +1,361 @@
+
+/* =====================================================
+✅ BASE (GLOBAL)
+===================================================== */
+
+body {
+  margin: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  background: #f1f3f4;
+}
+
+
+/* =====================================================
+✅ HEADER (CENTERED + CLEAN)
+===================================================== */
+
+
+/* ✅ FORCE HEADER CONTENT CENTERING */
+.topbar {
+  display: flex;
+  justify-content: center;   /* ✅ centers inner container horizontally */
+  width: 100%;
+}
+
+
+.fc-daygrid-event {
+  white-space: normal !important;
+}
+
+.fc-event-title {
+  word-break: break-word !important;
+}
+
+.fc-event {
+  height: auto !important;
+  border-width: 2px !important;
+}
+
+/* ✅ inner container */
+.topbar-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  width: 100%;
+  max-width: 600px;   /* ✅ THIS is the key: limits width so it centers visually */
+
+  text-align: center;
+}
+
+
+/* ✅ TITLE (bigger + bold + centered) */
+.appTitle {
+  font-size: 26px;   /* ✅ +5pts */
+  font-weight: bold;
+  text-align: center;
+}
+
+
+/* =====================================================
+✅ AUTH + BUTTON SECTION (CENTERED BLOCK)
+===================================================== */
+
+.authContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.authButtons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* ✅ SECOND ROW (Create / Sync / Logout) */
+.actionButtons {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+/* ✅ CONNECTED ACCOUNTS DISPLAY */
+.accounts {
+  text-align: center;
+  font-size: 13px;
+  color: #444;
+}
+
+/* ✅ hidden when no accounts */
+.hidden {
+  display: none;
+}
+
+/* ✅ spacing between account rows */
+.accounts div {
+  margin-top: 2px;
+}
+
+
+/* =====================================================
+✅ MAIN LAYOUT (CALENDAR + SIDEBAR)
+===================================================== */
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* ✅ MAIN CALENDAR PANEL */
+.calendarPanel {
+  background: white;
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+#calendar {
+  height: 700px;
+}
+
+
+/* =====================================================
+✅ RIGHT SIDEBAR (DAY / WEEK / TASKS)
+===================================================== */
+
+.leftSidebar {
+  background: white;
+  border-radius: 10px;
+  padding: 12px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+
+/* =====================================================
+✅ CARD BLOCKS
+===================================================== */
+
+.card h4 {
+  margin: 0 0 8px 0;
+  font-size: 15px;
+}
+
+
+/* =====================================================
+✅ DAY DETAILS
+===================================================== */
+
+#selectedDateTitle {
+  font-weight: 600;
+}
+
+#dayEventsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+#dayEventsList li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  padding: 4px;
+  margin-bottom: 6px;
+
+  border-left: 4px solid #1a73e8;
+}
+
+
+/* =====================================================
+✅ WEEK VIEW (OUTLOOK STYLE — CLEAN + FIXED)
+===================================================== */
+
+#weekView {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 3px solid black;
+}
+
+/* ✅ DAY BLOCK */
+.agendaDayBlock {
+  margin-bottom: 14px;
+}
+
+/* ✅ DAY TITLE */
+.agendaDayTitle {
+  font-weight: bold;
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+
+/* ✅ EVENT ROW (FORCED HORIZONTAL) */
+.agendaEventRow {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+
+  padding-left: 20px;
+  margin-bottom: 6px;
+}
+
+/* ✅ TIME */
+.agendaTime {
+  width: 70px;
+  font-size: 12px;
+  display: inline-block;
+}
+
+/* ✅ COLOR BAR */
+.agendaBar {
+  width: 4px;
+  height: 16px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+/* ✅ TEXT */
+.agendaText {
+  font-size: 13px;
+}
+
+
+/* =====================================================
+✅ TASKS
+===================================================== */
+
+#taskList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+#taskList li {
+  padding: 6px;
+  border-bottom: 1px solid #eee;
+}
+
+
+
+/* =====================================================
+✅ BUTTONS (CONSISTENT UI)
+===================================================== */
+
+button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background-color: #f5f5f5;
+  cursor: pointer;
+  font-size: 13px;
+
+  transition: background 0.15s ease;
+}
+
+button:hover {
+  background-color: #e0e0e0;
+}
+
+button:active {
+  background-color: #d0d0d0;
+}
+
+
+
+/* =====================================================
+✅ FULLCALENDAR CLEANUP
+===================================================== */
+
+.fc {
+  width: 100%;
+}
+
+.fc-event {
+  font-size: 12px;
+}
+
+
+/* =====================================================
+✅ NOTE ICONS
+===================================================== */
+
+.sticky-note-icon {
+  margin-left: 4px;
+  cursor: pointer;
+}
+
+/* =====================================================
+✅ MODAL SYSTEM (ANIMATED + OVERLAY)
+===================================================== */
+
+/* ✅ DARK BACKGROUND OVERLAY */
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+
+  background: rgba(0, 0, 0, 0.3);
+
+  opacity: 0;
+  pointer-events: none;
+
+  transition: opacity 0.2s ease;
+
+  z-index: 999;
+}
+
+/* ✅ WHEN OVERLAY IS ACTIVE */
+.modalOverlay.show {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+
+/* ✅ MAIN MODAL BOX */
+.modal {
+  position: fixed;
+  top: 25%;
+  left: 50%;
+
+  transform: translate(-50%, -20px);  /* ✅ start slightly above */
+
+  background: white;
+  padding: 20px;
+  border-radius: 10px;
+
+  width: 320px;
+  max-width: 90%;
+
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+
+  opacity: 0;                /* ✅ hidden by default */
+  pointer-events: none;
+
+  transition: all 0.2s ease;
+
+  z-index: 1000;
+}
+
+/* ✅ SHOW MODAL (animation happens here) */
+.modal.show {
+  transform: translate(-50%, 0);  /* slides downward */
+  opacity: 1;
+  pointer-events: auto;
+}
+
+
+/* ✅ SMALL BUTTON POLISH INSIDE MODAL */
+.modal button {
+  padding: 6px 10px;
+}
