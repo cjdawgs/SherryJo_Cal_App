@@ -1,0 +1,250 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Account Manager</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 40px;
+            background: #f5f6fa;
+        }
+
+        h2 {
+            margin-bottom: 20px;
+        }
+
+        .account {
+            padding: 12px;
+            margin-bottom: 8px;
+            background: white;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .left {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .provider {
+            font-weight: bold;
+        }
+
+        .google { color: #d93025; }
+        .microsoft { color: #0078d4; }
+
+        button {
+            margin-left: 5px;
+        }
+
+        .error {
+            color: red;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>OK - template loaded</h1>
+<h2>Connected Accounts</h2>
+
+<!-- ✅ Add Buttons -->
+<div>
+    <button onclick="addGoogle()">+ Add Google</button>
+    <button onclick="addMicrosoft()">+ Add Microsoft</button>
+</div>
+
+<br>
+
+<!-- ✅ Accounts render here -->
+<div id="accounts"></div>
+
+<!-- ✅ Error display -->
+<div id="error" class="error"></div>
+
+<script>
+/*
+============================================================
+✅ CONFIG
+============================================================
+*/
+//const TOKEN = localStorage.getItem("token");
+
+/*
+============================================================
+✅ LOAD ACCOUNTS (FULLY FIXED + DEBUG)
+============================================================
+*/
+async function loadAccounts() {
+    const errorBox = document.getElementById("error");
+    errorBox.innerText = "";
+    
+    const token = localStorage.getItem("token");
+    if (!token) {
+        console.error("❌ NO TOKEN FOUND");
+        errorBox.innerText = "Missing login token. Please login again.";
+        return;
+    }
+
+
+    try {
+        const res = await fetch("/accounts", {
+            headers: {
+                "Authorization": "Bearer " + token
+            }
+        });
+
+        console.log("✅ STATUS:", res.status);
+
+        if (res.status !== 200) {
+            const text = await res.text();
+            console.error("❌ API ERROR:", text);
+            errorBox.innerText = "API error: " + text;
+            return;
+        }
+
+        const data = await res.json();
+
+        console.log("✅ API RESPONSE:", data);
+
+        const accounts = Array.isArray(data) ? data : (data.accounts || []);
+
+        const container = document.getElementById("accounts");
+        container.innerHTML = "";
+
+        if (accounts.length === 0) {
+            container.innerHTML = "<i>No accounts connected</i>";
+            return;
+        }
+
+        accounts.forEach(acc => {
+            const div = document.createElement("div");
+            div.className = "account";
+
+            div.innerHTML = `
+                <div class="left">
+                    <span class="provider ${acc.provider}">
+                        ${acc.provider.toUpperCase()}
+                    </span>
+
+                    <span>
+                        ${acc.account_email ? acc.account_email.replace("#EXT#", "") : "UNKNOWN"}
+                    </span>
+
+                    ${acc.is_primary ? "⭐ PRIMARY" : ""}
+                    ${acc.sync_enabled ? "🔄 SYNC ON" : "⛔ SYNC OFF"}
+                </div>
+
+                <div>
+                    <button onclick="setPrimary(${acc.id})">
+                        Make Primary
+                    </button>
+
+                    <button onclick="toggleSync(${acc.id}, ${!acc.sync_enabled})">
+                        ${acc.sync_enabled ? "Disable" : "Enable"}
+                    </button>
+
+                    <button onclick="removeAccount(${acc.id})">
+                        Remove
+                    </button>
+                </div>
+            `;
+
+            container.appendChild(div);
+        });
+
+    } catch (err) {
+        console.error("❌ FETCH FAILED:", err);
+        errorBox.innerText = "Request failed. Check console.";
+    }
+}
+
+/*
+============================================================
+✅ ADD ACCOUNT
+============================================================
+*/
+function addGoogle() {
+    const token = localStorage.getItem("token");
+    window.location.href = "/auth/google/login?token=" + token;
+}
+
+function addMicrosoft() {
+    const token = localStorage.getItem("token");
+    window.location.href = "/ms/login?token=" + token;
+}
+
+
+/*
+============================================================
+✅ ACTIONS
+============================================================
+*/
+async function setPrimary(id) {
+    await fetch(`/accounts/${id}/set-primary`, {
+        method: "PUT",
+        headers: {
+            "Authorization": "Bearer " + localStorage.getItem("token")
+        }
+    });
+
+    loadAccounts();
+}
+
+async function toggleSync(id, enabled) {
+    await fetch(`/accounts/${id}/sync/${enabled}`, {
+        method: "PUT",
+        headers: {
+            "Authorization": "Bearer " + localStorage.getItem("token")
+        }
+    });
+
+    loadAccounts();
+}
+
+async function removeAccount(id) {
+    await fetch(`/accounts/${id}`, {
+        method: "DELETE",
+        headers: {
+            "Authorization": "Bearer " + localStorage.getItem("token")
+        }
+    });
+
+    loadAccounts();
+}
+
+/*
+============================================================
+✅ INITIAL LOAD (WITH OAUTH HANDLING)
+============================================================
+*/
+
+const params = new URLSearchParams(window.location.search);
+
+// ✅ SAVE NEW TOKEN IF PROVIDED
+if (params.get("token")) {
+    localStorage.setItem("token", params.get("token"));
+}
+
+if (params.get("connected")) {
+    console.log("✅ OAuth redirect detected → refreshing accounts");
+
+    setTimeout(() => {
+        loadAccounts();
+    }, 300);
+
+    window.history.replaceState({}, document.title, "/accounts/ui");
+} else {
+    loadAccounts();
+}
+
+</script>
+
+</body>
+</html>

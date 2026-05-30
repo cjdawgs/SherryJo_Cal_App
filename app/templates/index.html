@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- ✅ LOAD .js now moved to BOTTOM above the   </body>
+  <script src="/static/calendar.js?v=3"></script>
+  --> 
+
+  <!-- ✅ LOAD CSS FIRST -->
+  <link rel="stylesheet" href="/static/style.css?v=4">
+
+  <!-- ✅ FULLCALENDAR -->
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+</head>
+
+
+<body>
+
+<!-- =====================================================
+✅ HEADER
+===================================================== -->
+<header class="topbar">
+  <div class="topbar-inner">
+
+    <div class="appTitle">SherryJo Calendar</div>
+
+    <div class="authContainer">
+
+      <!-- ✅ CONNECT BUTTONS -->
+      <div class="authButtons">
+        
+        <button id="googleBtn" class="providerBtn google">
+          <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png">
+          Google
+        </button>
+
+        <button id="outlookBtn" class="providerBtn microsoft">
+          <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg">
+          Microsoft
+        </button>
+
+      </div>
+
+      <!-- ✅ CONNECTED ACCOUNTS -->
+      <div id="accounts" class="accounts hidden"></div>
+
+      <!-- ✅ ACTION BUTTONS -->
+      <div class="actionButtons">
+
+        <!-- ✅ UPDATED BUTTON (clearer + tooltip) -->
+        
+        <button id="createBtn"
+          title="Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'">
+          ➕ Create Event
+        </button>
+
+        <!-- 
+        <button id="addTaskBtn">Add</button> 
+        <button id="saveEventBtn">Save</button>
+        <button id="cancelEventBtn">Cancel</button>
+        -->
+
+
+        <button id="syncBtn">🔄 Sync</button>
+        <button id="logoutBtn">Logout</button>
+
+      </div>
+
+    </div>
+
+  </div>
+</header>
+
+<!-- =====================================================
+✅ MAIN LAYOUT
+===================================================== -->
+<main class="layout">
+
+  <!-- ✅ CALENDAR -->
+  <div class="calendarPanel">
+    <div id="calendar"></div>
+  </div>
+
+  <!-- ✅ RIGHT SIDEBAR -->
+  <div class="leftSidebar">
+
+    <!-- ✅ DAY DETAILS -->
+    <div class="card">
+      <h4 id="selectedDateTitle">Select a day</h4>
+      <ul id="dayEventsList"></ul>
+    </div>
+
+    <!-- ✅ WEEK VIEW -->
+    <div class="card">
+      <h4>This Week</h4>
+      <div id="weekView"></div>
+    </div>
+
+    <!-- ✅ TASK LIST -->
+    <div class="card">
+      <h4>Tasks</h4>
+
+      <div style="display:flex; gap:5px; margin-bottom:8px;">
+        <input id="taskInput" placeholder="Add task..." style="flex:1;" />
+        <button onclick="addTask()">Add</button>
+      </div>
+
+      <ul id="taskList"></ul>
+    </div>
+
+  </div>
+
+</main>
+
+
+<!-- =====================================================
+✅ ✅ ✅ CREATE / EDIT EVENT MODAL (THIS WAS MISSING)
+===================================================== -->
+<div id="modalOverlay" class="modalOverlay"></div>
+
+<div id="createEventModal" class="modal">
+
+  <!-- ✅ TITLE -->
+  <h3>Create Calendar Event</h3>
+
+  <!-- ✅ HELPFUL INSTRUCTIONS -->
+  <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+    Example: "Team Meeting", "Doctor Appointment", or "Call with John at 2pm"
+  </p>
+
+  <!-- ✅ EVENT TITLE -->
+  <input 
+    id="eventTitle" 
+    placeholder="e.g. Team Meeting or Dentist Appointment" 
+    style="display:block; margin-bottom:8px; width:100%;" 
+  />
+
+  <!-- ✅ DATE -->
+  <input 
+    id="eventDate" 
+    type="date" 
+    style="display:block; margin-bottom:8px; width:100%;" 
+  />
+
+  <!-- ✅ TIME ROW -->
+  <div style="display:flex; gap:5px; margin-bottom:10px;">
+    <input 
+      id="eventStart" 
+      type="time" 
+      title="Start time (optional)" 
+      style="flex:1;" 
+    />
+
+    <input 
+      id="eventEnd" 
+      type="time" 
+      title="End time (optional)" 
+      style="flex:1;" 
+    />
+  </div>
+
+  <!-- ✅ ACTION BUTTONS -->
+  
+<div style="display:flex; justify-content:space-between; align-items:center;">
+
+  <!-- ✅ DELETE BUTTON -->
+  <button id="deleteEventBtn" style="display:none;">
+    🗑 Delete
+  </button>
+
+  <!-- ✅ SAVE / CANCEL -->
+  <div style="display:flex; gap:10px;">
+    <button id="saveEventBtn">Save</button>
+    <button id="cancelEventBtn">Cancel</button>
+  </div>
+
+</div>
+
+
+</div>
+
+<script src="/static/calendar.js?v=10"></script>
+</body>
+</html>

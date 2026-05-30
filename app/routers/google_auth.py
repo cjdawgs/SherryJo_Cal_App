@@ -1,0 +1,131 @@
+# ==================================================
+# GOOGLE OAUTH ROUTER
+# ==================================================
+
+from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
+
+from urllib.parse import urlencode
+import os
+import jwt
+
+from app.deps import get_current_user
+from app.routers.auth import SECRET_KEY
+
+
+from app.database import get_db
+from app.services.google_calendar_service import GoogleCalendarService
+
+
+router = APIRouter(prefix="/auth/google", tags=["Google Auth"])
+
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
+
+service = GoogleCalendarService()
+
+
+# ==================================================
+# LOGIN (START OAUTH FLOW)
+# ==================================================
+
+@router.get("/login")
+def google_login(token: str):
+    """
+    ✅ Receive JWT token from URL (not header)
+    """
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    """
+    ✅ Starts Google OAuth flow
+    ✅ Requires JWT (so we know which user is connecting accounts)
+    """
+
+    # ✅ Store user ID in state (VERY important)
+    state = jwt.encode(
+        {"user_id": user_id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "response_type": "code",
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "scope": "openid email profile https://www.googleapis.com/auth/calendar",
+        "access_type": "offline",
+        "prompt": "select_account consent",
+        "state": state,
+    }
+
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+
+    return RedirectResponse(url)
+
+
+# ==================================================
+# CALLBACK (HANDLE GOOGLE RESPONSE)
+# ==================================================
+@router.get("/callback")
+def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+
+    # ==================================================
+    # ✅ DECODE STATE (extract user_id from JWT)
+    # ==================================================
+    try:
+        payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
+        user_id = payload.get("user_id")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid state")
+
+    # ==================================================
+    # ✅ EXCHANGE AUTH CODE FOR TOKENS
+    # ==================================================
+    token_data = service.exchange_code(code)
+
+    access_token = token_data.get("access_token")
+    refresh_token = token_data.get("refresh_token")
+
+    # ==================================================
+    # ✅ GET GOOGLE USER INFO
+    # ==================================================
+    user_info = service.get_user_info(access_token)
+    email = user_info.get("email")
+
+    print("✅ GOOGLE EMAIL:", email)
+
+    # ==================================================
+    # ✅ SAVE ACCOUNT (MULTI-ACCOUNT SAFE ✅✅✅)
+    # ==================================================
+    import time
+    from app.services.multi_account_oauth_service import MultiAccountOAuthService
+
+    # ✅ Calculate expiration timestamp
+    # Google returns expires_in (seconds from now)
+    expires_in = token_data.get("expires_in", 3600)
+
+    token_expires_at = time.time() + expires_in
+
+    # ✅ SAVE GOOGLE ACCOUNT (MULTI-ACCOUNT SUPPORT)
+    MultiAccountOAuthService.add_oauth_account(
+        db=db,
+        user_id=user_id,
+        provider="google",
+        account_email=email,
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_expires_at=token_expires_at,
+        display_name=email
+    )
+
+
+    print("✅ GOOGLE ACCOUNT SAVED")
+
+    # ==================================================
+    # ✅ REDIRECT BACK TO UI (AUTO REFRESH ✅)
+    # ==================================================
+    return RedirectResponse("/accounts/ui?connected=google")
