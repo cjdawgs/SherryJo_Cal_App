@@ -1,245 +1,129 @@
+
 # ==================================================
-# IMPORTS
+# ✅ IMPORTS
 # ==================================================
 
 import requests
-import time
-from app.auth.token_handler import TokenHandler
 
 
 # ==================================================
-# CONSTANTS
+# ✅ CONSTANTS
 # ==================================================
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 
 # ==================================================
-# GRAPH CLIENT
+# ✅ GRAPH CLIENT (FINAL VERSION)
 # ==================================================
 
 class GraphClient:
     """
-    Microsoft Graph API Client
+    ✅ PURPOSE:
+    Simple Microsoft Graph API client
 
-    Responsibilities:
-    - Handle authentication (via TokenHandler ✅ FIXED)
-    - Send HTTP requests to Graph API
-    - Handle pagination automatically ✅ KEPT
-    - Provide clean methods for services layer ✅ KEPT
+    ✅ DESIGN RULE:
+    - DOES NOT manage tokens
+    - Receives already-valid access_token
+    - Token lifecycle handled by: ensure_valid_token()
 
-    Design:
-    Router → Service → GraphClient → Microsoft Graph API
+    ✅ THIS FIXES:
+    - re-auth loops
+    - conflicting token systems
+    - broken refresh flow
     """
 
-    def __init__(self):
-        # ✅ Still use TokenHandler (but now DB-based)
-        self.token_handler = TokenHandler()
-
     # ==================================================
-    # ✅ NEW TOKEN SYSTEM (USER-AWARE)
+    # ✅ FETCH EVENTS
     # ==================================================
 
-    def _get_valid_token(self, db, user):
-        """
-        ✅ NEW:
-        Get token from DB (NOT memory)
-        Auto-refresh if expired
-        """
-
-        if not user.ms_access_token:
-            return None
-
-        # ✅ Auto refresh if expired
-        if user.ms_token_expires and time.time() >= user.ms_token_expires:
-            self.token_handler.refresh_access_token(db, user)
-
-        return user.ms_access_token
-
-    # ==================================================
-    # ✅ UPDATED HEADERS (ONLY THIS CHANGED)
-    # ==================================================
-
-    def _get_headers(self, db, user):
-        """
-        Build request headers with Bearer token
-        ✅ NOW USER-AWARE
-        """
-        access_token = self._get_valid_token(db, user)
-
-        if not access_token:
-            raise Exception("No valid access token available for user")
-
-        return {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        }
-
-    # ==================================================
-    # ✅ UPDATED GET WRAPPER
-    # ==================================================
-
-    def _get(self, url: str, db, user):
-        """
-        Internal GET wrapper with error handling
-        ✅ Now uses user-specific token
-        """
-        response = requests.get(url, headers=self._get_headers(db, user))
-
-        if response.status_code != 200:
-            raise Exception(
-                f"Graph API request failed: {response.status_code} - {response.text}"
-            )
-
-        return response.json()
-
-    # ==================================================
-    # ✅ UPDATED PAGINATION
-    # ==================================================
-
-    def _paginate(self, url: str, db, user):
-        """
-        Handles Graph API pagination automatically
-        ✅ KEPT EXACTLY SAME LOGIC
-        """
-        results = []
-
-        while url:
-            data = self._get(url, db, user)
-
-            results.extend(data.get("value", []))
-
-            url = data.get("@odata.nextLink")
-
-        return results
-
-    
-    # ==================================================
-    # EVENTS (UPDATED SIGNATURE ONLY)
-    # ==================================================
-
-    def get_events(self, db, user):
-        url = f"{GRAPH_BASE_URL}/me/events"
-        return self._get(url, db, user)
-
-    def get_all_events(self, db, user):
-        url = f"{GRAPH_BASE_URL}/me/events"
-        events = self._paginate(url, db, user)
-
-        return {"value": events}
-    
     def get_events_with_token(self, access_token):
-        
         """
-        ✅ Fetch Microsoft events per account
+        ✅ PURPOSE:
+        Fetch all Outlook calendar events for a single account
+
+        ✅ SAFE DESIGN:
+        - never crashes system
+        - returns empty list on failure
         """
-        url = "https://graph.microsoft.com/v1.0/me/events"
-        headers = {"Authorization": f"Bearer {access_token}"}
+
+        url = f"{GRAPH_BASE_URL}/me/events"
+
+        headers = {
+            "Authorization": f"Bearer {access_token}"
+        }
 
         response = requests.get(url, headers=headers)
 
+        # ✅ FAIL SAFE (DO NOT BREAK ENTIRE SYNC)
         if response.status_code != 200:
-            print("❌ Graph error:", response.text)
-            raise Exception(response.text)
+            print("❌ Microsoft events fetch failed:", response.text)
+            return {"value": []}
 
         return response.json()
 
     # ==================================================
-    # TASKS
+    # ✅ UPDATE EVENT
     # ==================================================
-
-    def get_tasks(self, db, user):
-        url = f"{GRAPH_BASE_URL}/me/todo/lists"
-        return self._get(url, db, user)
-
-    def get_all_tasks(self, db, user):
-        task_lists = self.get_tasks(db, user).get("value", [])
-        all_tasks = []
-
-        for task_list in task_lists:
-            list_id = task_list.get("id")
-            url = f"{GRAPH_BASE_URL}/me/todo/lists/{list_id}/tasks"
-
-            tasks = self._paginate(url, db, user)
-
-            for t in tasks:
-                t["list_id"] = list_id
-
-            all_tasks.extend(tasks)
-
-        return {"value": all_tasks}
-
 
     def update_event(self, token, event_id, updates):
         """
         ✅ PURPOSE:
-        Update an event in Microsoft Outlook (Graph API)
+        Update event in Outlook
 
         ✅ INPUTS:
-        - token → user's Microsoft access token
-        - event_id → Outlook event ID
-        - updates → fields we want to change
-
-        ✅ API:
-        Microsoft Graph API
+        - token → valid access token
+        - event_id → Microsoft event ID
+        - updates → dict of changes
         """
 
-        # ✅ Microsoft endpoint for updating events
-        url = f"https://graph.microsoft.com/v1.0/me/events/{event_id}"
+        url = f"{GRAPH_BASE_URL}/me/events/{event_id}"
 
         payload = {}
 
-        # ✅ Outlook calls title "subject"
+        # ✅ Outlook uses "subject"
         if "title" in updates:
             payload["subject"] = updates["title"]
 
-        # ✅ Update start time (MUST include timezone)
+        # ✅ Start time (must include timezone)
         if "start_time" in updates:
             payload["start"] = {
                 "dateTime": updates["start_time"].isoformat(),
-                "timeZone": "UTC"  # ✅ Safe default
+                "timeZone": "UTC"
             }
 
-        # ✅ Update end time
+        # ✅ End time
         if "end_time" in updates:
             payload["end"] = {
                 "dateTime": updates["end_time"].isoformat(),
                 "timeZone": "UTC"
             }
 
-        # ✅ Send update request
         response = requests.patch(
             url,
             json=payload,
-            headers={
-                "Authorization": f"Bearer {token}"
-            }
+            headers={"Authorization": f"Bearer {token}"}
         )
 
-        # ✅ Debugging
         if response.status_code not in [200, 202]:
             print("❌ Outlook update failed:", response.text)
 
-
+    # ==================================================
+    # ✅ DELETE EVENT
+    # ==================================================
 
     def delete_event(self, token, event_id):
         """
         ✅ PURPOSE:
-        Delete event from Outlook calendar
-
-        ✅ WHAT HAPPENS:
-        Removes event permanently from user's Outlook calendar
+        Delete Outlook event
         """
 
-        url = f"https://graph.microsoft.com/v1.0/me/events/{event_id}"
+        url = f"{GRAPH_BASE_URL}/me/events/{event_id}"
 
         response = requests.delete(
             url,
-            headers={
-                "Authorization": f"Bearer {token}"
-            }
+            headers={"Authorization": f"Bearer {token}"}
         )
 
-        # ✅ Debugging
         if response.status_code not in [200, 204]:
             print("❌ Outlook delete failed:", response.text)

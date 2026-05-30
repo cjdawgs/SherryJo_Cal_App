@@ -44,10 +44,13 @@ async function apiFetch(url, options = {}) {
 let calendar = null;
 let editingEventId = null;
 let editingNoteId = null;
-// ✅ NEW: track what day user has selected
-let selectedDate = new Date(); // default = today
+let lastGoodEvents = [];
 
+// ✅ Track selected day
+let selectedDate = new Date();
 
+// ✅ NEW: account filter
+let activeAccountFilter = null;
 /**************************************************************
  * ✅ INIT APP
  **************************************************************/
@@ -103,49 +106,85 @@ function initCalendar(el) {
      **************************************************/
     events: async (fetchInfo, successCallback, failureCallback) => {
       try {
-        const res = await apiFetch("/calendar/unified");
+        const token = localStorage.getItem("token");
+        const res = await apiFetch(`/calendar/unified?token=${token}`);
+
 
         if (!res.ok) {
           throw new Error("API failed: " + res.status);
         }
 
         const data = await res.json();
-
         console.log("✅ API response:", data);
 
-        // ✅ SAFE events array
+        // ✅ Robust + defensive mapping
         const events = Array.isArray(data?.events)
-          ? data.events.map(ev => ({
-            id: ev.id,
-            title: ev.title,
-            start: ev.start,
-            end: ev.end,
+          ? data.events
 
-            backgroundColor: ev.color || "#999",
-            borderColor: ev.color || "#999",
-            extendedProps: {
-              source: ev.source,
-              account: ev.account,
-              conflict: ev.conflict,
-              //conflict: true,          // ✅ TEMPORARY TEST MODE
-              notes: ev.notes || []
-            }
+              // ✅ STEP A: REMOVE BAD EVENTS
+              .filter(ev => ev.start)
 
-          }))
+              // ✅ STEP B: APPLY ACCOUNT FILTER (NEW)
+              .filter(ev => {
+
+                // ✅ show everything if no filter selected
+                if (!activeAccountFilter) return true;
+
+                const email = ev.account || "";
+                const key = `${ev.source}:${email}`;
+
+                return key === activeAccountFilter;
+              })
+
+              // ✅ STEP C: MAP (UNCHANGED LOGIC)
+              .map(ev => {
+                const safeStart = new Date(ev.start);
+                if (isNaN(safeStart)) return null;
+                
+                const safeEnd = ev.end ? new Date(ev.end) : null;
+
+                return {
+                  id: ev.id,
+                  title: ev.title || "Untitled",
+
+                  start: safeStart.toISOString(),
+                  end: safeEnd ? safeEnd.toISOString() : null,
+
+                  backgroundColor: ev.color || "#999",
+                  borderColor: ev.color || "#999",
+
+                  extendedProps: {
+                    source: ev.source,
+                    account: ev.account,
+                    conflict: !!ev.conflict,
+                    notes: ev.notes || []
+                  }
+                };
+              
+              })
+              .filter(Boolean)   // ✅ ← ADD THIS LINE
+
           : [];
-
         // ✅ SAFE accounts
         renderAccounts?.(data?.accounts || []);
 
         console.log("✅ ACCOUNTS:", data.accounts);
+        // ✅ SAVE GOOD EVENTS
+        lastGoodEvents = events;
+        
         successCallback(events);
 
-      } catch (err) {
-        console.error("❌ Event load failed:", err);
+        } catch (err) {
+          console.error("❌ Event load failed:", err);
 
-        // ✅ CRITICAL: tell FullCalendar it failed
-        failureCallback([]);
-      }
+          // ✅ DO NOT CLEAR CALENDAR — USE LAST GOOD DATA
+          if (lastGoodEvents.length > 0) {
+            console.warn("⚠️ Using cached events");
+            successCallback(lastGoodEvents);
+          } else {
+            failureCallback([]);
+          }
+        }
     },
 
 
@@ -304,12 +343,52 @@ function renderAccounts(accounts) {
     const email = acc.account_email || acc.email || "UNKNOWN";
 
     return `
-      <div style="margin: 4px 0;">
-        ${icon} <span style="color:#333;">${email}</span>
+      <div 
+        style="
+          margin: 4px 0;
+          cursor: pointer;
+          padding: 4px;
+          border-radius: 4px;
+        "
+        onclick="setAccountFilter('${acc.provider}:${email}')"
+          style="
+            margin:4px 0;
+            cursor:pointer;
+            padding:4px;
+            border-radius:4px;
+            background:${
+              activeAccountFilter === `${acc.provider}:${email}`
+                ? '#e8f0fe'
+                : 'transparent'
+            };
+          "
+      >
+        ${icon}
+        <span style="color:#333;">${email}</span>
       </div>
     `;
   }).join("");
 } //✅ ← THIS WAS MISSING
+
+  /**************************************************************
+   * ✅ ACCOUNT FILTER HANDLER
+   **************************************************************/
+  function setAccountFilter(filterKey) {
+
+    console.log("🎯 Filter selected:", filterKey);
+
+    // ✅ toggle behavior
+    if (activeAccountFilter === filterKey) {
+      activeAccountFilter = null; // unselect
+      console.log("✅ Filter cleared");
+    } else {
+      activeAccountFilter = filterKey;
+    }
+
+    // ✅ reload calendar data
+    calendar.refetchEvents();
+  }
+
 
 //✅ ✅ DAY DETAILS FUNCTION
 function updateDayDetails(date) {

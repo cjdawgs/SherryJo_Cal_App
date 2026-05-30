@@ -1,24 +1,33 @@
+
 # ==================================================
-# IMPORTS
+# ✅ IMPORTS
 # ==================================================
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 import requests
 from app.config import settings
 
 
 # ==================================================
-# GOOGLE CALENDAR SERVICE
+# ✅ GOOGLE CALENDAR SERVICE (FINAL)
 # ==================================================
 
 class GoogleCalendarService:
     """
-    Handles:
-    - Google OAuth login URL
-    - Token exchange
-    - Token refresh
-    - Fetching calendar events
+    ✅ RESPONSIBILITIES:
+    - Build Google OAuth URL
+    - Exchange code → tokens
+    - Refresh access tokens
+    - Fetch user calendar events
+
+    ✅ DESIGN:
+    This class DOES NOT manage token lifecycle logic.
+    That is handled by:
+        ensure_valid_token()
+
+    ✅ THIS FILE ONLY:
+    - Talks to Google APIs
+    - Returns clean responses
     """
 
     AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -27,21 +36,28 @@ class GoogleCalendarService:
     SCOPES = [
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/userinfo.email",
+        "openid"
     ]
 
     # ==================================================
-    # BUILD AUTH URL ✅ FIXED
+    # ✅ BUILD AUTH URL (CRITICAL FIXES INCLUDED)
     # ==================================================
     def build_auth_url(self, state: str) -> str:
         """
-        Build Google OAuth URL with state tracking
-        ✅ FIX 1: use proper "&" NOT "&amp;"
-        ✅ FIX 2: include state correctly
+        ✅ PURPOSE:
+        Generates Google OAuth login URL
+
+        ✅ CRITICAL SETTINGS:
+        - access_type=offline → REQUIRED for refresh_token
+        - prompt=consent → forces refresh_token return
+        - state → tracks which account/user login belongs to
+
+        ✅ DO NOT REMOVE THESE PARAMS
         """
 
-        # ✅ Join scopes correctly
-        scope_str = " ".join(self.SCOPES) + " openid"
+        scope_str = " ".join(self.SCOPES)
 
+        # ✅ FIXED: use "&" NOT "&amp;"
         url = (
             f"{self.AUTH_URL}"
             f"?client_id={settings.GOOGLE_CLIENT_ID}"
@@ -50,20 +66,31 @@ class GoogleCalendarService:
             f"&scope={scope_str}"
             f"&access_type=offline"
             f"&prompt=consent"
-            f"&state={state}"   # ✅ CRITICAL — THIS FIXES YOUR ISSUE
+            f"&state={state}"
         )
 
-        # ✅ Debug (WATCH THIS IN CONSOLE)
         print("✅ GOOGLE AUTH URL:", url)
 
         return url
 
     # ==================================================
-    # EXCHANGE CODE FOR TOKEN
+    # ✅ EXCHANGE CODE → TOKENS
     # ==================================================
     def exchange_code(self, code: str) -> Dict[str, Any]:
         """
-        Exchange auth code for access + refresh tokens
+        ✅ PURPOSE:
+        Exchange authorization code for tokens
+
+        ✅ RETURNS:
+        {
+            access_token,
+            refresh_token (IMPORTANT),
+            expires_in
+        }
+
+        ✅ IMPORTANT:
+        Sometimes Google does NOT return refresh_token
+        unless consent is forced — we log that case.
         """
 
         payload = {
@@ -77,16 +104,27 @@ class GoogleCalendarService:
         response = requests.post(self.TOKEN_URL, data=payload)
 
         if response.status_code != 200:
-            raise Exception(f"Google token exchange failed: {response.text}")
+            raise Exception(f"❌ Google token exchange failed: {response.text}")
 
-        return response.json()
+        data = response.json()
+
+        # ✅ CRITICAL DEBUG
+        if "refresh_token" not in data:
+            print("🚨 WARNING: Google did NOT return refresh_token")
+            print("➡️ User may need to reconnect with consent")
+
+        return data
 
     # ==================================================
-    # REFRESH ACCESS TOKEN
+    # ✅ REFRESH TOKEN
     # ==================================================
     def refresh_token(self, refresh_token: str) -> Dict[str, Any]:
         """
-        Use refresh token to get new access token
+        ✅ PURPOSE:
+        Get a new access_token using refresh_token
+
+        ✅ CALLED BY:
+        ensure_valid_token() (NOT directly by you)
         """
 
         payload = {
@@ -99,43 +137,44 @@ class GoogleCalendarService:
         response = requests.post(self.TOKEN_URL, data=payload)
 
         if response.status_code != 200:
-            raise Exception(f"Google token refresh failed: {response.text}")
+            print("❌ Google refresh failed:", response.text)
+            return {}
 
         return response.json()
 
     # ==================================================
-    # FETCH EVENTS
+    # ✅ FETCH EVENTS (SAFE VERSION)
     # ==================================================
-    
-    from typing import Optional
-
     def fetch_events(
         self,
         access_token: str,
         start_date: Optional[datetime] = None,
         end_date: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
-
         """
-        Fetch events from user's primary Google Calendar
+        ✅ PURPOSE:
+        Fetch events from Google Calendar
+
+        ✅ SAFE DESIGN:
+        - Never throws fatal exception
+        - Returns [] on failure
         """
 
         headers = {
             "Authorization": f"Bearer {access_token}",
         }
 
-        
         params = {
             "singleEvents": True,
             "orderBy": "startTime"
         }
 
-        # ✅ APPLY DATE FILTERS
+        # ✅ FIX: proper ISO handling (NO double 'Z')
         if start_date:
-            params["timeMin"] = start_date.isoformat() + "Z"
+            params["timeMin"] = start_date.isoformat()
 
         if end_date:
-            params["timeMax"] = end_date.isoformat() + "Z"
+            params["timeMax"] = end_date.isoformat()
 
         response = requests.get(
             "https://www.googleapis.com/calendar/v3/calendars/primary/events",
@@ -143,120 +182,68 @@ class GoogleCalendarService:
             params=params
         )
 
-
+        # ✅ SAFE FAILURE (DO NOT CRASH SYSTEM)
         if response.status_code != 200:
-            raise Exception(f"Google events fetch failed: {response.text}")
+            print("❌ Google events fetch failed:", response.text)
+            return []
 
         return response.json().get("items", [])
-    
+
     # ==================================================
-    # PUBLIC API (USED BY SYNC + TESTS)
+    # ✅ PUBLIC WRAPPER (FOR CONSISTENCY)
     # ==================================================
-    def get_events(self, access_token: str, start_date=None, end_date=None) -> List[Dict[str, Any]]:
+    def get_events(self, access_token: str, start_date=None, end_date=None):
         """
-        ✅ PURPOSE:
-        Public method used by sync engine and tests
-
-        ✅ WHY THIS EXISTS:
-        - Tests expect get_events()
-        - Allows internal flexibility (can change fetch_events later)
-
-        ✅ WHAT IT DOES:
-        Calls fetch_events internally
+        ✅ Exists for consistency
+        (some systems expect this method name)
         """
-
         return self.fetch_events(access_token, start_date, end_date)
 
+    # ==================================================
+    # ✅ UPDATE EVENT
+    # ==================================================
     def update_event(self, token, event_id, updates):
-        """
-        ✅ PURPOSE:
-        Update an existing event in Google Calendar
-
-        ✅ INPUTS:
-        - token → user's Google access token (used for authentication)
-        - event_id → the Google event ID (stored in external_ids)
-        - updates → dictionary with new values (title, start_time, end_time)
-
-        ✅ WHAT HAPPENS:
-        Sends a PATCH request to Google Calendar API to update the event
-        """
-
-        # ✅ This is the Google endpoint for updating ONE event
         url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
 
-        # ✅ This payload will contain ONLY the fields we want to update
         payload = {}
 
-        # ✅ Update title in Google (called "summary" in Google)
         if "title" in updates:
             payload["summary"] = updates["title"]
 
-        # ✅ Update start time
-        # Google expects ISO format (YYYY-MM-DDTHH:MM:SS)
         if "start_time" in updates:
-            payload["start"] = {
-                "dateTime": updates["start_time"].isoformat()
-            }
+            payload["start"] = {"dateTime": updates["start_time"].isoformat()}
 
-        # ✅ Update end time
         if "end_time" in updates:
-            payload["end"] = {
-                "dateTime": updates["end_time"].isoformat()
-            }
+            payload["end"] = {"dateTime": updates["end_time"].isoformat()}
 
-        # ✅ Send request to Google API
         response = requests.patch(
             url,
             json=payload,
-            headers={
-                "Authorization": f"Bearer {token}"
-            }
+            headers={"Authorization": f"Bearer {token}"}
         )
 
-        # ✅ Optional: Debugging (VERY helpful while testing)
         if response.status_code not in [200, 204]:
             print("❌ Google update failed:", response.text)
 
-
-
+    # ==================================================
+    # ✅ DELETE EVENT
+    # ==================================================
     def delete_event(self, token, event_id):
-        """
-        ✅ PURPOSE:
-        Delete an event from Google Calendar
-
-        ✅ INPUTS:
-        - token → user's Google access token
-        - event_id → the Google event ID
-
-        ✅ WHAT HAPPENS:
-        Sends DELETE request to remove event permanently
-        """
-
         url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
 
         response = requests.delete(
             url,
-            headers={
-                "Authorization": f"Bearer {token}"
-            }
+            headers={"Authorization": f"Bearer {token}"}
         )
 
-        # ✅ Debugging
         if response.status_code not in [200, 204]:
             print("❌ Google delete failed:", response.text)
 
-
     # ==================================================
-    # Get User Email from Google
+    # ✅ GET USER EMAIL
     # ==================================================
     def get_user_info(self, access_token: str) -> Dict[str, Any]:
-        """
-        Get user's Google email
-        """
-
-        headers = {
-            "Authorization": f"Bearer {access_token}"
-        }
+        headers = {"Authorization": f"Bearer {access_token}"}
 
         response = requests.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",

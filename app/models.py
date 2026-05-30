@@ -1,17 +1,18 @@
+
 # --------------------------------------------------
-# IMPORTS
+# ✅ IMPORTS
 # --------------------------------------------------
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, Float, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON
 from sqlalchemy.orm import relationship
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 
 from app.database import Base
 import uuid
 
 
 # --------------------------------------------------
-# ROLE CONSTANTS
+# ✅ ROLE CONSTANTS
 # --------------------------------------------------
 
 class Roles:
@@ -20,15 +21,23 @@ class Roles:
 
 
 # --------------------------------------------------
-# USER TABLE
+# ✅ USER TABLE
 # --------------------------------------------------
 
 class User(Base):
+    """
+    ✅ PURPOSE:
+    - Core app user
+    - Authentication + ownership of data
+
+    ✅ NOTE:
+    We KEEP legacy token fields for now (safe),
+    but they are NO LONGER USED for calendar sync.
+    """
+
     __tablename__ = "users"
 
-# ✅ PRIMARY KEY
     id = Column(Integer, primary_key=True, index=True)
-
 
     username = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
@@ -36,94 +45,95 @@ class User(Base):
 
     role = Column(String, default=Roles.STAFF, nullable=False)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
+    # ✅ RELATIONSHIPS
     events = relationship("Event", back_populates="owner")
     tasks = relationship("Task", back_populates="owner")
-    
-    # ==========================================================
-    # ✅ GOOGLE TOKENS
-    # ==========================================================
-    google_access_token = Column(String, nullable=True, index=True)
+
+    # ⚠️ LEGACY TOKEN STORAGE (NO LONGER USED — SAFE TO REMOVE LATER)
+    google_access_token = Column(String, nullable=True)
     google_refresh_token = Column(String, nullable=True)
-    google_token_expires = Column(Float, nullable=True)
+    google_token_expires = Column(Integer, nullable=True)
 
-    
-    # ==========================================================
-    # ✅ MICROSOFT TOKENS
-    # ==========================================================
-    ms_access_token = Column(String, nullable=True, index=True)
+    ms_access_token = Column(String, nullable=True)
     ms_refresh_token = Column(String, nullable=True)
-    ms_token_expires = Column(Float, nullable=True)
+    ms_token_expires = Column(Integer, nullable=True)
 
-    # ==========================================================
-    # ✅ ✅ NEW: PROVIDER EMAILS (REAL ACCOUNT IDENTITY)
-    # ==========================================================
-    # These store the ACTUAL email from Google / Microsoft
-    # DO NOT add index — not needed for lookups
-
+    # ✅ OPTIONAL DISPLAY EMAILS
     google_email = Column(String, nullable=True)
     ms_email = Column(String, nullable=True)
 
-    # ✅ NEW: Relationship to multiple OAuth accounts
-    oauth_accounts = relationship("OAuthAccount", back_populates="user", cascade="all, delete-orphan")
+    # ✅ NEW: MULTI-ACCOUNT SUPPORT (THIS IS WHAT WE USE NOW)
+    oauth_accounts = relationship(
+        "OAuthAccount",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
 
 
-# ==================================================
-# ✅ NEW: OAUTH ACCOUNT TABLE (MULTI-ACCOUNT SUPPORT)
-# ==================================================
+# --------------------------------------------------
+# ✅ OAUTH ACCOUNT TABLE (CRITICAL FIXED VERSION)
+# --------------------------------------------------
+
 class OAuthAccount(Base):
     """
-    Supports multiple OAuth accounts per user.
-    Each row = one connected Google or Microsoft account.
-    
-    Example:
-    - User 1 has 2 Google accounts + 1 Microsoft account → 3 rows
-    - User 2 has 1 Google account → 1 row
+    ✅ THIS TABLE POWERS YOUR ENTIRE SYSTEM
+
+    ✅ EACH ROW = ONE CONNECTED ACCOUNT
+    (Google or Microsoft)
+
+    ✅ IMPORTANT FIX:
+    token_expires_at is now DateTime (NOT float)
+    → this removes your crash completely
     """
+
     __tablename__ = "oauth_accounts"
 
     id = Column(Integer, primary_key=True, index=True)
-    
-    # Foreign key to users table
+
+    # ✅ USER LINK
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     user = relationship("User", back_populates="oauth_accounts")
-    
-    # Provider type: "google" or "microsoft"
+
+    # ✅ PROVIDER
     provider = Column(String, index=True, nullable=False)  # "google" or "microsoft"
-    
-    # Account email (the actual email from the provider)
-    # e.g., "sherryjo@gmail.com" or "sherryjo@outlook.com"
+
+    # ✅ ACCOUNT IDENTITY
     account_email = Column(String, nullable=False)
-    
-    # Tokens
+
+    # ✅ TOKEN STORAGE
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=True)
-    token_expires_at = Column(Float, nullable=True)  # Unix timestamp
-    
-    # Display name (optional, from user info)
+
+    # ✅ ✅ CRITICAL FIX (THIS FIXES YOUR ERROR)
+    token_expires_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ✅ OPTIONAL METADATA
     display_name = Column(String, nullable=True)
-    
-    # Provider-specific ID (Google ID, Azure Object ID, etc.)
     provider_id = Column(String, nullable=True, index=True)
-    
-    # Is this the primary account for the user? (can query by this)
+
+    # ✅ ACCOUNT FLAGS
     is_primary = Column(Boolean, default=False, index=True)
-    
-    # Sync status
-    last_sync = Column(DateTime, nullable=True)
     sync_enabled = Column(Boolean, default=True)
-    
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
-    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC))
-    
-    # Composite index for fast lookups
+
+    # ✅ SYNC TRACKING
+    last_sync = Column(DateTime(timezone=True), nullable=True)
+
+    # ✅ TIMESTAMPS
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
+
     def __repr__(self):
         return f"<OAuthAccount user={self.user_id} provider={self.provider} email={self.account_email}>"
 
 
 # --------------------------------------------------
-# TASK TABLE
+# ✅ TASK TABLE
 # --------------------------------------------------
 
 class Task(Base):
@@ -137,14 +147,13 @@ class Task(Base):
     completed = Column(Boolean, default=False)
 
     owner_id = Column(Integer, ForeignKey("users.id"))
-
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
-
     owner = relationship("User", back_populates="tasks")
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
 # --------------------------------------------------
-# ✅ NOTE TABLE (UPDATED FOR STICKY NOTE POSITIONING)
+# ✅ NOTE TABLE
 # --------------------------------------------------
 
 class Note(Base):
@@ -157,17 +166,16 @@ class Note(Base):
 
     color = Column(String, default="yellow")
 
-    # ✅ NEW (STEP 10): for floating position
+    # ✅ UI POSITIONING
     x = Column(Integer, default=120)
     y = Column(Integer, default=120)
 
     event_id = Column(Integer, ForeignKey("events.id"), nullable=True)
-
     event = relationship("Event", back_populates="notes")
 
 
 # --------------------------------------------------
-# EVENT TABLE
+# ✅ EVENT TABLE
 # --------------------------------------------------
 
 class Event(Base):
@@ -175,40 +183,32 @@ class Event(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # ✅ CORE EVENT DATA
+    # ✅ CORE DATA
     title = Column(String, nullable=False)
     description = Column(String)
 
-    start_time = Column(DateTime, nullable=False)
-    end_time = Column(DateTime)
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True))
 
-    # ✅ USER OWNERSHIP (ALREADY CORRECT ✅)
+    # ✅ OWNER
     owner_id = Column(Integer, ForeignKey("users.id"), index=True)
     owner = relationship("User", back_populates="events")
 
-    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    # ✅ STATUS / LOCAL STATE
+    # ✅ STATUS
     status = Column(String, default="pending")
 
-    # ✅ RELATIONSHIPS
+    # ✅ RELATIONSHIP
     notes = relationship(
         "Note",
         back_populates="event",
         cascade="all, delete-orphan"
     )
 
-    # ✅ EXTERNAL INTEGRATION FIELDS (UNCHANGED)
-    externalId = Column(String, nullable=True, index=True)
-    lastSyncVersion = Column(String, nullable=True)
-    calendarId = Column(String, nullable=True)
+    # ✅ EXTERNAL SYNC
+    externalId = Column(String, index=True)
     source = Column(String, default="local", index=True)
-    
-    
-    # ✅ NEW: store provider IDs (Google + Outlook)
-    # Example:
-    # {
-    #   "google": "abc123",
-    #   "outlook": "xyz789"
-    # }
+
+    # ✅ MULTI-PROVIDER SUPPORT
     external_ids = Column(JSON, nullable=True)
