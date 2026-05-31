@@ -131,18 +131,41 @@ def manual_sync(
 # ==================================================
 # ✅ UNIFIED CALENDAR (FINAL FIXED)
 # ==================================================
-
 @router.get("/unified")
 def get_unified_calendar(
+    range_days: int = Query(30),  # ✅ DEFAULT = Monthly (FAST)
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
+    """
+    ✅ RANGE SYSTEM (NEW)
+    
+    Controls how much data we pull:
+    - 30  = Monthly (default)
+    - 90  = Quarterly
+    - 180 = Semi-Annual
+    - 360 = Yearly
+    """
+
+    now = datetime.utcnow()
+
+    start_date = now - timedelta(days=range_days)
+    end_date = now + timedelta(days=range_days)
+
+    print(f"✅ RANGE WINDOW: ±{range_days} days")
 
     # ------------------------------------------
     # STEP 1: FETCH EXTERNAL EVENTS
     # ------------------------------------------
     try:
-        events = calendar_service.fetch_all_events(db, current_user)
+        # ✅ RANGE-AWARE FETCH (NEW)
+        events = calendar_service.fetch_all_events(
+            db,
+            current_user,
+            start_date=start_date,
+            end_date=end_date
+        )
+
     except Exception as e:
         print(f"❌ fetch_all_events failed: {e}")
         events = []
@@ -158,12 +181,10 @@ def get_unified_calendar(
     # STEP 2: ADD LOCAL EVENTS
     # ------------------------------------------
     now = datetime.now(timezone.utc)
-    future_limit = now + timedelta(days=30)
-
     db_events = db.query(Event).filter(
         Event.owner_id == current_user.id,
-        Event.end_time >= now,
-        Event.start_time <= future_limit
+        Event.end_time >= start_date,
+        Event.start_time <= end_date
     ).all()
 
     for e in db_events:
@@ -229,9 +250,3 @@ def get_unified_calendar(
     # ------------------------------------------
     accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
 
-    return {
-        "user_id": current_user.id,
-        "count": len(events),
-        "events": events,
-        "accounts": accounts
-    }

@@ -2,7 +2,7 @@
 # ==================================================
 # ✅ IMPORTS
 # ==================================================
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import requests
 from app.config import settings
@@ -166,14 +166,19 @@ class GoogleCalendarService:
 
         params = {
             "singleEvents": True,
-            "orderBy": "startTime"
+            "orderBy": "startTime",
+            "maxResults": 2500   # ✅ prevents truncation
         }
 
-        # ✅ FIX: proper ISO handling (NO double 'Z')
+        # ✅ FORCE UTC (CRITICAL FIX)
         if start_date:
+            if start_date.tzinfo is None:
+                start_date = start_date.replace(tzinfo=timezone.utc)
             params["timeMin"] = start_date.isoformat()
 
         if end_date:
+            if end_date.tzinfo is None:
+                end_date = end_date.replace(tzinfo=timezone.utc)
             params["timeMax"] = end_date.isoformat()
 
         response = requests.get(

@@ -46,6 +46,11 @@ let editingEventId = null;
 let editingNoteId = null;
 let lastGoodEvents = [];
 
+// ✅ RANGE CONTROL (NEW)
+let currentRangeDays = 30;  // ✅ Default = Monthly
+let currentRangeStart = null;
+let currentRangeEnd = null; 
+
 // ✅ Track selected day
 let selectedDate = new Date();
 
@@ -116,7 +121,9 @@ function initCalendar(el) {
     events: async (fetchInfo, successCallback, failureCallback) => {
       try {
         const token = localStorage.getItem("token");
-        const res = await apiFetch(`/calendar/unified?token=${token}`);
+        const res = await apiFetch(
+          `/calendar/unified?range_days=${currentRangeDays}&token=${token}`
+        );
 
 
         if (!res.ok) {
@@ -457,6 +464,19 @@ function getAccountColor(provider, index) {
   const percent = Math.min(0.20 + (index * 0.32), 0.75);
 
   return lightenColor(base, percent);
+}
+
+function openCustomRange() {
+
+  const days = prompt("Enter custom range (days):");
+
+  if (!days || isNaN(days)) return;
+
+  currentRangeDays = parseInt(days);
+
+  console.log("📅 Custom range:", currentRangeDays);
+
+  calendar.refetchEvents();
 }
 
 /* =====================================================
@@ -1308,6 +1328,37 @@ function bindUIEvents() {
         saveEvent();
       }
     });
+
+    /**************************************************
+    ✅ RANGE BUTTONS (THIS WAS MISSING)
+    **************************************************/
+    document.querySelectorAll(".range-btn").forEach(btn => {
+
+      btn.addEventListener("click", () => {
+
+        // ✅ Update UI (active highlight)
+        document.querySelectorAll(".range-btn")
+          .forEach(b => b.classList.remove("active"));
+
+        btn.classList.add("active");
+
+        // ✅ CUSTOM RANGE
+        if (btn.id === "customRange") {
+          openCustomRange();
+          return;
+        }
+
+        // ✅ GET RANGE VALUE
+        currentRangeDays = parseInt(btn.dataset.range);
+
+        console.log("📅 Range changed:", currentRangeDays);
+
+        // ✅ THIS LINE TRIGGERS EVERYTHING
+        calendar.refetchEvents();
+      });
+
+    });
+
 
 }
 

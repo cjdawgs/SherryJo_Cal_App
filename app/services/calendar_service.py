@@ -42,11 +42,8 @@ class CalendarService:
 
             dt = datetime.fromisoformat(dt_str)
 
-            # ensure timezone-aware
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
+            return self._ensure_utc(dt)
 
-            return dt
 
         except Exception:
             return None
@@ -80,26 +77,59 @@ class CalendarService:
             })
 
         return unified
+    
+    # ==================================================
+    # ✅ ENSURE UTC (FINAL FIX - CORRECT)
+    # ==================================================
+    def _ensure_utc(self, dt):
+        """
+        ✅ Ensures datetime is always timezone-aware (UTC)
+
+        - None → stays None
+        - naive datetime → converted to UTC
+        - aware datetime → unchanged
+        """
+
+        if not dt:
+            return None
+
+        # ✅ Convert naive → UTC
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+
+        return dt
 
     # ==================================================
     # ✅ FETCH EVENTS (FIXED)
     # ==================================================
-    def fetch_all_events(self, db, user):
+    def fetch_all_events(self, db, user, start_date=None, end_date=None):
+        """
+        ✅ NEW: RANGE-AWARE FETCH
+        
+        If no range provided → default to FAST monthly window
+        """
 
         google_events = []
         ms_events = []
 
         now = datetime.now(timezone.utc)
 
-        if now.month > 6:
-            start_date = datetime(now.year, 1, 1, tzinfo=timezone.utc)
-            future_limit = datetime(now.year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        # ✅ ENSURE RANGE EXISTS
+        if not start_date or not end_date:
+            start_date = now - relativedelta(days=30)
+            end_date = now + relativedelta(days=30)
+            print("⚡ Using DEFAULT 30-day window")
         else:
-            start_date = now - relativedelta(months=6)
-            future_limit = now + relativedelta(months=6)
+            print("✅ Using UI-provided range")
 
-        print(f"✅ Fetch window: {start_date} → {future_limit}")
+        # ✅ ✅ NORMALIZE ONCE (CRITICAL IMPROVEMENT)
+        safe_start = self._ensure_utc(start_date)
+        safe_end = self._ensure_utc(end_date)
 
+        print(f"✅ Fetch window: {safe_start} → {safe_end}")
+
+
+        # ✅ GET ALL SYNC-ENABLED ACCOUNTS
         accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, user.id)
         print(f"✅ Accounts found: {len(accounts)}")
 
@@ -114,6 +144,7 @@ class CalendarService:
                 continue
 
             try:
+                
                 # ========================
                 # GOOGLE
                 # ========================
@@ -122,7 +153,7 @@ class CalendarService:
                     events = self.google.fetch_events(
                         token,
                         start_date=start_date,
-                        end_date=future_limit
+                        end_date=end_date
                     ) or []
 
                     print(f"✅ Google returned: {len(events)}")
@@ -134,18 +165,25 @@ class CalendarService:
                         )
 
                         dt = self._to_utc(start_val)
+                        dt = self._ensure_utc(dt)
 
                         if not dt:
                             continue
 
-                        if start_date <= dt <= future_limit:
+                        # ✅ CLEAN SAFE COMPARISON
+                        if safe_start <= dt <= safe_end:
                             e["start"] = dt.isoformat()
-                            e["end"] = self._to_utc(
-                                e.get("end", {}).get("dateTime")
-                                or e.get("end", {}).get("date")
+                            e["end"] = self._ensure_utc(
+                                self._to_utc(
+                                    e.get("end", {}).get("dateTime")
+                                    or e.get("end", {}).get("date")
+                                )
                             )
                             e["account"] = acc.account_email
+
                             google_events.append(e)
+
+                    print(f"✅ Google added: {len(google_events)}")
 
                 # ========================
                 # MICROSOFT
@@ -157,7 +195,7 @@ class CalendarService:
 
                     params = {
                         "startDateTime": start_date.isoformat(),
-                        "endDateTime": future_limit.isoformat()
+                        "endDateTime": end_date.isoformat()
                     }
 
                     events = []
@@ -186,16 +224,19 @@ class CalendarService:
                         start_val = e.get("start", {}).get("dateTime")
 
                         dt = self._to_utc(start_val)
+                        dt = self._ensure_utc(dt)
 
                         if not dt:
                             continue
 
-                        if start_date <= dt <= future_limit:
+                        # ✅ CLEAN SAFE COMPARISON
+                        if safe_start <= dt <= safe_end:
                             e["start"] = dt.isoformat()
-                            e["end"] = self._to_utc(
-                                e.get("end", {}).get("dateTime")
+                            e["end"] = self._ensure_utc(
+                                self._to_utc(e.get("end", {}).get("dateTime"))
                             )
                             e["account"] = acc.account_email
+
                             ms_events.append(e)
 
             except Exception as e:
