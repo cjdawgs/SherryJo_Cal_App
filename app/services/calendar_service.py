@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 import requests
+from app.routers import events
 from app.services.graph_client import GraphClient
 from app.services.google_calendar_service import GoogleCalendarService
 from app.models import Event
@@ -10,14 +11,16 @@ from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     ensure_valid_token
 )
+import pytz
 
 SAFE_DELETE = False
 
 ACCOUNT_COLORS = {
-    "google": "#4285F4",
-    "outlook": "#0078D4"
+    "google": "#1f9d55",
+    "microsoft": "#1d4ed8",
+    "apple": "#ef4444",
+    "other": "#eab308"  
 }
-
 
 class CalendarService:
 
@@ -48,36 +51,63 @@ class CalendarService:
         except Exception:
             return None
 
+
+    def _safe_datetime(self, val):
+        if isinstance(val, dict):
+            return val.get("dateTime") or val.get("date")
+        return val
+
     # ==================================================
     # ✅ NORMALIZATION
     # ==================================================
     def _normalize(self, google_events, ms_events):
         unified = []
 
+        # ✅ combine everything FIRST
+        all_events = []
+
         for e in google_events:
-            unified.append({
-                "external_id": e.get("id"),
-                "title": e.get("summary") or "Untitled Event",
-                "start": e.get("start"),
-                "end": e.get("end"),
-                "source": "google",
-                "account": e.get("account"),
-                "color": ACCOUNT_COLORS["google"]
-            })
+            e["provider"] = "google"
+            e["source"] = "google"
+            all_events.append(e)
 
         for e in ms_events:
+            e["provider"] = "microsoft"
+            e["source"] = "microsoft"
+            all_events.append(e)
+
+        # ✅ SINGLE NORMALIZATION PIPELINE (THIS FIXES EVERYTHING)
+        for e in all_events:
+
+            provider = (e.get("provider") or "other").lower()
+            account = (e.get("account") or "").lower()
+
+            start = self._safe_datetime(e.get("start"))
+            end = self._safe_datetime(e.get("end"))
+
             unified.append({
                 "external_id": e.get("id"),
-                "title": (e.get("subject") or "").strip() or "Untitled Event",
-                "start": e.get("start"),
-                "end": e.get("end"),
-                "source": "outlook",
-                "account": e.get("account"),
-                "color": ACCOUNT_COLORS["outlook"]
+
+                "title": (
+                    e.get("summary") or
+                    e.get("subject") or
+                    "Untitled Event"
+                ),
+
+                "start": start,
+                "end": end,
+
+                "source": provider,
+                "provider": provider,
+
+                "account": account,
+                "account_key": f"{provider}:{account}",
+
+                "color": ACCOUNT_COLORS.get(provider, ACCOUNT_COLORS["other"])
             })
 
         return unified
-    
+
     # ==================================================
     # ✅ ENSURE UTC (FINAL FIX - CORRECT)
     # ==================================================
@@ -102,6 +132,22 @@ class CalendarService:
     # ==================================================
     # ✅ FETCH EVENTS (FIXED)
     # ==================================================
+    @staticmethod
+
+    def map_ms_tz(tz_name):
+        if not tz_name:
+            return pytz.utc
+
+        if "Eastern" in tz_name:
+            return pytz.timezone("US/Eastern")
+        if "Central" in tz_name:
+            return pytz.timezone("US/Central")
+        if "Mountain" in tz_name:
+            return pytz.timezone("US/Mountain")
+        if "Pacific" in tz_name:
+            return pytz.timezone("US/Pacific")
+
+        return pytz.utc
     def fetch_all_events(self, db, user, start_date=None, end_date=None):
         """
         ✅ NEW: RANGE-AWARE FETCH
@@ -172,30 +218,61 @@ class CalendarService:
 
                         # ✅ CLEAN SAFE COMPARISON
                         if safe_start <= dt <= safe_end:
-                            e["start"] = dt.isoformat()
-                            e["end"] = self._ensure_utc(
-                                self._to_utc(
-                                    e.get("end", {}).get("dateTime")
-                                    or e.get("end", {}).get("date")
-                                )
-                            )
                             e["account"] = acc.account_email
-
                             google_events.append(e)
 
                     print(f"✅ Google added: {len(google_events)}")
+                    
+                # ========================
+                # APPLE (SURGICAL ADD ✅)
+                # ========================
+                elif acc.provider == "apple":
+
+                    """
+                    ✅ Phase 1 Apple support
+                    ✅ Safe: does not break pipeline
+                    ✅ Reuses normalization system
+                    """
+
+                    try:
+                        from app.services.external_calendar_service import ExternalCalendarService
+
+                        events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
+
+                        print(f"✅ Apple returned: {len(events)}")
+
+                        for e in events:
+                            start_val = e.get("start")
+
+                            dt = self._to_utc(start_val)
+                            dt = self._ensure_utc(dt)
+
+                            if not dt:
+                                continue
+
+                            if safe_start <= dt <= safe_end:
+                                e["account"] = acc.account_email
+                                e["provider"] = "apple"
+                                e["source"] = "apple"
+
+                                # ✅ IMPORTANT: reuse existing pipeline
+                                google_events.append(e)
+
+                        print(f"✅ Apple added: {len(google_events)}")
+
+                    except Exception as err:
+                        print(f"❌ Apple sync failed: {err}")
 
                 # ========================
                 # MICROSOFT
                 # ========================
                 elif acc.provider == "microsoft":
 
-                    # ✅ EXPAND RECURRING EVENTS PROPERLY
                     url = "https://graph.microsoft.com/v1.0/me/calendarView"
 
                     params = {
-                        "startDateTime": start_date.isoformat(),
-                        "endDateTime": end_date.isoformat()
+                        "startDateTime": start_date.isoformat().replace("+00:00", "Z"),
+                        "endDateTime": end_date.isoformat().replace("+00:00", "Z")
                     }
 
                     events = []
@@ -207,37 +284,84 @@ class CalendarService:
                             params=params
                         )
 
+                        print("🔐 MS STATUS:", res.status_code)
+
+                        if res.status_code != 200:
+                            print("❌ MS ERROR:", res.text)
+                            break
+
                         data = res.json()
 
                         batch = data.get("value", [])
                         events.extend(batch)
 
-                        # ✅ handle pagination
                         url = data.get("@odata.nextLink")
-
-                        # ✅ only send params first time
                         params = None
 
                     print(f"✅ Microsoft expanded instances: {len(events)}")
 
                     for e in events:
-                        start_val = e.get("start", {}).get("dateTime")
+                        start_obj = e.get("start", {})
+                        dt_str = start_obj.get("dateTime")
+                        tz_name = start_obj.get("timeZone")
 
-                        dt = self._to_utc(start_val)
-                        dt = self._ensure_utc(dt)
+                        dt = None
+
+                        if dt_str:
+                            try:
+                                dt_naive = datetime.fromisoformat(dt_str)
+
+                                if tz_name:
+                                    tz = self.map_ms_tz(tz_name)
+                                    
+                                    dt = tz.localize(dt_naive).astimezone(timezone.utc)
+                                else:
+                                    dt = dt_naive.replace(tzinfo=timezone.utc)
+
+                            except Exception as err:
+                                print("❌ TZ PARSE ERROR:", err)
 
                         if not dt:
                             continue
 
-                        # ✅ CLEAN SAFE COMPARISON
-                        if safe_start <= dt <= safe_end:
-                            e["start"] = dt.isoformat()
-                            e["end"] = self._ensure_utc(
-                                self._to_utc(e.get("end", {}).get("dateTime"))
-                            )
-                            e["account"] = acc.account_email
+                        print("🧪 CHECK:", dt, "| RANGE:", safe_start, safe_end)
 
-                            ms_events.append(e)
+                        if safe_start <= dt <= safe_end:
+
+                            end_obj = e.get("end", {})
+                            end_str = end_obj.get("dateTime")
+                            end_tz = end_obj.get("timeZone")
+
+                            end_dt = None
+
+                            if end_str:
+                                try:
+                                    end_naive = datetime.fromisoformat(end_str)
+
+                                    if end_tz:
+                                        tz = self.map_ms_tz(end_tz)
+
+                                        try:
+                                            end_dt = tz.localize(end_naive).astimezone(timezone.utc)
+                                        except:
+                                            end_dt = end_naive.replace(tzinfo=timezone.utc)
+
+                                    else:
+                                        end_dt = end_naive.replace(tzinfo=timezone.utc)
+
+                                except Exception as err:
+                                    print("❌ END TZ ERROR:", err)
+
+                            ms_events.append({
+                                "id": e.get("id"),
+                                "subject": e.get("subject"),
+                                "start": dt.isoformat(),
+                                "end": end_dt.isoformat() if end_dt else None,
+                                "account": acc.account_email
+                            })
+
+                    print(f"✅ FINAL MICROSOFT EVENTS: {len(ms_events)}")
+                    print("🔵 MICROSOFT SAMPLE:", ms_events[:2])
 
             except Exception as e:
                 print(f"❌ Account failed: {e}")

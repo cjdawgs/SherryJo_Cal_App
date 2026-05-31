@@ -45,10 +45,173 @@ templates = Jinja2Templates(
 )
 
 
+
+# ============================================================
+# ✅ CONNECT APPLE ACCOUNT (NEW)
+# ============================================================
+
+from pydantic import BaseModel, EmailStr
+
+class AppleConnectRequest(BaseModel):
+    email: EmailStr
+    app_password: str
+    caldav_url: str = "https://caldav.icloud.com"
+
+
+from app.services.external_calendar_service import ExternalCalendarService
+
+@router.post("/apple/connect")
+def connect_apple_account(
+    payload: AppleConnectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    ✅ FIXED: Always return success AFTER save
+    ✅ Never raise 400 after success
+    ✅ Matches /test endpoint behavior
+    """
+
+    from app.services.external_calendar_service import ExternalCalendarService
+
+    service = ExternalCalendarService()
+
+    try:
+        # --------------------------------------------------
+        # ✅ VALIDATE (same as /test endpoint)
+        # --------------------------------------------------
+        is_valid = service.validate_icloud_credentials(
+            url=payload.caldav_url,
+            username=payload.email,
+            password=payload.app_password
+        )
+
+        # ✅ SAFE FAILURE (no exception)
+        if not is_valid:
+            return {
+                "success": False,
+                "message": "Invalid Apple credentials"
+            }
+
+        # --------------------------------------------------
+        # ✅ SAVE ACCOUNT
+        # --------------------------------------------------
+        account = MultiAccountOAuthService.add_oauth_account(
+            db=db,
+            user_id=current_user.id,
+            provider="apple",
+            account_email=payload.email,
+
+            # ✅ Apple does NOT use tokens
+            access_token=None,
+            refresh_token=None,
+
+            # ✅ Apple credentials
+            caldav_url=payload.caldav_url,
+            app_password=payload.app_password
+        )
+
+        # --------------------------------------------------
+        # ✅ CRITICAL FIX: RETURN SUCCESS HERE
+        # --------------------------------------------------
+        return {
+            "success": True,
+            "message": "✅ Apple connected",
+            "account_id": account.id
+        }
+
+    except Exception as e:
+        # ✅ NEVER THROW → prevents 500 & 400 mismatch
+        print("❌ Apple connect error:", e)
+
+        return {
+            "success": False,
+            "message": "Connection failed"
+        }
+    
+# ============================================================
+# ✅ RETRY ACCOUNT SYNC (NEW)
+# ============================================================
+
+@router.post("/{account_id}/retry")
+def retry_account_sync(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    ✅ Retry sync for a single account
+    ✅ Uses stored credentials (NO re-entry)
+    """
+
+    from app.services.calendar_service import CalendarService
+
+    account = db.query(OAuthAccount).filter(
+        OAuthAccount.id == account_id,
+        OAuthAccount.user_id == current_user.id
+    ).first()
+
+    if not account:
+        raise HTTPException(404, "Account not found")
+
+    service = CalendarService()
+
+    try:
+        # ✅ Reuse your existing pipeline (single-account style)
+        service.fetch_all_events(db, current_user)
+
+        account.last_sync_success = datetime.now(timezone.utc)
+        account.last_error = None
+
+        db.commit()
+
+        return {"success": True, "message": "✅ Sync successful"}
+
+    except Exception as e:
+        account.last_sync_failure = datetime.now(timezone.utc)
+        account.last_error = str(e)
+
+        db.commit()
+
+        return {"success": False, "message": "❌ Sync failed"}
+    
+# ============================================================
+# ✅ TEST APPLE CONNECTION (NEW)
+# ============================================================
+
+@router.post("/apple/test")
+def test_apple_connection(
+    payload: AppleConnectRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    ✅ Test Apple credentials WITHOUT saving
+
+    Used by UI button:
+    "Test Connection"
+
+    ✅ Does NOT touch DB
+    ✅ Fast feedback for user
+    """
+
+    from app.services.external_calendar_service import ExternalCalendarService
+
+    service = ExternalCalendarService()
+
+    is_valid = service.validate_icloud_credentials(
+        url=payload.caldav_url,
+        username=payload.email,
+        password=payload.app_password
+    )
+
+    if not is_valid:
+        raise HTTPException(400, "❌ Connection failed")
+
+    return {"message": "✅ Connection successful"}
+
 # ============================================================
 # GET ALL OAUTH ACCOUNTS
 # ============================================================
-
 @router.get("")
 def get_my_accounts(
     provider: str = Query(None, description="Filter by provider"),

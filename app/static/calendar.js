@@ -1,15 +1,17 @@
 console.log("🔥 JS FILE LOADED");
 
-/**************************************************************
- * ✅ AUTH GUARD (RUNS IMMEDIATELY)
- **************************************************************/
+// ✅ GLOBAL TOKEN (FIX)
 const token = localStorage.getItem("token");
 
-if (!window.location.pathname.includes("calendar-ui")) {
-  // Not our page → ignore
-} else if (!token) {
-  window.location.replace("/login");
-  throw new Error("No token — blocking execution");
+/**************************************************************
+ * ✅ AUTH GUARD (SAFE VERSION)
+ **************************************************************/
+if (window.location.pathname.includes("calendar-ui")) {
+  
+  if (!token) {
+    console.warn("⚠️ No token → redirecting to login");
+    window.location.replace("/login");
+  }
 }
 
 
@@ -17,8 +19,6 @@ if (!window.location.pathname.includes("calendar-ui")) {
  * ✅ CENTRALIZED API FETCH
  **************************************************************/
 async function apiFetch(url, options = {}) {
-  const token = localStorage.getItem("token");
-
   const res = await fetch(url, {
     ...options,
     headers: {
@@ -61,7 +61,6 @@ let activeAccountFilters = new Set();
  * ✅ INIT APP
  **************************************************************/
 document.addEventListener("DOMContentLoaded", init);
-
 function init() {
   console.log("✅ calendar.js loaded");
 
@@ -70,15 +69,41 @@ function init() {
     console.warn("Missing #calendar element");
     return;
   }
+
   handleOAuthRedirect();
+
+  loadAccounts();      // ✅ ✅ ADD THIS LINE
+
   initCalendar(calendarEl);
   bindUIEvents();
-  // ✅ Initialize view to today
+
   updateDayDetails(selectedDate);
   updateWeekView();
   highlightSelectedDay(selectedDate);
 }
 
+/**************************************************************
+ * ✅ LOAD ACCOUNTS (SEPARATE FROM EVENTS)
+ **************************************************************/
+async function loadAccounts() {
+  try {
+    const res = await apiFetch("/accounts");
+
+    if (!res.ok) {
+      throw new Error("Accounts API failed");
+    }
+
+    const data = await res.json();
+
+    console.log("✅ ACCOUNTS API:", data);
+
+    // ✅ IMPORTANT: send directly to renderer
+    renderAccounts(data);
+
+  } catch (err) {
+    console.error("❌ Failed to load accounts:", err);
+  }
+}
 
 /**************************************************************
  * ✅ HANDLE OAuth RETURN (?connected=)
@@ -109,8 +134,8 @@ function initCalendar(el) {
       initialView: "dayGridMonth",
 
       // ✅ ✅ CRITICAL FIX
-      dayMaxEventRows: false,
-      dayMaxEvents: false,
+      dayMaxEventRows: 3,   // ✅ clean stacking
+      dayMaxEvents: true,
 
 
     initialView: "dayGridMonth",
@@ -120,9 +145,8 @@ function initCalendar(el) {
      **************************************************/
     events: async (fetchInfo, successCallback, failureCallback) => {
       try {
-        const token = localStorage.getItem("token");
         const res = await apiFetch(
-          `/calendar/unified?range_days=${currentRangeDays}&token=${token}`
+          `/calendar/unified?range_days=${currentRangeDays}`
         );
 
 
@@ -137,35 +161,12 @@ function initCalendar(el) {
         const events = Array.isArray(data?.events)
           ? data.events
 
-              // ✅ STEP A: REMOVE BAD EVENTS
+              // ✅ STEP 1: REMOVE BAD EVENTS
               .filter(ev => ev.start || ev.start?.dateTime)
 
-              // ✅ STEP B: APPLY ACCOUNT FILTER (FIXED + NORMALIZED)
-              .filter(ev => {
-
-                // ✅ show everything if no filters selected
-                if (activeAccountFilters.size === 0) return true;
-
-                // ✅ normalize values (CRITICAL FIX)
-                const email = (ev.account || "").toLowerCase();
-                const source = (ev.source || "").toLowerCase();
-
-                // ✅ FIX: normalize outlook → microsoft
-                const normalizedSource =
-                  source === "outlook" ? "microsoft" : source;
-
-                // ✅ allow events without account (prevents loss)
-                if (!email) return true;
-
-                const key = `${normalizedSource}:${email}`;
-
-                return activeAccountFilters.has(key);
-              })
-
-              // ✅ STEP C: MAP (UNCHANGED LOGIC)
+              // ✅ STEP 2: BUILD account_key FIRST
               .map(ev => {
 
-                // ✅ SUPPORT GOOGLE + MICROSOFT FORMATS
                 const rawStart = ev.start?.dateTime || ev.start;
                 const rawEnd = ev.end?.dateTime || ev.end;
 
@@ -174,36 +175,47 @@ function initCalendar(el) {
 
                 const safeEnd = rawEnd ? new Date(rawEnd) : null;
 
-                const email = ev.account || "";
+                // ✅ normalize provider
+                const source = (ev.source || "").toLowerCase();
+                const provider = source === "outlook" ? "microsoft" : source;
+
+                const account = (ev.account || "").toLowerCase();
+
+                // ✅ ✅ THIS IS THE FIX
+                const account_key = `${provider}:${account}`;
 
                 return {
                   id: `${ev.id}_${rawStart}`,
                   title: ev.title || "Untitled",
 
-                  // ✅ DO NOT convert to ISO (CRITICAL FIX)
                   start: safeStart,
                   end: safeEnd || null,
 
                   extendedProps: {
-                    source: ev.source,
-                    account: email,
+                    source: provider,
+                    account: account,
+                    account_key: account_key,   // ✅ CREATED HERE
                     conflict: !!ev.conflict,
                     notes: ev.notes || []
                   }
                 };
-
               })
 
-              .filter(Boolean)   // ✅ ← ADD THIS LINE
+              .filter(Boolean)
+
+              // ✅ STEP 3: FILTER AFTER KEY EXISTS
+              .filter(ev => {
+
+                if (activeAccountFilters.size === 0) return true;
+
+                const key = ev.extendedProps.account_key;
+
+                return activeAccountFilters.has(key);
+              })
 
           : [];
-
         console.log(events.filter(e => e.extendedProps.source === "microsoft").map(e => e.id));
 
-        // ✅ SAFE accounts
-        renderAccounts?.(data?.accounts || []);
-
-        console.log("✅ ACCOUNTS:", data.accounts);
         // ✅ SAVE GOOD EVENTS
         lastGoodEvents = events;
         
@@ -232,11 +244,7 @@ function initCalendar(el) {
     eventDidMount: (info) => {
 
     // ✅ ✅ APPLY NEW COLOR SYSTEM
-    applyEventColor(info.el, {
-      extendedProps: {
-        account_email: info.event.extendedProps.account
-      }
-    });
+    applyEventColor(info.el, info.event);
 
     // ✅ Keep your styling
     info.el.style.border = "none";
@@ -246,7 +254,7 @@ function initCalendar(el) {
 
     // ✅ Conflict override (unchanged)
     if (info.event.extendedProps.conflict) {
-      info.el.style.border = "2px solid red";
+      info.el.style.borderLeft = "4px solid red";
     }
 
     // ✅ Tooltip (unchanged)
@@ -431,7 +439,7 @@ function initCalendar(el) {
 const BASE_COLORS = {
   google: "#1f9d55",
   microsoft: "#1d4ed8",
-  apple: "#dc2626",
+  apple: "#ef4444",
   other: "#eab308"
 };
 
@@ -480,47 +488,14 @@ function openCustomRange() {
 }
 
 /* =====================================================
-✅ LEGEND (AUTO-SYNC WITH COLORS)
-===================================================== 
-
-function renderLegend(accounts) {
-  const container = document.getElementById("calendarLegend");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  accounts.forEach(acc => {
-    const email = acc.account_email || acc.email;
-    const color = accountColorMap[email];
-
-    const item = document.createElement("div");
-    item.className = "legendItem";
-
-    const dot = document.createElement("span");
-    dot.className = "legendDot";
-    dot.style.backgroundColor = color;
-
-    const label = document.createElement("span");
-    label.textContent = email;
-
-    item.appendChild(dot);
-    item.appendChild(label);
-
-    container.appendChild(item);
-  });
-}
-*/
-
-/* =====================================================
 ✅ APPLY COLOR TO EVENT ELEMENT
 ===================================================== */
 
 function applyEventColor(el, event) {
-  const email =
-    event.extendedProps?.account_email ||
-    event.extendedProps?.email;
+    
+  const key = event.extendedProps?.account_key;
+  const color = accountColorMap[key];
 
-  const color = accountColorMap[email];
   if (!color) return;
 
   // ✅ Background
@@ -583,31 +558,25 @@ function renderAccounts(accounts) {
   const el = document.getElementById("accounts");
   if (!el) return;
 
-  // ✅ ✅ KEEP THIS (restores original behavior)
-  
-if (!accounts || accounts.length === 0) {
-  el.classList.add("hidden");
-
-  const legend = document.getElementById("calendarLegend");
-  if (legend) {
-    legend.innerHTML = '<span style="color:#888;">No connected accounts</span>';
+  if (!accounts || accounts.length === 0) {
+    el.classList.add("hidden");
+    return;
   }
-
-  return;
-}
-
 
   el.classList.remove("hidden");
 
-  // ✅ Reset map
   accountColorMap = {};
   const providerCounts = {};
 
   el.innerHTML = "";
 
   accounts.forEach(acc => {
-    const provider = (acc.provider || "other").toLowerCase();
-    const email = acc.account_email || acc.email;
+
+    const providerRaw = (acc.provider || "other").toLowerCase();
+    const provider = providerRaw === "outlook" ? "microsoft" : providerRaw;
+
+    const email = (acc.account_email || acc.email || "").toLowerCase();
+    if (!email) return;
 
     if (!providerCounts[provider]) {
       providerCounts[provider] = 0;
@@ -616,38 +585,32 @@ if (!accounts || accounts.length === 0) {
     const index = providerCounts[provider]++;
     const color = getAccountColor(provider, index);
 
-    accountColorMap[email] = color;
+    const key = `${provider}:${email}`;
+    accountColorMap[key] = color;
 
-    /* ---------- UI ROW ---------- */
+    // ✅ CREATE CHIP
     const row = document.createElement("div");
-
-    // ✅ normalize provider (match filter logic)
-    const normalizedProvider =
-      provider === "outlook" ? "microsoft" : provider;
-
-    const key = `${normalizedProvider}:${email.toLowerCase()}`;
     row.dataset.key = key;
-
-    // ✅ HOVER FULL EMAIL
     row.title = email;
 
-    // ✅ DOT (ONLY ONCE)
+    // DOT
     const dot = document.createElement("span");
     dot.style.backgroundColor = color;
     row.appendChild(dot);
 
-    // ✅ LABEL
+    // LABEL
     const shortName = email.split("@")[0];
 
     let suffix = "";
     if (provider === "google") suffix = "(G)";
     if (provider === "microsoft") suffix = "(MS)";
+    if (provider === "apple") suffix = "(A)";
 
     const label = document.createElement("span");
     label.textContent = `${shortName} ${suffix}`;
     row.appendChild(label);
 
-    // ✅ CLICK HANDLER
+    // CLICK FILTER
     row.onclick = () => {
       if (activeAccountFilters.has(key)) {
         activeAccountFilters.delete(key);
@@ -659,16 +622,11 @@ if (!accounts || accounts.length === 0) {
       calendar.refetchEvents();
     };
 
-    // ✅ APPEND
     el.appendChild(row);
-
   });
 
   updateChipSelectionUI();
-
-  //renderLegend(accounts);
 }
-
 function updateChipSelectionUI() {
 
   document.querySelectorAll("#accounts div").forEach(row => {
@@ -948,17 +906,18 @@ function updateWeekView() {
  * ✅ OAUTH BUTTONS
  **************************************************************/
 function connectGoogle() {
+  const token = localStorage.getItem("token");
+
   window.location.href =
     `/auth/google/login?token=${encodeURIComponent(token)}`;
 }
 
-
 function connectOutlook() {
+  const token = localStorage.getItem("token");
+
   window.location.href =
     `/ms/login?token=${encodeURIComponent(token)}`;
 }
-
-
 
 /**************************************************************
  * ✅ SYNC

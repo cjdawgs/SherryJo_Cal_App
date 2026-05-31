@@ -10,8 +10,8 @@ SAFE DESIGN:
 - Returns normalized event objects for internal use
 - Can be plugged into routers/services later
 """
-
-from datetime import datetime
+    
+from datetime import datetime, timezone
 from typing import List, Dict, Any
 import logging
 
@@ -31,6 +31,52 @@ class ExternalCalendarService:
 
     def __init__(self):
         pass
+    
+    # --------------------------------------------------
+    # ✅ VALIDATE ICLOUD CREDENTIALS (REQUIRED FIX)
+    # --------------------------------------------------
+    def validate_icloud_credentials(
+        self,
+        url: str,
+        username: str,
+        password: str
+    ) -> bool:
+        """
+        ✅ PURPOSE:
+        Validate Apple credentials BEFORE saving
+
+        ✅ CRITICAL RULES:
+        - MUST NEVER raise exception
+        - MUST return True / False only
+        - MUST be lightweight (no event fetch)
+        """
+
+        if caldav is None:
+            logger.error("❌ caldav not installed")
+            return False
+
+        try:
+            client = caldav.DAVClient(
+                url=url,
+                username=username,
+                password=password
+            )
+
+            # ✅ LIGHTWEIGHT check (NO events)
+            principal = client.principal()
+
+            if not principal:
+                logger.warning("❌ No principal returned")
+                return False
+
+            logger.info(f"✅ Apple credentials valid: {username}")
+            return True
+
+        except Exception as e:
+            # ✅ NEVER crash API
+            logger.error(f"❌ Apple validation failed: {e}")
+            return False
+
 
     # --------------------------------------------------
     # ICLOUD / CALDAV
@@ -41,17 +87,6 @@ class ExternalCalendarService:
         username: str,
         password: str
     ) -> List[Dict[str, Any]]:
-        """
-        Fetch events from iCloud via CalDAV
-
-        Args:
-            url: CalDAV URL (iCloud endpoint)
-            username: Apple ID email
-            password: App-specific password
-
-        Returns:
-            Normalized event list
-        """
 
         if caldav is None:
             raise ImportError("caldav package is not installed")
@@ -73,25 +108,82 @@ class ExternalCalendarService:
 
                 for event in events:
                     try:
-                        vevent = event.vobject_instance.vevent
+                        vobj = getattr(event, "vobject_instance", None)
+
+                        if not vobj or not hasattr(vobj, "vevent"):
+                            logger.warning("⚠️ Skipping event (no vevent)")
+                            continue
+
+                        vevent = vobj.vevent
+
+                        parsed_start = self._parse_date(getattr(vevent, "dtstart", None))
+                        parsed_end = self._parse_date(getattr(vevent, "dtend", None))
+
+                        # ✅ DEBUG (keep for now)
+                        print("🧪 APPLE NORMALIZED:", getattr(vevent, "summary", ""), parsed_start)
+
+                        
+                        if not parsed_start:
+                            parsed_start = parsed_end  # fallback for some Apple events
+
+                        if not parsed_start:
+                            continue
+
 
                         results.append(self._normalize_event({
-                            "title": str(getattr(vevent, "summary", "")),
-                            "start": self._parse_date(getattr(vevent, "dtstart", None)),
-                            "end": self._parse_date(getattr(vevent, "dtend", None)),
+                            "title": str(getattr(vevent, "summary", "")).replace("<SUMMARY{}", "").replace(">", ""),
+                            "start": parsed_start,
+                            "end": parsed_end,
                             "description": str(getattr(vevent, "description", "")),
-                            "source": "icloud"
+                            "source": "apple"
                         }))
 
                     except Exception as e:
                         logger.warning(f"Skipping malformed iCloud event: {e}")
 
-            return results
+            return results  # ✅ INSIDE try block
 
         except Exception as e:
             logger.error(f"iCloud fetch failed: {e}")
             return []
+        
+    # --------------------------------------------------
+    # APPLE (PLACEHOLDER FOR YOUR IMPLEMENTATION)
+    # --------------------------------------------------
+    @staticmethod
+    def fetch_apple_calendar_events(account):
+        """
+        ✅ Apple → iCloud bridge
+        ✅ Uses existing CalDAV implementation
+        ✅ Minimal, safe integration
+        """
 
+        try:
+            service = ExternalCalendarService()
+
+            # ✅ You will need these fields on account
+            # ✅ FIX: use stored credentials correctly
+            url = account.access_token          # caldav_url
+            username = account.account_email
+            password = account.refresh_token    # app_password
+
+
+            # ✅ SAFETY: do not break pipeline
+            if not url or not username or not password:
+                logger.warning("⚠️ Apple account missing CalDAV credentials")
+                return []
+
+            return service.fetch_icloud_events(
+                url=url,
+                username=username,
+                password=password
+            )
+            
+            
+        except Exception as e:
+            logger.error(f"❌ Apple calendar fetch failed: {e}")
+            return []
+    
     # --------------------------------------------------
     # GOOGLE (PLACEHOLDER FOR YOUR IMPLEMENTATION)
     # --------------------------------------------------
@@ -119,27 +211,67 @@ class ExternalCalendarService:
     # --------------------------------------------------
     def _normalize_event(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Convert external event into internal schema-compatible dict
+        ✅ Convert external event → format expected by CalendarService
+
+        ⚠️ CRITICAL:
+        CalendarService expects:
+        - summary
+        - start
+        - end
+        - id
+
+        NOT:
+        - title
+        - start_time
         """
 
         return {
-            "title": raw.get("title", ""),
+            # ✅ Provide stable ID (fallback if missing)
+            "id": raw.get("id", f"apple-{hash(str(raw))}"),
+
+            # ✅ MATCH Google/Microsoft field
+            "summary": raw.get("title", ""),
+            "subject": raw.get("title", ""),
+
+            # ✅ Keep optional metadata
             "description": raw.get("description", ""),
-            "start_time": raw.get("start"),
-            "end_time": raw.get("end"),
+
+            # ✅ CRITICAL FIX — match pipeline expectations
+            "start": raw.get("start"),
+            "end": raw.get("end"),
+
+            # ✅ REQUIRED downstream
             "source": raw.get("source", "external"),
-            "created_at": datetime.utcnow()
         }
 
+
     def _parse_date(self, date_obj):
-        """
-        Safely parse CalDAV date formats
-        """
         if not date_obj:
             return None
 
         try:
-            return date_obj.value
+            value = date_obj.value
+
+            # ✅ CASE 1: datetime (normal timed events)
+            if isinstance(value, datetime):
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
+                else:
+                    value = value.astimezone(timezone.utc)
+                return value
+
+            # ✅ CASE 2: date (ALL-DAY events — VERY COMMON IN APPLE)
+            if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+                return datetime(
+                    value.year,
+                    value.month,
+                    value.day,
+                    0, 0, 0,
+                    tzinfo=timezone.utc
+                )
+
+            return None
+
         except Exception:
             return None
 

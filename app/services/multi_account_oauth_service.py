@@ -48,14 +48,20 @@ class MultiAccountOAuthService:
         user_id: int,
         provider: str,
         account_email: str,
-        access_token: str,
-        refresh_token: str = None,
-        token_expires_at: datetime = None,
-        display_name: str = None,
-        provider_id: str = None,
-        set_as_primary: bool = False
-    ) -> OAuthAccount:
 
+        access_token: str = None,
+        refresh_token: str = None,
+
+        # ✅ ADD THIS BACK (CRITICAL FIX)
+        token_expires_at: datetime = None,
+
+        caldav_url: str = None,
+        app_password: str = None,
+
+        display_name: str = None,
+        provider_id: str = None
+    ):
+        
         # ✅ FLOAT → DATETIME
         if isinstance(token_expires_at, (int, float)):
             print("⚠️ Converting float expires_at → datetime")
@@ -77,15 +83,24 @@ class MultiAccountOAuthService:
 
         if existing:
             print(f"🔄 Updating account: {account_email}")
+            # ✅ APPLE SUPPORT (update credentials)
 
-            existing.access_token = access_token
+            # ✅ APPLE SUPPORT (update credentials correctly)
+            if provider == "apple":
+                existing.access_token = caldav_url
+                existing.refresh_token = app_password
+            else:
+                existing.access_token = access_token
+
+                if refresh_token:
+                    existing.refresh_token = refresh_token
 
             if refresh_token:
                 existing.refresh_token = refresh_token
 
             if token_expires_at:
                 existing.token_expires_at = token_expires_at
-
+                
             existing.display_name = display_name
             existing.provider_id = provider_id
             existing.updated_at = datetime.now(timezone.utc)
@@ -104,13 +119,25 @@ class MultiAccountOAuthService:
             user_id=user_id,
             provider=provider,
             account_email=account_email,
+
             access_token=access_token,
             refresh_token=refresh_token,
             token_expires_at=token_expires_at,
+
             display_name=display_name,
             provider_id=provider_id,
+
             is_primary=(account_count == 0 or set_as_primary)
         )
+
+        # --------------------------------------------------
+        # ✅ APPLE SUPPORT (STORE CREDENTIALS SAFELY)
+        # ---------------------------------------if provider == "apple":
+        if provider == "apple":
+            oauth_account.access_token = caldav_url
+            oauth_account.refresh_token = app_password
+
+
 
         db.add(oauth_account)
         safe_commit(db)
@@ -136,6 +163,52 @@ class MultiAccountOAuthService:
             OAuthAccount.sync_enabled == True
         ).all()
 
+# --------------------------------------------------
+# ✅ VALIDATE ICLOUD CREDENTIALS (NEW)
+# --------------------------------------------------
+def validate_icloud_credentials(
+    self,
+    url: str,
+    username: str,
+    password: str
+) -> bool:
+    """
+    ✅ PURPOSE:
+    Validate Apple iCloud credentials BEFORE saving
+
+    ✅ HOW:
+    - Attempt minimal CalDAV connection
+    - Do NOT fetch all events (fast + safe)
+
+    ✅ RETURNS:
+    True = valid credentials
+    False = invalid credentials
+    """
+
+    if caldav is None:
+        logger.error("caldav library not installed")
+        return False
+
+    try:
+        client = caldav.DAVClient(
+            url=url,
+            username=username,
+            password=password
+        )
+
+        # ✅ LIGHTWEIGHT CHECK (no heavy event fetch)
+        principal = client.principal()
+
+        if not principal:
+            logger.warning("❌ Apple validation failed (no principal)")
+            return False
+
+        logger.info(f"✅ Apple credentials valid: {username}")
+        return True
+
+    except Exception as e:
+        logger.error(f"❌ Apple validation failed: {e}")
+        return False
 
 # ==================================================
 # ✅ TOKEN ENGINE (FINAL FIX)
@@ -180,10 +253,21 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
             return None
 
     # --------------------------------------------------
+    # ✅ APPLE (NO TOKEN FLOW)
+    # --------------------------------------------------
+    if account.provider == "apple":
+        """
+        Apple does NOT use OAuth tokens for calendar.
+        We return a dummy value so pipeline continues.
+        """
+        return "APPLE_CREDENTIALS"
+    
+    # --------------------------------------------------
     # ✅ RECOVERY MODE (FIXES YOUR BUG)
     # --------------------------------------------------
     if not expires:
         print(f"⚠️ Missing expires_at → attempting recovery: {account.account_email}")
+
 
         # ✅ Try refresh if possible
         if account.refresh_token:

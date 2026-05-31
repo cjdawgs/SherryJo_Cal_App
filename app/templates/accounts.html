@@ -51,47 +51,137 @@
 
 <body>
 
-<h1>OK - template loaded</h1>
-<h2>Connected Accounts</h2>
+<h1>Connected Accounts</h1>
 
-<!-- ✅ Add Buttons -->
+<!-- NAVIGATION -->
+<div style="margin-bottom:20px;">
+    <button onclick="goToCalendar()">⬅ Back to Calendar</button>
+    <button id="back-btn" onclick="goBack()">↩ Back</button>
+</div>
+
+<!-- ADD BUTTONS -->
 <div>
     <button onclick="addGoogle()">+ Add Google</button>
     <button onclick="addMicrosoft()">+ Add Microsoft</button>
 </div>
 
+<!-- APPLE FORM -->
+<div style="margin-top:20px; background:white; padding:15px; border-radius:6px;">
+    <h3>Connect Apple (iCloud)</h3>
+
+    <input id="apple-email" placeholder="Apple ID Email" />
+    <input id="apple-password" placeholder="App Password" />
+
+    <br><br>
+
+    <button onclick="testApple()">Test Connection</button>
+    <button onclick="connectApple()">Connect Apple</button>
+
+    <div id="apple-status" style="margin-top:10px;"></div>
+</div>
+
 <br>
 
-<!-- ✅ Accounts render here -->
+<!-- ACCOUNTS -->
 <div id="accounts"></div>
 
-<!-- ✅ Error display -->
+<!-- ERRORS -->
 <div id="error" class="error"></div>
 
 <script>
-/*
-============================================================
-✅ CONFIG
-============================================================
-*/
-//const TOKEN = localStorage.getItem("token");
 
-/*
-============================================================
-✅ LOAD ACCOUNTS (FULLY FIXED + DEBUG)
-============================================================
-*/
+// ============================
+// HEALTH STATUS
+// ============================
+function getHealthStatus(acc) {
+    if (acc.last_sync_success) return "✅ Healthy";
+    if (acc.last_sync_failure) return "❌ Error";
+    return "⏳ Not Synced";
+}
+
+// ============================
+// ERROR DISPLAY
+// ============================
+function getErrorMessage(acc) {
+    if (!acc.last_error || !acc.last_sync_failure) return "";
+
+    let msg = acc.last_error;
+
+    if (msg.length > 120) {
+        msg = msg.substring(0, 120) + "...";
+    }
+
+    return `
+        <div style="color:red; font-size:12px;">
+            ⚠ ${msg}
+        </div>
+    `;
+}
+
+// ============================
+// NAVIGATION
+// ============================
+function goToCalendar() {
+    window.location.href = "/calendar-ui";
+}
+
+function goBack() {
+    window.history.back();
+}
+
+// hide back button if no history
+window.addEventListener("load", () => {
+    if (window.history.length <= 1) {
+        const btn = document.getElementById("back-btn");
+        if (btn) btn.style.display = "none";
+    }
+});
+
+// ============================
+// RETRY ACCOUNT SYNC
+// ============================
+async function retryAccount(id) {
+
+    const token = localStorage.getItem("token");
+
+    try {
+        const res = await fetch(`/accounts/${id}/retry`, {
+            method: "POST",
+            headers: {
+                "Authorization": "Bearer " + token
+            }
+        });
+
+        let data;
+        try {
+            data = await res.json();
+        } catch {
+            data = { message: "Server error" };
+        }
+
+        alert(data.message || "Retry complete");
+
+        // ✅ refresh UI after retry
+        loadAccounts();
+
+    } catch (err) {
+        console.error(err);
+        alert("Retry failed");
+    }
+}
+
+// ============================
+// LOAD ACCOUNTS
+// ============================
 async function loadAccounts() {
     const errorBox = document.getElementById("error");
     errorBox.innerText = "";
-    
+
     const token = localStorage.getItem("token");
     if (!token) {
-        console.error("❌ NO TOKEN FOUND");
-        errorBox.innerText = "Missing login token. Please login again.";
+        errorBox.innerText = "Missing login token.";
         return;
     }
-
 
     try {
         const res = await fetch("/accounts", {
@@ -100,19 +190,12 @@ async function loadAccounts() {
             }
         });
 
-        console.log("✅ STATUS:", res.status);
-
-        if (res.status !== 200) {
-            const text = await res.text();
-            console.error("❌ API ERROR:", text);
-            errorBox.innerText = "API error: " + text;
+        if (!res.ok) {
+            errorBox.innerText = "Failed to load accounts";
             return;
         }
 
         const data = await res.json();
-
-        console.log("✅ API RESPONSE:", data);
-
         const accounts = Array.isArray(data) ? data : (data.accounts || []);
 
         const container = document.getElementById("accounts");
@@ -134,25 +217,26 @@ async function loadAccounts() {
                     </span>
 
                     <span>
-                        ${acc.account_email ? acc.account_email.replace("#EXT#", "") : "UNKNOWN"}
+                        ${acc.account_email || "UNKNOWN"}
                     </span>
 
                     ${acc.is_primary ? "⭐ PRIMARY" : ""}
                     ${acc.sync_enabled ? "🔄 SYNC ON" : "⛔ SYNC OFF"}
+
+                    <span style="margin-left:10px;">
+                        ${getHealthStatus(acc)}
+                    </span>
+
+                    ${getErrorMessage(acc)}
                 </div>
 
                 <div>
-                    <button onclick="setPrimary(${acc.id})">
-                        Make Primary
-                    </button>
-
+                    <button onclick="setPrimary(${acc.id})">Make Primary</button>
                     <button onclick="toggleSync(${acc.id}, ${!acc.sync_enabled})">
                         ${acc.sync_enabled ? "Disable" : "Enable"}
                     </button>
-
-                    <button onclick="removeAccount(${acc.id})">
-                        Remove
-                    </button>
+                    <button onclick="removeAccount(${acc.id})">Remove</button>
+                    <button onclick="retryAccount(${acc.id})">Retry</button>
                 </div>
             `;
 
@@ -160,16 +244,14 @@ async function loadAccounts() {
         });
 
     } catch (err) {
-        console.error("❌ FETCH FAILED:", err);
-        errorBox.innerText = "Request failed. Check console.";
+        console.error(err);
+        errorBox.innerText = "Error loading accounts";
     }
 }
 
-/*
-============================================================
-✅ ADD ACCOUNT
-============================================================
-*/
+// ============================
+// ADD ACCOUNT
+// ============================
 function addGoogle() {
     const token = localStorage.getItem("token");
     window.location.href = "/auth/google/login?token=" + token;
@@ -180,12 +262,9 @@ function addMicrosoft() {
     window.location.href = "/ms/login?token=" + token;
 }
 
-
-/*
-============================================================
-✅ ACTIONS
-============================================================
-*/
+// ============================
+// ACTIONS
+// ============================
 async function setPrimary(id) {
     await fetch(`/accounts/${id}/set-primary`, {
         method: "PUT",
@@ -193,7 +272,6 @@ async function setPrimary(id) {
             "Authorization": "Bearer " + localStorage.getItem("token")
         }
     });
-
     loadAccounts();
 }
 
@@ -204,7 +282,6 @@ async function toggleSync(id, enabled) {
             "Authorization": "Bearer " + localStorage.getItem("token")
         }
     });
-
     loadAccounts();
 }
 
@@ -215,34 +292,106 @@ async function removeAccount(id) {
             "Authorization": "Bearer " + localStorage.getItem("token")
         }
     });
-
     loadAccounts();
 }
 
-/*
-============================================================
-✅ INITIAL LOAD (WITH OAUTH HANDLING)
-============================================================
-*/
+// ============================
+// APPLE TEST (SAFE)
+// ============================
+async function testApple() {
+    const email = document.getElementById("apple-email").value;
+    const password = document.getElementById("apple-password").value;
 
+    const statusDiv = document.getElementById("apple-status");
+    statusDiv.innerText = "Testing...";
+
+    try {
+        const res = await fetch("/accounts/apple/test", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + localStorage.getItem("token")
+            },
+            body: JSON.stringify({
+                email: email,
+                app_password: password,
+                caldav_url: "https://caldav.icloud.com"
+            })
+        });
+
+        let data;
+        try {
+            data = await res.json();
+        } catch {
+            data = { message: "Server error" };
+        }
+
+        if (!res.ok || data.success === false) {
+            statusDiv.innerText = "❌ " + (data.message || "Connection failed");
+        } else {
+            statusDiv.innerText = "✅ Connection successful";
+        }
+
+    } catch (err) {
+        console.error(err);
+        statusDiv.innerText = "❌ Request failed";
+    }
+}
+
+// ============================
+// APPLE CONNECT (SAFE)
+// ============================
+async function connectApple() {
+    const email = document.getElementById("apple-email").value;
+    const password = document.getElementById("apple-password").value;
+
+    const statusDiv = document.getElementById("apple-status");
+    statusDiv.innerText = "Connecting...";
+
+    try {
+        const res = await fetch("/accounts/apple/connect", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + localStorage.getItem("token")
+            },
+            body: JSON.stringify({
+                email: email,
+                app_password: password,
+                caldav_url: "https://caldav.icloud.com"
+            })
+        });
+
+        let data;
+        try {
+            data = await res.json();
+        } catch {
+            data = { message: "Server error" };
+        }
+
+        if (!res.ok || data.success === false) {
+            statusDiv.innerText = "❌ " + (data.message || "Failed");
+        } else {
+            statusDiv.innerText = "✅ Apple connected!";
+            loadAccounts();
+        }
+
+    } catch (err) {
+        console.error(err);
+        statusDiv.innerText = "❌ Request failed";
+    }
+}
+
+// ============================
+// INIT
+// ============================
 const params = new URLSearchParams(window.location.search);
 
-// ✅ SAVE NEW TOKEN IF PROVIDED
 if (params.get("token")) {
     localStorage.setItem("token", params.get("token"));
 }
 
-if (params.get("connected")) {
-    console.log("✅ OAuth redirect detected → refreshing accounts");
-
-    setTimeout(() => {
-        loadAccounts();
-    }, 300);
-
-    window.history.replaceState({}, document.title, "/accounts/ui");
-} else {
-    loadAccounts();
-}
+loadAccounts();
 
 </script>
 

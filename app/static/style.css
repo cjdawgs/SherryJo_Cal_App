@@ -13,7 +13,27 @@ body {
 /* =====================================================
 ✅ HEADER (CENTERED + CLEAN)
 ===================================================== */
+.header-container {
+  padding: 10px 20px;
+  margin-bottom: 10px;
+}
 
+.header-top {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.provider-buttons {
+  margin: 6px 0;
+}
+
+.account-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin: 6px 0;
+}
 
 /* ✅ FORCE HEADER CONTENT CENTERING */
 .topbar {
@@ -22,9 +42,11 @@ body {
   width: 100%;
 }
 
-
 .fc-daygrid-event {
-  white-space: normal !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
 }
 
 .fc-event-title {
@@ -36,6 +58,7 @@ body {
 .fc-event {
   border-left: 4px solid rgba(0,0,0,0.2);
 }
+
 
 
 /* ✅ inner container */
@@ -94,18 +117,20 @@ body {
   margin-top: 8px;
 }
 
+.action-buttons {
+  margin-top: 8px;
+}
+
 /* =====================================================
 ✅ CONNECTED ACCOUNTS DISPLAY (POLISHED CHIP STYLE)
 ===================================================== */
-
 .accounts {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-
-  gap: 8px;
-  margin-top: 6px;
+  gap: 6px;
+  margin: 6px 0;
 }
 
 /* ✅ hidden when no accounts */
@@ -116,30 +141,39 @@ body {
 /* =====================================================
 ✅ ACCOUNT CHIP
 ===================================================== */
-
 .accounts div {
   display: flex;
   align-items: center;
   gap: 6px;
 
-  padding: 3px 9px;
+  padding: 3px 8px;            /* ✅ tighter */
   border-radius: 999px;
 
   background: #f1f3f4;
-
   border: 1px solid rgba(0, 0, 0, 0.08);
 
+  font-size: 12px;             /* ✅ slightly smaller = cleaner */
   line-height: 1;
-  font-size: 13px;
 
-  transition: transform 0.1s ease, background 0.1s ease;
+  max-width: 160px;            /* ✅ prevents overflow */
+
+  white-space: nowrap;         /* ✅ single line */
+  overflow: hidden;            /* ✅ hide long text */
+  text-overflow: ellipsis;     /* ✅ "..." */
+
+  transition: all 0.15s ease;
 }
 
-/* ✅ HOVER (interactive feel) */
 .accounts div:hover {
-  transform: scale(1.05);
   background: #e8eaed;
-  cursor: pointer;   /* ready for filtering later */
+  transform: scale(1.03);
+  cursor: pointer;
+}
+
+
+.accounts div.active {
+  background: #d2e3fc;
+  border-color: #1d4ed8;
 }
 
 /* =====================================================
@@ -166,15 +200,6 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* =====================================================
-✅ OPTIONAL: ACTIVE / SELECTED CHIP (READY FOR NEXT STEP)
-===================================================== */
-
-.accounts div.active {
-  background: #dbeafe;      /* light blue highlight */
-  border-color: #93c5fd;
 }
 
 /* =====================================================
