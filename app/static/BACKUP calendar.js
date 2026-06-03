@@ -59,7 +59,6 @@ let calendar = null;
 let editingEventId = null;
 let editingNoteId = null;
 let lastGoodEvents = [];
-let providerAccountCounts = {};
 
 // ✅ RANGE CONTROL (NEW)
 let currentRangeDays = 30;  // ✅ Default = Monthly
@@ -67,34 +66,123 @@ let currentRangeStart = null;
 let currentRangeEnd = null; 
 
 // ✅ Track selected day
-let selectedDate = null;
+let selectedDate = new Date();
 
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
 
 /**************************************************************
- * ✅ HELPERS
+ * ✅ INIT APP
  **************************************************************/
-//CREATE A SINGLE SOURCE FORMATTED STRING (FOR COMPARISON + KEYS)
-function toDayString(d) {
-  if (!d) return null;
+document.addEventListener("DOMContentLoaded", init);
+async function init() {
+  console.log("✅ calendar.js loaded");
 
-  const dt = new Date(d);
+  const calendarEl = document.getElementById("calendar");
+  if (!calendarEl) {
+    console.warn("Missing #calendar element");
+    return;
+  }
+  handleOAuthRedirect();
 
-  return dt.getFullYear() + "-" +
-    String(dt.getMonth() + 1).padStart(2, "0") + "-" +
-    String(dt.getDate()).padStart(2, "0");
+  /**************************************************************
+   * ✅ WAIT FOR TOKEN (CLEAN + CORRECT)
+   **************************************************************/
+  let attempts = 0;
+
+  while (!localStorage.getItem("token") && attempts < 10) {
+    console.log("⏳ Waiting for token...");
+    await new Promise(r => setTimeout(r, 200));
+    attempts++;
+  }
+
+  if (!localStorage.getItem("token")) {
+    console.warn("❌ Token never became available");
+    window.location.replace("/login");
+    return;
+  }
+
+  // ✅ Final validation
+  getTokenOrFail();
+  
+  await loadAccounts();
+
+  initCalendar(calendarEl);
+  bindUIEvents();
+
+  updateDayDetails(selectedDate);
+  updateWeekView();
+  highlightSelectedDay(selectedDate);
 }
 
-function fromDayString(dayStr) {
-  const [y, m, d] = dayStr.split('-');
-  return new Date(y, m - 1, d);
+/**************************************************************
+ * ✅ LOAD ACCOUNTS (SEPARATE FROM EVENTS)
+ **************************************************************/
+async function loadAccounts() {
+  try {
+    const res = await apiFetch("/accounts");
+
+    if (!res.ok) {
+      throw new Error("Accounts API failed");
+    }
+
+    const data = await res.json();
+
+    console.log("✅ ACCOUNTS API:", data);
+
+    // ✅ send to renderer
+    renderAccounts(data);
+
+    return data;  // ✅ REQUIRED (for await)
+
+  } catch (err) {
+    console.error("❌ Failed to load accounts:", err);
+    return [];   // ✅ prevents crash
+  }
 }
 
-// ✅ SAFE DATE PARSER (FULLY FIXED)
+/**************************************************************
+ * ✅ HANDLE OAuth RETURN (?connected=)
+ **************************************************************/
+function handleOAuthRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const connected = params.get("connected");
+
+  if (connected) {
+    console.log("✅ Connected:", connected);
+
+    syncNow();
+
+    // ✅ FORCE CALENDAR REFRESH AFTER AUTH
+    setTimeout(() => {
+      if (calendar) {
+        console.log("🔄 FORCING REFETCH AFTER LOGIN");
+        calendar.refetchEvents();
+      } else {
+        console.warn("⚠️ Calendar not ready yet for refetch");
+      }
+    }, 500);
+
+    // Clean URL
+    window.history.replaceState({}, document.title, "/calendar-ui");
+  }
+}
+
+
+// ==================================================
+// ✅ FIX: FORCE UTC / SAFE DATE PARSING (APPLE CRITICAL)
+// ==================================================
 function safeParseDate(dt) {
   if (!dt) return null;
 
+  // ✅ already ISO or timezone-aware
+  if (dt.includes("Z") || dt.includes("+")) {
+    return new Date(dt);
+  }
+
+  // ==================================================
+  // ✅ FIX: PRESERVE LOCAL TIME (DO NOT FORCE UTC)
+  // ==================================================
   const parsed = new Date(dt);
 
   if (isNaN(parsed.getTime())) {
@@ -102,50 +190,499 @@ function safeParseDate(dt) {
     return null;
   }
 
-  // ✅ HARD GUARD: prevent accidental string misuse later
-  if (typeof dt === "string" && !dt.includes("T")) {
-    console.warn("⚠️ Non-ISO date detected:", dt);
-  }
-
   return parsed;
 }
 
-//✅ HIGHLIGHT SELECTED DAY
-function highlightSelectedDay(dayStr) {
-  document.querySelectorAll(".fc-daygrid-day").forEach(el => {
-    el.style.backgroundColor = "";
-    el.style.transition = "background 0.2s ease";
+/**************************************************************
+ * ✅ INIT FULLCALENDAR
+ **************************************************************/
+function initCalendar(el) {
+    calendar = new FullCalendar.Calendar(el, {
+
+      initialView: "dayGridMonth",
+      timeZone: "UTC",
+      dayMaxEventRows: 6,
+      dayMaxEvents: false,
+
+      // ✅ ONLY ONE EVENTS BLOCK EXISTS
+      events: async (fetchInfo, successCallback, failureCallback) => {
+    
+        try {
+        console.log("🔄 Fetching events...");
+
+        // ==================================================
+        // ✅ STEP 1: FETCH FROM API
+        //  - USE FULLCALENDAR DATE RANGE (CRITICAL FIX)
+        // ==================================================
+        const start = fetchInfo.startStr;
+        const end = fetchInfo.endStr;
+
+        console.log("📅 FULLCAL RANGE:", start, "→", end);
+
+        const res = await apiFetch(
+          `/calendar/unified?start=${start}&end=${end}`
+        );
+
+
+        if (!res.ok) {
+          throw new Error("API failed: " + res.status);
+        }
+
+        const data = await res.json();
+
+        // ✅ CLEAN LOGGING
+        console.log(`✅ API returned (${Array.isArray(data) ? data.length : "object"}) items`);
+
+        // ==================================================
+        // ✅ STEP 2: NORMALIZE RESPONSE SHAPE
+        // ==================================================
+        // ✅ WHY:
+        // Backend returns array, not { events: [...] }
+
+        const rawEvents = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.events)
+          ? data.events
+          : [];
+
+        console.log(`📦 Raw events count: ${rawEvents.length}`);
+
+        // ==================================================
+        // ✅ STEP 3: MAP TO FULLCALENDAR FORMAT (FIXED)
+        // ==================================================
+        let mappedEvents = rawEvents
+          
+          .filter(ev => {
+            if (!ev.start) {
+              console.warn("⚠️ Missing start:", ev);
+              return false;
+            }
+            return true;
+          })
+
+          // ✅ MAP + NORMALIZE (CRITICAL FIXES CLEAN FINAL BLOCK)
+          .map(ev => {
+
+            // ==================================================
+            // ✅ FIX: SAFE DATE PARSING (CORRECT LOCATION)
+            // ==================================================
+            const rawStart = ev.start;
+            const rawEnd = ev.end;
+
+            let safeStart = safeParseDate(rawStart);
+
+            if (!safeStart || isNaN(safeStart.getTime())) {
+              console.warn("⚠️ Invalid start date skipped:", rawStart);
+              return null;
+            }
+
+            // ==================================================
+            // ✅ BULLETPROOF DATE VALIDATION (FIX)
+            // ==================================================
+            if (!safeStart || isNaN(safeStart.getTime())) {
+              console.warn("⚠️ Invalid start date skipped:", rawStart);
+              return null;
+            }
+
+            let safeEnd = safeParseDate(rawEnd);
+
+            // ✅ normalize provider
+            const source = (ev.source || "").toLowerCase();
+            const provider = source === "outlook" ? "microsoft" : source;
+
+            // ==================================================
+            // ✅ FIX: NORMALIZE ACCOUNT (MATCH UI EXACTLY)
+            // ==================================================
+            const account = (
+              ev.account_email ||   // ✅ primary (backend aligned)
+              ev.account ||         // ✅ fallback
+              ""
+            )
+            .toLowerCase()
+            .trim();
+
+            const account_key = `${provider}:${account}`;
+            
+            if (!account) {
+              console.warn("⚠️ Missing account on event:", ev);
+            }
+            if (!ev.external_id && !ev.id) {
+              console.warn("⚠️ NO EVENT ID:", ev);
+            }
+
+
+            // ==================================================
+            // ✅ DEBUG: VERIFY KEY MATCHING
+            // ==================================================
+            console.log("🧪 EVENT KEY:", account_key);
+
+            // ==================================================
+            // ✅ FIX: GUARANTEED UNIQUE ID (NO COLLISIONS)
+            // ==================================================
+            const safeId = [
+              provider,
+              account,
+              ev.external_id || ev.id || "noid",
+              rawStart
+            ].join("|");
+
+
+            // ✅ DEBUG (optional)
+            if (provider === "apple") {
+              console.log("🍎 Apple ID:", safeId);
+              console.log("🍎 PASSING APPLE EVENT is OK:", ev.title, safeStart);
+            }
+
+            // ==================================================
+            // ✅ FINAL RETURN (CLEAN OBJECT ONLY)
+            // ==================================================
+            return {
+              id: safeId,
+              title: ev.title || ev.summary || "Untitled",
+              start: safeStart,
+              end: safeEnd || null,
+
+
+              extendedProps: {
+                source: provider,
+                account: account,
+                account_key: account_key,
+                conflict: !!ev.conflict,
+                notes: ev.notes || []
+              }
+            };
+          })
+          .filter(Boolean);
+
+        console.log(`🧩 Mapped events: ${mappedEvents.length}`);
+
+        // ✅ DEBUG: RANGE FILTER TEMP DISABLED
+        console.log("🚧 Range filter disabled for debugging");
+
+        console.log(`🧩 Filtered events: ${mappedEvents.length}`) ;
+
+        // ==============================================================
+        // ✅ DEBUG: VERIFY UNIQUE IDS (CRITICAL ONLY ONE DECLARATION)
+        // ==============================================================
+        const uniqueIds = new Set(mappedEvents.map(e => e.id));
+
+        console.log("🧪 UNIQUE EVENT IDS:", uniqueIds.size);
+        console.log("🧪 TOTAL EVENTS:", mappedEvents.length);
+
+        const appleMapped = mappedEvents.filter(e => e.extendedProps.source === "apple").length;
+        console.log("🍎 Apple mapped:", appleMapped);
+        
+
+        // ==================================================
+        // ✅ STEP 4: APPLY ACCOUNT FILTERS
+        // ==================================================
+        
+        // ==================================================
+        // ✅ TEMP: HARD BYPASS FILTER (DEBUG MODE)
+        // ==================================================
+        const filteredEvents = mappedEvents;
+
+
+        console.log(`🎯 Filtered events: ${filteredEvents.length}`);
+        
+        const appleFiltered = filteredEvents.filter(e => e.extendedProps.source === "apple").length;
+        console.log("🍎 Apple filtered:", appleFiltered);
+
+
+        // ==================================================
+        // ✅ STEP 5: RETURN TO CALENDAR
+        // ==================================================
+        lastGoodEvents = filteredEvents;
+        console.log("🚨 FINAL EVENTS SENT TO CALENDAR:", filteredEvents.length);
+
+        const appleFinal = filteredEvents.filter(e => e.extendedProps.source === "apple").length;
+        console.log("🍎 Apple FINAL SENT:", appleFinal);
+
+        successCallback(filteredEvents);
+
+        setTimeout(() => {
+          const stored = calendar.getEvents();
+          console.log("📊 CALENDAR STORED EVENTS:", stored.length);
+
+          if (stored.length > 0) {
+            console.log("✅ SAMPLE STORED:", stored[0]);
+          } else {
+            console.warn("❌ FULLCALENDAR REJECTED ALL EVENTS");
+          }
+        }, 500);
+
+
+
+        } catch (err) {
+          console.error("❌ Event load failed:", err);
+
+          // ✅ FALLBACK TO LAST KNOWN GOOD DATA
+          if (lastGoodEvents.length > 0) {
+            console.warn("⚠️ Using cached events");
+            successCallback(lastGoodEvents);
+          } else {
+            failureCallback([]);
+          }
+        }
+      },
+
+    // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
+    eventsSet: () => {
+      console.log("✅ eventsSet fired");
+      updateWeekView();
+    },
+
+    eventDidMount: (info) => {
+      console.log("🧪 RENDERING EVENT:", info.event.title, info.event.start, info.event.extendedProps.source);
+
+      // ✅ ✅ APPLY NEW COLOR SYSTEM
+      applyEventColor(info.el, info.event);
+
+      // ✅ Keep your styling
+      info.el.style.border = "none";
+      info.el.style.borderRadius = "6px";
+      info.el.style.padding = "2px 4px";
+      info.el.style.fontWeight = "500";
+
+      // ✅ Conflict override (unchanged)
+      if (info.event.extendedProps.conflict) {
+        info.el.style.borderLeft = "4px solid red";
+      }
+
+      // ✅ Tooltip (unchanged)
+      info.el.title =
+        info.event.extendedProps.source + " | " +
+        (info.event.extendedProps.account || "");
+  },
+
+    /**************************************************
+     * CLICK EVENT
+     **************************************************/
+    // ✅ CLICK DAY → CREATE + UPDATE SIDEBAR
+    dateClick: (info) => {
+
+      // ✅ SAVE selected date (VERY IMPORTANT)
+      selectedDate = info.date;
+
+      // ✅ ONLY update UI (no modal)
+      updateDayDetails(info.date);
+      updateWeekView();
+
+      // ✅ store selected date for highlight
+      highlightSelectedDay(info.date);
+
+      // ✅ NEW: scroll week panel to this day
+      setTimeout(() => {
+        scrollWeekToDate(info.date);
+      }, 50); // slight delay ensures DOM is ready
+    },
+
+    /**************************************************
+     * ✅ DOUBLE CLICK HANDLER (SAFE)
+     **************************************************/
+    dayCellDidMount: function (info) {
+
+      let clickTimer = null;
+
+      info.el.addEventListener("click", () => {
+        if (clickTimer) {
+          // ✅ DOUBLE CLICK detected
+          clearTimeout(clickTimer);
+          clickTimer = null;
+
+          openCreateModal(info.date); // ONLY here!
+
+        } else {
+          // ✅ WAIT to see if second click happens
+          clickTimer = setTimeout(() => {
+            clickTimer = null;
+          }, 250);
+        }
+      });
+
+    },
+
+
+    // ✅ CLICK EVENT → EDIT + UPDATE SIDEBAR
+    eventClick: (info) => {
+      openCreateModal(null, info.event);
+
+      // ✅ use event date to update sidebar
+      if (info.event.start) {
+        // ✅ SAVE selected date here too
+        selectedDate = info.event.start;
+
+        updateDayDetails(info.event.start);
+
+        // ✅ keep sidebar + scroll aligned
+        setTimeout(() => {
+          scrollWeekToDate(info.event.start);
+        }, 50);
+      }
+      updateWeekView();
+    },
+
+
+    /**************************************************
+     * DRAG → UPDATE BACKEND
+     **************************************************/
+    eventDrop: async (info) => {
+      try {
+        await apiFetch(`/calendar/event/${info.event.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            start_time: info.event.start.toISOString(),
+            end_time: info.event.end?.toISOString()
+          })
+        });
+      } catch (err) {
+        console.error("❌ Drag update failed:", err);
+      }
+    },
+
+    /**************************************************
+     * NOTES UI
+     **************************************************/
+    /*eventContent: (arg) => {
+
+      const notes = arg.event.extendedProps.notes || [];
+      const source = arg.event.extendedProps.source;
+
+      const wrap = document.createElement("div");
+
+      // ✅ ROW CONTAINER (icon + text inline)
+      const row = document.createElement("div");
+      row.style.display = "flex";
+      row.style.alignItems = "center";
+      row.style.gap = "4px";
+
+      // ==================================================
+      // ✅ ICON (CENTRALIZED — USE SINGLE SOURCE)
+      // ==================================================
+      const icon = createSourceIcon(source);
+
+      // ✅ TITLE (clean + ellipsis)
+      const title = document.createElement("div");
+      title.textContent = arg.event.title;
+      title.style.fontSize = "12px";
+      title.style.whiteSpace = "nowrap";
+      title.style.overflow = "hidden";
+      title.style.textOverflow = "ellipsis";
+      title.style.fontWeight = "500";
+
+      // ✅ BUILD ROW
+      row.appendChild(icon);
+      row.appendChild(title);
+      wrap.appendChild(row);
+
+      // ✅ NOTES (unchanged)
+      notes.forEach(note => {
+        const noteIcon = document.createElement("span");
+        noteIcon.textContent = "📝";
+        noteIcon.title = stripHtml(note.content);
+
+        noteIcon.onclick = (e) => {
+          e.stopPropagation();
+          editNote(arg.event.id, note.id);
+        };
+
+        wrap.appendChild(noteIcon);
+      });
+
+      return { domNodes: [wrap] };
+    }  */
+
   });
 
-  const el = document.querySelector(`[data-date="${dayStr}"]`);
+  calendar.render();
+}
 
-  if (el) {
-    el.style.backgroundColor = "#e8f0fe";
-    el.style.borderRadius = "4px";
+/* =====================================================
+✅ COLOR ENGINE (CENTRALIZED + SCALABLE)
+===================================================== */
+
+// ✅ Base colors per provider
+const BASE_COLORS = {
+  google: "#1f9d55",
+  microsoft: "#1d4ed8",
+  apple: "#ef4444",
+  other: "#eab308"
+};
+
+// ✅ Store final color per account
+let accountColorMap = {};
+
+// ✅ Lighten function
+function lightenColor(hex, percent) {
+  const num = parseInt(hex.replace("#", ""), 16);
+
+  let r = (num >> 16) & 0xff;
+  let g = (num >> 8) & 0xff;
+  let b = num & 0xff;
+
+  r = Math.min(255, Math.floor(r + (255 - r) * percent));
+  g = Math.min(255, Math.floor(g + (255 - g) * percent));
+  b = Math.min(255, Math.floor(b + (255 - b) * percent));
+
+  return "#" + [r, g, b]
+    .map(x => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+// ✅ NON-LINEAR contrast (fixes your “greens too close” issue)
+function getAccountColor(provider, index) {
+  const base = BASE_COLORS[provider] || BASE_COLORS.other;
+
+  // ✅ THIS IS THE SECRET SAUCE
+  // First step has a minimum jump → avoids subtle differences
+  const percent = Math.min(0.20 + (index * 0.32), 0.75);
+
+  return lightenColor(base, percent);
+}
+
+function openCustomRange() {
+
+  const days = prompt("Enter custom range (days):");
+
+  if (!days || isNaN(days)) return;
+
+  currentRangeDays = parseInt(days);
+
+  console.log("📅 Custom range:", currentRangeDays);
+
+  calendar.refetchEvents();
+}
+
+
+function applyEventColor(el, event) {
+  const key = event.extendedProps?.account_key;
+  let color = accountColorMap[key];
+
+  if (!color) {
+    const source = event.extendedProps.source;
+
+    if (source === "apple") color = "#ef4444";
+    else if (source === "google") color = "#34a853";
+    else if (source === "microsoft") color = "#2563eb";
+    else color = "#999";
   }
+
+  el.style.backgroundColor = color;
+
+  const num = parseInt(color.replace("#", ""), 16);
+  const r = (num >> 16) & 0xff;
+  const g = (num >> 8) & 0xff;
+  const b = num & 0xff;
+
+  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+  el.style.color = brightness > 155 ? "#000" : "#fff";
+
+  el.style.borderLeft = "4px solid rgba(0,0,0,0.25)";
 }
 
-// ✅ AUTO SCROLL WEEK VIEW TO SELECTED DAY
-function scrollWeekToDate(dayStr) {
-  const container = document.getElementById("weekView");
-  const el = container?.querySelector(`[data-day="${dayStr}"]`);
 
-  if (el) {
-    container.scrollTo({
-      top: el.offsetTop,
-      behavior: "smooth"
-    });
-  }
-}
-
-// ✅ STRIP HTML FROM NOTES FOR TOOLTIP (SAFETY)
-function stripHtml(html) {
-  const div = document.createElement("div");
-  div.innerHTML = html;
-  return div.textContent || "";
-}
-
-/*
+/**************************************************************
  * ✅ REUSABLE ICON BUILDER (COMPONENT STANDARD)
  * ------------------------------------------------------------
  * PURPOSE:
@@ -159,7 +696,7 @@ function stripHtml(html) {
  * ✅ safe fallback
  **************************************************************/
 function createSourceIcon(source) {
-  source = normalizeProvider(source);  // ✅ ADD THIS LINE
+
   // ==================================================
   // ✅ BASE CONTAINER (UNCHANGED — DO NOT MODIFY)
   // ==================================================
@@ -168,10 +705,8 @@ function createSourceIcon(source) {
   icon.style.display = "flex";
   icon.style.alignItems = "center";
   icon.style.justifyContent = "center";
-  
-  icon.style.width = "16px";
-  icon.style.height = "16px";
-
+  icon.style.width = "12px";
+  icon.style.height = "12px";
   icon.style.flexShrink = "0";
   icon.style.marginRight = "4px";
 
@@ -234,510 +769,10 @@ function createSourceIcon(source) {
   return icon;
 }
 
-/**************************************************************
- * ✅ INIT APP
- **************************************************************/
-document.addEventListener("DOMContentLoaded", init);
-async function init() {
-  console.log("✅ calendar.js loaded");
-
-  const calendarEl = document.getElementById("calendar");
-  if (!calendarEl) {
-    console.warn("Missing #calendar element");
-    return;
-  }
-  handleOAuthRedirect();
-
-  /**************************************************************
-   * ✅ WAIT FOR TOKEN (CLEAN + CORRECT)
-   **************************************************************/
-  let attempts = 0;
-
-  while (!localStorage.getItem("token") && attempts < 10) {
-    console.log("⏳ Waiting for token...");
-    await new Promise(r => setTimeout(r, 200));
-    attempts++;
-  }
-
-  if (!localStorage.getItem("token")) {
-    console.warn("❌ Token never became available");
-    window.location.replace("/login");
-    return;
-  }
-
-  // ✅ Final validation
-  getTokenOrFail();
-
-  await loadAccounts();
-
-  initCalendar(calendarEl);
-
-  // ✅ CRITICAL FIX — ALIGN SELECTED DATE
-  selectedDate = toDayString(calendar.getDate());
-
-  bindUIEvents();
-
-  updateDayDetails();
-  updateWeekView();
-  highlightSelectedDay(selectedDate);
-}
-
-/**************************************************************
- * ✅ LOAD ACCOUNTS (SEPARATE FROM EVENTS)
- **************************************************************/
-async function loadAccounts() {
-  try {
-    const res = await apiFetch("/accounts");
-
-    if (!res.ok) {
-      console.error("API error:", res.status, await res.text());
-      throw new Error("API failed: " + res.status);
-    }
-
-    const data = await res.json();
-
-    console.log("✅ ACCOUNTS API:", data);
-
-    // ✅ send to renderer
-    renderAccounts(data);
-
-    return data;  // ✅ REQUIRED (for await)
-
-  } catch (err) {
-    console.error("❌ Failed to load accounts:", err);
-    return [];   // ✅ prevents crash
-  }
-}
-
-/**************************************************************
- * ✅ HANDLE OAuth RETURN (?connected=)
- **************************************************************/
-function handleOAuthRedirect() {
-  const params = new URLSearchParams(window.location.search);
-  const connected = params.get("connected");
-
-  if (connected) {
-    console.log("✅ Connected:", connected);
-
-    syncNow();
-
-    // ✅ FORCE CALENDAR REFRESH AFTER AUTH
-    setTimeout(() => {
-      if (calendar) {
-        console.log("🔄 FORCING REFETCH AFTER LOGIN");
-        calendar.refetchEvents();
-      } else {
-        console.warn("⚠️ Calendar not ready yet for refetch");
-      }
-    }, 500);
-
-    // Clean URL
-    window.history.replaceState({}, document.title, "/calendar-ui");
-  }
-}
-
-/************************************************************
- * ✅ INIT FULLCALENDAR
- **************************************************************/
-function initCalendar(el) {
-    calendar = new FullCalendar.Calendar(el, {
-
-      initialView: "dayGridMonth",
-      timeZone: "local",
-
-      // ✅ LOCK WEEK START (CRITICAL FOR CONSISTENCY)
-      firstDay: 0,  // ✅ Sunday = start of week
-
-      dayMaxEventRows: 6,
-      dayMaxEvents: false,
-
-// ✅ ONLY ONE EVENTS BLOCK EXISTS
-events: async (fetchInfo, successCallback, failureCallback) => {
-
-  let filteredEvents = []; // ✅ FIX: declare OUTSIDE try
-
-  try {
-    console.log("🔄 Fetching events...");
-
-    // ✅ STEP 1: FETCH
-    const start = fetchInfo.startStr;
-    const end = fetchInfo.endStr;
-
-    console.log("📅 FULLCAL RANGE:", start, "→", end);
-
-    const res = await apiFetch(
-      `/calendar/unified?start=${start}&end=${end}`
-    );
-
-    if (!res.ok) {
-      throw new Error("API failed: " + res.status);
-    }
-
-    const data = await res.json();
-
-    // ✅ STEP 2: NORMALIZE RESPONSE
-    const rawEvents = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.events)
-      ? data.events
-      : [];
-
-    console.log(`📦 Raw events count: ${rawEvents.length}`);
-
-    // ✅ STEP 3: MAP
-    let mappedEvents = rawEvents
-      .filter(ev => {
-        if (!ev.start) {
-          console.warn("⚠️ Missing start:", ev);
-          return false;
-        }
-        return true;
-      })
-
-      .map(ev => {
-
-        const rawStart = ev.start;
-        const rawEnd = ev.end;
-
-        // ✅ SINGLE SOURCE PARSING (NO HACKS)
-        const safeStart = safeParseDate(rawStart);
-        if (!safeStart) return null;   // prevent bad events
-        const safeEnd = safeParseDate(rawEnd);
-        const provider = normalizeProvider(ev.source);
-
-        const account = (
-          ev.account_email ||
-          ev.account ||
-          ""
-        ).toLowerCase().trim();
-
-        const account_key = `${provider}:${account}`;
-
-        const safeId = [
-          provider,
-          account,
-          ev.external_id || ev.id || "noid",
-          rawStart
-        ].join("|");
-
-        return {
-          id: safeId,
-          title: ev.title || ev.summary || "Untitled",
-          start: safeStart,
-          end: safeEnd || null,
-          
-          backgroundColor: getBaseProviderColor(provider),
-          borderColor: getBaseProviderColor(provider),
-
-          textColor: "#ffffff",
-
-          classNames: ["source-" + provider],
-
-          extendedProps: {
-            source: provider,
-            account: account,
-            account_key: account_key,
-            conflict: !!ev.conflict,
-            notes: ev.notes || []
-          }
-        };
-      })
-      .filter(Boolean);
-
-    console.log(`🧩 Mapped events: ${mappedEvents.length}`);
-
-    
-    // ✅ STEP 4: APPLY ACCOUNT FILTER
-    filteredEvents = mappedEvents;
-
-    if (activeAccountFilters.size > 0) {
-      filteredEvents = mappedEvents.filter(ev => {
-        const key = ev.extendedProps.account_key;
-        return activeAccountFilters.has(key);
-      });
-    }
-
-
-    console.log(`🎯 Final events: ${filteredEvents.length}`);
-
-    // ✅ STEP 5: RETURN
-    lastGoodEvents = filteredEvents;
-    successCallback(filteredEvents);
-
-  } catch (err) {
-    console.error("❌ Event load failed:", err);
-
-    if (lastGoodEvents.length > 0) {
-      console.warn("⚠️ Using cached events");
-      successCallback(lastGoodEvents);
-    } else {
-      failureCallback(err);
-    }
-  }
-},
-
-    // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
-    eventsSet: () => {
-      console.log("✅ eventsSet fired");
-
-      // ✅ ONLY initialize once — NEVER override user selection
-      if (!selectedDate) {
-        selectedDate = toDayString(calendar.getDate());
-      }
-
-      updateWeekView();
-      updateDayDetails();
-      highlightSelectedDay(selectedDate);
-    },
-
-
-
-    eventDidMount: (info) => {
-      const provider = normalizeProvider(info.event.extendedProps.source);
-      const baseColor = getBaseProviderColor(provider);
-
-      info.el.style.backgroundColor = baseColor;
-      info.el.style.borderColor = baseColor;
-      info.el.style.color = "#fff";
-
-      // ✅ KEEP YOUR STYLING
-      info.el.style.border = "none";
-      info.el.style.borderRadius = "6px";
-      info.el.style.padding = "2px 4px";
-
-    },
-
-    /**************************************************
-     * CLICK EVENT
-     **************************************************/
-    // ✅ CLICK DAY → CREATE + UPDATE SIDEBAR
-    dateClick: (info) => {
-
-      // ✅ SAVE selected date (VERY IMPORTANT)
-      selectedDate = toDayString(info.date);
-
-      // ✅ ONLY update UI (no modal)
-      updateDayDetails();
-      
-      // ✅ store selected date for highlight
-      highlightSelectedDay(selectedDate);
-    },
-
-    /**************************************************
-     * ✅ DOUBLE CLICK HANDLER (SAFE)
-     **************************************************/
-    dayCellDidMount: function (info) {
-
-      let clickTimer = null;
-
-      info.el.addEventListener("click", () => {
-        if (clickTimer) {
-          // ✅ DOUBLE CLICK detected
-          clearTimeout(clickTimer);
-          clickTimer = null;
-
-          openCreateModal(info.date); // ONLY here!
-
-        } else {
-          // ✅ WAIT to see if second click happens
-          clickTimer = setTimeout(() => {
-            clickTimer = null;
-          }, 250);
-        }
-      });
-
-    },
-
-
-    // ✅ CLICK EVENT → EDIT + UPDATE SIDEBAR
-    eventClick: (info) => {
-      openCreateModal(null, info.event);
-
-      // ✅ use event date to update sidebar
-      if (info.event.start) {
-        selectedDate = toDayString(info.event.start);
-
-        updateDayDetails();
-        highlightSelectedDay(selectedDate);
-
-        setTimeout(() => {
-          scrollWeekToDate(selectedDate);
-        }, 50);
-      }
-   },
-
-    /**************************************************
-     * DRAG → UPDATE BACKEND
-     **************************************************/
-    eventDrop: async (info) => {
-      try {
-        await apiFetch(`/calendar/event/${info.event.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            start_time: info.event.start.toISOString(),
-            end_time: info.event.end?.toISOString()
-          })
-        });
-      } catch (err) {
-        console.error("❌ Drag update failed:", err);
-      }
-    },
-
-    /**************************************************
-     * NOTES UI
-     **************************************************/
-    eventContent: function(arg) {
-
-      const source = arg.event.extendedProps?.source;
-
-      const container = document.createElement("div");
-      container.style.display = "flex";
-      container.style.alignItems = "center";
-      container.style.gap = "4px";
-
-      // ✅ ICON
-      const icon = createSourceIcon(source);
-
-      // ✅ ACCOUNT + PROVIDER
-      const account = arg.event.extendedProps.account || "";
-      const provider = normalizeProvider(arg.event.extendedProps?.source);
-      const accountShort = account.split("@")[0] || "X";
-
-      // ✅ TITLE
-      const title = document.createElement("div");
-      title.textContent = arg.event.title;
-      title.style.fontSize = "12px";
-      title.style.fontWeight = "500";
-      title.style.whiteSpace = "nowrap";
-      title.style.overflow = "hidden";
-      title.style.textOverflow = "ellipsis";
-
-      // ✅ BUILD ORDER (FIXED)
-      container.appendChild(icon);
-
-      // ✅ ONLY show badge when needed
-      if ((providerAccountCounts[provider] || 0) > 1) {
-        const badge = document.createElement("span");
-        badge.textContent = accountShort.slice(0, 2).toUpperCase();
-
-        badge.style.fontSize = "10px";
-        badge.style.fontWeight = "bold";
-        badge.style.background = "rgba(255,255,255,0.25)";
-        badge.style.color = "#fff";
-        badge.style.padding = "1px 4px";
-        badge.style.borderRadius = "4px";
-        badge.style.flexShrink = "0";
-
-        container.appendChild(badge);
-      }
-
-      container.appendChild(title);
-
-      return { domNodes: [container] };
-    }
-
-  });
-
-  calendar.render();
-}
-
-/* =====================================================
-✅ COLOR ENGINE (CENTRALIZED + SCALABLE)
-===================================================== */
-
-// ✅ Base colors per provider
-const BASE_COLORS = {
-  google: "#34a853",      // ✅ FIXED (matches event chip)
-  microsoft: "#2563eb",   // ✅ matches event
-  apple: "#ef4444",
-  other: "#999"
-};
-
-// ✅ NORMALIZE PROVIDER (SINGLE SOURCE OF TRUTH)
-function normalizeProvider(provider) {
-  const p = (provider || "").toLowerCase();
-  return p === "outlook" ? "microsoft" : p;
-}
-
-// ✅ BASE PROVIDER COLOR (SINGLE SOURCE OF TRUTH)
-function getBaseProviderColor(provider) {
-  const normalized = normalizeProvider(provider);
-  return BASE_COLORS[normalized] || BASE_COLORS.other;
-}
-
-
-
-// ✅ Store final color per account
-let accountColorMap = {};
-
-// ✅ Lighten function
-function lightenColor(hex, percent) {
-  const num = parseInt(hex.replace("#", ""), 16);
-
-  let r = (num >> 16) & 0xff;
-  let g = (num >> 8) & 0xff;
-  let b = num & 0xff;
-
-  r = Math.min(255, Math.floor(r + (255 - r) * percent));
-  g = Math.min(255, Math.floor(g + (255 - g) * percent));
-  b = Math.min(255, Math.floor(b + (255 - b) * percent));
-
-  return "#" + [r, g, b]
-    .map(x => x.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// ✅ NON-LINEAR contrast (fixes your “greens too close” issue)
-function getAccountColor(provider, index) {
-  const base = getBaseProviderColor(provider);
-  // ✅ THIS IS THE SECRET SAUCE
-  // First step has a minimum jump → avoids subtle differences
-  const percent = Math.min(0.35 + (index * 0.40), 0.85);
-
-  return lightenColor(base, percent);
-}
-
-function openCustomRange() {
-
-  const days = prompt("Enter custom range (days):");
-
-  if (!days || isNaN(days)) return;
-
-  currentRangeDays = parseInt(days);
-
-  console.log("📅 Custom range:", currentRangeDays);
-
-  calendar.refetchEvents();
-}
-
-
-function applyEventColor(el, event) {
-  const key = event.extendedProps?.account_key;
-  let color = accountColorMap[key];
-
-  if (!color) {
-    color = getBaseProviderColor(event.extendedProps.source);
-  }
-
-  el.style.backgroundColor = color;
-
-  const num = parseInt(color.replace("#", ""), 16);
-  const r = (num >> 16) & 0xff;
-  const g = (num >> 8) & 0xff;
-  const b = num & 0xff;
-
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-
-  el.style.color = brightness > 155 ? "#000" : "#fff";
-
-  el.style.borderLeft = "4px solid rgba(0,0,0,0.25)";
-}
-
 /* =====================================================
 ✅ ACCOUNT LIST + COLOR MAP BUILDER (WITH HIDE SUPPORT)
 ===================================================== */
 function renderAccounts(accounts) {
-  providerAccountCounts = {};
   const el = document.getElementById("accounts");
   if (!el) return;
 
@@ -752,29 +787,19 @@ function renderAccounts(accounts) {
   const providerCounts = {};
 
   el.innerHTML = "";
-  
-  const normalizedAccounts = accounts.map(acc => {
-    const provider = normalizeProvider(acc.provider || "other");
 
+  accounts.forEach(acc => {
+
+    const providerRaw = (acc.provider || "other").toLowerCase();
+    const provider = providerRaw === "outlook" ? "microsoft" : providerRaw;
+
+    
+    // ==================================================
+    // ✅ FIX: MATCH EVENT KEY EXACTLY
+    // ==================================================
     const email = (acc.account_email || acc.email || "")
       .toLowerCase()
       .trim();
-
-    return { provider, email };
-  });
-
-  // ✅ PRE-CALCULATE COUNTS FIRST
-  normalizedAccounts.forEach(({ provider }) => {
-    if (!providerAccountCounts[provider]) {
-      providerAccountCounts[provider] = 0;
-    }
-    providerAccountCounts[provider]++;
-  });
-
-  normalizedAccounts.forEach(({ provider, email }) => {
-    if (!providerAccountCounts[provider]) {
-      providerAccountCounts[provider] = 0;
-    }
 
     if (!email) return;
 
@@ -786,113 +811,58 @@ function renderAccounts(accounts) {
     const color = getAccountColor(provider, index);
 
     const key = `${provider}:${email}`;
-  
+    
+    // ==================================================
+    // ✅ DEBUG: ACCOUNT MAP KEYS
+    // ==================================================
+    console.log("🧪 ACCOUNT KEY:", key);
+
     accountColorMap[key] = color;
 
     // ✅ CREATE CHIP
     const row = document.createElement("div");
-    row.classList.add("chip");   // ✅ ADD ONLY HERE
     row.dataset.key = key;
-    row.title = `${email} • Click to filter \n Ctrl+Click for multi-select`;
+    row.title = email;
 
-    // LABEL for accounts
-    const container = document.createElement("div");
-    container.style.display = "flex";
-    container.style.alignItems = "center";
-    container.style.gap = "4px";
+    // DOT
+    const dot = document.createElement("span");
+    dot.style.backgroundColor = color;
+    row.appendChild(dot);
 
-    // ✅ ICON
-    const icon = createSourceIcon(provider);
-    container.appendChild(icon);
+    // LABEL
+    const shortName = email.split("@")[0];
 
-    // ✅ BADGE (same as event)
-    if ((providerAccountCounts[provider] || 0) > 1) {
-      const prefix = email.split("@")[0].slice(0, 2).toUpperCase() || "X";
+    let suffix = "";
+    if (provider === "google") suffix = "(G)";
+    if (provider === "microsoft") suffix = "(MS)";
+    if (provider === "apple") suffix = "(A)";
 
-      const badge = document.createElement("span");
-      badge.textContent = prefix;
+    console.log("🎯 Account key:", key);
 
-      const baseColor = getBaseProviderColor(provider);
+    const label = document.createElement("span");
+    label.textContent = `${shortName} ${suffix}`;
+    row.appendChild(label);
 
-      badge.style.background = baseColor;
-      badge.style.color = "#fff";
-      badge.style.border = "none";
-      badge.style.fontSize = "10px";
-      badge.style.fontWeight = "bold";
-      badge.style.padding = "1px 4px";
-      badge.style.borderRadius = "4px";
-      badge.style.flexShrink = "0";
-    
-      container.appendChild(badge);
-    }
-
-    // ✅ TITLE
-    const title = document.createElement("span");
-    title.textContent = email.split("@")[0];
-
-    container.appendChild(title);
-
-    // ✅ FINAL APPEND
-    row.appendChild(container);
-
-    // ✅ MATCH EVENT-STYLE CHIP (COLOR + STRUCTURE)
-    // ✅ LIGHT TINT BACKGROUND (matches your screenshot)
-    // ✅ MATCH EVENT CHIP TINT + STRONGER BORDER
-    row.style.backgroundColor = `${color}26`;   // stronger tint (matches event feel)
-    row.style.border = `2.5px solid ${color}`;  // thicker border (as you want)
-    row.style.color = color;
-
-    // ✅ STRUCTURE
-    row.style.display = "inline-flex";
-    row.style.alignItems = "center";
-    row.style.gap = "4px";
-
-    // ✅ CHIP SHAPE
-    row.style.borderRadius = "999px";
-    row.style.padding = "4px 8px";
-
-    row.style.outline = "none";
-    row.style.boxShadow = "none"; 
-
-    // CLICK FILTER Exclusive First Click + Toggle with Ctrl
-    row.onclick = (e) => {
-      const isMultiSelect = e.ctrlKey || e.metaKey;
-      if (!isMultiSelect) {
-        // ✅ SINGLE CLICK = RESET TO ONLY THIS
-        activeAccountFilters.clear();
-        activeAccountFilters.add(key);
-
+    // CLICK FILTER
+    row.onclick = () => {
+      if (activeAccountFilters.has(key)) {
+        activeAccountFilters.delete(key);
       } else {
-        // ✅ CTRL CLICK = TOGGLE
-        if (activeAccountFilters.has(key)) {
-          if (activeAccountFilters.size > 1) {
-            activeAccountFilters.delete(key);
-          }
-        } else {
-          activeAccountFilters.add(key);
-        }
+        activeAccountFilters.add(key);
       }
 
-    updateChipSelectionUI();
-    calendar.refetchEvents();
-  };
-
+      updateChipSelectionUI();
+      calendar.refetchEvents();
+    };
 
     el.appendChild(row);
   });
 
-  // ✅ Default: all accounts active on first load
-  if (activeAccountFilters.size === 0) {
-    normalizedAccounts.forEach(({ provider, email }) => {
-      if (!email) return;
-      activeAccountFilters.add(`${provider}:${email}`);
-    });
-  }
   updateChipSelectionUI();
 }
 function updateChipSelectionUI() {
-  const accountContainer = document.getElementById("accounts");
-  accountContainer?.querySelectorAll(".chip").forEach(row => {
+
+  document.querySelectorAll("#accounts div").forEach(row => {
     const key = row.dataset.key;
 
     if (!key) return;
@@ -907,17 +877,21 @@ function updateChipSelectionUI() {
 
 
 //✅ ✅ DAY DETAILS FUNCTION
-function updateDayDetails() {
-  if (!selectedDate) return;  // ✅ guard
+function updateDayDetails(date) {
+
   const titleEl = document.getElementById("selectedDateTitle");
   const listEl = document.getElementById("dayEventsList");
 
   if (!titleEl || !listEl || !calendar) return;
-  
-  
-  // ✅ Softer, cleaner header
-  const safeDate = fromDayString(selectedDate);
 
+  
+  const selected = new Date(date);
+
+  // ✅ NORMALIZE
+  selected.setHours(0,0,0,0);
+
+
+  // ✅ Softer, cleaner header
   titleEl.innerHTML = `
     <div style="
       font-size:15px;
@@ -925,18 +899,24 @@ function updateDayDetails() {
       color:#333;
       margin-bottom:6px;
     ">
-      ${safeDate.toDateString()}
+      ${date.toDateString()}
     </div>
   `;
-  
+
   let events = calendar.getEvents().filter(ev => {
     if (!ev.start) return false;
 
-    const evDay = toDayString(ev.start);
-    return evDay === selectedDate;
+    const evDate = new Date(ev.start);
+
+    return (
+      evDate.getFullYear() === selected.getFullYear() &&
+      evDate.getMonth() === selected.getMonth() &&
+      evDate.getDate() === selected.getDate()
+    );
   });
 
-  events.sort((a, b) => a.start - b.start);
+
+  events.sort((a, b) => new Date(a.start) - new Date(b.start));
 
   listEl.innerHTML = "";
 
@@ -948,9 +928,9 @@ function updateDayDetails() {
   events.forEach(ev => {
 
     const li = document.createElement("li");
-    
+
     const time = ev.start
-      ? ev.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      ? new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : "";
 
     const row = document.createElement("div");
@@ -975,14 +955,14 @@ function updateDayDetails() {
     timeEl.style.fontSize = "11px";
 
     // ✅ TITLE
-    const titleSpan = document.createElement("span");
-    titleSpan.textContent = ev.title;
-    titleSpan.style.fontWeight = "500";
+    const titleEl = document.createElement("span");
+    titleEl.textContent = ev.title;
+    titleEl.style.fontWeight = "500";
 
     // ✅ BUILD
     row.appendChild(icon);
     row.appendChild(timeEl);
-    row.appendChild(titleSpan);
+    row.appendChild(titleEl);
 
     li.appendChild(row);
 
@@ -1023,28 +1003,31 @@ function updateWeekView() {
   const events = calendar.getEvents();
 
   // ✅ USE selected date OR fallback to today
-  // ✅ base date is now STRING → convert to Date
-  const base = fromDayString(selectedDate);
+  const baseDate = selectedDate || new Date();
 
-  // ✅ compute week range
-  const start = new Date(base);
-  start.setDate(base.getDate() - base.getDay());
+  // ✅ START OF WEEK
+  const start = new Date(baseDate);
+  start.setDate(baseDate.getDate() - baseDate.getDay());
+
+  // ✅ NORMALIZE START (CRITICAL)
+  start.setHours(0,0,0,0);
 
   const end = new Date(start);
   end.setDate(start.getDate() + 7);
 
-  // ✅ string boundaries
-  const startDay = toDayString(start);
-  const endDay = toDayString(end);
+  // ✅ NORMALIZE END (CRITICAL)
+  end.setHours(0,0,0,0);
 
-  // ✅ filter events
+
   let weekEvents = events.filter(ev => {
     if (!ev.start) return false;
 
-    const evDay = toDayString(ev.start);
+    const evDate = new Date(ev.start);
 
-    return evDay >= startDay && evDay < endDay;
+    // ✅ PURE DATE COMPARISON (correct)
+    return evDate >= start && evDate < end;
   });
+
 
   container.innerHTML = "";
 
@@ -1053,13 +1036,13 @@ function updateWeekView() {
     return;
   }
 
-  weekEvents.sort((a, b) => a.start - b.start);
+  weekEvents.sort((a, b) => new Date(a.start) - new Date(b.start));
 
   let currentDay = "";
 
   weekEvents.forEach(ev => {
 
-    const evDate = ev.start;
+    const evDate = new Date(ev.start);
     const dayLabel = evDate.toDateString();
 
     // ✅ Better section header (lighter + separated)
@@ -1069,11 +1052,7 @@ function updateWeekView() {
 
       const dayDiv = document.createElement("div");
       // ✅ tag for auto-scroll targeting
-      dayDiv.setAttribute(
-        "data-day",
-        toDayString(ev.start)
-      );
-
+      dayDiv.setAttribute("data-day", evDate.toISOString().split("T")[0]);
       dayDiv.innerHTML = `
         <div style="
           margin-top:12px;
@@ -1103,6 +1082,8 @@ function updateWeekView() {
     row.onmouseleave = () => {
       row.firstChild.style.background = "transparent";
     };
+
+    console.log("WEEK RANGE:", start, end);
 
     const inner = document.createElement("div");
 
@@ -1139,6 +1120,12 @@ function updateWeekView() {
         // ✅ CLICK → OPEN MODAL
         row.onclick = () => {
           openCreateModal(null, ev);
+
+          // ✅ scroll selected item into view
+          row.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest"
+          });
         };
 
     // ✅ HOVER TOOLTIP
@@ -1225,7 +1212,7 @@ function openCreateModal(date = null, event = null) {
   const now = new Date();
 
   // ✅ DEFAULT DATE = TODAY
-  const todayStr = toDayString(now);
+  const todayStr = now.toISOString().split("T")[0];
   document.getElementById("eventDate").value = todayStr;
 
   // ✅ NEXT FULL HOUR
@@ -1260,15 +1247,15 @@ function openCreateModal(date = null, event = null) {
     document.getElementById("eventTitle").value = event.title;
 
     if (event.start) {
-      const d = event.start;
+      const d = new Date(event.start);
       document.getElementById("eventDate").value =
-        toDayString(d);
+        d.toISOString().split("T")[0];
       document.getElementById("eventStart").value =
         d.toTimeString().slice(0, 5);
     }
 
     if (event.end) {
-      const d = event.end;
+      const d = new Date(event.end);
       document.getElementById("eventEnd").value =
         d.toTimeString().slice(0, 5);
     }
@@ -1277,7 +1264,7 @@ function openCreateModal(date = null, event = null) {
   // ✅ If clicking a day → PRE-FILL DATE
   if (date && !event) {
     document.getElementById("eventDate").value =
-      toDayString(date);
+      date.toISOString().split("T")[0];
   }
 
   // ✅ AUTO-FOCUS TITLE INPUT
@@ -1384,6 +1371,63 @@ function logout() {
   window.location.href = "/login";
 }
 
+
+/**************************************************************
+ * ✅ HELPERS
+ **************************************************************/
+
+//✅ HIGHLIGHT SELECTED DAY
+function highlightSelectedDay(date) {
+
+  document.querySelectorAll(".fc-daygrid-day").forEach(el => {
+    el.style.backgroundColor = "";
+    el.style.transition = "background 0.2s ease";
+  });
+
+  const dateStr = date.toISOString().split("T")[0];
+
+  const el = document.querySelector(`[data-date="${dateStr}"]`);
+
+  if (el) {
+    el.style.backgroundColor = "#e8f0fe";
+    el.style.borderRadius = "4px";
+  }
+}
+
+/**************************************************************
+ * ✅ AUTO SCROLL WEEK VIEW TO SELECTED DAY
+ **************************************************************/
+function scrollWeekToDate(date) {
+
+  const dateStr = date.toISOString().split("T")[0];
+
+  const el = document.querySelector(`[data-day="${dateStr}"]`);
+
+  if (el) {
+    el.scrollIntoView({
+      behavior: "smooth",
+      block: "start"
+    });
+  }
+}
+
+
+// ✅ CENTRALIZED COLOR LOGIC (DO NOT SCATTER THIS)
+function getEventClass(event) {
+  const source = event.extendedProps?.source;
+
+  if (source === "google") return "event-pill event-google";
+  if (source === "google_alt") return "event-pill event-google-alt";
+  if (source === "microsoft") return "event-pill event-microsoft";
+
+  return "event-pill"; // fallback
+}
+
+function stripHtml(html) {
+  const div = document.createElement("div");
+  div.innerHTML = html;
+  return div.textContent || "";
+}
 
 
 /**************************************************************
@@ -1517,7 +1561,10 @@ function bindUIEvents() {
         // ✅ THIS LINE TRIGGERS EVERYTHING
         calendar.refetchEvents();
       });
+
     });
+
+
 }
 
 /**************************************************************

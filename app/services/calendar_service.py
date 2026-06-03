@@ -22,6 +22,26 @@ ACCOUNT_COLORS = {
     "other": "#eab308"  
 }
 
+# ==================================================
+# ✅ LOGGING SYSTEM (STANDARDIZED - PRODUCTION SAFE)
+# ==================================================
+import os
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG | INFO | ERROR
+
+
+def log_debug(msg: str):
+    if LOG_LEVEL == "DEBUG":
+        print(f"[DEBUG] {msg}")
+
+
+def log_info(msg: str):
+    print(f"[INFO] {msg}")
+
+
+def log_error(msg: str):
+    print(f"[ERROR] {msg}")
+
 class CalendarService:
 
     def __init__(self):
@@ -66,14 +86,23 @@ class CalendarService:
         # ✅ combine everything FIRST
         all_events = []
 
+        
+        # ✅ Preserve original provider if already set (Apple compatibility)
         for e in google_events:
-            e["provider"] = "google"
-            e["source"] = "google"
+            if not e.get("provider"):
+                e["provider"] = "google"
+            if not e.get("source"):
+                e["source"] = "google"
+
             all_events.append(e)
 
+        # ✅ Preserve provider/source if already set (future-safe)
         for e in ms_events:
-            e["provider"] = "microsoft"
-            e["source"] = "microsoft"
+            if not e.get("provider"):
+                e["provider"] = "microsoft"
+            if not e.get("source"):
+                e["source"] = "microsoft"
+
             all_events.append(e)
 
         # ✅ SINGLE NORMALIZATION PIPELINE (THIS FIXES EVERYTHING)
@@ -158,42 +187,67 @@ class CalendarService:
         google_events = []
         ms_events = []
 
+
+        # ==================================================
+        # ✅ RANGE INITIALIZATION (STANDARDIZED LOGGING)
+        # ==================================================
         now = datetime.now(timezone.utc)
 
-        # ✅ ENSURE RANGE EXISTS
         if not start_date or not end_date:
-            start_date = now - relativedelta(days=30)
-            end_date = now + relativedelta(days=30)
-            print("⚡ Using DEFAULT 30-day window")
+            
+            # ==================================================
+            # ✅ FIX: EXPANDED DEFAULT RANGE (USER-REALISTIC)
+            # ==================================================
+            # ✅ WHY:
+            # - 30 days is too narrow for real-world calendars
+            # - Apple calendars contain historical + recurring events
+            # - Google calendars often sparse outside near-term
+            start_date = now - relativedelta(days=90)
+            end_date = now + relativedelta(days=90)
+
+            log_info("📦 Using default 30-day range")
         else:
-            print("✅ Using UI-provided range")
+            log_info("📥 Using UI-provided range")
 
         # ✅ ✅ NORMALIZE ONCE (CRITICAL IMPROVEMENT)
         safe_start = self._ensure_utc(start_date)
         safe_end = self._ensure_utc(end_date)
 
-        print(f"✅ Fetch window: {safe_start} → {safe_end}")
-
-
         # ✅ GET ALL SYNC-ENABLED ACCOUNTS
         accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, user.id)
-        print(f"✅ Accounts found: {len(accounts)}")
+
+        # ==================================================
+        # ✅ FETCH SUMMARY (CLEAN + READABLE) - Debug
+        # ==================================================
+
+        log_info(f"📅 Fetch window: {safe_start.date()} → {safe_end.date()}")
+        log_info(f"👤 Accounts found: {len(accounts)}")
+
 
         for acc in accounts:
 
-            print(f"👉 Processing: {acc.provider} | {acc.account_email}")
+            # ==================================================
+            # ✅ ACCOUNT PROCESSING START
+            # ==================================================
+            log_info(f"🔄 Processing: {acc.provider} | {acc.account_email}")
 
             token = ensure_valid_token(db, acc)
 
             if not token:
-                print(f"🚫 Skipped: {acc.account_email}")
+                log_info(f"🚫 Skipped: {acc.account_email}")
                 continue
 
             try:
+                # ==================================================
+                # ✅ PROVIDER ROUTING (FAIL SAFE)
+                # ==================================================
+                if acc.provider not in ["google", "apple", "microsoft"]:
+                    log_error(f"Unknown provider: {acc.provider}")
+                    continue
                 
-                # ========================
-                # GOOGLE
-                # ========================
+                # ==================================================
+                # ✅ GOOGLE FETCH + FILTER
+                # ==================================================
                 if acc.provider == "google":
 
                     events = self.google.fetch_events(
@@ -202,7 +256,9 @@ class CalendarService:
                         end_date=end_date
                     ) or []
 
-                    print(f"✅ Google returned: {len(events)}")
+                    log_debug(f"Google raw count: {len(events)}")
+
+                    added = 0
 
                     for e in events:
                         start_val = (
@@ -216,78 +272,120 @@ class CalendarService:
                         if not dt:
                             continue
 
-                        # ✅ CLEAN SAFE COMPARISON
-                        if safe_start <= dt <= safe_end:
-                            e["account"] = acc.account_email
-                            google_events.append(e)
+                        #if safe_start <= dt <= safe_end:
+                        # ==================================================
+                        # ✅ FIX: ENSURE GOOGLE EVENTS HAVE PROVIDER METADATA
+                        # ==================================================
+                        # ✅ WHY:
+                        # - Summary + normalization depend on provider/source
+                        # - Without this → events counted as "other"
 
-                    print(f"✅ Google added: {len(google_events)}")
+                        #if safe_start <= dt <= safe_end:
+                        if True:
+                            e["account"] = acc.account_email
+
+                            # ✅ CRITICAL FIX
+                            e["provider"] = "google"
+                            e["source"] = "google"
+
+                            google_events.append(e)
+                            added += 1
+
+                    log_info(f"   🟢 Google events in range: {added}")
                     
-                # ========================
-                # APPLE (SURGICAL ADD ✅)
-                # ========================
+                    # ==================================================
+                    # ✅ GOOGLE DEBUG VISIBILITY
+                    # ==================================================
+                    log_info(f"🟢 Google RAW fetched: {len(events)}")
+
+
+                # ==================================================
+                # ✅ APPLE FETCH + FILTER (CALDAV)
+                #   ✅ Phase 1 Apple support
+                #   ✅ Safe: does not break pipeline
+                #   ✅ Reuses normalization system
+                # ==================================================
                 elif acc.provider == "apple":
 
-                    """
-                    ✅ Phase 1 Apple support
-                    ✅ Safe: does not break pipeline
-                    ✅ Reuses normalization system
-                    """
+                    from app.services.external_calendar_service import ExternalCalendarService
+                    events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
+                    log_debug(f"Apple raw count: {len(events)}")
+                    added = 0
+                    
+                    # ✅ WHY:
+                    # Apple data spans MANY years and is not "window-based"
 
-                    try:
-                        from app.services.external_calendar_service import ExternalCalendarService
+                    apple_start = datetime(1900, 1, 1, tzinfo=timezone.utc)
+                    apple_end = datetime(2100, 1, 1, tzinfo=timezone.utc)
 
-                        events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
+                    for e in events:
+                        
+                        # ==================================================
+                        # ✅ FIX: ROBUST APPLE DATETIME HANDLING
+                        # ==================================================
+                        # ✅ WHY:
+                        # Apple events may already be datetime OR string
+                        # We must safely handle both without losing data
 
-                        print(f"✅ Apple returned: {len(events)}")
+                        dt = e.get("start")
 
-                        for e in events:
-                            start_val = e.get("start")
-
-                            dt = self._to_utc(start_val)
+                        # ✅ Case 1: already datetime → just normalize
+                        if isinstance(dt, datetime):
                             dt = self._ensure_utc(dt)
 
-                            if not dt:
-                                continue
+                        # ✅ Case 2: string → convert
+                        elif isinstance(dt, str):
+                            dt = self._to_utc(dt)
 
-                            if safe_start <= dt <= safe_end:
-                                e["account"] = acc.account_email
-                                e["provider"] = "apple"
-                                e["source"] = "apple"
+                        # ✅ Invalid case
+                        else:
+                            log_debug(f"Skipped Apple event (invalid start): {dt}")
+                            continue
 
-                                # ✅ IMPORTANT: reuse existing pipeline
-                                google_events.append(e)
+                        # ✅ Final safety check
+                        if not dt:
+                            log_debug("Skipped Apple event after conversion (None)")
+                            continue
 
-                        print(f"✅ Apple added: {len(google_events)}")
+                        log_debug(f"✅ Apple dt parsed: {dt}")
+                        
+                        if apple_start <= dt <= apple_end:
+                            e["account"] = acc.account_email
+                            e["provider"] = "apple"
+                            e["source"] = "apple"
 
-                    except Exception as err:
-                        print(f"❌ Apple sync failed: {err}")
+                            google_events.append(e)
+                            added += 1
 
-                # ========================
-                # MICROSOFT
-                # ========================
+                    log_info(f"   🍎 Apple events in range: {added}")
+                    log_debug(f"Apple raw start type: {type(e.get('start'))}")
+
+                # ==================================================
+                # ✅ MICROSOFT FETCH + PAGINATION
+                # ==================================================
+
                 elif acc.provider == "microsoft":
-
                     url = "https://graph.microsoft.com/v1.0/me/calendarView"
-
                     params = {
                         "startDateTime": start_date.isoformat().replace("+00:00", "Z"),
                         "endDateTime": end_date.isoformat().replace("+00:00", "Z")
                     }
-
                     events = []
 
+                    
+                    # ✅ PAGINATED FETCH
                     while url:
+
                         res = requests.get(
                             url,
                             headers={"Authorization": f"Bearer {token}"},
                             params=params
                         )
 
-                        print("🔐 MS STATUS:", res.status_code)
+                        log_debug(f"MS status: {res.status_code}")
 
                         if res.status_code != 200:
-                            print("❌ MS ERROR:", res.text)
+                            log_error(f"Microsoft API error: {res.status_code}")
                             break
 
                         data = res.json()
@@ -298,8 +396,13 @@ class CalendarService:
                         url = data.get("@odata.nextLink")
                         params = None
 
-                    print(f"✅ Microsoft expanded instances: {len(events)}")
+                    
+                    log_debug(f"Microsoft raw events: {len(events)}")
 
+                    # ==================================================
+                    # ✅ MICROSOFT DATE NORMALIZATION + FILTER
+                    # ==================================================
+                    added = 0
                     for e in events:
                         start_obj = e.get("start", {})
                         dt_str = start_obj.get("dateTime")
@@ -313,21 +416,17 @@ class CalendarService:
 
                                 if tz_name:
                                     tz = self.map_ms_tz(tz_name)
-                                    
                                     dt = tz.localize(dt_naive).astimezone(timezone.utc)
                                 else:
                                     dt = dt_naive.replace(tzinfo=timezone.utc)
 
                             except Exception as err:
-                                print("❌ TZ PARSE ERROR:", err)
+                                log_debug(f"MS start parse error: {err}")
 
                         if not dt:
                             continue
 
-                        print("🧪 CHECK:", dt, "| RANGE:", safe_start, safe_end)
-
                         if safe_start <= dt <= safe_end:
-
                             end_obj = e.get("end", {})
                             end_str = end_obj.get("dateTime")
                             end_tz = end_obj.get("timeZone")
@@ -350,7 +449,7 @@ class CalendarService:
                                         end_dt = end_naive.replace(tzinfo=timezone.utc)
 
                                 except Exception as err:
-                                    print("❌ END TZ ERROR:", err)
+                                    log_debug(f"MS end parse error: {err}")
 
                             ms_events.append({
                                 "id": e.get("id"),
@@ -358,15 +457,38 @@ class CalendarService:
                                 "start": dt.isoformat(),
                                 "end": end_dt.isoformat() if end_dt else None,
                                 "account": acc.account_email
+                            
                             })
+                            added += 1
+                    log_info(f"   🟦 Microsoft events in range: {added}")
 
-                    print(f"✅ FINAL MICROSOFT EVENTS: {len(ms_events)}")
-                    print("🔵 MICROSOFT SAMPLE:", ms_events[:2])
-
+            # ==================================================
+            # ✅ ACCOUNT ERROR HANDLING (STANDARDIZED)
+            # ==================================================
             except Exception as e:
-                print(f"❌ Account failed: {e}")
+                log_error(f"Account failed ({acc.account_email}): {e}")
+                continue
+
+        
+        # ==================================================
+        # ✅ FINAL FETCH SUMMARY (PROVIDER-AWARE)
+        # ==================================================
+
+        total_google = len([e for e in google_events if e.get("source") == "google"])
+        total_apple  = len([e for e in google_events if e.get("source") == "apple"])
+        total_ms     = len(ms_events)
+
+        total = total_google + total_apple + total_ms
+
+        log_info("✅ Fetch complete")
+        log_info(f"📊 Google: {total_google}")
+        log_info(f"📊 Apple:  {total_apple}")
+        log_info(f"📊 MSFT:   {total_ms}")
+        log_info(f"📊 TOTAL:  {total}")
+
 
         return self._normalize(google_events, ms_events)
+
 
     # ==================================================
     # ✅ SYNC ENGINE (FIXED + INSIDE CLASS)

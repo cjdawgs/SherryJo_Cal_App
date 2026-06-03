@@ -56,15 +56,37 @@ def to_iso(val):
 @router.get("/unified")
 def get_unified_calendar(
     range_days: int = Query(30),
+    start: str = Query(None),
+    end: str = Query(None),
+
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
 
     now = datetime.utcnow()
-    start_date = now - timedelta(days=range_days)
-    end_date = now + timedelta(days=range_days)
 
-    print(f"✅ RANGE WINDOW: ±{range_days} days")
+    # ==================================================
+    # ✅ NEW: SUPPORT FULLCALENDAR RANGE
+    # ==================================================
+    if start and end:
+        try:
+            start_date = datetime.fromisoformat(start)
+            end_date = datetime.fromisoformat(end)
+
+            print(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
+
+        except Exception as e:
+            print("❌ Invalid start/end, falling back:", e)
+
+            start_date = now - timedelta(days=range_days)
+            end_date = now + timedelta(days=range_days)
+
+    else:
+        start_date = now - timedelta(days=range_days)
+        end_date = now + timedelta(days=range_days)
+
+        print(f"✅ RANGE WINDOW: ±{range_days} days")
+
 
     # ------------------------------------------
     # STEP 1: FETCH EXTERNAL EVENTS

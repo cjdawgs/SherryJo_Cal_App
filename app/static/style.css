@@ -2,13 +2,12 @@
 /* =====================================================
 ✅ BASE (GLOBAL)
 ===================================================== */
-
 body {
   margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont,
+               "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: #f1f3f4;
 }
-
 
 /* =====================================================
 ✅ HEADER (CENTERED + CLEAN)
@@ -35,6 +34,13 @@ body {
   margin: 6px 0;
 }
 
+.accounts .chip.active {
+  opacity: 1;
+  filter: none;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+
 /* ✅ FORCE HEADER CONTENT CENTERING */
 .topbar {
   display: flex;
@@ -53,26 +59,20 @@ body {
   word-break: break-word !important;
 }
 
-
 /* ✅ STRONGER VISUAL SEPARATION */
 .fc-event {
   border-left: 4px solid rgba(0,0,0,0.2);
 }
-
-
 
 /* ✅ inner container */
 .topbar-inner {
   display: flex;
   flex-direction: column;
   align-items: center;
-
   width: 100%;
-  max-width: 600px;   /* ✅ THIS is the key: limits width so it centers visually */
-
+  max-width: 95%;   /* ✅ allows 1-row chips - auto-adapt*/
   text-align: center;
 }
-
 
 .providerBtn {
   padding: 6px 10px;
@@ -91,16 +91,14 @@ body {
   text-align: center;
 }
 
-
 /* =====================================================
 ✅ AUTH + BUTTON SECTION (CENTERED BLOCK)
 ===================================================== */
-
 .authContainer {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
+  gap: 2px;  /* ✅ was 6px */
 }
 
 .authButtons {
@@ -114,23 +112,20 @@ body {
   display: flex;
   gap: 8px;
   justify-content: center;
-  margin-top: 8px;
+  margin-top: 2px;       /* ✅ pulls buttons up */
 }
-
-.action-buttons {
-  margin-top: 8px;
-}
-
 /* =====================================================
 ✅ CONNECTED ACCOUNTS DISPLAY (POLISHED CHIP STYLE)
 ===================================================== */
 .accounts {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;     /* ✅ force single row */
   justify-content: center;
   align-items: center;
-  gap: 6px;
-  margin: 6px 0;
+  gap: 8px;
+
+  overflow-x: auto;      /* ✅ allow scroll if needed */
+  padding-bottom: 4px;   /* prevents scrollbar clipping */
 }
 
 /* ✅ hidden when no accounts */
@@ -138,68 +133,43 @@ body {
   display: none;
 }
 
-/* =====================================================
-✅ ACCOUNT CHIP
-===================================================== */
-.accounts div {
+
+.accounts .chip {
+  opacity: 0.45;
+  filter: saturate(0.7);
   display: flex;
   align-items: center;
   gap: 6px;
-
-  padding: 3px 8px;            /* ✅ tighter */
+  padding: 6px 10px;   /* ✅ bigger vertical presence */
   border-radius: 999px;
-
   background: #f1f3f4;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-
-  font-size: 12px;             /* ✅ slightly smaller = cleaner */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  font-size: 12px;
   line-height: 1;
-
-  max-width: 160px;            /* ✅ prevents overflow */
-
-  white-space: nowrap;         /* ✅ single line */
-  overflow: hidden;            /* ✅ hide long text */
-  text-overflow: ellipsis;     /* ✅ "..." */
-
-  transition: all 0.15s ease;
-}
-
-.accounts div:hover {
-  background: #e8eaed;
-  transform: scale(1.03);
-  cursor: pointer;
-}
-
-
-.accounts div.active {
-  background: #d2e3fc;
-  border-color: #1d4ed8;
-}
-
-/* =====================================================
-✅ COLOR DOT (FIRST SPAN)
-===================================================== */
-
-.accounts div span:first-child {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-/* =====================================================
-✅ LABEL TEXT (SECOND SPAN)
-===================================================== */
-
-.accounts div span:last-child {
-  font-weight: 500;
-  color: #333;
-
-  max-width: 120px;         /* prevents overflow */
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: none;   /* ✅ REMOVE truncation */
+  overflow: visible;
+  text-overflow: unset;
   white-space: nowrap;
+  transition: all 0.15s ease, border-color 0.15s ease;
+}
+
+.accounts .chip span {
+  display: flex;
+  align-items: center;
+}
+
+.accounts .chip span:last-child {
+  font-weight: 500;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+}
+
+.accounts .chip:hover {
+  background: #e8eaed;
+  opacity: 0.75;
+  cursor: pointer;
 }
 
 /* =====================================================
@@ -517,4 +487,42 @@ button:active {
 .fc-daygrid-day:hover {
   background-color: #f9fafb;
   cursor: pointer;
+}
+
+/* =====================================================
+✅ FINAL OVERRIDE — FORCE PROVIDER COLORS
+(add this at VERY BOTTOM of file)
+===================================================== */
+
+/* 🔴 Apple */
+.fc-event.source-apple,
+.fc-daygrid-event.source-apple,
+.fc-daygrid-event.source-apple .fc-event-main {
+  background-color: #ef4444 !important;
+  border-color: #ef4444 !important;
+  color: #ffffff !important;
+}
+
+/* 🔵 Microsoft */
+.fc-event.source-microsoft,
+.fc-daygrid-event.source-microsoft,
+.fc-daygrid-event.source-microsoft .fc-event-main {
+  background-color: #2563eb !important;
+  border-color: #2563eb !important;
+  color: #ffffff !important;
+}
+
+/* 🟢 Google */
+.fc-event.source-google,
+.fc-daygrid-event.source-google,
+.fc-daygrid-event.source-google .fc-event-main {
+  background-color: #34a853 !important;
+  border-color: #34a853 !important;
+  color: #ffffff !important;
+}
+
+/* ✅ ensure inner text also respects color */
+.fc-event-main {
+  background-color: inherit !important;
+  color: inherit !important;
 }

@@ -120,7 +120,7 @@ class ExternalCalendarService:
                         parsed_end = self._parse_date(getattr(vevent, "dtend", None))
 
                         # ✅ DEBUG (keep for now)
-                        print("🧪 APPLE NORMALIZED:", getattr(vevent, "summary", ""), parsed_start)
+                        #print("🧪 APPLE NORMALIZED:", getattr(vevent, "summary", ""), parsed_start)
 
                         
                         if not parsed_start:
