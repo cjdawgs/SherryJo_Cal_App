@@ -30,6 +30,7 @@ body {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
+  transition: all 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
   gap: 6px;
   margin: 6px 0;
 }
@@ -133,6 +134,31 @@ body {
   display: none;
 }
 
+/**************************************************************
+✅ COLOR PICKER — PRO UX
+**************************************************************/
+
+/* ✅ remove ugly native border (Safari fix) */
+.accounts input[type="color"] {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* ✅ cleaner circular picker */
+.accounts input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.accounts input[type="color"]::-webkit-color-swatch {
+  border: 1px solid rgba(0,0,0,0.2);
+  border-radius: 50%;
+}
+
+.accounts input[type="color"]:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
 
 .accounts .chip {
   opacity: 0.45;
@@ -498,27 +524,27 @@ button:active {
 .fc-event.source-apple,
 .fc-daygrid-event.source-apple,
 .fc-daygrid-event.source-apple .fc-event-main {
-  background-color: #ef4444 !important;
-  border-color: #ef4444 !important;
-  color: #ffffff !important;
+  background-color: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
 }
 
 /* 🔵 Microsoft */
 .fc-event.source-microsoft,
 .fc-daygrid-event.source-microsoft,
 .fc-daygrid-event.source-microsoft .fc-event-main {
-  background-color: #2563eb !important;
-  border-color: #2563eb !important;
-  color: #ffffff !important;
+  background-color: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
 }
 
 /* 🟢 Google */
 .fc-event.source-google,
 .fc-daygrid-event.source-google,
 .fc-daygrid-event.source-google .fc-event-main {
-  background-color: #34a853 !important;
-  border-color: #34a853 !important;
-  color: #ffffff !important;
+  background-color: #34a853;
+  border-color: #34a853;
+  color: #ffffff;
 }
 
 /* ✅ ensure inner text also respects color */

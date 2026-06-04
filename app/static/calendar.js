@@ -18,7 +18,7 @@ function getTokenOrFail() {
 
 /**************************************************************
  * ✅ AUTH GUARD (SAFE VERSION + NO STALE TOKEN)
- **************************************************************/
+ ****************************+**********************************/
 if (window.location.pathname.includes("calendar-ui")) {
 
   // ✅ ALWAYS READ FRESH TOKEN (NO GLOBAL CACHE)
@@ -89,6 +89,18 @@ function toDayString(d) {
 function fromDayString(dayStr) {
   const [y, m, d] = dayStr.split('-');
   return new Date(y, m - 1, d);
+}
+/**************************************************************
+ * ✅ FINAL COLOR RESOLVER (OVERRIDE → FALLBACK)
+ **************************************************************/
+function getFinalAccountColor(key, provider, index) {
+
+  // ✅ SAFE CHECK (more robust than truthy)
+  if (Object.prototype.hasOwnProperty.call(accountColorOverrides, key)) {
+    return accountColorOverrides[key];
+  }
+
+  return getAccountColor(provider, index);
 }
 
 // ✅ SAFE DATE PARSER (FULLY FIXED)
@@ -336,6 +348,41 @@ function handleOAuthRedirect() {
   }
 }
 
+/**************************************************************
+ * ✅ HARD COLOR ENFORCER (ANTI-FULLCAL OVERRIDE)
+ * Ensures colors ALWAYS match accountColorMap
+ **************************************************************/
+function enforceAllEventColors() {
+
+  if (!calendar) return;
+
+  const elements = document.querySelectorAll(".fc-event");
+
+  elements.forEach(el => {
+
+    const id =
+      el.getAttribute("data-event-id") ||
+      el.getAttribute("data-id");
+
+    if (!id) return;
+
+    const event = calendar.getEventById(id);
+    if (!event) return;
+
+    const key = event.extendedProps?.account_key;
+    const provider = normalizeProvider(event.extendedProps?.source);
+
+    const color =
+      accountColorMap[key] ??
+      accountColorOverrides[key] ??
+      getBaseProviderColor(provider);
+
+    el.style.backgroundColor = color;
+    el.style.borderColor = color;
+  });
+}
+
+
 /************************************************************
  * ✅ INIT FULLCALENDAR
  **************************************************************/
@@ -488,24 +535,32 @@ events: async (fetchInfo, successCallback, failureCallback) => {
       updateWeekView();
       updateDayDetails();
       highlightSelectedDay(selectedDate);
+      setTimeout(enforceAllEventColors, 0);
     },
 
 
 
     eventDidMount: (info) => {
-      const provider = normalizeProvider(info.event.extendedProps.source);
-      const baseColor = getBaseProviderColor(provider);
 
-      info.el.style.backgroundColor = baseColor;
-      info.el.style.borderColor = baseColor;
+      const key = info.event.extendedProps.account_key;
+      const provider = normalizeProvider(info.event.extendedProps.source);
+
+      // ✅ USE FINAL MAP (includes overrides)
+      const color =
+        accountColorMap[key] ||
+        accountColorOverrides[key] ||
+        getBaseProviderColor(provider);
+
+      info.el.style.backgroundColor = color;
+      info.el.style.borderColor = color;
+
       info.el.style.color = "#fff";
 
-      // ✅ KEEP YOUR STYLING
+      // ✅ existing styling
       info.el.style.border = "none";
       info.el.style.borderRadius = "6px";
       info.el.style.padding = "2px 4px";
-
-    },
+    },    
 
     /**************************************************
      * CLICK EVENT
@@ -641,6 +696,7 @@ events: async (fetchInfo, successCallback, failureCallback) => {
   calendar.render();
 }
 
+
 /* =====================================================
 ✅ COLOR ENGINE (CENTRALIZED + SCALABLE)
 ===================================================== */
@@ -652,6 +708,35 @@ const BASE_COLORS = {
   apple: "#ef4444",
   other: "#999"
 };
+
+/**************************************************************
+ * ✅ USER COLOR OVERRIDE STORAGE (LOCAL, BULLETPROOF)
+ **************************************************************/
+
+// ✅ STORAGE KEY (single source of truth)
+const ACCOUNT_COLOR_STORAGE_KEY = "accountColorOverrides";
+
+// ✅ LOAD SAVED OVERRIDES
+function loadColorOverrides() {
+  try {
+    const raw = localStorage.getItem(ACCOUNT_COLOR_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.warn("⚠️ Failed to parse color overrides");
+    return {};
+  }
+}
+
+// ✅ SAVE OVERRIDES
+function saveColorOverrides(map) {
+  localStorage.setItem(
+    ACCOUNT_COLOR_STORAGE_KEY,
+    JSON.stringify(map)
+  );
+}
+
+// ✅ GET CURRENT OVERRIDES
+let accountColorOverrides = loadColorOverrides();
 
 // ✅ NORMALIZE PROVIDER (SINGLE SOURCE OF TRUTH)
 function normalizeProvider(provider) {
@@ -783,10 +868,14 @@ function renderAccounts(accounts) {
     }
 
     const index = providerCounts[provider]++;
-    const color = getAccountColor(provider, index);
 
+    // ✅ SINGLE SOURCE KEY (ONLY ONCE)
     const key = `${provider}:${email}`;
-  
+
+    // ✅ APPLY OVERRIDE OR GENERATED COLOR
+    const color = getFinalAccountColor(key, provider, index);
+
+    // ✅ STORE FINAL COLOR
     accountColorMap[key] = color;
 
     // ✅ CREATE CHIP
@@ -810,9 +899,11 @@ function renderAccounts(accounts) {
       const prefix = email.split("@")[0].slice(0, 2).toUpperCase() || "X";
 
       const badge = document.createElement("span");
+      badge.classList.add("account-badge");
+
       badge.textContent = prefix;
 
-      const baseColor = getBaseProviderColor(provider);
+      const baseColor = accountColorMap[key] || getBaseProviderColor(provider);
 
       badge.style.background = baseColor;
       badge.style.color = "#fff";
@@ -834,6 +925,109 @@ function renderAccounts(accounts) {
 
     // ✅ FINAL APPEND
     row.appendChild(container);
+
+    /**************************************************************
+     * ✅ COLOR PICKER (INLINE, NON-INTRUSIVE)
+     **************************************************************/
+
+    const picker = document.createElement("input");
+    picker.type = "color";
+
+    // ✅ use current color
+    picker.value = color;
+    // ✅ bold matching border
+    picker.style.outline = "none";
+
+    // ✅ STRONG OUTER RING (this is what you want)
+    picker.style.border = "none";                 // ✅ remove native frame COMPLETELY
+    picker.style.borderRadius = "50%";
+    picker.style.transform = "scale(0.75)";       // ✅ smaller dot (hides gray edge)
+    picker.style.backgroundColor = color;         // ✅ FORCE fill
+    picker.style.boxShadow = `0 0 0 3px ${color}`; // ✅ strong outer ring
+
+
+    // ✅ keep compact
+    picker.style.marginLeft = "6px";
+    picker.style.width = "18px";
+    picker.style.height = "18px";
+    
+    picker.style.padding = "0";
+    picker.style.cursor = "pointer";
+    picker.title = "Click = set color • Right-click = reset";
+
+    // ✅ STOP FILTER CLICK CONFLICT
+    picker.onclick = (e) => e.stopPropagation();
+
+    // ✅ HANDLE CHANGE
+    picker.oninput = (e) => {
+      const newColor = e.target.value;
+
+      // ✅ save override
+      accountColorOverrides[key] = newColor;
+      saveColorOverrides(accountColorOverrides);
+
+      // ✅ update local map immediately
+      accountColorMap[key] = newColor;
+
+      picker.style.backgroundColor = newColor;
+      picker.style.boxShadow = `0 0 0 3px ${newColor}`;
+      // ✅ update chip visuals instantly
+      row.style.backgroundColor = `${newColor}26`;
+      row.style.border = `2.5px solid ${newColor}`;
+      row.style.color = newColor;
+
+      // ✅ update badge if exists
+      const badge = row.querySelector(".account-badge");
+      if (badge) {
+        badge.style.background = newColor;
+      }
+
+      // ✅ UI refresh (no reload)
+      // ✅ instant visual update
+      enforceAllEventColors();
+
+      // ✅ light refresh only when needed
+      setTimeout(() => calendar.refetchEvents(), 50);
+
+    };
+
+    /**************************************************************
+     * ✅ RIGHT-CLICK → RESET TO DEFAULT COLOR
+     **************************************************************/
+    picker.oncontextmenu = (e) => {
+      e.preventDefault(); // ✅ prevent browser menu
+
+      // ✅ remove override
+      delete accountColorOverrides[key];
+
+      const defaultColor = getAccountColor(provider, index);
+
+      row.style.backgroundColor = `${defaultColor}26`;
+      row.style.border = `2.5px solid ${defaultColor}`;
+      row.style.color = defaultColor;
+
+      const badge = row.querySelector(".account-badge");
+      if (badge) {
+        badge.style.background = defaultColor;
+      }
+
+      picker.style.backgroundColor = defaultColor;
+      picker.style.boxShadow = `0 0 0 3px ${defaultColor}`;
+
+
+      // ✅ persist removal
+      saveColorOverrides(accountColorOverrides);
+
+      // ✅ rebuild color using default logic
+      delete accountColorMap[key]; // forces recalculation
+
+      // ✅ refresh UI
+      enforceAllEventColors();
+      setTimeout(() => calendar.refetchEvents(), 50);
+    };
+
+
+    row.appendChild(picker);
 
     // ✅ MATCH EVENT-STYLE CHIP (COLOR + STRUCTURE)
     // ✅ LIGHT TINT BACKGROUND (matches your screenshot)
@@ -954,6 +1148,15 @@ function updateDayDetails() {
       : "";
 
     const row = document.createElement("div");
+    const key = ev.extendedProps?.account_key;
+    const color = accountColorMap[key] || getBaseProviderColor(ev.extendedProps.source);
+
+    // ✅ subtle colored band
+    row.style.borderLeft = `4px solid ${color}`;
+    row.style.paddingLeft = "6px";
+
+    // ✅ OPTIONAL light tint (very nice touch)
+    row.style.background = `${color}1a`;
 
     row.style.display = "flex";
     row.style.alignItems = "center";
@@ -1105,6 +1308,15 @@ function updateWeekView() {
     };
 
     const inner = document.createElement("div");
+    const key = ev.extendedProps?.account_key;
+    const color = accountColorMap[key] || getBaseProviderColor(ev.extendedProps.source);
+
+    // ✅ colored band
+    inner.style.borderLeft = `4px solid ${color}`;
+    inner.style.paddingLeft = "6px";
+
+    // ✅ optional tint
+    inner.style.background = `${color}1a`;
 
     inner.style.display = "flex";
     inner.style.alignItems = "center";
