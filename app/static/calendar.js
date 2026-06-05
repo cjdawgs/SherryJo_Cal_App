@@ -60,6 +60,8 @@ let editingEventId = null;
 let editingNoteId = null;
 let lastGoodEvents = [];
 let providerAccountCounts = {};
+let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
+
 
 // ✅ RANGE CONTROL (NEW)
 let currentRangeDays = 30;  // ✅ Default = Monthly
@@ -90,6 +92,41 @@ function fromDayString(dayStr) {
   const [y, m, d] = dayStr.split('-');
   return new Date(y, m - 1, d);
 }
+
+/**************************************************************
+ * ✅ ABSOLUTE COLOR SOURCE (DO NOT BYPASS)
+ **************************************************************/
+function resolveEventColor(event) {
+  return getColorByKey(
+    event?.extendedProps?.account_key,
+    normalizeProvider(event?.extendedProps?.source)
+  );
+}
+
+
+/**************************************************************
+ * ✅ SAFE COLOR ACCESSOR (WORKS WITH OR WITHOUT FULL EVENT)
+ **************************************************************/
+function getColorByKey(key, provider) {
+  if (!key) {
+    console.warn("⚠️ Missing account key for color");
+    return "#999";
+  }
+
+  const color =
+    accountColorOverrides[key] ||
+    accountColorMap[key] ||
+    getBaseProviderColor(provider);
+
+  if (!color) {
+    console.warn("⚠️ No color resolved:", key, provider);
+    return "#999";
+  }
+
+  return color;
+}
+
+
 /**************************************************************
  * ✅ FINAL COLOR RESOLVER (OVERRIDE → FALLBACK)
  **************************************************************/
@@ -348,6 +385,48 @@ function handleOAuthRedirect() {
   }
 }
 
+function applyChipStyle(row, key, isActive) {
+  
+  const [provider] = key.split(":");
+  const color = getColorByKey(key, provider);
+
+
+  /**************************************************************
+   * ✅ CHIP BACKGROUND — SOFTENED (GOLD STANDARD)
+   * - keeps color identity
+   * - removes heavy/dark look
+   **************************************************************/
+  const softBg = lightenColor(color, 0.65); // ✅ tuned to match your old screenshot
+
+  row.style.backgroundColor = softBg;
+  row.style.transition = "all 0.15s ease";
+  /**************************************************************
+   * ✅ TEXT — DARK FOR LIGHT BACKGROUND
+   **************************************************************/
+  row.style.color = "#222";
+
+  // ✅ CLEAN CHIP LOOK
+  row.style.borderRadius = "999px";
+  row.style.display = "inline-flex";
+  row.style.alignItems = "center";
+  row.style.gap = "4px";
+  row.style.padding = "4px 8px";
+
+  // ✅ RESET JUNK
+  row.style.boxShadow = "none";
+  row.style.transform = "none";
+
+  if (isActive) {
+    // ✅ ACTIVE = bold outline (like before)
+    row.style.border = "2px solid rgba(0,0,0,0.6)";
+    row.style.opacity = "1";
+  } else {
+    // ✅ INACTIVE = faded (THIS WAS MISSING FEEL)
+    row.style.border = "2px solid transparent";
+    row.style.opacity = "0.45";
+  }
+}
+
 /**************************************************************
  * ✅ HARD COLOR ENFORCER (ANTI-FULLCAL OVERRIDE)
  * Ensures colors ALWAYS match accountColorMap
@@ -369,13 +448,13 @@ function enforceAllEventColors() {
     const event = calendar.getEventById(id);
     if (!event) return;
 
+    
     const key = event.extendedProps?.account_key;
     const provider = normalizeProvider(event.extendedProps?.source);
 
-    const color =
-      accountColorMap[key] ||
-      accountColorOverrides[key] ||
-      getBaseProviderColor(provider);
+    // ✅ SINGLE SOURCE
+    const color = getColorByKey(key, provider);
+
 
     el.style.setProperty("background-color", color, "important");
     el.style.setProperty("border-color", color, "important");
@@ -386,144 +465,139 @@ function enforceAllEventColors() {
  * ✅ INIT FULLCALENDAR
  **************************************************************/
 function initCalendar(el) {
-    calendar = new FullCalendar.Calendar(el, {
+  calendar = new FullCalendar.Calendar(el, {
 
-      initialView: "dayGridMonth",
-      timeZone: "local",
+    initialView: "dayGridMonth",
+    timeZone: "local",
 
-      // ✅ LOCK WEEK START (CRITICAL FOR CONSISTENCY)
-      firstDay: 0,  // ✅ Sunday = start of week
+    // ✅ LOCK WEEK START (CRITICAL FOR CONSISTENCY)
+    firstDay: 0,  // ✅ Sunday = start of week
 
-      dayMaxEventRows: 6,
-      dayMaxEvents: false,
+    dayMaxEventRows: 6,
+    dayMaxEvents: false,
 
-// ✅ ONLY ONE EVENTS BLOCK EXISTS
-events: async (fetchInfo, successCallback, failureCallback) => {
+    // ✅ ONLY ONE EVENTS BLOCK EXISTS
+    events: async (fetchInfo, successCallback, failureCallback) => {
 
-  let filteredEvents = []; // ✅ FIX: declare OUTSIDE try
+      let filteredEvents = []; // ✅ FIX: declare OUTSIDE try
 
-  try {
-    console.log("🔄 Fetching events...");
+      try {
+        console.log("🔄 Fetching events...");
 
-    // ✅ STEP 1: FETCH
-    const start = fetchInfo.startStr;
-    const end = fetchInfo.endStr;
+        // ✅ STEP 1: FETCH
+        const startDate = new Date(fetchInfo.start);
+        const endDate = new Date(fetchInfo.end);
 
-    console.log("📅 FULLCAL RANGE:", start, "→", end);
+        // ✅ expand buffer (7 days on each side)
+        startDate.setDate(startDate.getDate() - 7);
+        endDate.setDate(endDate.getDate() + 7);
 
-    const res = await apiFetch(
-      `/calendar/unified?start=${start}&end=${end}`
-    );
+        const start = startDate.toISOString();
+        const end = endDate.toISOString();
 
-    if (!res.ok) {
-      throw new Error("API failed: " + res.status);
-    }
+        console.log("📅 FULLCAL RANGE:", start, "→", end);
 
-    const data = await res.json();
+        const res = await apiFetch(
+          `/calendar/unified?start=${start}&end=${end}`
+        );
 
-    // ✅ STEP 2: NORMALIZE RESPONSE
-    const rawEvents = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.events)
-      ? data.events
-      : [];
-
-    console.log(`📦 Raw events count: ${rawEvents.length}`);
-
-    // ✅ STEP 3: MAP
-    let mappedEvents = rawEvents
-      .filter(ev => {
-        if (!ev.start) {
-          console.warn("⚠️ Missing start:", ev);
-          return false;
+        if (!res.ok) {
+          throw new Error("API failed: " + res.status);
         }
-        return true;
-      })
 
-      .map(ev => {
+        const data = await res.json();
 
-        const rawStart = ev.start;
-        const rawEnd = ev.end;
+        // ✅ STEP 2: NORMALIZE RESPONSE
+        const rawEvents = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.events)
+          ? data.events
+          : [];
 
-        // ✅ SINGLE SOURCE PARSING (NO HACKS)
-        const safeStart = safeParseDate(rawStart);
-        if (!safeStart) return null;   // prevent bad events
-        const safeEnd = safeParseDate(rawEnd);
-        const provider = normalizeProvider(ev.source);
+        console.log(`📦 Raw events count: ${rawEvents.length}`);
 
-        const account = (
-          ev.account_email ||
-          ev.account ||
-          ""
-        ).toLowerCase().trim();
+        // ✅ STEP 3: MAP
+        let mappedEvents = rawEvents
+          .filter(ev => {
+            if (!ev.start) {
+              console.warn("⚠️ Missing start:", ev);
+              return false;
+            }
+            return true;
+          })
 
-        const account_key = `${provider}:${account}`;
+          .map(ev => {
 
-        const safeId = [
-          provider,
-          account,
-          ev.external_id || ev.id || "noid",
-          rawStart
-        ].join("|");
+            const rawStart = ev.start;
+            const rawEnd = ev.end;
 
-        return {
-          id: safeId,
-          title: ev.title || ev.summary || "Untitled",
-          start: safeStart,
-          end: safeEnd || null,
-          
-          /* ✅ DO NOT ASSIGN COLORS HERE
-            → Event color is applied ONLY in eventDidMount
-          */
-          backgroundColor: "transparent",
-          borderColor: "transparent",
+            // ✅ SINGLE SOURCE PARSING (NO HACKS)
+            const safeStart = safeParseDate(rawStart);
+            if (!safeStart) return null;   // prevent bad events
+            const safeEnd = safeParseDate(rawEnd);
+            const provider = normalizeProvider(ev.source);
 
-          textColor: "#ffffff",
+            const account = (
+              ev.account_email ||
+              ev.account ||
+              ""
+            ).toLowerCase().trim();
 
-          classNames: ["source-" + provider],
+            const account_key = `${provider}:${account}`;
 
-          extendedProps: {
-            source: provider,
-            account: account,
-            account_key: account_key,
-            conflict: !!ev.conflict,
-            notes: ev.notes || []
-          }
-        };
-      })
-      .filter(Boolean);
+            const safeId = [
+              provider,
+              account,
+              ev.external_id || ev.id || "noid",
+              rawStart
+            ].join("|");
 
-    console.log(`🧩 Mapped events: ${mappedEvents.length}`);
+            return {
+              id: safeId,
+              title: ev.title || ev.summary || "Untitled",
+              start: safeStart,
+              end: safeEnd || null,
+              
+              /* ✅ DO NOT ASSIGN COLORS HERE
+                → Event color is applied ONLY in eventDidMount
+              */
+              backgroundColor: "transparent",
+              borderColor: "transparent",
 
-    
-    // ✅ STEP 4: APPLY ACCOUNT FILTER
-    filteredEvents = mappedEvents;
+              textColor: "#ffffff",
 
-    if (activeAccountFilters.size > 0) {
-      filteredEvents = mappedEvents.filter(ev => {
-        const key = ev.extendedProps.account_key;
-        return activeAccountFilters.has(key);
-      });
-    }
+              classNames: ["source-" + provider],
 
+              extendedProps: {
+                source: provider,
+                account: account,
+                account_key: account_key,
+                conflict: !!ev.conflict,
+                notes: ev.notes || []
+              }
+            };
+          })
+          .filter(Boolean);
 
-    console.log(`🎯 Final events: ${filteredEvents.length}`);
+        console.log(`🧩 Mapped events: ${mappedEvents.length}`);
+        filteredEvents = mappedEvents;
+        console.log(`🎯 Final events: ${filteredEvents.length}`);
 
-    // ✅ STEP 5: RETURN
-    lastGoodEvents = filteredEvents;
-    successCallback(filteredEvents);
+        // ✅ STEP 5: RETURN
+        lastGoodEvents = filteredEvents;
+        successCallback(filteredEvents);
 
-  } catch (err) {
-    console.error("❌ Event load failed:", err);
+      } catch (err) {
+        console.error("❌ Event load failed:", err);
 
-    if (lastGoodEvents.length > 0) {
-      console.warn("⚠️ Using cached events");
-      successCallback(lastGoodEvents);
-    } else {
-      failureCallback(err);
-    }
-  }
-},
+        if (lastGoodEvents.length > 0) {
+          console.warn("⚠️ Using cached events");
+          successCallback(lastGoodEvents);
+        } else {
+          failureCallback(err);
+        }
+      }
+    },
 
     // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
     eventsSet: () => {
@@ -540,6 +614,18 @@ events: async (fetchInfo, successCallback, failureCallback) => {
       setTimeout(enforceAllEventColors, 0);
     },
 
+    datesSet: () => {
+      console.log("📅 datesSet fired");
+
+      const current = calendar.getDate();
+
+      // ✅ THIS IS THE FIX
+      selectedDate = toDayString(current);
+
+      updateWeekView();
+      updateDayDetails();
+      highlightSelectedDay(selectedDate);
+    },
 
     /* =====================================================
     ✅ SINGLE SOURCE OF TRUTH (COLOR ENGINE)
@@ -567,13 +653,9 @@ events: async (fetchInfo, successCallback, failureCallback) => {
       const key = info.event.extendedProps.account_key;
       const provider = normalizeProvider(info.event.extendedProps.source);
 
-
-
-      const color =
-        accountColorMap[key] ||              // ✅ primary
-        accountColorOverrides[key] ||        // ✅ user override
-        getBaseProviderColor(provider);      // ✅ fallback
-
+      // ✅ SINGLE SOURCE
+      const color = getColorByKey(key, provider);
+      
       /* =====================================================
       ✅ FORCE APPLY (OVERRIDES FULLCAL + CSS)
       ===================================================== */
@@ -734,6 +816,7 @@ const BASE_COLORS = {
   google: "#34a853",      // ✅ FIXED (matches event chip)
   microsoft: "#2563eb",   // ✅ matches event
   apple: "#ef4444",
+  local: "#7ca3af",   // ✅ ADD THIS Local color (bluegray)
   other: "#999"
 };
 
@@ -811,7 +894,6 @@ function getAccountColor(provider, index) {
 }
 
 function openCustomRange() {
-
   const days = prompt("Enter custom range (days):");
 
   if (!days || isNaN(days)) return;
@@ -819,31 +901,58 @@ function openCustomRange() {
   currentRangeDays = parseInt(days);
 
   console.log("📅 Custom range:", currentRangeDays);
-
-  calendar.refetchEvents();
 }
 
+/* =====================================================
+✅ UNIFIED FILTER ENGINE (GOLD STANDARD)
+Single source of truth for ALL client-side filtering
+===================================================== */
+function applyClientSideFilters() {
 
-function applyEventColor(el, event) {
-  const key = event.extendedProps?.account_key;
-  let color = accountColorMap[key];
+  if (!calendar) return;
 
-  if (!color) {
-    color = getBaseProviderColor(event.extendedProps.source);
-  }
+  // ✅ ALWAYS RESET FIRST (prevents sticky hidden events)
+  calendar.getEvents().forEach(ev => {
+    ev.setProp("display", "auto");
+  });
 
-  el.style.backgroundColor = color;
+  const view = calendar.view;
 
-  const num = parseInt(color.replace("#", ""), 16);
-  const r = (num >> 16) & 0xff;
-  const g = (num >> 8) & 0xff;
-  const b = num & 0xff;
+  // ✅ use visible calendar range ONLY (no custom math)
+  const viewStart = new Date(view.activeStart);
+  const viewEnd = new Date(view.activeEnd);
 
-  const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+  const allEvents = calendar.getEvents();
 
-  el.style.color = brightness > 155 ? "#000" : "#fff";
+  console.log("ACTIVE FILTERS:", [...activeAccountFilters]);
 
-  el.style.borderLeft = "4px solid rgba(0,0,0,0.25)";
+  allEvents.forEach(ev => {
+
+    if (!ev.start) return;
+
+    const key = ev.extendedProps?.account_key;
+    const evDate = new Date(ev.start);
+
+    // ✅ ACCOUNT FILTER
+    
+    const passesAccount =
+      key === "local:local" || activeAccountFilters.has(key);
+
+
+    // ✅ RANGE FILTER (matches visible calendar ONLY)
+    const passesRange =
+      evDate >= viewStart && evDate <= viewEnd;
+
+    if (passesAccount && passesRange) {
+      ev.setProp("display", "auto");
+    } else {
+      ev.setProp("display", "none");
+    }
+  });
+
+  // ✅ KEEP UI IN SYNC
+  updateDayDetails();
+  updateWeekView();
 }
 
 /* =====================================================
@@ -865,7 +974,7 @@ function renderAccounts(accounts) {
   const providerCounts = {};
 
   el.innerHTML = "";
-  
+
   const normalizedAccounts = accounts.map(acc => {
     const provider = normalizeProvider(acc.provider || "other");
 
@@ -876,6 +985,22 @@ function renderAccounts(accounts) {
     return { provider, email };
   });
 
+  // ✅ inject local account if any events exist
+  // ✅ ALWAYS INCLUDE LOCAL ACCOUNT (FIX)
+  normalizedAccounts.push({
+    provider: "local",
+    email: "local"
+  });
+
+  
+  // ✅ ✅ MOVE THIS HERE (AFTER normalizedAccounts exists)
+    allAccountKeys = new Set(
+      normalizedAccounts
+        .map(({ provider, email }) => email ? `${provider}:${email}` : null)
+        .filter(Boolean)
+    );
+
+
   // ✅ PRE-CALCULATE COUNTS FIRST
   normalizedAccounts.forEach(({ provider }) => {
     if (!providerAccountCounts[provider]) {
@@ -885,6 +1010,7 @@ function renderAccounts(accounts) {
   });
 
   normalizedAccounts.forEach(({ provider, email }) => {
+
     if (!providerAccountCounts[provider]) {
       providerAccountCounts[provider] = 0;
     }
@@ -897,43 +1023,37 @@ function renderAccounts(accounts) {
 
     const index = providerCounts[provider]++;
 
-    // ✅ SINGLE SOURCE KEY (ONLY ONCE)
     const key = `${provider}:${email}`;
 
-    // ✅ APPLY OVERRIDE OR GENERATED COLOR
     const color = getFinalAccountColor(key, provider, index);
 
-    // ✅ STORE FINAL COLOR
     accountColorMap[key] = color;
 
-    // ✅ CREATE CHIP
     const row = document.createElement("div");
-    row.classList.add("chip");   // ✅ ADD ONLY HERE
+    row.classList.add("chip");
     row.dataset.key = key;
     row.title = `${email} • Click to filter \n Ctrl+Click for multi-select`;
 
-    // LABEL for accounts
     const container = document.createElement("div");
     container.style.display = "flex";
     container.style.alignItems = "center";
     container.style.gap = "4px";
 
-    // ✅ ICON
     const icon = createSourceIcon(provider);
     container.appendChild(icon);
 
-    // ✅ BADGE (same as event)
     if ((providerAccountCounts[provider] || 0) > 1) {
+
       const prefix = email.split("@")[0].slice(0, 2).toUpperCase() || "X";
 
       const badge = document.createElement("span");
       badge.classList.add("account-badge");
-
       badge.textContent = prefix;
 
-      const baseColor = accountColorMap[key] || getBaseProviderColor(provider);
-
+      // ✅ SINGLE SOURCE (NO DRIFT)
+      const baseColor = getColorByKey(key, provider);
       badge.style.background = baseColor;
+
       badge.style.color = "#fff";
       badge.style.border = "none";
       badge.style.fontSize = "10px";
@@ -941,151 +1061,107 @@ function renderAccounts(accounts) {
       badge.style.padding = "1px 4px";
       badge.style.borderRadius = "4px";
       badge.style.flexShrink = "0";
-    
+
       container.appendChild(badge);
     }
 
-    // ✅ TITLE
     const title = document.createElement("span");
     title.textContent = email.split("@")[0];
 
     container.appendChild(title);
-
-    // ✅ FINAL APPEND
     row.appendChild(container);
-
-    /**************************************************************
-     * ✅ COLOR PICKER (INLINE, NON-INTRUSIVE)
-     **************************************************************/
 
     const picker = document.createElement("input");
     picker.type = "color";
-
-    // ✅ use current color
     picker.value = color;
-    // ✅ bold matching border
-    picker.style.outline = "none";
 
-    // ✅ STRONG OUTER RING (this is what you want)
-    picker.style.border = "none";                 // ✅ remove native frame COMPLETELY
+    /**************************************************************
+     * ✅ COLOR PICKER — CLEAN MINIMAL STYLE
+     **************************************************************/
+    picker.style.appearance = "none";
+    picker.style.border = "1px solid #222";
+    picker.style.boxShadow = "none";
     picker.style.borderRadius = "50%";
-    picker.style.transform = "scale(0.75)";       // ✅ smaller dot (hides gray edge)
-    picker.style.backgroundColor = color;         // ✅ FORCE fill
-    picker.style.boxShadow = `0 0 0 3px ${color}`; // ✅ strong outer ring
 
-
-    // ✅ keep compact
-    picker.style.marginLeft = "6px";
     picker.style.width = "18px";
     picker.style.height = "18px";
-    
     picker.style.padding = "0";
+    picker.style.marginLeft = "6px";
     picker.style.cursor = "pointer";
-    picker.title = "Click = set color • Right-click = reset";
 
-    // ✅ STOP FILTER CLICK CONFLICT
+    // ✅ base scale (prevents jump)
+    picker.style.transform = "scale(0.75)";
+
+    // ✅ LET NATIVE COLOR RENDER CLEANLY
+    picker.style.backgroundColor = "transparent";
+
+    /**************************************************************
+     * ✅ HOVER FEEDBACK (PREMIUM FEEL)
+     **************************************************************/
+    picker.onmouseenter = () => {
+      picker.style.transform = "scale(0.9)";
+    };
+
+    picker.onmouseleave = () => {
+      picker.style.transform = "scale(0.75)";
+    };
+
     picker.onclick = (e) => e.stopPropagation();
 
-    // ✅ HANDLE CHANGE
     picker.oninput = (e) => {
       const newColor = e.target.value;
 
-      // ✅ save override
       accountColorOverrides[key] = newColor;
       saveColorOverrides(accountColorOverrides);
-
-      // ✅ update local map immediately
       accountColorMap[key] = newColor;
 
-      picker.style.backgroundColor = newColor;
-      picker.style.boxShadow = `0 0 0 3px ${newColor}`;
-      // ✅ update chip visuals instantly
-      row.style.backgroundColor = `${newColor}26`;
-      row.style.border = `2.5px solid ${newColor}`;
-      row.style.color = newColor;
+      picker.style.backgroundColor = "transparent";
+      
+      applyChipStyle(row, key, true); // default all active
 
-      // ✅ update badge if exists
       const badge = row.querySelector(".account-badge");
-      if (badge) {
-        badge.style.background = newColor;
-      }
+      if (badge) badge.style.background = newColor;
 
-      // ✅ UI refresh (no reload)
-      // ✅ instant visual update
       enforceAllEventColors();
+      updateWeekView();      // ✅ FIX: ensure week view updates immediately
     };
 
-    /**************************************************************
-     * ✅ RIGHT-CLICK → RESET TO DEFAULT COLOR
-     **************************************************************/
     picker.oncontextmenu = (e) => {
-      e.preventDefault(); // ✅ prevent browser menu
+      e.preventDefault();
 
-      // ✅ remove override
       delete accountColorOverrides[key];
 
-      const defaultColor = getAccountColor(provider, index);
+      // ✅ rebuild default
+      accountColorMap[key] = getAccountColor(provider, index);
 
-      row.style.backgroundColor = `${defaultColor}26`;
-      row.style.border = `2.5px solid ${defaultColor}`;
-      row.style.color = defaultColor;
+      // ✅ pull from system
+      const newColor = getColorByKey(key, provider);
+
+      // ✅ apply UI
+      applyChipStyle(row, key, true);
 
       const badge = row.querySelector(".account-badge");
-      if (badge) {
-        badge.style.background = defaultColor;
-      }
+      if (badge) badge.style.background = newColor;
 
-      picker.style.backgroundColor = defaultColor;
-      picker.style.boxShadow = `0 0 0 3px ${defaultColor}`;
+      picker.style.backgroundColor = "transparent";
 
-
-      // ✅ persist removal
       saveColorOverrides(accountColorOverrides);
 
-      // ✅ rebuild color using default logic
-      delete accountColorMap[key]; // forces recalculation
-
-      // ✅ refresh UI
       enforceAllEventColors();
+      updateWeekView();
     };
-
 
     row.appendChild(picker);
 
-    // ✅ MATCH EVENT-STYLE CHIP (COLOR + STRUCTURE)
-    // ✅ LIGHT TINT BACKGROUND (matches your screenshot)
-    // ✅ MATCH EVENT CHIP TINT + STRONGER BORDER
-    row.style.backgroundColor = `${color}26`;   // stronger tint (matches event feel)
-    row.style.border = `2.5px solid ${color}`;  // thicker border (as you want)
-    row.style.color = color;
+    applyChipStyle(row, key, true); // default all active
 
-    // ✅ STRUCTURE
-    row.style.display = "inline-flex";
-    row.style.alignItems = "center";
-    row.style.gap = "4px";
-
-    // ✅ CHIP SHAPE
-    row.style.borderRadius = "999px";
-    row.style.padding = "4px 8px";
-
-    row.style.outline = "none";
-    row.style.boxShadow = "none"; 
-
-    
-    /* ✅ DATASET CHANGE → MUST REFRESH EVENTS
-      This modifies which events are visible,
-      so FullCalendar must refetch + re-render.
-      *** CLICK FILTER Exclusive First Click + Toggle with Ctrl
-    */
     row.onclick = (e) => {
       const isMultiSelect = e.ctrlKey || e.metaKey;
+
       if (!isMultiSelect) {
-        // ✅ SINGLE CLICK = RESET TO ONLY THIS
         activeAccountFilters.clear();
         activeAccountFilters.add(key);
-
       } else {
-        // ✅ CTRL CLICK = TOGGLE
         if (activeAccountFilters.has(key)) {
           if (activeAccountFilters.size > 1) {
             activeAccountFilters.delete(key);
@@ -1095,36 +1171,35 @@ function renderAccounts(accounts) {
         }
       }
 
-    updateChipSelectionUI();
-    //This is a DATASET CHANGE, not just UI. We need to refetch to apply the filter.
-    calendar.refetchEvents();
-  };
-
+      updateChipSelectionUI();
+      applyClientSideFilters();
+    };
 
     el.appendChild(row);
-  });
 
-  // ✅ Default: all accounts active on first load
-  if (activeAccountFilters.size === 0) {
-    normalizedAccounts.forEach(({ provider, email }) => {
-      if (!email) return;
-      activeAccountFilters.add(`${provider}:${email}`);
-    });
-  }
+  });  // ✅ ✅ ✅ LOOP ENDS HERE
+
+  /* ✅ RUN ONCE AFTER LOOP */
+  
+  // ✅ ALWAYS SYNC FROM SOURCE
+  activeAccountFilters = new Set(allAccountKeys);
   updateChipSelectionUI();
-}
+
+/* ✅ UPDATE UI ONCE */
+}  // ✅ renderAccounts closes cleanly
+
+//updateChipSelectionUI → overrides style based on activeAccountFilters
 function updateChipSelectionUI() {
   const accountContainer = document.getElementById("accounts");
+
   accountContainer?.querySelectorAll(".chip").forEach(row => {
     const key = row.dataset.key;
-
     if (!key) return;
 
-    if (activeAccountFilters.has(key)) {
-      row.classList.add("active");
-    } else {
-      row.classList.remove("active");
-    }
+    const isActive = activeAccountFilters.has(key);
+
+    // ✅ ONLY DO THIS
+    applyChipStyle(row, key, isActive);
   });
 }
 
@@ -1152,12 +1227,19 @@ function updateDayDetails() {
     </div>
   `;
   
+  
   let events = calendar.getEvents().filter(ev => {
     if (!ev.start) return false;
+
+    const key = ev.extendedProps?.account_key;
+
+    // ✅ ADD THIS LINE
+    if (key !== "local:local" && !activeAccountFilters.has(key)) return false;
 
     const evDay = toDayString(ev.start);
     return evDay === selectedDate;
   });
+
 
   events.sort((a, b) => a.start - b.start);
 
@@ -1178,15 +1260,25 @@ function updateDayDetails() {
 
     const row = document.createElement("div");
     const key = ev.extendedProps?.account_key;
-    const color = accountColorMap[key] || getBaseProviderColor(ev.extendedProps.source);
+    const provider = normalizeProvider(ev.extendedProps.source);
 
-    // ✅ subtle colored band
-    row.style.borderLeft = `4px solid ${color}`;
-    row.style.paddingLeft = "6px";
+    // ✅ SINGLE SOURCE (FIXES SIDEBAR COLORS)
+    const color = getColorByKey(key, provider);
 
     // ✅ OPTIONAL light tint (very nice touch)
+    /**************************************************************
+     * ✅ SIDEBAR COLOR SYSTEM (GOLD STANDARD)
+     **************************************************************/
+
+    // ✅ LEFT COLOR BAND (primary identity)
+    row.style.borderLeft = `4px solid ${color}`;
+
+    // ✅ SOFT BACKGROUND (consistent tint)
     row.style.background = `${color}1a`;
 
+    // ✅ TEXT (readable on light bg)
+    row.style.color = "#222";
+    
     row.style.display = "flex";
     row.style.alignItems = "center";
     row.style.gap = "6px";
@@ -1215,17 +1307,15 @@ function updateDayDetails() {
     row.appendChild(icon);
     row.appendChild(timeEl);
     row.appendChild(titleSpan);
+    row.onmouseenter = () => {
+      row.style.filter = "brightness(0.96)";
+    };
+
+    row.onmouseleave = () => {
+      row.style.filter = "none";
+    };
 
     li.appendChild(row);
-
-    li.onmouseenter = () => {
-      li.firstChild.style.background = "#f5f7fa";
-    };
-
-    li.onmouseleave = () => {
-      li.firstChild.style.background = "transparent";
-    };
-
 
     // ✅ CLICK → open edit modal
     li.onclick = () => {
@@ -1237,7 +1327,6 @@ function updateDayDetails() {
         block: "nearest"
       });
     };
-
 
     // ✅ HOVER PREVIEW
     li.title = ev.title;
@@ -1273,10 +1362,15 @@ function updateWeekView() {
   let weekEvents = events.filter(ev => {
     if (!ev.start) return false;
 
+    const key = ev.extendedProps?.account_key;
+
+    // ✅ ADD THIS LINE
+    if (key !== "local:local" && !activeAccountFilters.has(key)) return false;
     const evDay = toDayString(ev.start);
 
     return evDay >= startDay && evDay < endDay;
   });
+  
 
   container.innerHTML = "";
 
@@ -1329,20 +1423,24 @@ function updateWeekView() {
 
     const row = document.createElement("div");
     row.onmouseenter = () => {
-      row.firstChild.style.background = "#f5f7fa";
+      row.style.filter = "brightness(0.96)";
     };
 
     row.onmouseleave = () => {
-      row.firstChild.style.background = "transparent";
+      row.style.filter = "none";
     };
 
     const inner = document.createElement("div");
     const key = ev.extendedProps?.account_key;
-    const color = accountColorMap[key] || getBaseProviderColor(ev.extendedProps.source);
+    const provider = normalizeProvider(ev.extendedProps.source);
+
+    // ✅ SINGLE SOURCE
+    const color = getColorByKey(key, provider);
+
 
     // ✅ colored band
     inner.style.borderLeft = `4px solid ${color}`;
-    inner.style.paddingLeft = "6px";
+    inner.style.paddingLeft = "4px";
 
     // ✅ optional tint
     inner.style.background = `${color}1a`;
@@ -1731,34 +1829,33 @@ function bindUIEvents() {
       }
     });
 
-    /**************************************************
-    ✅ RANGE BUTTONS (THIS WAS MISSING)
-    **************************************************/
-    document.querySelectorAll(".range-btn").forEach(btn => {
+  /**************************************************
+  ✅ RANGE BUTTONS (THIS WAS MISSING)
+  **************************************************/
+  document.querySelectorAll(".range-btn").forEach(btn => {
 
-      btn.addEventListener("click", () => {
+    btn.addEventListener("click", () => {
 
-        // ✅ Update UI (active highlight)
-        document.querySelectorAll(".range-btn")
-          .forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".range-btn")
+        .forEach(b => b.classList.remove("active"));
 
-        btn.classList.add("active");
+      btn.classList.add("active");
 
-        // ✅ CUSTOM RANGE
-        if (btn.id === "customRange") {
-          openCustomRange();
-          return;
-        }
+      if (btn.id === "customRange") {
+        openCustomRange();
+        return;
+      }
 
-        // ✅ GET RANGE VALUE
-        currentRangeDays = parseInt(btn.dataset.range);
+      currentRangeDays = parseInt(btn.dataset.range);
 
-        console.log("📅 Range changed:", currentRangeDays);
+      console.log("📅 Range changed:", currentRangeDays);
 
-        // ✅ THIS LINE TRIGGERS EVERYTHING
-        calendar.refetchEvents();
-      });
+      /* ✅ CLIENT-SIDE RANGE FILTER */
+      applyClientSideFilters();
+
     });
+
+  });
 }
 
 /**************************************************************
