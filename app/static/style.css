@@ -515,40 +515,16 @@ button:active {
   cursor: pointer;
 }
 
+
 /* =====================================================
-✅ FINAL OVERRIDE — FORCE PROVIDER COLORS
-(add this at VERY BOTTOM of file)
+✅ FULLCAL COLOR RULE (NEUTRAL — JS CONTROLS COLORS)
 ===================================================== */
 
-/* 🔴 Apple */
-.fc-event.source-apple,
-.fc-daygrid-event.source-apple,
-.fc-daygrid-event.source-apple .fc-event-main {
-  background-color: #ef4444;
-  border-color: #ef4444;
-  color: #ffffff;
-}
-
-/* 🔵 Microsoft */
-.fc-event.source-microsoft,
-.fc-daygrid-event.source-microsoft,
-.fc-daygrid-event.source-microsoft .fc-event-main {
-  background-color: #2563eb;
-  border-color: #2563eb;
-  color: #ffffff;
-}
-
-/* 🟢 Google */
-.fc-event.source-google,
-.fc-daygrid-event.source-google,
-.fc-daygrid-event.source-google .fc-event-main {
-  background-color: #34a853;
-  border-color: #34a853;
-  color: #ffffff;
-}
-
-/* ✅ ensure inner text also respects color */
-.fc-event-main {
+/* ✅ allow JS to fully control colors */
+.fc-event,
+.fc-daygrid-event,
+.fc-daygrid-event .fc-event-main {
   background-color: inherit !important;
+  border-color: inherit !important;
   color: inherit !important;
 }

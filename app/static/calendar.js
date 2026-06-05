@@ -373,15 +373,14 @@ function enforceAllEventColors() {
     const provider = normalizeProvider(event.extendedProps?.source);
 
     const color =
-      accountColorMap[key] ??
-      accountColorOverrides[key] ??
+      accountColorMap[key] ||
+      accountColorOverrides[key] ||
       getBaseProviderColor(provider);
 
-    el.style.backgroundColor = color;
-    el.style.borderColor = color;
+    el.style.setProperty("background-color", color, "important");
+    el.style.setProperty("border-color", color, "important");
   });
 }
-
 
 /************************************************************
  * ✅ INIT FULLCALENDAR
@@ -473,8 +472,11 @@ events: async (fetchInfo, successCallback, failureCallback) => {
           start: safeStart,
           end: safeEnd || null,
           
-          backgroundColor: getBaseProviderColor(provider),
-          borderColor: getBaseProviderColor(provider),
+          /* ✅ DO NOT ASSIGN COLORS HERE
+            → Event color is applied ONLY in eventDidMount
+          */
+          backgroundColor: "transparent",
+          borderColor: "transparent",
 
           textColor: "#ffffff",
 
@@ -539,28 +541,54 @@ events: async (fetchInfo, successCallback, failureCallback) => {
     },
 
 
+    /* =====================================================
+    ✅ SINGLE SOURCE OF TRUTH (COLOR ENGINE)
+      ✅ GOLD RULE — EVENT REFETCH POLICY
 
+      ONLY use calendar.refetchEvents() when:
+      ✔ Backend data changes (create/update/delete/sync)
+      ✔ Event dataset changes (filters, range)
+
+      NEVER use refetchEvents() for:
+      ✘ Color updates
+      ✘ UI styling
+      ✘ Local overrides
+
+      Use enforceAllEventColors() instead.
+
+      This guarantees:
+      ✅ zero flicker
+      ✅ no race conditions
+      ✅ consistent color application
+
+    ===================================================== */
     eventDidMount: (info) => {
 
       const key = info.event.extendedProps.account_key;
       const provider = normalizeProvider(info.event.extendedProps.source);
 
-      // ✅ USE FINAL MAP (includes overrides)
+
+
       const color =
-        accountColorMap[key] ||
-        accountColorOverrides[key] ||
-        getBaseProviderColor(provider);
+        accountColorMap[key] ||              // ✅ primary
+        accountColorOverrides[key] ||        // ✅ user override
+        getBaseProviderColor(provider);      // ✅ fallback
 
-      info.el.style.backgroundColor = color;
-      info.el.style.borderColor = color;
+      /* =====================================================
+      ✅ FORCE APPLY (OVERRIDES FULLCAL + CSS)
+      ===================================================== */
 
+      info.el.style.setProperty("background-color", color, "important");
+      info.el.style.setProperty("border-color", color, "important");
+
+      /* ✅ text contrast */
       info.el.style.color = "#fff";
 
-      // ✅ existing styling
+      /* ✅ consistent styling */
       info.el.style.border = "none";
       info.el.style.borderRadius = "6px";
       info.el.style.padding = "2px 4px";
-    },    
+    },
 
     /**************************************************
      * CLICK EVENT
@@ -985,10 +1013,6 @@ function renderAccounts(accounts) {
       // ✅ UI refresh (no reload)
       // ✅ instant visual update
       enforceAllEventColors();
-
-      // ✅ light refresh only when needed
-      setTimeout(() => calendar.refetchEvents(), 50);
-
     };
 
     /**************************************************************
@@ -1023,7 +1047,6 @@ function renderAccounts(accounts) {
 
       // ✅ refresh UI
       enforceAllEventColors();
-      setTimeout(() => calendar.refetchEvents(), 50);
     };
 
 
@@ -1048,7 +1071,12 @@ function renderAccounts(accounts) {
     row.style.outline = "none";
     row.style.boxShadow = "none"; 
 
-    // CLICK FILTER Exclusive First Click + Toggle with Ctrl
+    
+    /* ✅ DATASET CHANGE → MUST REFRESH EVENTS
+      This modifies which events are visible,
+      so FullCalendar must refetch + re-render.
+      *** CLICK FILTER Exclusive First Click + Toggle with Ctrl
+    */
     row.onclick = (e) => {
       const isMultiSelect = e.ctrlKey || e.metaKey;
       if (!isMultiSelect) {
@@ -1068,6 +1096,7 @@ function renderAccounts(accounts) {
       }
 
     updateChipSelectionUI();
+    //This is a DATASET CHANGE, not just UI. We need to refetch to apply the filter.
     calendar.refetchEvents();
   };
 
