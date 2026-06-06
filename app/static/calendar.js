@@ -75,8 +75,81 @@ let selectedDate = null;
 let activeAccountFilters = new Set();
 
 /**************************************************************
+ * ✅ SESSION EVENT CACHE (SEC) — GOLD STANDARD
+ * - Single fetch per session
+ * - All filtering becomes client-side
+ * - Eliminates redundant API calls
+ **************************************************************/
+let sessionEventCache = [];
+let sessionCacheRange = {
+  start: null,
+  end: null
+};
+let isInitialLoadComplete = false;
+
+/**************************************************************
+ * ✅ SMART REFRESH ENGINE (REPLACES refetchEvents)
+ **************************************************************/
+function smartRefresh({ reason = "unknown", force = false } = {}) {
+
+  console.log(`🧠 SMART REFRESH → ${reason}`);
+
+  if (force) {
+    console.log("⚠️ FORCE REFETCH");
+    calendar.refetchEvents();
+    return;
+  }
+
+  // ✅ NO SERVER CALL — JUST RE-RENDER UI FROM CACHE
+  applyClientSideFilters();
+
+  updateDayDetails();
+  updateWeekView();
+  highlightSelectedDay(selectedDate);
+
+}
+
+/**************************************************************
+ * ✅ CACHE MUTATION ENGINE (STEP TOWARD ZERO-REFETCH)
+ **************************************************************/
+function updateEventInCache(updatedEvent) {
+
+  const index = sessionEventCache.findIndex(e => e.id === updatedEvent.id);
+
+  if (index !== -1) {
+    sessionEventCache[index] = {
+      ...sessionEventCache[index],
+      ...updatedEvent
+    };
+  }
+}
+
+/**************************************************************
  * ✅ HELPERS
  **************************************************************/
+
+/**************************************************************
+ * ✅ NORMALIZE TO LOCAL DAY (CRITICAL FIX)
+ **************************************************************/
+function normalizeToLocalDay(dateInput) {
+  const d = new Date(dateInput);
+
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate(),
+    0, 0, 0, 0
+  );
+}
+
+function sameDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 //CREATE A SINGLE SOURCE FORMATTED STRING (FOR COMPARISON + KEYS)
 function toDayString(d) {
   if (!d) return null;
@@ -91,6 +164,21 @@ function toDayString(d) {
 function fromDayString(dayStr) {
   const [y, m, d] = dayStr.split('-');
   return new Date(y, m - 1, d);
+}
+
+/**************************************************************
+ * ✅ SAFE DAY KEY (CRITICAL FIX FOR TIMEZONE DRIFT)
+ * - Uses LOCAL calendar day exactly as FullCalendar sees it
+ * - DO NOT normalize again
+ **************************************************************/
+function getEventDayKey(dateInput) {
+  if (!dateInput) return null;
+
+  const d = new Date(dateInput);
+
+  return d.getFullYear() + "-" +
+    String(d.getMonth() + 1).padStart(2, "0") + "-" +
+    String(d.getDate()).padStart(2, "0");
 }
 
 /**************************************************************
@@ -144,16 +232,20 @@ function getFinalAccountColor(key, provider, index) {
 function safeParseDate(dt) {
   if (!dt) return null;
 
+  // ✅ ALREADY HAS timezone info → LEAVE IT ALONE
+  const hasTZ =
+    typeof dt === "string" &&
+    (dt.endsWith("Z") || dt.match(/[\+\-]\d{2}:\d{2}$/));
+
+  if (typeof dt === "string" && !hasTZ) {
+    dt = dt + "Z";  // only add if truly missing
+  }
+
   const parsed = new Date(dt);
 
   if (isNaN(parsed.getTime())) {
     console.warn("⚠️ Failed parse:", dt);
     return null;
-  }
-
-  // ✅ HARD GUARD: prevent accidental string misuse later
-  if (typeof dt === "string" && !dt.includes("T")) {
-    console.warn("⚠️ Non-ISO date detected:", dt);
   }
 
   return parsed;
@@ -319,6 +411,9 @@ async function init() {
 
   await loadAccounts();
 
+  // ✅ LOAD DATA FIRST (critical)
+  await preloadEventCache();
+
   initCalendar(calendarEl);
 
   // ✅ CRITICAL FIX — ALIGN SELECTED DATE
@@ -374,7 +469,7 @@ function handleOAuthRedirect() {
     setTimeout(() => {
       if (calendar) {
         console.log("🔄 FORCING REFETCH AFTER LOGIN");
-        calendar.refetchEvents();
+        smartRefresh({ reason: "event_saved" });
       } else {
         console.warn("⚠️ Calendar not ready yet for refetch");
       }
@@ -427,38 +522,72 @@ function applyChipStyle(row, key, isActive) {
   }
 }
 
-/**************************************************************
- * ✅ HARD COLOR ENFORCER (ANTI-FULLCAL OVERRIDE)
- * Ensures colors ALWAYS match accountColorMap
- **************************************************************/
-function enforceAllEventColors() {
+async function preloadEventCache() {
+  console.log("🧠 PRELOADING CACHE");
 
-  if (!calendar) return;
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
 
-  const elements = document.querySelectorAll(".fc-event");
-
-  elements.forEach(el => {
-
-    const id =
-      el.getAttribute("data-event-id") ||
-      el.getAttribute("data-id");
-
-    if (!id) return;
-
-    const event = calendar.getEventById(id);
-    if (!event) return;
-
-    
-    const key = event.extendedProps?.account_key;
-    const provider = normalizeProvider(event.extendedProps?.source);
-
-    // ✅ SINGLE SOURCE
-    const color = getColorByKey(key, provider);
+  
+  start.setMonth(start.getMonth() - 6);
+  end.setMonth(end.getMonth() + 6);
 
 
-    el.style.setProperty("background-color", color, "important");
-    el.style.setProperty("border-color", color, "important");
-  });
+  const res = await apiFetch(
+    `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
+  );
+
+  if (!res.ok) throw new Error("API failed");
+
+  const data = await res.json();
+
+  const rawEvents = Array.isArray(data)
+    ? data
+    : data.events || [];
+
+  sessionEventCache = rawEvents.map(ev => {
+    const safeStart = safeParseDate(ev.start);
+    if (!safeStart) return null;
+
+    const safeEnd = safeParseDate(ev.end);
+    const provider = normalizeProvider(ev.source);
+
+    let account = ev.account_email || ev.account || "";
+    account = account.toLowerCase().trim();
+
+    const account_key = `${provider}:${account}`;
+
+    const color = getColorByKey(account_key, provider);
+
+    return {
+      id: Math.random().toString(36),
+      title: ev.title || "Untitled",
+      start: safeStart,
+      end: safeEnd || null,
+
+      extendedProps: {
+        source: provider,
+        account,
+        account_key,
+        notes: ev.notes || []
+      }
+    };
+
+  }).filter(Boolean);
+
+  sessionCacheRange = { start, end };
+  isInitialLoadComplete = true;
+  
+  console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
+  
+  console.log(
+    "LATEST EVENT DATE:",
+    sessionEventCache.reduce((max, ev) => {
+      return ev.start > max ? ev.start : max;
+    }, new Date(0))
+  );
+
 }
 
 /************************************************************
@@ -477,126 +606,17 @@ function initCalendar(el) {
     dayMaxEvents: false,
 
     // ✅ ONLY ONE EVENTS BLOCK EXISTS
-    events: async (fetchInfo, successCallback, failureCallback) => {
+    events: function(fetchInfo, successCallback) {
 
-      let filteredEvents = []; // ✅ FIX: declare OUTSIDE try
+      const viewStart = normalizeToLocalDay(fetchInfo.start);
+      const viewEnd   = normalizeToLocalDay(fetchInfo.end);   
+      const visibleEvents = sessionEventCache.filter(ev => {
+        const evDay = normalizeToLocalDay(ev.start);
+        return evDay >= viewStart && evDay < viewEnd;
+      });
 
-      try {
-        console.log("🔄 Fetching events...");
 
-        // ✅ STEP 1: FETCH
-        const startDate = new Date(fetchInfo.start);
-        const endDate = new Date(fetchInfo.end);
-
-        // ✅ expand buffer (7 days on each side)
-        startDate.setDate(startDate.getDate() - 7);
-        endDate.setDate(endDate.getDate() + 7);
-
-        const start = startDate.toISOString();
-        const end = endDate.toISOString();
-
-        console.log("📅 FULLCAL RANGE:", start, "→", end);
-
-        const res = await apiFetch(
-          `/calendar/unified?start=${start}&end=${end}`
-        );
-
-        if (!res.ok) {
-          throw new Error("API failed: " + res.status);
-        }
-
-        const data = await res.json();
-
-        // ✅ STEP 2: NORMALIZE RESPONSE
-        const rawEvents = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.events)
-          ? data.events
-          : [];
-
-        console.log(`📦 Raw events count: ${rawEvents.length}`);
-
-        // ✅ STEP 3: MAP
-        let mappedEvents = rawEvents
-          .filter(ev => {
-            if (!ev.start) {
-              console.warn("⚠️ Missing start:", ev);
-              return false;
-            }
-            return true;
-          })
-
-          .map(ev => {
-
-            const rawStart = ev.start;
-            const rawEnd = ev.end;
-
-            // ✅ SINGLE SOURCE PARSING (NO HACKS)
-            const safeStart = safeParseDate(rawStart);
-            if (!safeStart) return null;   // prevent bad events
-            const safeEnd = safeParseDate(rawEnd);
-            const provider = normalizeProvider(ev.source);
-
-            const account = (
-              ev.account_email ||
-              ev.account ||
-              ""
-            ).toLowerCase().trim();
-
-            const account_key = `${provider}:${account}`;
-
-            const safeId = [
-              provider,
-              account,
-              ev.external_id || ev.id || "noid",
-              rawStart
-            ].join("|");
-
-            return {
-              id: safeId,
-              title: ev.title || ev.summary || "Untitled",
-              start: safeStart,
-              end: safeEnd || null,
-              
-              /* ✅ DO NOT ASSIGN COLORS HERE
-                → Event color is applied ONLY in eventDidMount
-              */
-              backgroundColor: "transparent",
-              borderColor: "transparent",
-
-              textColor: "#ffffff",
-
-              classNames: ["source-" + provider],
-
-              extendedProps: {
-                source: provider,
-                account: account,
-                account_key: account_key,
-                conflict: !!ev.conflict,
-                notes: ev.notes || []
-              }
-            };
-          })
-          .filter(Boolean);
-
-        console.log(`🧩 Mapped events: ${mappedEvents.length}`);
-        filteredEvents = mappedEvents;
-        console.log(`🎯 Final events: ${filteredEvents.length}`);
-
-        // ✅ STEP 5: RETURN
-        lastGoodEvents = filteredEvents;
-        successCallback(filteredEvents);
-
-      } catch (err) {
-        console.error("❌ Event load failed:", err);
-
-        if (lastGoodEvents.length > 0) {
-          console.warn("⚠️ Using cached events");
-          successCallback(lastGoodEvents);
-        } else {
-          failureCallback(err);
-        }
-      }
+      successCallback(visibleEvents);
     },
 
     // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
@@ -611,16 +631,13 @@ function initCalendar(el) {
       updateWeekView();
       updateDayDetails();
       highlightSelectedDay(selectedDate);
-      setTimeout(enforceAllEventColors, 0);
+      
     },
-
+    
     datesSet: () => {
       console.log("📅 datesSet fired");
 
-      const current = calendar.getDate();
-
-      // ✅ THIS IS THE FIX
-      selectedDate = toDayString(current);
+      selectedDate = toDayString(calendar.getDate());
 
       updateWeekView();
       updateDayDetails();
@@ -647,44 +664,20 @@ function initCalendar(el) {
       ✅ no race conditions
       ✅ consistent color application
 
-    ===================================================== */
-    eventDidMount: (info) => {
-
-      const key = info.event.extendedProps.account_key;
-      const provider = normalizeProvider(info.event.extendedProps.source);
-
-      // ✅ SINGLE SOURCE
-      const color = getColorByKey(key, provider);
-      
-      /* =====================================================
-      ✅ FORCE APPLY (OVERRIDES FULLCAL + CSS)
-      ===================================================== */
-
-      info.el.style.setProperty("background-color", color, "important");
-      info.el.style.setProperty("border-color", color, "important");
-
-      /* ✅ text contrast */
-      info.el.style.color = "#fff";
-
-      /* ✅ consistent styling */
-      info.el.style.border = "none";
-      info.el.style.borderRadius = "6px";
-      info.el.style.padding = "2px 4px";
-    },
-
+    
     /**************************************************
      * CLICK EVENT
      **************************************************/
     // ✅ CLICK DAY → CREATE + UPDATE SIDEBAR
     dateClick: (info) => {
 
-      // ✅ SAVE selected date (VERY IMPORTANT)
+      console.log("🧠 DATE CLICK:", info.date);
+
+      // ✅ THIS is the actual clicked cell
       selectedDate = toDayString(info.date);
 
-      // ✅ ONLY update UI (no modal)
       updateDayDetails();
-      
-      // ✅ store selected date for highlight
+      updateWeekView();
       highlightSelectedDay(selectedDate);
     },
 
@@ -753,54 +746,38 @@ function initCalendar(el) {
      **************************************************/
     eventContent: function(arg) {
 
-      const source = arg.event.extendedProps?.source;
+      const ev = arg.event;
+      const source = ev.extendedProps?.source;
 
       const container = document.createElement("div");
+
+      const color = getColorByKey(
+        ev.extendedProps.account_key,
+        normalizeProvider(source)
+      );
+
+      container.style.backgroundColor = color;
+      container.style.color = "#222";
+
       container.style.display = "flex";
       container.style.alignItems = "center";
       container.style.gap = "4px";
 
+      container.style.padding = "2px 4px";
+      container.style.borderRadius = "4px";
+      container.style.height = "100%";
+
       // ✅ ICON
       const icon = createSourceIcon(source);
-
-      // ✅ ACCOUNT + PROVIDER
-      const account = arg.event.extendedProps.account || "";
-      const provider = normalizeProvider(arg.event.extendedProps?.source);
-      const accountShort = account.split("@")[0] || "X";
-
-      // ✅ TITLE
-      const title = document.createElement("div");
-      title.textContent = arg.event.title;
-      title.style.fontSize = "12px";
-      title.style.fontWeight = "500";
-      title.style.whiteSpace = "nowrap";
-      title.style.overflow = "hidden";
-      title.style.textOverflow = "ellipsis";
-
-      // ✅ BUILD ORDER (FIXED)
       container.appendChild(icon);
 
-      // ✅ ONLY show badge when needed
-      if ((providerAccountCounts[provider] || 0) > 1) {
-        const badge = document.createElement("span");
-        badge.textContent = accountShort.slice(0, 2).toUpperCase();
-
-        badge.style.fontSize = "10px";
-        badge.style.fontWeight = "bold";
-        badge.style.background = "rgba(255,255,255,0.25)";
-        badge.style.color = "#fff";
-        badge.style.padding = "1px 4px";
-        badge.style.borderRadius = "4px";
-        badge.style.flexShrink = "0";
-
-        container.appendChild(badge);
-      }
-
+      // ✅ TITLE
+      const title = document.createElement("span");
+      title.textContent = ev.title;
       container.appendChild(title);
 
       return { domNodes: [container] };
     }
-
   });
 
   calendar.render();
@@ -908,7 +885,7 @@ function openCustomRange() {
 Single source of truth for ALL client-side filtering
 ===================================================== */
 function applyClientSideFilters() {
-
+  // ✅ Use session cache (not calendar events)
   if (!calendar) return;
 
   // ✅ ALWAYS RESET FIRST (prevents sticky hidden events)
@@ -919,8 +896,17 @@ function applyClientSideFilters() {
   const view = calendar.view;
 
   // ✅ use visible calendar range ONLY (no custom math)
-  const viewStart = new Date(view.activeStart);
-  const viewEnd = new Date(view.activeEnd);
+  let viewStart, viewEnd;
+
+  const base = calendar.getDate();
+
+  viewStart = new Date(base);
+  viewEnd = new Date(base);
+
+  viewStart.setHours(0,0,0,0);
+  viewEnd.setHours(23,59,59,999);
+
+  viewEnd.setDate(viewEnd.getDate() + currentRangeDays);
 
   const allEvents = calendar.getEvents();
 
@@ -931,15 +917,13 @@ function applyClientSideFilters() {
     if (!ev.start) return;
 
     const key = ev.extendedProps?.account_key;
-    const evDate = new Date(ev.start);
-
-    // ✅ ACCOUNT FILTER
     
+    const evDay = normalizeToLocalDay(ev.start);
+    const evDate = evDay;  // ✅ REQUIRED
+
     const passesAccount =
       key === "local:local" || activeAccountFilters.has(key);
 
-
-    // ✅ RANGE FILTER (matches visible calendar ONLY)
     const passesRange =
       evDate >= viewStart && evDate <= viewEnd;
 
@@ -1023,7 +1007,7 @@ function renderAccounts(accounts) {
 
     const index = providerCounts[provider]++;
 
-    const key = `${provider}:${email}`;
+    const key = `${provider}:${email}`.replace(/\s+/g, "");
 
     const color = getFinalAccountColor(key, provider, index);
 
@@ -1066,7 +1050,7 @@ function renderAccounts(accounts) {
     }
 
     const title = document.createElement("span");
-    title.textContent = email.split("@")[0];
+    title.textContent = `${provider}: ${email.split("@")[0]}`;
 
     container.appendChild(title);
     row.appendChild(container);
@@ -1111,19 +1095,22 @@ function renderAccounts(accounts) {
     picker.oninput = (e) => {
       const newColor = e.target.value;
 
+      // ✅ update your map (keep what you already had)
       accountColorOverrides[key] = newColor;
       saveColorOverrides(accountColorOverrides);
       accountColorMap[key] = newColor;
 
-      picker.style.backgroundColor = "transparent";
-      
-      applyChipStyle(row, key, true); // default all active
+      // ✅ update chip UI (keep this)
+      applyChipStyle(row, key, true);
 
       const badge = row.querySelector(".account-badge");
       if (badge) badge.style.background = newColor;
 
-      enforceAllEventColors();
-      updateWeekView();      // ✅ FIX: ensure week view updates immediately
+      // ✅ keep your week/day updates
+      updateWeekView();
+
+      // ✅ ✅ THIS IS THE ONLY LINE THAT FIXES CALENDAR
+      calendar.refetchEvents();
     };
 
     picker.oncontextmenu = (e) => {
@@ -1147,7 +1134,6 @@ function renderAccounts(accounts) {
 
       saveColorOverrides(accountColorOverrides);
 
-      enforceAllEventColors();
       updateWeekView();
     };
 
@@ -1180,12 +1166,11 @@ function renderAccounts(accounts) {
   });  // ✅ ✅ ✅ LOOP ENDS HERE
 
   /* ✅ RUN ONCE AFTER LOOP */
-  
+
   // ✅ ALWAYS SYNC FROM SOURCE
   activeAccountFilters = new Set(allAccountKeys);
   updateChipSelectionUI();
 
-/* ✅ UPDATE UI ONCE */
 }  // ✅ renderAccounts closes cleanly
 
 //updateChipSelectionUI → overrides style based on activeAccountFilters
@@ -1206,6 +1191,20 @@ function updateChipSelectionUI() {
 
 //✅ ✅ DAY DETAILS FUNCTION
 function updateDayDetails() {
+
+  console.log("------ DAY DEBUG ------");
+  console.log("Selected Date:", selectedDate);
+  console.log("Total Cache Size:", sessionEventCache.length);
+
+  
+  console.log(
+    "LATEST 10 EVENTS:",
+    sessionEventCache
+      .slice(-10)
+      .map(e => [e.title, e.start])
+  );
+
+
   if (!selectedDate) return;  // ✅ guard
   const titleEl = document.getElementById("selectedDateTitle");
   const listEl = document.getElementById("dayEventsList");
@@ -1227,20 +1226,35 @@ function updateDayDetails() {
     </div>
   `;
   
-  
-  let events = calendar.getEvents().filter(ev => {
+  const dayStart = normalizeToLocalDay(fromDayString(selectedDate));
+
+  const dayEnd = new Date(dayStart);
+  dayEnd.setHours(23, 59, 59, 999);
+
+  let events = sessionEventCache.filter(ev => {
+
     if (!ev.start) return false;
 
-    const key = ev.extendedProps?.account_key;
+    const key = (ev.extendedProps?.account_key || "").replace(/\s+/g, "");
+    if (key !== "local:local" && !activeAccountFilters.has(key)) {
+      return false;
+    }
 
-    // ✅ ADD THIS LINE
-    if (key !== "local:local" && !activeAccountFilters.has(key)) return false;
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : new Date(ev.start);
 
-    const evDay = toDayString(ev.start);
-    return evDay === selectedDate;
+    evStart.setHours(0,0,0,0);
+
+    const evEndDay = new Date(evEnd);
+    evEndDay.setHours(23,59,59,999);
+
+    // ✅ SAME OVERLAP MODEL AS WEEK
+    return (
+      evStart <= dayEnd &&
+      evEndDay >= dayStart
+    );
   });
-
-
+   
   events.sort((a, b) => a.start - b.start);
 
   listEl.innerHTML = "";
@@ -1251,6 +1265,13 @@ function updateDayDetails() {
   }
 
   events.forEach(ev => {
+    
+    if (ev.title.includes("850/Day")) {
+      console.log("🧠 APPLE EVENT CHECK", {
+        raw: ev.start,
+        local: new Date(ev.start).toString()
+      });
+    }
 
     const li = document.createElement("li");
     
@@ -1289,6 +1310,8 @@ function updateDayDetails() {
     row.style.padding = "3px 6px";
     row.style.borderRadius = "6px";
 
+    console.log("MATCHED EVENTS:", events.map(e => e.title));
+
     // ✅ NEW ICON
     const icon = createSourceIcon(ev.extendedProps.source);
 
@@ -1300,8 +1323,36 @@ function updateDayDetails() {
 
     // ✅ TITLE
     const titleSpan = document.createElement("span");
-    titleSpan.textContent = ev.title;
-    titleSpan.style.fontWeight = "500";
+
+    // ✅ determine span
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : new Date(ev.start);
+
+    const isSpan =
+      ev.end &&
+      evStart.toDateString() !== evEnd.toDateString();
+
+    const selected = new Date(selectedDate + "T00:00:00");
+
+    const isFirstDay =
+      selected.toDateString() === evStart.toDateString();
+
+    // ✅ title logic
+    titleSpan.textContent = isSpan
+      ? (isFirstDay ? ev.title : "↳ continues")
+      : ev.title;
+
+    // ✅ badge ONLY on first day
+    if (isSpan && isFirstDay) {
+      const badge = document.createElement("span");
+      badge.textContent = " (multi-day)";
+      badge.style.fontSize = "10px";
+      badge.style.color = "#777";
+      badge.style.marginLeft = "2px";
+
+      titleSpan.appendChild(badge);
+    }
+
 
     // ✅ BUILD
     row.appendChild(icon);
@@ -1341,36 +1392,48 @@ function updateWeekView() {
   const container = document.getElementById("weekView");
   if (!container || !calendar) return;
 
-  const events = calendar.getEvents();
-
-  // ✅ USE selected date OR fallback to today
-  // ✅ base date is now STRING → convert to Date
+  // ✅ base date
   const base = fromDayString(selectedDate);
 
   // ✅ compute week range
-  const start = new Date(base);
-  start.setDate(base.getDate() - base.getDay());
+  const weekStart = normalizeToLocalDay(new Date(base));
+  weekStart.setDate(weekStart.getDate() - weekStart.getDay());
 
-  const end = new Date(start);
-  end.setDate(start.getDate() + 7);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 7);
 
-  // ✅ string boundaries
-  const startDay = toDayString(start);
-  const endDay = toDayString(end);
+  // ✅ FullCalendar end is exclusive → adjust
+  weekEnd.setDate(weekEnd.getDate() - 1);
 
-  // ✅ filter events
-  let weekEvents = events.filter(ev => {
+  weekStart.setHours(0, 0, 0, 0);
+  weekEnd.setHours(23, 59, 59, 999);
+
+  // ✅ STEP 1: FILTER (range overlap)
+  let weekEvents = sessionEventCache.filter(ev => {
+
     if (!ev.start) return false;
 
-    const key = ev.extendedProps?.account_key;
+    const key = (ev.extendedProps?.account_key || "").replace(/\s+/g, "");
+    if (key !== "local:local" && !activeAccountFilters.has(key)) {
+      return false;
+    }
 
-    // ✅ ADD THIS LINE
-    if (key !== "local:local" && !activeAccountFilters.has(key)) return false;
-    const evDay = toDayString(ev.start);
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : new Date(ev.start);
 
-    return evDay >= startDay && evDay < endDay;
+    evStart.setHours(0, 0, 0, 0);
+
+    const evEndDay = new Date(evEnd);
+    evEndDay.setHours(23, 59, 59, 999);
+
+    return (
+      evStart <= weekEnd &&
+      evEndDay >= weekStart
+    );
   });
-  
+
+  console.log("🧪 EVENTS AFTER FILTER:", weekEvents.length);
+  console.log("🧪 SELECTED DATE:", selectedDate);
 
   container.innerHTML = "";
 
@@ -1379,26 +1442,70 @@ function updateWeekView() {
     return;
   }
 
-  weekEvents.sort((a, b) => a.start - b.start);
-
-  let currentDay = "";
+  // ✅ STEP 2: EXPAND EVENTS INTO DAILY INSTANCES
+  let expanded = [];
 
   weekEvents.forEach(ev => {
 
-    const evDate = ev.start;
-    const dayLabel = evDate.toDateString();
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : new Date(ev.start);
 
-    // ✅ Better section header (lighter + separated)
+    evStart.setHours(0, 0, 0, 0);
+
+    const endDay = new Date(evEnd);
+    endDay.setHours(0, 0, 0, 0);
+
+    for (let d = new Date(evStart); d <= endDay; d.setDate(d.getDate() + 1)) {
+
+      if (d < weekStart || d > weekEnd) continue;
+
+      expanded.push({
+        ev,
+        date: new Date(d),
+        isSpan: !!ev.end && ev.end !== ev.start,   // ✅ multi-day indicator
+        spanStart: toDayString(evStart),
+        spanEnd: toDayString(evEnd),
+        isFirstDay: toDayString(d) === toDayString(evStart),
+        isLastDay: toDayString(d) === toDayString(evEnd)
+      });
+    }
+  });
+
+  // ✅ STEP 3: SORT BY DISPLAY DATE
+  expanded.sort((a, b) => a.date - b.date);
+
+  // ✅ STEP 4: RENDER
+  let currentDay = "";
+  // ✅ TRACK RENDERED EVENTS PER DAY
+  let renderedMap = new Map();  
+
+  expanded.forEach(({ ev, date, isSpan, isFirstDay, isLastDay }) => {
+
+    const dayLabel = date.toDateString();
+    // ✅ UNIQUE KEY PER DAY
+    const dayKey = toDayString(date);
+
+    // ✅ INIT SET IF NEEDED
+    if (!renderedMap.has(dayKey)) {
+      renderedMap.set(dayKey, new Set());
+    }
+
+    // ✅ EVENT UNIQUE ID (fallback safe)
+    const eventId = ev.id || ev.title;
+
+    // ✅ SKIP DUPLICATE
+    if (renderedMap.get(dayKey).has(eventId)) {
+      return;
+    }
+
+    // ✅ MARK AS RENDERED
+    renderedMap.get(dayKey).add(eventId);
+
     if (dayLabel !== currentDay) {
       currentDay = dayLabel;
 
-
       const dayDiv = document.createElement("div");
-      // ✅ tag for auto-scroll targeting
-      dayDiv.setAttribute(
-        "data-day",
-        toDayString(ev.start)
-      );
+      dayDiv.setAttribute("data-day", toDayString(date));
 
       dayDiv.innerHTML = `
         <div style="
@@ -1418,33 +1525,39 @@ function updateWeekView() {
     }
 
     const time = ev.start
-      ? evDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      ? new Date(ev.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : "";
 
     const row = document.createElement("div");
-    row.onmouseenter = () => {
-      row.style.filter = "brightness(0.96)";
-    };
-
-    row.onmouseleave = () => {
-      row.style.filter = "none";
-    };
 
     const inner = document.createElement("div");
+
     const key = ev.extendedProps?.account_key;
     const provider = normalizeProvider(ev.extendedProps.source);
-
-    // ✅ SINGLE SOURCE
     const color = getColorByKey(key, provider);
 
+    if (isSpan) {
 
-    // ✅ colored band
-    inner.style.borderLeft = `4px solid ${color}`;
-    inner.style.paddingLeft = "4px";
+      inner.style.borderLeft = isFirstDay
+        ? `4px solid ${color}`
+        : `2px solid ${color}`;
 
-    // ✅ optional tint
+      inner.style.borderRight = isLastDay
+        ? `4px solid ${color}`
+        : "none";
+
+      inner.style.borderRadius = isFirstDay
+        ? "6px 0 0 6px"
+        : isLastDay
+          ? "0 6px 6px 0"
+          : "0";
+
+      inner.style.opacity = isFirstDay || isLastDay ? "1" : "0.85";
+    } else {
+      inner.style.borderLeft = `4px solid ${color}`;
+      inner.style.borderRadius = "6px";
+    }
     inner.style.background = `${color}1a`;
-
     inner.style.display = "flex";
     inner.style.alignItems = "center";
     inner.style.gap = "6px";
@@ -1452,35 +1565,39 @@ function updateWeekView() {
     inner.style.marginBottom = "4px";
     inner.style.fontSize = "13px";
     inner.style.cursor = "pointer";
-    inner.style.transition = "background 0.15s ease";
     inner.style.padding = "2px 4px";
     inner.style.borderRadius = "4px";
 
-    // ✅ NEW ICON
     const icon = createSourceIcon(ev.extendedProps.source);
 
-    // ✅ TIME
     const timeEl = document.createElement("span");
     timeEl.textContent = time;
     timeEl.style.color = "#555";
 
-    // ✅ TITLE
     const titleEl = document.createElement("span");
-    titleEl.textContent = ev.title;
 
-    // ✅ BUILD
+    titleEl.textContent = isSpan
+      ? (isFirstDay ? ev.title : "↳ continues")
+      : ev.title;
+
+    // ✅ badge ONLY on first day
+    if (isSpan && isFirstDay) {
+      const badge = document.createElement("span");
+      badge.textContent = " (multi-day)";
+      badge.style.fontSize = "10px";
+      badge.style.color = "#777";
+      badge.style.marginLeft = "2px";
+
+      titleEl.appendChild(badge);
+    }
+
     inner.appendChild(icon);
     inner.appendChild(timeEl);
     inner.appendChild(titleEl);
 
     row.appendChild(inner);
 
-        // ✅ CLICK → OPEN MODAL
-        row.onclick = () => {
-          openCreateModal(null, ev);
-        };
-
-    // ✅ HOVER TOOLTIP
+    row.onclick = () => openCreateModal(null, ev);
     row.title = ev.title;
 
     container.appendChild(row);
@@ -1523,7 +1640,7 @@ async function syncNow() {
 
     alert("✅ Sync complete");
 
-    calendar.refetchEvents();
+    smartRefresh({ reason: "event_saved" });
 
   } catch (err) {
     console.error("❌ Sync failed:", err);
@@ -1684,8 +1801,22 @@ async function saveEvent() {
       });
     }
 
+    /*  FUTURE USE (DO NOT APPLY YET)
+        STEP 3D.3 — (OPTIONAL BUT STRONG) ENABLE PARTIAL CACHE UPDATE
+        Already created Function updateEventInCache(updatedEvent) 
+        that updates the sessionEventCache and the calendar event directly without refetching all events.
+        
+    updateEventInCache({
+      id: editingEventId,
+      title,
+      start: new Date(startISO),
+      end: new Date(endISO)
+    });
+
+    */
+
     closeCreateModal();
-    calendar.refetchEvents();
+    smartRefresh({ reason: "event_saved" });
 
   } catch (err) {
     console.error("❌ Save failed:", err);
@@ -1708,7 +1839,7 @@ async function deleteEvent() {
 
 
     closeCreateModal();
-    calendar.refetchEvents();
+    smartRefresh({ reason: "event_deleted" });
 
   } catch (err) {
     console.error("❌ Delete failed:", err);
@@ -1748,7 +1879,7 @@ async function saveNoteEditor() {
 
   document.getElementById("noteEditorModal")?.classList.add("hidden");
 
-  calendar.refetchEvents();
+  smartRefresh({ reason: "event_saved" });
 }
 
 
@@ -1846,11 +1977,13 @@ function bindUIEvents() {
         return;
       }
 
-      currentRangeDays = parseInt(btn.dataset.range);
+      const base = calendar.getDate();
+      const rangeStart = new Date(base);
+      const rangeEnd = new Date(base);
+
+      rangeEnd.setDate(base.getDate() + currentRangeDays);
 
       console.log("📅 Range changed:", currentRangeDays);
-
-      /* ✅ CLIENT-SIDE RANGE FILTER */
       applyClientSideFilters();
 
     });
