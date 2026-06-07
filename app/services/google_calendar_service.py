@@ -34,9 +34,7 @@ class GoogleCalendarService:
     TOKEN_URL = "https://oauth2.googleapis.com/token"
 
     SCOPES = [
-        "https://www.googleapis.com/auth/calendar.readonly",
-        "https://www.googleapis.com/auth/userinfo.email",
-        "openid"
+        "https://www.googleapis.com/auth/calendar"
     ]
 
     # ==================================================
@@ -59,15 +57,15 @@ class GoogleCalendarService:
 
         # ✅ FIXED: use "&" NOT "&amp;"
         url = (
-            f"{self.AUTH_URL}"
-            f"?client_id={settings.GOOGLE_CLIENT_ID}"
-            f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
-            f"&response_type=code"
-            f"&scope={scope_str}"
-            f"&access_type=offline"
-            f"&prompt=consent"
-            f"&state={state}"
-        )
+                f"{self.AUTH_URL}"
+                f"?client_id={settings.GOOGLE_CLIENT_ID}"
+                f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
+                f"&response_type=code"
+                f"&scope={scope_str}"
+                f"&access_type=offline"
+                f"&prompt=consent"
+                f"&state={state}"
+            )
 
         print("✅ GOOGLE AUTH URL:", url)
 
@@ -146,10 +144,11 @@ class GoogleCalendarService:
     # ✅ FETCH EVENTS (SAFE VERSION)
     # ==================================================
     def fetch_events(
-        self,
-        access_token: str,
-        start_date: Optional[datetime] = None,
-        end_date: Optional[datetime] = None
+        self, 
+        access_token, 
+        account_email=None, 
+        start_date=None, 
+        end_date=None
     ) -> List[Dict[str, Any]]:
         """
         ✅ PURPOSE:
@@ -181,35 +180,81 @@ class GoogleCalendarService:
                 end_date = end_date.replace(tzinfo=timezone.utc)
             params["timeMax"] = end_date.isoformat()
 
-        response = requests.get(
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-            headers=headers,
-            params=params
+        calendar_id = account_email or "primary"
+
+        # ✅ STEP 1: GET ALL CALENDARS
+        cal_list_resp = requests.get(
+            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+            headers=headers
         )
 
-        # ✅ SAFE FAILURE (DO NOT CRASH SYSTEM)
-        if response.status_code != 200:
-            print("❌ Google events fetch failed:", response.text)
-            return []
+        calendars = []
 
-        return response.json().get("items", [])
+        if cal_list_resp.status_code == 200:
+            calendars = cal_list_resp.json().get("items", [])
+        else:
+            print("⚠️ Calendar list failed — falling back to direct calendars")
 
+        # ✅ ALWAYS include these (critical)
+        calendar_ids = ["primary", account_email]
+
+        # ✅ add any others if available
+        for c in calendars:
+            cid = c.get("id")
+            if cid and cid not in calendar_ids:
+                calendar_ids.append(cid)
+
+        print("🧪 CALENDAR IDS USED:", calendar_ids)
+
+
+
+        all_events = []
+
+        # ✅ STEP 2: FETCH EVENTS FROM EACH CALENDAR
+        for cal_id in calendar_ids:
+
+            print(f"📆 CALENDAR ID ({account_email}):", cal_id)
+            url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
+
+            
+            response = requests.get(
+                    url,
+                    headers=headers,
+                    params=params
+                )
+
+            if response.status_code != 200:
+                print("❌ Failed:", cal_id)
+                continue
+
+            items = response.json().get("items", [])
+
+            print(f"📦 Events in {cal_id}:", len(items))
+
+            all_events.extend(items)
+
+
+        print(f"🟢 Google TOTAL events fetched ({account_email}):", len(all_events))
+
+        return all_events
+        
     # ==================================================
     # ✅ PUBLIC WRAPPER (FOR CONSISTENCY)
     # ==================================================
-    def get_events(self, access_token: str, start_date=None, end_date=None):
-        """
-        ✅ Exists for consistency
-        (some systems expect this method name)
-        """
-        return self.fetch_events(access_token, start_date, end_date)
+    def get_events(self, access_token: str, account_email=None, start_date=None, end_date=None):
+        return self.fetch_events(
+            access_token=access_token,
+            account_email=account_email,
+            start_date=start_date,
+            end_date=end_date
+        )
 
     # ==================================================
     # ✅ UPDATE EVENT
     # ==================================================
-    def update_event(self, token, event_id, updates):
-        url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
-
+    def update_event(self, token, event_id, updates, account_email=None):
+        calendar_id = account_email or "primary"
+        url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}"
         payload = {}
 
         if "title" in updates:
@@ -233,9 +278,10 @@ class GoogleCalendarService:
     # ==================================================
     # ✅ DELETE EVENT
     # ==================================================
-    def delete_event(self, token, event_id):
-        url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
-
+    def delete_event(self, token, event_id, account_email=None):
+        
+        calendar_id = account_email or "primary"
+        url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}"
         response = requests.delete(
             url,
             headers={"Authorization": f"Bearer {token}"}

@@ -26,14 +26,28 @@ from app.config import settings
 # ==================================================
 # ✅ SAFE COMMIT HELPER (CRITICAL)
 # ==================================================
-
 def safe_commit(db: Session):
     try:
         db.commit()
     except Exception as e:
         print("❌ DB commit failed:", e)
+
+        # ✅ EMERGENCY FIX — detect NULL token issue
+        if "access_token" in str(e):
+            print("🚫 FIXING NULL ACCESS TOKEN BEFORE RETRY")
+
+            for obj in db.dirty:
+                if hasattr(obj, "access_token") and obj.access_token is None:
+                    obj.access_token = "__REAUTH_REQUIRED__"
+
         db.rollback()
-        raise
+
+        try:
+            db.commit()
+            print("✅ Commit recovered successfully")
+        except Exception as e2:
+            print("❌ Commit retry failed:", e2)
+            raise
 
 
 # ==================================================
@@ -127,7 +141,8 @@ class MultiAccountOAuthService:
             display_name=display_name,
             provider_id=provider_id,
 
-            is_primary=(account_count == 0 or set_as_primary)
+            is_primary = (account_count == 0 or locals().get("set_as_primary", False))
+
         )
 
         # --------------------------------------------------
@@ -221,9 +236,22 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     """
 
     now = datetime.now(timezone.utc)
-
+    print(f"[TOKEN CHECK] {account.provider} | {account.account_email}")
     expires = account.token_expires_at
 
+    # ==================================================
+    # ✅ PRO-LEVEL HARDENING — BLOCK INVALID TOKENS
+    # ✅ ONLY BLOCK TRUE INVALID TOKENS
+    # ==================================================
+    if account.access_token == "__REAUTH_REQUIRED__":
+        print(f"🚫 Token flagged invalid → skipping: {account.account_email}")
+
+        if hasattr(account, "status") and account.status != "error":
+            account.status = "error"
+            safe_commit(db)
+
+        return None
+    
     # --------------------------------------------------
     # ✅ FIX 1: FLOAT → DATETIME
     # --------------------------------------------------
@@ -273,7 +301,14 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
         if account.refresh_token:
             try:
                 if account.provider == "google":
-                    return _refresh_google_token(db, account)
+                    result = _refresh_google_token(db, account)
+
+                    # ✅ HANDLE REAUTH SIGNAL
+                    if result == "__REAUTH_REQUIRED__":
+                        return None
+
+                    return result
+
 
                 if account.provider == "microsoft":
                     return _refresh_ms_token(db, account)
@@ -291,9 +326,9 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # --------------------------------------------------
     if expires > now + timedelta(minutes=2):
 
-        if not account.access_token:
-            print(f"❌ Missing access_token: {account.account_email}")
-            return None
+        if hasattr(account, "status"):
+            account.status = "ok"
+            safe_commit(db)
 
         return account.access_token
 
@@ -304,7 +339,14 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
 
     try:
         if account.provider == "google":
-            return _refresh_google_token(db, account)
+            result = _refresh_google_token(db, account)
+
+            # ✅ HANDLE REAUTH SIGNAL
+            if result == "__REAUTH_REQUIRED__":
+                return None
+
+            return result
+
 
         if account.provider == "microsoft":
             return _refresh_ms_token(db, account)
@@ -337,7 +379,35 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
     )
 
     if res.status_code != 200:
+        try:
+            error_data = res.json()
+        except Exception:
+            error_data = {}
+
+        error = error_data.get("error")
+
         print("❌ Google refresh failed:", res.text)
+
+        # ==================================================
+        # ✅ GOLD STANDARD FIX — HANDLE REVOKED TOKEN
+        # ==================================================
+        if error == "invalid_grant":
+            print(f"🚫 TOKEN REVOKED → marking error: {account.account_email}")
+
+            # ✅ SAFE ATTRIBUTE SET (no crash if column missing)
+            if hasattr(account, "status"):
+                account.status = "error"
+
+            # ✅ PREVENT BAD TOKEN RETRY
+            # ✅ NEVER set NULL (DB constraint)
+            # ✅ Use sentinel value instead
+
+            account.access_token = "__REAUTH_REQUIRED__"
+            account.updated_at = datetime.now(timezone.utc)
+            safe_commit(db)
+
+            return "__REAUTH_REQUIRED__"
+
         return None
 
     data = res.json()
@@ -345,6 +415,9 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
     if "access_token" not in data:
         print("❌ Invalid Google response:", data)
         return None
+    
+    print("🔍 ACCESS TOKEN:", account.access_token)
+    print("🔍 ACCOUNT STATUS:", getattr(account, "status", None))   
 
     account.access_token = data["access_token"]
 
@@ -356,6 +429,16 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
         seconds=data.get("expires_in", 3600)
     )
 
+    # ✅ AUTO HEAL IF PREVIOUSLY BROKEN
+        # ✅ ONLY clear error IF token is actually valid
+    if hasattr(account, "status"):
+
+        if account.access_token == "__REAUTH_REQUIRED__":
+            account.status = "error"
+
+        elif account.access_token:
+            account.status = "ok"
+            safe_commit(db)
 
     safe_commit(db)
 

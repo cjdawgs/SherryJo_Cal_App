@@ -232,6 +232,9 @@ def get_my_accounts(
             "sync_enabled": acc.sync_enabled,
             "last_sync": acc.last_sync.isoformat() if acc.last_sync else None,
             "created_at": acc.created_at.isoformat(),
+
+            # ✅ ADD THIS EXACT LINE
+            "status": getattr(acc, "status", "ok"),
         }
         for acc in accounts
     ]

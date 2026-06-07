@@ -3,16 +3,17 @@
 # IMPORTS
 # ==================================================
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
-from app.models import Event, Note
+from app.models import Event, Note, OAuthAccount
 from app.deps import get_current_user
 
 from app.services.calendar_service import CalendarService
-from app.services.multi_account_oauth_service import MultiAccountOAuthService
+from app.services.multi_account_oauth_service import MultiAccountOAuthService, ensure_valid_token
+
 
 
 print("✅ CALENDAR ROUTER FILE LOADED")
@@ -21,9 +22,8 @@ router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 calendar_service = CalendarService()
 
-
 # ==================================================
-# ✅ SAFE HELPERS
+# ✅ SAFE HELPERS (TOP LEVEL — NOT INSIDE ANY FUNCTION)
 # ==================================================
 
 def to_dt(val):
@@ -47,6 +47,97 @@ def to_iso(val):
     if not val:
         return None
     return val if isinstance(val, str) else val.isoformat()
+
+
+# ==================================================
+# ✅ SYNC ENDPOINT (SEPARATE FUNCTION)
+# ==================================================
+
+@router.post("/sync")
+def sync_calendar(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+
+    account_key = request.query_params.get("account")
+
+    print("🧠 SYNC REQUEST:", account_key)
+
+    accounts = MultiAccountOAuthService.get_user_accounts(
+        db, current_user.id
+    )
+
+    if account_key:
+        print("🎯 Filtering to single account:", account_key)
+
+        try:
+            provider, email = account_key.split(":", 1)
+
+            accounts = [
+                acc for acc in accounts
+                if acc.provider == provider and acc.account_email == email
+            ]
+
+        except Exception as e:
+            print(f"❌ fetch_all_events failed: {e}")
+            return {
+                "events": [],
+                "account_status": {}
+            }
+
+    if not accounts:
+        return {"status": "no_accounts"}
+
+    # ✅ YOUR EXISTING SYNC LOOP GOES HERE
+    # ✅ TRACK PER-ACCOUNT RESULTS
+    results = []
+
+    for account in accounts:
+
+        print(f"[UNIFIED] Checking account: {account.account_email}")
+
+        # ==================================================
+        # ✅ CRITICAL FIX — TOKEN VALIDATION PIPELINE
+        # ==================================================
+        token = ensure_valid_token(db, account)
+
+        if not token:
+            print(f"[UNIFIED] 🚫 Skipping (no token): {account.account_email}")
+
+            # ✅ 🔴 FINAL FIX — mark error HERE
+            if hasattr(account, "status") and account.status != "error":
+                account.status = "error"
+                safe_commit(db)
+
+            continue
+
+        key = f"{account.provider}:{account.account_email}"
+
+        try:
+            print("🔄 Processing:", account.provider, "|", account.account_email)
+
+            # ✅ CALL YOUR EXISTING SYNC LOGIC HERE
+            calendar_service.sync_account(db, account)  # or whatever you use
+
+            results.append({
+                "key": key,
+                "status": "ok"
+            })
+
+        except Exception as e:
+            print("❌ Sync failed:", key, e)
+
+            results.append({
+                "key": key,
+                "status": "error",
+                "error": str(e)
+            })
+
+    return {
+        "status": "success",
+        "results": results
+    }
 
 
 # ==================================================
@@ -92,23 +183,42 @@ def get_unified_calendar(
     # STEP 1: FETCH EXTERNAL EVENTS
     # ------------------------------------------
     try:
-        events = calendar_service.fetch_all_events(
+        result = calendar_service.fetch_all_events(
             db,
             current_user,
             start_date=start_date,
             end_date=end_date
-        ) or []
+        )
+
+        # ✅ CRITICAL: normalize shape ONCE
+        if isinstance(result, dict):
+            events = result.get("events", [])
+            account_status = result.get("account_status", {})
+        else:
+            events = result or []
+            account_status = {}
 
     except Exception as e:
         print(f"❌ fetch_all_events failed: {e}")
         events = []
+        account_status = {}
 
     print(f"✅ External events fetched: {len(events)}")
 
-    # ✅ Normalize external events
+    # ✅ Normalize + CLEAN ONCE (CRITICAL FIX)
+    clean_events = []
+
     for e in events:
+        if not isinstance(e, dict):
+            print("⚠️ Skipping malformed event:", e)
+            continue
+
         e["_start_dt"] = to_dt(e.get("start"))
         e["_end_dt"] = to_dt(e.get("end"))
+
+        clean_events.append(e)
+
+    events = clean_events
 
     # ------------------------------------------
     # STEP 2: ADD LOCAL EVENTS
@@ -197,9 +307,7 @@ def get_unified_calendar(
             if s1 < e2 and e1 > s2:
                 events[i]["conflict"] = True
 
-    # ------------------------------------------
-    # STEP 6: CLEAN OUTPUT
-    # ------------------------------------------
+    # ✅ FINAL CLEAN OUTPUT (RESTORE ISO VALUES)
     for e in events:
         e["start"] = to_iso(e.get("_start_dt"))
         e["end"] = to_iso(e.get("_end_dt"))
@@ -208,11 +316,35 @@ def get_unified_calendar(
         e.pop("_end_dt", None)
 
     # ------------------------------------------
-    # FINAL RESPONSE
+    # ✅ STEP 6: BUILD ACCOUNT STATUS MAP (NEW)
     # ------------------------------------------
-    accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
+    print("🔥 BUILDING account_status...")
+    accounts = MultiAccountOAuthService.get_user_accounts(
+        db, current_user.id
+    )
 
+    print("🔥 USING NEW ACCOUNT STATUS LOGIC")
+    
+    account_status = {}
+
+    for acc in accounts:
+        key = f"{acc.provider}:{(acc.account_email or '').lower().strip()}"
+
+        print("🔥 TOKEN VALUE:", acc.account_email, acc.access_token)
+
+
+        # ✅ CRITICAL FIX — TRUST TOKEN STATE FIRST
+        if acc.access_token == "__REAUTH_REQUIRED__":
+            account_status[key] = "error"
+        else:
+            account_status[key] = getattr(acc, "status", "ok")
+
+    print("🔥 FINAL account_status:", account_status)
+
+    # ------------------------------------------
+    # ✅ FINAL RESPONSE (NEW STRUCTURE)
+    # ------------------------------------------
     return {
         "events": events,
-        "accounts": accounts
+        "account_status": account_status
     }

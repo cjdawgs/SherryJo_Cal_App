@@ -109,7 +109,8 @@ class CalendarService:
         for e in all_events:
 
             provider = (e.get("provider") or "other").lower()
-            account = (e.get("account") or "").lower()
+            account = (e.get("account") or e.get("account_email") or "").lower()
+
 
             start = self._safe_datetime(e.get("start"))
             end = self._safe_datetime(e.get("end"))
@@ -177,6 +178,7 @@ class CalendarService:
             return pytz.timezone("US/Pacific")
 
         return pytz.utc
+    
     def fetch_all_events(self, db, user, start_date=None, end_date=None):
         """
         ✅ NEW: RANGE-AWARE FETCH
@@ -226,6 +228,10 @@ class CalendarService:
 
         for acc in accounts:
 
+            print("🧪 ACCOUNT CHECK:",
+                acc.provider,
+                acc.account_email,
+                acc.access_token)
             # ==================================================
             # ✅ ACCOUNT PROCESSING START
             # ==================================================
@@ -234,7 +240,19 @@ class CalendarService:
             token = ensure_valid_token(db, acc)
 
             if not token:
-                log_info(f"🚫 Skipped: {acc.account_email}")
+                print("🚫 Skipping (no token):", acc.account_email)
+
+                # ✅ FORCE ERROR STATE (keeps UI + backend in sync)
+                acc.status = "error"
+                db.commit()
+
+                continue
+                # ✅ 🔴 THIS IS THE MISSING PIECE
+                if hasattr(acc, "status") and acc.status != "error":
+                    acc.status = "error"
+                    from app.services.multi_account_oauth_service import safe_commit
+                    safe_commit(db)
+
                 continue
 
             try:
@@ -251,10 +269,11 @@ class CalendarService:
                 if acc.provider == "google":
 
                     events = self.google.fetch_events(
-                        token,
-                        start_date=start_date,
-                        end_date=end_date
-                    ) or []
+                    access_token=token,
+                    account_email=acc.account_email,
+                    start_date=start_date,
+                    end_date=end_date
+                ) or []
 
                     log_debug(f"Google raw count: {len(events)}")
 
@@ -283,7 +302,7 @@ class CalendarService:
                         #if safe_start <= dt <= safe_end:
                         if True:
                             e["account"] = acc.account_email
-
+                            e["account_email"] = acc.account_email  # ✅ CRITICAL
                             # ✅ CRITICAL FIX
                             e["provider"] = "google"
                             e["source"] = "google"
@@ -456,7 +475,7 @@ class CalendarService:
                                 "subject": e.get("subject"),
                                 "start": dt.isoformat(),
                                 "end": end_dt.isoformat() if end_dt else None,
-                                "account": acc.account_email
+                                "account_email": acc.account_email,  # ✅ CRITICAL FIX
                             
                             })
                             added += 1
@@ -486,9 +505,17 @@ class CalendarService:
         log_info(f"📊 MSFT:   {total_ms}")
         log_info(f"📊 TOTAL:  {total}")
 
+        accounts = MultiAccountOAuthService.get_user_accounts(db, user.id)
 
-        return self._normalize(google_events, ms_events)
+        account_status = {
+            f"{acc.provider}:{(acc.account_email or '').lower().strip()}": getattr(acc, "status", "ok")
+            for acc in accounts
+        }
 
+        return {
+            "events": self._normalize(google_events, ms_events),
+            "account_status": account_status
+        }
 
     # ==================================================
     # ✅ SYNC ENGINE (FIXED + INSIDE CLASS)

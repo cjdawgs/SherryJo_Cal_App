@@ -61,6 +61,16 @@ let editingNoteId = null;
 let lastGoodEvents = [];
 let providerAccountCounts = {};
 let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
+let needsCacheRefresh = false;
+let lastLoadedAccounts = [];
+// ✅ GLOBAL SYNC STATE (NEW)
+let isAppSyncing = false;
+
+/**************************************************************
+ * ✅ ACCOUNT SYNC STATUS MAP
+ * key → "ok" | "error"
+ **************************************************************/
+let accountStatusMap = {};
 
 
 // ✅ RANGE CONTROL (NEW)
@@ -286,6 +296,48 @@ function stripHtml(html) {
   return div.textContent || "";
 }
 
+/**************************************************************
+ * ✅ CACHE RANGE TOOLTIP (SINGLE SOURCE OF TRUTH)
+ * - Uses PRELOADED backend range
+ * - No recalculation
+ * - Safe if cache not ready
+ **************************************************************/
+function updateCustomRangeTooltip() {
+
+  const btn = document.getElementById("customRange");
+  if (!btn) return;
+
+  const { start, end } = sessionCacheRange || {};
+
+  // ✅ SAFETY GUARD
+  if (!start || !end) {
+    
+    btn.title =
+        `📦 Cached Event Range
+
+        From: ${format(start)}
+        To:   ${format(end)}
+
+        Client-side filtering enabled`;
+    return;
+  }
+
+  // ✅ CLEAN FORMATTER (LOCALIZED)
+  const format = (d) =>
+    d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+
+  // ✅ TOOLTIP TEXT (MULTI-LINE)
+  btn.title =
+`Loaded Data Range
+${format(start)} → ${format(end)}
+
+(Full dataset cached for this session)`;
+}
+
 /*
  * ✅ REUSABLE ICON BUILDER (COMPONENT STANDARD)
  * ------------------------------------------------------------
@@ -375,6 +427,38 @@ function createSourceIcon(source) {
   return icon;
 }
 
+async function syncSingleAccount(accountKey) {
+
+  console.log("🔄 Syncing only:", accountKey);
+
+  const res = await apiFetch(`/calendar/sync?account=${accountKey}`, {
+    method: "POST"
+  });
+
+  const data = await res.json();
+
+  console.log("✅ Sync result:", data);
+
+  /**************************************************************
+   * ✅ UPDATE STATUS MAP (CRITICAL)
+   **************************************************************/
+  if (data.results) {
+    data.results.forEach(r => {
+      accountStatusMap[r.key] = r.status;
+    });
+  }
+
+  // ✅ mark cache dirty
+  needsCacheRefresh = true;
+
+  smartRefresh({ reason: "single_account_sync" });
+
+  // ✅ re-render chips with status
+  renderAccounts(lastLoadedAccounts);
+}
+
+
+
 /**************************************************************
  * ✅ INIT APP
  **************************************************************/
@@ -411,8 +495,16 @@ async function init() {
 
   await loadAccounts();
 
-  // ✅ LOAD DATA FIRST (critical)
-  await preloadEventCache();
+  // ✅ LOAD DATA FIRST (critical) check for Full preload or parial
+  if (!sessionEventCache.length || needsCacheRefresh) {
+    console.log("🔄 Refreshing cache (needed)");
+    await preloadEventCache();
+    needsCacheRefresh = false;
+  } else {
+    console.log("⚡ Using existing session cache");
+  }
+
+
 
   initCalendar(calendarEl);
 
@@ -426,10 +518,34 @@ async function init() {
   highlightSelectedDay(selectedDate);
 }
 
+function showReconnectBanner(accounts) {
+
+  const broken = accounts.filter(a => a.status === "error");
+
+  if (!broken.length) return;
+
+  const banner = document.createElement("div");
+
+  banner.style.background = "#fee2e2";
+  banner.style.color = "#991b1b";
+  banner.style.padding = "8px";
+  banner.style.marginBottom = "8px";
+
+  banner.innerHTML = `
+    ⚠ Some accounts need reconnect:
+    ${broken.map(a => a.account_email).join(", ")}
+    <button onclick="window.location='/accounts/ui'">Fix</button>
+  `;
+
+  document.body.prepend(banner);
+}
+
 /**************************************************************
  * ✅ LOAD ACCOUNTS (SEPARATE FROM EVENTS)
  **************************************************************/
 async function loadAccounts() {
+  lastLoadedAccounts = [];
+
   try {
     const res = await apiFetch("/accounts");
 
@@ -438,18 +554,32 @@ async function loadAccounts() {
       throw new Error("API failed: " + res.status);
     }
 
-    const data = await res.json();
+    const data = await res.json();  // ✅ DEFINE HERE
 
-    console.log("✅ ACCOUNTS API:", data);
+    lastLoadedAccounts = data;
 
-    // ✅ send to renderer
+    console.log("🔥 RAW ACCOUNT DATA:", data);
+
+    data.forEach(acc => {
+      const key = `${acc.provider}:${(acc.account_email || "").toLowerCase().trim()}`;
+
+      console.log("🔑 MAPPING:", key, acc.status);
+
+      if (acc.status) {
+        accountStatusMap[key] = acc.status;
+      }
+    });
+
+    // ✅ ✅ FIX: CALL USING data (INSIDE SCOPE)
+    showReconnectBanner(data);
+
     renderAccounts(data);
 
-    return data;  // ✅ REQUIRED (for await)
+    return data;
 
   } catch (err) {
     console.error("❌ Failed to load accounts:", err);
-    return [];   // ✅ prevents crash
+    return [];
   }
 }
 
@@ -459,11 +589,13 @@ async function loadAccounts() {
 function handleOAuthRedirect() {
   const params = new URLSearchParams(window.location.search);
   const connected = params.get("connected");
+  needsCacheRefresh = true;
 
+  
   if (connected) {
     console.log("✅ Connected:", connected);
-
-    syncNow();
+    needsCacheRefresh = true;   // ✅ ADD THIS
+    syncSingleAccount(connected + ":" + detectEmailFromState());
 
     // ✅ FORCE CALENDAR REFRESH AFTER AUTH
     setTimeout(() => {
@@ -524,6 +656,11 @@ function applyChipStyle(row, key, isActive) {
 
 async function preloadEventCache() {
   console.log("🧠 PRELOADING CACHE");
+  isAppSyncing = true;
+  renderAccounts(lastLoadedAccounts);
+  console.log("🟡 SYNC MODE ON");
+  document.getElementById("syncBanner").style.display = "block";
+
 
   const now = new Date();
   const start = new Date(now);
@@ -542,9 +679,14 @@ async function preloadEventCache() {
 
   const data = await res.json();
 
-  const rawEvents = Array.isArray(data)
-    ? data
-    : data.events || [];
+  const rawEvents = data.events || [];
+  const backendStatus = data.account_status || {};
+  console.log("🔥 BACKEND account_status:", backendStatus);
+
+  // ✅ 🔴 CRITICAL: UPDATE GLOBAL STATUS MAP
+  Object.assign(accountStatusMap, backendStatus);
+
+  console.log("🧠 STATUS MAP UPDATED:", accountStatusMap);
 
   sessionEventCache = rawEvents.map(ev => {
     const safeStart = safeParseDate(ev.start);
@@ -579,8 +721,14 @@ async function preloadEventCache() {
   sessionCacheRange = { start, end };
   isInitialLoadComplete = true;
   
+  document.getElementById("syncBanner").style.display = "none";
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
-  
+    isAppSyncing = false;
+  renderAccounts(lastLoadedAccounts);
+  console.log("✅ SYNC MODE OFF");  
+  // ✅ ADD THIS LINE (CRITICAL — ONLY PLACE IT NEEDS TO RUN)
+  updateCustomRangeTooltip();
+
   console.log(
     "LATEST EVENT DATE:",
     sessionEventCache.reduce((max, ev) => {
@@ -621,8 +769,6 @@ function initCalendar(el) {
 
     // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
     eventsSet: () => {
-      console.log("✅ eventsSet fired");
-
       // ✅ ONLY initialize once — NEVER override user selection
       if (!selectedDate) {
         selectedDate = toDayString(calendar.getDate());
@@ -635,8 +781,6 @@ function initCalendar(el) {
     },
     
     datesSet: () => {
-      console.log("📅 datesSet fired");
-
       selectedDate = toDayString(calendar.getDate());
 
       updateWeekView();
@@ -871,13 +1015,33 @@ function getAccountColor(provider, index) {
 }
 
 function openCustomRange() {
-  const days = prompt("Enter custom range (days):");
 
-  if (!days || isNaN(days)) return;
+  if (!sessionCacheRange.start || !sessionCacheRange.end) {
+    alert("Range not loaded yet");
+    return;
+  }
 
-  currentRangeDays = parseInt(days);
+  const start = sessionCacheRange.start;
+  const end = sessionCacheRange.end;
 
-  console.log("📅 Custom range:", currentRangeDays);
+  const format = (d) =>
+    d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+
+  const message = `
+📦 Event Cache Range
+
+From: ${format(start)}
+To:   ${format(end)}
+
+✅ This is the full dataset loaded for this session
+(used for client-side filtering)
+  `;
+
+  alert(message);
 }
 
 /* =====================================================
@@ -1007,7 +1171,7 @@ function renderAccounts(accounts) {
 
     const index = providerCounts[provider]++;
 
-    const key = `${provider}:${email}`.replace(/\s+/g, "");
+    const key = `${provider}:${(email || "").toLowerCase().trim()}`;
 
     const color = getFinalAccountColor(key, provider, index);
 
@@ -1055,89 +1219,223 @@ function renderAccounts(accounts) {
     container.appendChild(title);
     row.appendChild(container);
 
-    const picker = document.createElement("input");
-    picker.type = "color";
-    picker.value = color;
 
     /**************************************************************
-     * ✅ COLOR PICKER — CLEAN MINIMAL STYLE
+     * ✅ REPLACE NATIVE PICKER WITH GRID PICKER (SURGICAL)
      **************************************************************/
-    picker.style.appearance = "none";
-    picker.style.border = "1px solid #222";
-    picker.style.boxShadow = "none";
-    picker.style.borderRadius = "50%";
+    const pickerWrap = document.createElement("div");
 
-    picker.style.width = "18px";
-    picker.style.height = "18px";
-    picker.style.padding = "0";
-    picker.style.marginLeft = "6px";
-    picker.style.cursor = "pointer";
-
-    // ✅ base scale (prevents jump)
-    picker.style.transform = "scale(0.75)";
-
-    // ✅ LET NATIVE COLOR RENDER CLEANLY
-    picker.style.backgroundColor = "transparent";
+    pickerWrap.style.display = "grid";
+    pickerWrap.style.gridTemplateColumns = "repeat(6, 12px)";
+    pickerWrap.style.gap = "3px";
+    pickerWrap.style.marginLeft = "8px";
+    pickerWrap.style.alignItems = "center";
 
     /**************************************************************
-     * ✅ HOVER FEEDBACK (PREMIUM FEEL)
+     * ✅ COLOR PALETTE (TUNED FOR VISIBILITY)
      **************************************************************/
-    picker.onmouseenter = () => {
-      picker.style.transform = "scale(0.9)";
+    const palette = [
+      "#000000","#444","#888","#ccc","#eee","#fff",
+      "#ff0000","#ff9900","#ffff00","#00cc00","#00cccc","#0066ff",
+      "#cc0000","#cc6600","#cccc00","#009900","#009999","#000099"
+    ];
+
+    /**************************************************************
+     * ✅ BUILD SWATCHES
+     **************************************************************/
+    palette.forEach(col => {
+
+      const swatch = document.createElement("div");
+
+      swatch.style.width = "12px";
+      swatch.style.height = "12px";
+      swatch.style.background = col;
+      swatch.style.border = "1px solid rgba(0,0,0,0.25)";
+      swatch.style.borderRadius = "2px";
+      swatch.style.cursor = "pointer";
+
+      // ✅ SHOW ACTIVE COLOR
+      if (col === color) {
+        swatch.style.outline = "2px solid #000";
+      }
+
+      /**************************************************************
+       * ✅ CLICK → APPLY COLOR (USES YOUR ENGINE)
+       **************************************************************/
+      swatch.onclick = (e) => {
+        e.stopPropagation();
+
+        accountColorOverrides[key] = col;
+        accountColorMap[key] = col;
+
+        saveColorOverrides(accountColorOverrides);
+
+        // ✅ Update chip immediately
+        applyChipStyle(row, key, true);
+
+        const badge = row.querySelector(".account-badge");
+        if (badge) badge.style.background = col;
+
+        // ✅ Force calendar repaint (existing pattern)
+        calendar.refetchEvents();
+        updateWeekView();
+
+        // ✅ Refresh selection UI
+        pickerWrap.querySelectorAll("div").forEach(el => {
+          el.style.outline = "";
+        });
+        swatch.style.outline = "2px solid #000";
+      };
+
+      swatch.onmouseenter = () => {
+        swatch.style.transform = "scale(1.15)";
+      };
+
+      swatch.onmouseleave = () => {
+        swatch.style.transform = "scale(1)";
+      };
+
+      /**************************************************************
+       * ✅ RIGHT CLICK → RESET (POWER USER FEATURE)
+       **************************************************************/
+      swatch.oncontextmenu = (e) => {
+        e.preventDefault();
+
+        delete accountColorOverrides[key];
+
+        const defaultColor = getAccountColor(provider, index);
+        accountColorMap[key] = defaultColor;
+
+        saveColorOverrides(accountColorOverrides);
+
+        applyChipStyle(row, key, true);
+        calendar.refetchEvents();
+        updateWeekView();
+
+        pickerWrap.querySelectorAll("div").forEach(el => {
+          el.style.outline = "";
+        });
+      };
+
+      pickerWrap.appendChild(swatch);
+    });
+
+    /**************************************************************
+     * ✅ ADD TO ROW (EXACT SAME POSITION AS OLD PICKER)
+     * ✅ SMALL COLOR DOT (PRIMARY UI)
+     **************************************************************/
+    const colorDot = document.createElement("div");
+    
+    /**************************************************************
+     * ✅ APPLY SYNC STATUS VISUAL
+     **************************************************************/
+    let status = accountStatusMap[key] || "ok";
+
+    // ✅ GLOBAL OVERRIDE WHEN SYNCING
+    if (isAppSyncing) {
+      status = "syncing";
+      colorDot.style.animation = "pulse 1s infinite";
+    }
+
+    console.log("🎯 FINAL STATUS:", key, status);
+
+    // ✅ BASE DEFAULT (always set FIRST)
+    colorDot.style.boxShadow = "0 0 0 2px transparent";
+    colorDot.title = "Change color";
+
+    // ✅ STATUS-DRIVEN OVERRIDE
+    if (status.toLowerCase() === "error") {
+
+      colorDot.style.boxShadow = "0 0 0 4px #ef4444";
+      colorDot.title = "⚠ Reconnect required";
+
+      // ✅ RECONNECT CLICK (ONLY FOR ERROR)
+      colorDot.onclick = (e) => {
+        e.stopPropagation();
+
+        const [provider, email] = key.split(":");
+        const token = getTokenOrFail();  // ✅ REQUIRED
+
+        if (provider === "google") {
+          window.location.href =
+            `/auth/google/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
+
+        } else if (provider === "microsoft") {
+          window.location.href =
+            `/ms/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
+        }
+      };
+
+    } else if (status.toLowerCase() === "syncing") {
+
+      colorDot.style.boxShadow = "0 0 0 2px #f59e0b";
+      colorDot.title = "⏳ Syncing accounts...";
+
+    } else {
+      // ✅ NORMAL CLICK (ONLY IF NOT ERROR)
+      colorDot.onclick = (e) => {
+        e.stopPropagation();
+
+        pickerWrap.style.display =
+          pickerWrap.style.display === "none" ? "grid" : "none";
+      };
+    }
+
+    // ✅ ALWAYS APPLY VISUAL BASE LAST
+    colorDot.style.width = "10px";
+    colorDot.style.height = "10px";
+    colorDot.style.borderRadius = "50%";
+    colorDot.style.background = color;
+    colorDot.style.marginLeft = "6px";
+    colorDot.style.cursor = "pointer";
+    colorDot.style.border = "1px solid rgba(0,0,0,0.4)";
+
+    /**************************************************************
+     * ✅ HIDDEN PALETTE (POPUP STYLE)
+     **************************************************************/
+    pickerWrap.style.position = "absolute";
+    pickerWrap.style.background = "#fff";
+    pickerWrap.style.padding = "5px";
+    pickerWrap.style.border = "1px solid #ccc";
+    pickerWrap.style.borderRadius = "6px";
+    pickerWrap.style.display = "none";
+    pickerWrap.style.zIndex = "999";
+
+    /**************************************************************
+     * ✅ TOGGLE PALETTE
+     **************************************************************/
+    // ✅ ONLY assign click handler if NOT error
+    if (status.toLowerCase() !== "error") {
+      colorDot.onclick = (e) => {
+        e.stopPropagation();
+
+        pickerWrap.style.display =
+          pickerWrap.style.display === "none" ? "grid" : "none";
+      };
+    }
+
+    colorDot.onmouseenter = () => {
+      colorDot.style.transform = "scale(1.2)";
     };
 
-    picker.onmouseleave = () => {
-      picker.style.transform = "scale(0.75)";
+    colorDot.onmouseleave = () => {
+      colorDot.style.transform = "scale(1)";
     };
+    ``
 
-    picker.onclick = (e) => e.stopPropagation();
+    /**************************************************************
+     * ✅ CLOSE WHEN CLICKING OUTSIDE
+     **************************************************************/
+    document.addEventListener("click", () => {
+      pickerWrap.style.display = "none";
+    });
 
-    picker.oninput = (e) => {
-      const newColor = e.target.value;
 
-      // ✅ update your map (keep what you already had)
-      accountColorOverrides[key] = newColor;
-      saveColorOverrides(accountColorOverrides);
-      accountColorMap[key] = newColor;
-
-      // ✅ update chip UI (keep this)
-      applyChipStyle(row, key, true);
-
-      const badge = row.querySelector(".account-badge");
-      if (badge) badge.style.background = newColor;
-
-      // ✅ keep your week/day updates
-      updateWeekView();
-
-      // ✅ ✅ THIS IS THE ONLY LINE THAT FIXES CALENDAR
-      calendar.refetchEvents();
-    };
-
-    picker.oncontextmenu = (e) => {
-      e.preventDefault();
-
-      delete accountColorOverrides[key];
-
-      // ✅ rebuild default
-      accountColorMap[key] = getAccountColor(provider, index);
-
-      // ✅ pull from system
-      const newColor = getColorByKey(key, provider);
-
-      // ✅ apply UI
-      applyChipStyle(row, key, true);
-
-      const badge = row.querySelector(".account-badge");
-      if (badge) badge.style.background = newColor;
-
-      picker.style.backgroundColor = "transparent";
-
-      saveColorOverrides(accountColorOverrides);
-
-      updateWeekView();
-    };
-
-    row.appendChild(picker);
+    /**************************************************************
+     * ✅ APPEND BOTH
+     **************************************************************/
+    row.appendChild(colorDot);
+    row.appendChild(pickerWrap);
 
     applyChipStyle(row, key, true); // default all active
 
@@ -1191,20 +1489,6 @@ function updateChipSelectionUI() {
 
 //✅ ✅ DAY DETAILS FUNCTION
 function updateDayDetails() {
-
-  console.log("------ DAY DEBUG ------");
-  console.log("Selected Date:", selectedDate);
-  console.log("Total Cache Size:", sessionEventCache.length);
-
-  
-  console.log(
-    "LATEST 10 EVENTS:",
-    sessionEventCache
-      .slice(-10)
-      .map(e => [e.title, e.start])
-  );
-
-
   if (!selectedDate) return;  // ✅ guard
   const titleEl = document.getElementById("selectedDateTitle");
   const listEl = document.getElementById("dayEventsList");
@@ -1265,14 +1549,6 @@ function updateDayDetails() {
   }
 
   events.forEach(ev => {
-    
-    if (ev.title.includes("850/Day")) {
-      console.log("🧠 APPLE EVENT CHECK", {
-        raw: ev.start,
-        local: new Date(ev.start).toString()
-      });
-    }
-
     const li = document.createElement("li");
     
     const time = ev.start
@@ -1309,8 +1585,6 @@ function updateDayDetails() {
     row.style.transition = "background 0.15s ease";
     row.style.padding = "3px 6px";
     row.style.borderRadius = "6px";
-
-    console.log("MATCHED EVENTS:", events.map(e => e.title));
 
     // ✅ NEW ICON
     const icon = createSourceIcon(ev.extendedProps.source);
@@ -1431,9 +1705,6 @@ function updateWeekView() {
       evEndDay >= weekStart
     );
   });
-
-  console.log("🧪 EVENTS AFTER FILTER:", weekEvents.length);
-  console.log("🧪 SELECTED DATE:", selectedDate);
 
   container.innerHTML = "";
 
@@ -1636,11 +1907,30 @@ function connectOutlook() {
  **************************************************************/
 async function syncNow() {
   try {
-    await apiFetch("/calendar/sync", { method: "POST" });
-
-    alert("✅ Sync complete");
-
+    const res = await apiFetch("/calendar/sync", { method: "POST" });
+    const data = await res.json();
+    console.log("✅ Sync result:", data);
+    /**************************************************************
+     * ✅ CAPTURE ACCOUNT STATUS (NEW)
+     **************************************************************/
+    if (data.results) {
+      data.results.forEach(r => {
+        accountStatusMap[r.key] = r.status;
+      });
+    }
+    /**************************************************************
+     * ✅ REMOVE ALERT → REPLACE WITH UI STATE
+     **************************************************************/
+    console.log("✅ Sync complete");
+    /**************************************************************
+     * ✅ MARK CACHE FOR REFRESH (CRITICAL)
+     **************************************************************/
+    needsCacheRefresh = true;
+    /**************************************************************
+     * ✅ REFRESH UI + CHIPS
+     **************************************************************/
     smartRefresh({ reason: "event_saved" });
+    renderAccounts(lastLoadedAccounts);
 
   } catch (err) {
     console.error("❌ Sync failed:", err);
@@ -1898,6 +2188,15 @@ function bindUIEvents() {
       openCreateModal();
     });
   }
+
+  /**************************************************************
+   * ✅ OPEN ACCOUNTS UI (SUBTLE NAV)
+   **************************************************************/
+  document.getElementById("accountsBtn")
+    ?.addEventListener("click", () => {
+
+      window.location.href = "/accounts/ui";
+    });
 
   // ✅ OAuth buttons
   document.getElementById("googleBtn")

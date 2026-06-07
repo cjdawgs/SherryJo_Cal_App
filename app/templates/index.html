@@ -27,7 +27,22 @@
 
     <div class="appTitle">SherryJo Calendar</div>
 
-    <div class="authContainer">
+      <div class="authContainer">
+            <div id="syncBanner" style="
+        position: fixed;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #f59e0b;
+        color: white;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 13px;
+        display: none;
+        z-index: 9999;
+      ">
+        ⏳ Syncing calendar...
+      </div>
 
       <!-- ✅ CONNECT BUTTONS -->
       <div class="authButtons">
@@ -71,9 +86,33 @@
         <button id="cancelEventBtn">Cancel</button>
         -->
 
+        <!-- ✅ ACCOUNTS BUTTON (SUBTLE ENTRY POINT) -->
+        <button id="accountsBtn" title="Manage connected accounts"
+          style="
+            margin-left:6px;
+            font-size:14px;
+            padding:4px 8px;
+            opacity:0.7;
+            cursor:pointer;
+          ">
+          ⚙
+        </button>
 
-        <button id="syncBtn">🔄 Sync</button>
-        <button id="logoutBtn">Logout</button>
+        <!-- ✅ SYNC (SUBTLE ICON) -->
+        <button id="syncBtn" title="Sync calendars">
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path fill="currentColor"
+              d="M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.75-6.97z"/>
+          </svg>
+        </button>
+
+        <!-- ✅ LOGOUT (SUBTLE ICON) -->
+        <button id="logoutBtn" title="Logout">
+          <svg width="14" height="14" viewBox="0 0 24 24">
+            <path fill="currentColor"
+              d="M16 17l5-5-5-5v3H9v4h7v3zM4 19h8v2H4a2 2 0 01-2-2V5a2 2 0 012-2h8v2H4v14z"/>
+          </svg>
+        </button>
 
       </div>
 
