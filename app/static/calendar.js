@@ -4,13 +4,13 @@ console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));
 /**************************************************************
  * ✅ TOKEN ENGINE (SINGLE SOURCE OF TRUTH)
  **************************************************************/
-function getTokenOrFail() {
+function getTokenSafe() {
   const token = localStorage.getItem("token");
 
   if (!token) {
-    console.error("❌ NO TOKEN — redirecting to login");
+    console.warn("⚠️ No token → redirecting to login");
     window.location.replace("/login");
-    throw new Error("No token");
+    return null;
   }
 
   return token;
@@ -20,33 +20,43 @@ function getTokenOrFail() {
  * ✅ AUTH GUARD (SAFE VERSION + NO STALE TOKEN)
  ****************************+**********************************/
 if (window.location.pathname.includes("calendar-ui")) {
-
-  // ✅ ALWAYS READ FRESH TOKEN (NO GLOBAL CACHE)
-  getTokenOrFail();
-  
+  getTokenSafe();
 }
+
 
 /**************************************************************
  * ✅ CENTRALIZED API FETCH (TOKEN SAFE)
  **************************************************************/
 async function apiFetch(url, options = {}) {
+  const authToken = getTokenSafe();
+  // ✅ STOP EARLY (NO TOKEN)
+  if (!authToken) return null;
 
-  const authToken = getTokenOrFail();
+  let res;
 
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer " + authToken,
-      ...(options.headers || {})
-    }
-  });
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + authToken,
+        ...(options.headers || {})
+      }
+    });
+  } catch (err) {
+    console.warn("⚠️ Network issue:", err);
+    return null; // ✅ NO CRASH
+  }
 
+  // ✅ HANDLE AUTH CLEANLY
   if (res.status === 401) {
-    console.error("❌ 401 — token invalid or expired");
+    console.warn("⚠️ Session expired → redirect");
+
     localStorage.removeItem("token");
+
     window.location.replace("/login");
-    throw new Error("Unauthorized");
+
+    return null; // ✅ NO THROW
   }
 
   return res;
@@ -56,6 +66,7 @@ async function apiFetch(url, options = {}) {
  * ✅ GLOBAL STATE
  **************************************************************/
 let calendar = null;
+let isAppSyncing = false;
 let editingEventId = null;
 let editingNoteId = null;
 let lastGoodEvents = [];
@@ -156,6 +167,78 @@ function updateEventInCache(updatedEvent) {
  **************************************************************/
 function normalizeKey(provider, email) {
   return `${normalizeProvider(provider)}:${(email || "").toLowerCase().trim()}`;
+}
+/**************************************************************
+ * ✅ IS DATE IN ACTIVE RANGE
+ **************************************************************/
+function isDateInActiveRange(date) {
+
+  if (!calendar) return true;
+
+  const { start, end } = getActiveRangeLabel(currentRangeDays);
+
+  if (!start || !end) return true;
+
+  return date >= start && date <= end;
+}
+
+/**************************************************************
+ * ✅ APPLY RANGE TOOLTIPS (SAFE + REUSABLE)
+ **************************************************************/
+function applyRangeTooltips() {
+
+  document.querySelectorAll(".range-btn").forEach(btn => {
+
+    if (btn.id === "customRange") return;
+
+    const previewDays =
+      btn.id === "monthly" ? 30 :
+      btn.id === "quarterly" ? 90 :
+      btn.id === "semiAnnual" ? 180 :
+      btn.id === "yearly" ? 365 :
+      currentRangeDays;
+
+    const preview = getActiveRangeLabel(previewDays);
+
+    if (preview.label) {
+      btn.title = `Range: ${preview.label}`;
+    }
+  });
+}
+
+
+/**************************************************************
+ * ✅ RANGE CALCULATOR (SINGLE SOURCE OF TRUTH)
+ * ------------------------------------------------------------
+ * DO NOT duplicate logic elsewhere
+ * ALL range UI derives from here
+ **************************************************************/
+function getActiveRangeLabel(days) {
+
+  if (!calendar) {
+    return { start: null, end: null, label: "" };
+  }
+
+  const base = calendar.getDate();
+
+  const start = new Date(base);
+  const end = new Date(base);
+
+  start.setDate(base.getDate() - days);
+  end.setDate(base.getDate() + days);
+
+  const format = d =>
+    d.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+
+  return {
+    start,
+    end,
+    label: `${format(start)} → ${format(end)}`
+  };
 }
 
 /**************************************************************
@@ -517,34 +600,34 @@ function updateCustomRangeTooltip() {
 
   const { start, end } = sessionCacheRange || {};
 
-  // ✅ SAFETY GUARD
+  // ✅ SINGLE formatter (ONLY ONE)
+  const format = (d) =>
+    d
+      ? d.toLocaleDateString(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        })
+      : "N/A";
+
   if (!start || !end) {
-    
     btn.title =
-        `📦 Cached Event Range
+`📦 Cached Event Range
 
-        From: ${format(start)}
-        To:   ${format(end)}
+From: ${format(start)}
+To:   ${format(end)}
 
-        Client-side filtering enabled`;
+Client-side filtering enabled`;
     return;
   }
 
-  // ✅ CLEAN FORMATTER (LOCALIZED)
-  const format = (d) =>
-    d.toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
-
-  // ✅ TOOLTIP TEXT (MULTI-LINE)
   btn.title =
 `Loaded Data Range
 ${format(start)} → ${format(end)}
 
 (Full dataset cached for this session)`;
 }
+
 
 /*
  * ✅ REUSABLE ICON BUILDER (COMPONENT STANDARD)
@@ -670,6 +753,8 @@ async function syncSingleAccount(accountKey) {
       method: "POST"
     });
 
+    if (!res) return;
+
     const data = await res.json();
 
     console.log("✅ Sync result:", data);
@@ -742,14 +827,8 @@ async function init() {
     attempts++;
   }
 
-  if (!localStorage.getItem("token")) {
-    console.warn("❌ Token never became available");
-    window.location.replace("/login");
-    return;
-  }
-
   // ✅ Final validation
-  getTokenOrFail();
+  if (!getTokenSafe()) return;
   await loadAccounts();
   renderAccountsSafe();
 
@@ -765,6 +844,27 @@ async function init() {
 
 
   initCalendar(calendarEl);
+  /**************************************************************
+   * ✅ APPLY TOOLTIPS AFTER CALENDAR READY
+   **************************************************************/
+  setTimeout(() => {
+    applyRangeTooltips();
+  }, 50);
+  
+  /**************************************************************
+   * ✅ INITIAL RANGE DISPLAY (FIRST LOAD)
+   **************************************************************/
+  setTimeout(() => {
+
+    const { label } = getActiveRangeLabel(currentRangeDays);
+
+    const rangeEl = document.getElementById("rangeDisplay");
+
+    if (rangeEl) {
+      rangeEl.textContent = `Showing: ${label}`;
+    }
+
+  }, 0);
 
   // ✅ CRITICAL FIX — ALIGN SELECTED DATE
   selectedDate = toDayString(calendar.getDate());
@@ -806,6 +906,7 @@ async function loadAccounts() {
 
   try {
     const res = await apiFetch("/accounts");
+    if (!res) return [];
 
     if (!res.ok) {
       console.error("API error:", res.status, await res.text());
@@ -853,7 +954,7 @@ function handleOAuthRedirect() {
   if (connected) {
     console.log("✅ Connected:", connected);
     needsCacheRefresh = true;   // ✅ ADD THIS
-    syncSingleAccount(connected + ":" + detectEmailFromState());
+    syncSingleAccount(connected);
 
     // ✅ FORCE CALENDAR REFRESH AFTER AUTH
     setTimeout(() => {
@@ -951,8 +1052,12 @@ async function preloadEventCache() {
   end.setMonth(end.getMonth() + 6);
 
   const res = await apiFetch(
+    
     `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
   );
+
+  if (!res) return;
+
 
   if (!res.ok) throw new Error("API failed");
 
@@ -1080,11 +1185,28 @@ function initCalendar(el) {
     },
     
     datesSet: () => {
+
       selectedDate = toDayString(calendar.getDate());
 
       updateWeekView();
       updateDayDetails();
       highlightSelectedDay(selectedDate);
+
+      /**************************************************************
+       * ✅ NEW: UPDATE RANGE TOOLTIPS ON NAVIGATION
+       **************************************************************/
+      applyRangeTooltips();
+
+      /**************************************************************
+       * ✅ NEW: UPDATE RANGE DISPLAY (STAYS IN SYNC)
+       **************************************************************/
+      const { label } = getActiveRangeLabel(currentRangeDays);
+
+      const rangeEl = document.getElementById("rangeDisplay");
+
+      if (rangeEl) {
+        rangeEl.textContent = `Showing: ${label}`;
+      }
     },
 
     /* =====================================================
@@ -1131,16 +1253,27 @@ function initCalendar(el) {
 
       let clickTimer = null;
 
+      /**************************************************************
+       * ✅ RANGE VISUALIZATION (NEW)
+       **************************************************************/
+      const cellDate = new Date(info.date);
+
+      if (!isDateInActiveRange(cellDate)) {
+        info.el.style.opacity = "0.35";   // ✅ dim out-of-range
+        info.el.style.filter = "grayscale(0.2)";
+      } else {
+        info.el.style.backgroundColor = "rgba(59,130,246,0.08)"; // ✅ subtle blue highlight
+      }
+
+      /**************************************************************
+       * ✅ EXISTING DOUBLE CLICK LOGIC
+       **************************************************************/
       info.el.addEventListener("click", () => {
         if (clickTimer) {
-          // ✅ DOUBLE CLICK detected
           clearTimeout(clickTimer);
           clickTimer = null;
-
-          openCreateModal(info.date); // ONLY here!
-
+          openCreateModal(info.date);
         } else {
-          // ✅ WAIT to see if second click happens
           clickTimer = setTimeout(() => {
             clickTimer = null;
           }, 250);
@@ -1148,7 +1281,7 @@ function initCalendar(el) {
       });
 
     },
-
+    
 
     // ✅ CLICK EVENT → EDIT + UPDATE SIDEBAR
     eventClick: (info) => {
@@ -1172,13 +1305,16 @@ function initCalendar(el) {
      **************************************************/
     eventDrop: async (info) => {
       try {
-        await apiFetch(`/calendar/event/${info.event.id}`, {
+        const res = await apiFetch(`/calendar/event/${info.event.id}`, {
           method: "PUT",
           body: JSON.stringify({
             start_time: info.event.start.toISOString(),
             end_time: info.event.end?.toISOString()
           })
         });
+
+        if (!res) return;
+
       } catch (err) {
         console.error("❌ Drag update failed:", err);
       }
@@ -1955,7 +2091,7 @@ function renderAccounts(accounts) {
       if (status === "error") {
 
         const [provider, email] = key.split(":");
-        const token = getTokenOrFail();
+        const token = getTokenSafe();
 
         if (provider === "google") {
           window.location.href =
@@ -2662,7 +2798,7 @@ function updateWeekView() {
 function connectGoogle() {
 
   // ✅ ALWAYS GET FRESH TOKEN
-  const authToken = getTokenOrFail();
+  const authToken = getTokenSafe();
   window.location.href =
     `/auth/google/login?token=${encodeURIComponent(authToken)}`;
 }
@@ -2671,7 +2807,7 @@ function connectGoogle() {
 // ✅ ✅ NEW: APPLE OAUTH (MATCHES PATTERN)
 // ==================================================
 function connectApple() {
-  const authToken = getTokenOrFail();
+  const authToken = getTokenSafe();
   window.location.href =
     `/auth/apple/login?token=${encodeURIComponent(authToken)}`;
 }
@@ -2679,7 +2815,7 @@ function connectApple() {
 function connectOutlook() {
 
   // ✅ ALWAYS GET FRESH TOKEN
-  const authToken = getTokenOrFail();
+  const authToken = getTokenSafe();
   window.location.href =
     `/ms/login?token=${encodeURIComponent(authToken)}`;
 }
@@ -2728,13 +2864,12 @@ async function syncNow() {
      * ✅ FORCE BROWSER TO PAINT BEFORE BLOCKING
      **************************************************************/
     await new Promise(resolve => requestAnimationFrame(resolve));
-
     const res = await apiFetch("/calendar/sync", { method: "POST" });
+    if (!res) return;
+
     const data = await res.json();
 
     console.log("✅ Sync result:", data);
-
-    
 
     /**************************************************************
      * ✅ SHOW SUCCESS STATE (still syncing visually)
@@ -2919,9 +3054,11 @@ async function saveEvent() {
     : null;
 
   try {
+    let res;
+
     if (editingEventId) {
       // ✅ UPDATE
-      await apiFetch(`/calendar/event/${editingEventId}`, {
+      res = await apiFetch(`/calendar/event/${editingEventId}`, {
         method: "PUT",
         body: JSON.stringify({
           title,
@@ -2931,7 +3068,7 @@ async function saveEvent() {
       });
     } else {
       // ✅ CREATE
-      await apiFetch("/calendar/event", {
+      res = await apiFetch("/calendar/event", {
         method: "POST",
         body: JSON.stringify({
           title,
@@ -2941,19 +3078,8 @@ async function saveEvent() {
       });
     }
 
-    /*  FUTURE USE (DO NOT APPLY YET)
-        STEP 3D.3 — (OPTIONAL BUT STRONG) ENABLE PARTIAL CACHE UPDATE
-        Already created Function updateEventInCache(updatedEvent) 
-        that updates the sessionEventCache and the calendar event directly without refetching all events.
-        
-    updateEventInCache({
-      id: editingEventId,
-      title,
-      start: new Date(startISO),
-      end: new Date(endISO)
-    });
-
-    */
+    // ✅ ✅ SINGLE CHECK (THIS IS THE FIX)
+    if (!res) return;
 
     closeCreateModal();
     smartRefresh({ reason: "event_saved" });
@@ -2973,9 +3099,11 @@ async function deleteEvent() {
   if (!confirmDelete) return;
 
   try {
-    await apiFetch(`/calendar/event/${editingEventId}`, {
+    const res = await apiFetch(`/calendar/event/${editingEventId}`, {
       method: "DELETE"
     });
+
+    if (!res) return;
 
 
     closeCreateModal();
@@ -3008,7 +3136,7 @@ function editNote(eventId, noteId = null) {
 async function saveNoteEditor() {
   const content = document.getElementById("editor").innerHTML;
 
-  await apiFetch("/events/note", {
+  const res = await apiFetch("/events/note", {
     method: "POST",
     body: JSON.stringify({
       event_id: editingEventId,
@@ -3016,6 +3144,9 @@ async function saveNoteEditor() {
       content
     })
   });
+
+  if (!res) return;
+
 
   document.getElementById("noteEditorModal")?.classList.add("hidden");
 
@@ -3137,22 +3268,49 @@ function bindUIEvents() {
 
       btn.classList.add("active");
 
+      /**************************************************************
+       * ✅ CUSTOM BUTTON
+       **************************************************************/
       if (btn.id === "customRange") {
+
         openCustomRange();
+
+        const rangeEl = document.getElementById("rangeDisplay");
+
+        if (rangeEl && sessionCacheRange.start && sessionCacheRange.end) {
+
+          const format = d => d.toLocaleDateString();
+
+          rangeEl.textContent =
+            `Full Range: ${format(sessionCacheRange.start)} → ${format(sessionCacheRange.end)}`;
+        }
+
         return;
       }
 
-      const base = calendar.getDate();
-      const rangeStart = new Date(base);
-      const rangeEnd = new Date(base);
+      /**************************************************************
+       * ✅ RANGE MAPPING
+       **************************************************************/
+      if (btn.id === "monthly") currentRangeDays = 30;
+      else if (btn.id === "quarterly") currentRangeDays = 90;
+      else if (btn.id === "semiAnnual") currentRangeDays = 180;
+      else if (btn.id === "yearly") currentRangeDays = 365;
 
-      rangeEnd.setDate(base.getDate() + currentRangeDays);
+      /**************************************************************
+       * ✅ UPDATE DISPLAY
+       **************************************************************/
+      const { label } = getActiveRangeLabel(currentRangeDays);
 
-      console.log("📅 Range changed:", currentRangeDays);
+      const rangeEl = document.getElementById("rangeDisplay");
+
+      if (rangeEl) {
+        rangeEl.textContent = `Showing: ${label}`;
+      }
+
       applyClientSideFilters();
+      applyRangeTooltips();
 
     });
-
   });
 }
 
