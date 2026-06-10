@@ -2,6 +2,10 @@
 /* =====================================================
 ✅ BASE (GLOBAL)
 ===================================================== */
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont,
@@ -30,16 +34,80 @@ body {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  transition: all 0.15s ease, background-color 0.2s ease, border-color 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease; /* ✅ FIXED */
   gap: 6px;
-  margin: 6px 0;
 }
 
 .accounts .chip.active {
-  opacity: 1;
-  filter: none;
   transform: translateY(-1px);
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+}
+/**************************************************************
+✅ COLOR PICKER — PRO UX
+**************************************************************/
+
+/* ✅ remove ugly native border (Safari fix) */
+.accounts input[type="color"] {
+  border: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* ✅ cleaner circular picker */
+.accounts input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.accounts input[type="color"]::-webkit-color-swatch {
+  border: 1px solid rgba(0,0,0,0.2);
+  border-radius: 50%;
+}
+
+.accounts input[type="color"]:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.accounts .chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  padding: 6px 10px;
+  border-radius: 999px;
+
+  background: #f1f3f4;
+  border: 2px solid transparent;
+
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+
+  opacity: 1;
+  filter: brightness(1) saturate(0.85);
+  transition:
+    transform 0.12s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+ 
+.accounts .chip span {
+  display: flex;
+  align-items: center;
+}
+
+.accounts .chip span:last-child {
+  font-weight: 500;
+  font-size: 13px;
+  color: #333;
+  white-space: nowrap;
+}
+
+
+.accounts .chip:hover {
+  transform: translateY(-1px) scale(1.02);
+  background: #e8eaed;
+  filter: brightness(0.95) saturate(1);
+  cursor: pointer;
 }
 
 /* ✅ FORCE HEADER CONTENT CENTERING */
@@ -50,19 +118,13 @@ body {
 }
 
 .fc-daygrid-event {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
 }
 
 .fc-event-title {
   word-break: break-word !important;
-}
-
-/* ✅ STRONGER VISUAL SEPARATION */
-.fc-event {
-  border-left: 4px solid rgba(0,0,0,0.2);
 }
 
 /* ✅ inner container */
@@ -116,15 +178,21 @@ body {
   margin-top: 2px;       /* ✅ pulls buttons up */
 }
 
-.actionButtons button {
-  border: none;
-  background: transparent;
+
+.actionButtons button.primary {
+  background: #2563eb;
+  color: #fff;
+  border: none; /* ✅ ensures consistent look */
   transition: opacity 0.15s ease, transform 0.1s ease;
 }
 
 .actionButtons button:hover {
   opacity: 1;
   transform: scale(1.05);
+}
+
+.actionButtons button.primary:hover {
+  background: #1d4ed8;
 }
 
 /* =====================================================
@@ -136,85 +204,101 @@ body {
   justify-content: center;
   align-items: center;
   gap: 8px;
-
+  scrollbar-width: none; /* Firefox */
   overflow-x: auto;      /* ✅ allow scroll if needed */
+  scroll-behavior: smooth;
   padding-bottom: 4px;   /* prevents scrollbar clipping */
 }
 
-@keyframes pulse {
-  0%   { transform: scale(1); opacity: 1; }
-  50%  { transform: scale(1.3); opacity: 0.6; }
-  100% { transform: scale(1); opacity: 1; }
+.accounts::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.color-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 
+.color-picker-pop {
+  position: fixed;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  z-index: 10000; /* ✅ above everything */
+  transform: translateZ(0); /* ✅ forces GPU layer */
+}
+
+/*
+@keyframes pulse {
+  0%   { transform: scale(1); opacity: 1; }
+  50%  { transform: scale(1.4); opacity: 0.6; }
+  100% { transform: scale(1); opacity: 1; }
+}
+*/
+
+/* =====================================================
+✅ CHIP SYNCING STATE (PRIMARY UX SIGNAL)
+===================================================== */
+/* ✅ CHIP SPINNER (GOOGLE-STYLE) */
+.chip-success {
+  font-size: 12px;
+  margin-right: 4px;
+}
+
+.chip-error {
+  font-size: 12px;
+  margin-right: 4px;
+  cursor: pointer;
+}
+
+.chip-spinner {
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  border: 2.5px solid rgba(0,0,0,0.2);
+  border-top-color: rgba(0,0,0,0.6);
+
+  border-radius: 50%;
+
+  animation: chipSpin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes chipSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chip {
+  backface-visibility: hidden;
+}
+
+
+.chip.syncing {
+  /*
+  will-change: transform, opacity;
+  animation: chipPulse 1s infinite;
+  */
+  cursor: wait;
+}
+
+@keyframes chipPulse {
+  0%   { transform: scale(1) translateY(0); opacity: 1; }
+  50%  { transform: scale(1.05) translateY(-1px); opacity: 0.7; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+/*
+.accounts .chip.syncing:hover {
+  animation-play-state: paused;
+  transform: none;
+}
+
+*/
 /* ✅ hidden when no accounts */
 .hidden {
   display: none;
-}
-
-/**************************************************************
-✅ COLOR PICKER — PRO UX
-**************************************************************/
-
-/* ✅ remove ugly native border (Safari fix) */
-.accounts input[type="color"] {
-  border: none;
-  background: transparent;
-  padding: 0;
-  border-radius: 50%;
-}
-
-/* ✅ cleaner circular picker */
-.accounts input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.accounts input[type="color"]::-webkit-color-swatch {
-  border: 1px solid rgba(0,0,0,0.2);
-  border-radius: 50%;
-}
-
-.accounts input[type="color"]:hover {
-  opacity: 1;
-  transform: scale(1.1);
-}
-
-.accounts .chip {
-  opacity: 0.45;
-  filter: saturate(0.7);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;   /* ✅ bigger vertical presence */
-  border-radius: 999px;
-  background: #f1f3f4;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-  font-size: 12px;
-  line-height: 1;
-  max-width: none;   /* ✅ REMOVE truncation */
-  overflow: visible;
-  text-overflow: unset;
-  white-space: nowrap;
-  transition: all 0.15s ease, border-color 0.15s ease;
-}
-
-.accounts .chip span {
-  display: flex;
-  align-items: center;
-}
-
-.accounts .chip span:last-child {
-  font-weight: 500;
-  font-size: 13px;
-  color: #333;
-  white-space: nowrap;
-}
-
-.accounts .chip:hover {
-  background: #e8eaed;
-  opacity: 0.75;
-  cursor: pointer;
 }
 
 /* =====================================================
@@ -362,8 +446,6 @@ body {
   border-bottom: 1px solid #eee;
 }
 
-
-
 /* =====================================================
 ✅ BUTTONS (CONSISTENT UI)
 ===================================================== */
@@ -375,8 +457,7 @@ button {
   background-color: #f5f5f5;
   cursor: pointer;
   font-size: 13px;
-
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
 button:hover {
@@ -387,8 +468,15 @@ button:active {
   background-color: #d0d0d0;
 }
 
+button.primary {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+}
 
-
+button.primary:hover {
+  background: #1d4ed8;
+}
 /* =====================================================
 ✅ FULLCALENDAR CLEANUP
 ===================================================== */
@@ -397,8 +485,10 @@ button:active {
   width: 100%;
 }
 
+/* ✅ STRONGER VISUAL SEPARATION */
 .fc-event {
   font-size: 12px;
+  border-left: 4px solid rgba(0,0,0,0.2) !important;
 }
 
 
@@ -446,9 +536,11 @@ button:active {
   top: 25%;
   left: 50%;
 
-  transform: translate(-50%, -20px);  /* ✅ start slightly above */
+  transform: translate(-50%, -20px) translateZ(0); /* ✅ start slightly above */
+  
+  will-change: transform, opacity;
+  background: #fff;
 
-  background: white;
   padding: 20px;
   border-radius: 10px;
 
@@ -460,14 +552,15 @@ button:active {
   opacity: 0;                /* ✅ hidden by default */
   pointer-events: none;
 
-  transition: all 0.2s ease;
+ transition: opacity 0.2s ease, transform 0.2s ease;
 
   z-index: 1000;
 }
 
 /* ✅ SHOW MODAL (animation happens here) */
 .modal.show {
-  transform: translate(-50%, 0);  /* slides downward */
+  transform: translate(-50%, 0) translateZ(0);
+  /* slides downward */
   opacity: 1;
   pointer-events: auto;
 }

@@ -196,22 +196,48 @@ class GoogleCalendarService:
             print("⚠️ Calendar list failed — falling back to direct calendars")
 
         # ✅ ALWAYS include these (critical)
-        calendar_ids = ["primary", account_email]
+        calendar_ids = ["primary"]
 
-        # ✅ add any others if available
+        if account_email and account_email != "primary":
+            calendar_ids.append(account_email.lower())
+
+        #/**************************************************************
+        #* ✅ HARD FILTER SYSTEM CALENDARS (CRITICAL FIX)
+        #* Prevents Google holiday + system calendar failures
+        #**************************************************************/
         for c in calendars:
-            cid = c.get("id")
-            if cid and cid not in calendar_ids:
-                calendar_ids.append(cid)
+            cid = (c.get("id") or "").lower()
 
+            if not cid:
+                continue
+
+            # ✅ BLOCK ALL SYSTEM CALENDARS
+            if (
+                "holiday" in cid or
+                "@group.v.calendar.google.com" in cid or
+                "#" in cid   # ✅ catches regional calendars like en.usa#
+            ):
+                print(f"⏭ Skipping system calendar at source: {cid}")
+                continue
+
+            if cid not in calendar_ids:
+                calendar_ids.append(cid)        
+                
         print("🧪 CALENDAR IDS USED:", calendar_ids)
-
-
 
         all_events = []
 
         # ✅ STEP 2: FETCH EVENTS FROM EACH CALENDAR
         for cal_id in calendar_ids:
+            cid = (cal_id or "").lower()
+
+            if (
+                "holiday" in cid or
+                "@group.v.calendar.google.com" in cid or
+                "#" in cid
+            ):
+                print(f"⏭ Skipping bad calendar at request time: {cid}")
+                continue
 
             print(f"📆 CALENDAR ID ({account_email}):", cal_id)
             url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
@@ -224,7 +250,13 @@ class GoogleCalendarService:
                 )
 
             if response.status_code != 200:
-                print("❌ Failed:", cal_id)
+                print(f"❌ Failed ({response.status_code}): {cal_id}")
+
+                try:
+                    print("↳ Response:", response.text[:200])
+                except:
+                    pass
+
                 continue
 
             items = response.json().get("items", [])

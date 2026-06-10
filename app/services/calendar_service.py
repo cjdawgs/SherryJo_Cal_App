@@ -7,9 +7,11 @@ from app.routers import events
 from app.services.graph_client import GraphClient
 from app.services.google_calendar_service import GoogleCalendarService
 from app.models import Event
+from app.services.external_calendar_service import ExternalCalendarService
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
-    ensure_valid_token
+    ensure_valid_token,
+    safe_commit
 )
 import pytz
 
@@ -188,6 +190,7 @@ class CalendarService:
 
         google_events = []
         ms_events = []
+        apple_events = []
 
 
         # ==================================================
@@ -227,6 +230,17 @@ class CalendarService:
 
 
         for acc in accounts:
+            
+            #/**************************************************************
+            #* ✅ SKIP SYSTEM / HOLIDAY CALENDARS (CRITICAL FIX)
+            #* MUST RUN BEFORE ANY TOKEN OR API CALL
+            #**************************************************************/
+            email = (acc.account_email or "").lower()
+
+            if "holiday" in email or "@group.v.calendar.google.com" in email:
+                log_info(f"⏭ Skipping system calendar: {email}")
+                continue
+
 
             print("🧪 ACCOUNT CHECK:",
                 acc.provider,
@@ -240,18 +254,11 @@ class CalendarService:
             token = ensure_valid_token(db, acc)
 
             if not token:
-                print("🚫 Skipping (no token):", acc.account_email)
+                log_error(f"🚫 No token: {acc.account_email}")
 
-                # ✅ FORCE ERROR STATE (keeps UI + backend in sync)
                 acc.status = "error"
-                db.commit()
 
-                continue
-                # ✅ 🔴 THIS IS THE MISSING PIECE
-                if hasattr(acc, "status") and acc.status != "error":
-                    acc.status = "error"
-                    from app.services.multi_account_oauth_service import safe_commit
-                    safe_commit(db)
+                safe_commit(db)
 
                 continue
 
@@ -280,6 +287,19 @@ class CalendarService:
                     added = 0
 
                     for e in events:
+                        #/**************************************************************
+                        #* ✅ FILTER GOOGLE SYSTEM CALENDARS (REAL FIX)
+                        #**************************************************************/
+                        calendar_id = (
+                            e.get("organizer", {}).get("email") or
+                            e.get("creator", {}).get("email") or
+                            ""
+                        ).lower()
+
+                        if "holiday" in calendar_id or "@group.v.calendar.google.com" in calendar_id:
+                            log_debug(f"⏭ Skipping holiday event: {calendar_id}")
+                            continue
+                        
                         start_val = (
                             e.get("start", {}).get("dateTime")
                             or e.get("start", {}).get("date")
@@ -326,7 +346,6 @@ class CalendarService:
                 # ==================================================
                 elif acc.provider == "apple":
 
-                    from app.services.external_calendar_service import ExternalCalendarService
                     events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
                     log_debug(f"Apple raw count: {len(events)}")
                     added = 0
@@ -373,7 +392,7 @@ class CalendarService:
                             e["provider"] = "apple"
                             e["source"] = "apple"
 
-                            google_events.append(e)
+                            apple_events.append(e)
                             added += 1
 
                     log_info(f"   🍎 Apple events in range: {added}")
@@ -494,8 +513,8 @@ class CalendarService:
         # ==================================================
 
         total_google = len([e for e in google_events if e.get("source") == "google"])
-        total_apple  = len([e for e in google_events if e.get("source") == "apple"])
-        total_ms     = len(ms_events)
+        total_apple = len(apple_events)
+        total_ms = len(ms_events)
 
         total = total_google + total_apple + total_ms
 
@@ -512,8 +531,16 @@ class CalendarService:
             for acc in accounts
         }
 
+        
+        #/**************************************************************
+        # ✅ MERGE APPLE INTO GOOGLE PIPE (NORMALIZER EXPECTS 2 LISTS)
+        # Keep normalize() unchanged (low-risk surgery)
+        #*************************************************************/
+        combined_primary = google_events + apple_events
+
         return {
-            "events": self._normalize(google_events, ms_events),
+            "events": self._normalize(combined_primary, ms_events),
+
             "account_status": account_status
         }
 
@@ -522,10 +549,22 @@ class CalendarService:
     # ==================================================
     def sync_all(self, db: Session, user):
 
-        raw_events = self.fetch_all_events(db, user)
+        result = self.fetch_all_events(db, user)
+
+        events = result.get("events", []) if isinstance(result, dict) else []
+
+        if not isinstance(events, list):
+            log_error("❌ Invalid events payload structure")
+            return {"created": 0, "updated": 0}
         created = updated = 0
 
-        for e in raw_events:
+        
+        for e in events:
+
+            if not isinstance(e, dict):
+                log_debug(f"⚠️ Skipping invalid event: {e}")
+                continue
+
             external_id = f"{e['source']}:{e['external_id']}"
 
             start = self._to_utc(e["start"])

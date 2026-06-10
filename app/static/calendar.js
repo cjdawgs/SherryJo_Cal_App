@@ -63,8 +63,25 @@ let providerAccountCounts = {};
 let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
 let needsCacheRefresh = false;
 let lastLoadedAccounts = [];
+let recentlySynced = new Set();
+
 // ✅ GLOBAL SYNC STATE (NEW)
-let isAppSyncing = false;
+
+/**************************************************************
+ * ✅ GOLD STANDARD: PER-ACCOUNT SYNC TRACKER
+ * ------------------------------------------------------------
+ * PURPOSE:
+ * Track which specific accounts are currently syncing
+ *
+ * WHY:
+ * - Eliminates global spinner problem
+ * - Enables independent UI state per account
+ * - Matches real multi-account architecture
+ *
+ * STRUCTURE:
+ * Set<string> → account_key
+ **************************************************************/
+let syncingAccounts = new Set();
 
 /**************************************************************
  * ✅ ACCOUNT SYNC STATUS MAP
@@ -137,6 +154,197 @@ function updateEventInCache(updatedEvent) {
 /**************************************************************
  * ✅ HELPERS
  **************************************************************/
+function normalizeKey(provider, email) {
+  return `${normalizeProvider(provider)}:${(email || "").toLowerCase().trim()}`;
+}
+
+/**************************************************************
+ * ✅ GOLD STANDARD: CONTRAST ENGINE (WCAG SAFE)
+ * ------------------------------------------------------------
+ * PURPOSE:
+ * Ensure text is ALWAYS readable against ANY background color
+ *
+ * RULE:
+ * ALWAYS use this instead of hardcoded "#fff" or "#222"
+ *
+ * WHY:
+ * - human perception ≠ raw RGB
+ * - prevents unreadable text on vibrant colors
+ * - matches modern design systems (Google, Apple, Microsoft)
+ **************************************************************/
+function normalizeColorHarmony(hex) {
+
+  // ✅ round color to softer palette bands
+  const num = parseInt(hex.replace("#", ""), 16);
+
+  let r = (num >> 16) & 0xff;
+  let g = (num >> 8) & 0xff;
+  let b = num & 0xff;
+
+  // ✅ clamp extremes (removes neon harshness)
+  r = Math.min(220, Math.max(60, r));
+  g = Math.min(220, Math.max(60, g));
+  b = Math.min(220, Math.max(60, b));
+
+  return "#" + [r, g, b]
+    .map(x => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+function getLuminance(hex) {
+  const rgb = hex.replace("#", "").match(/.{2}/g)
+    .map(x => parseInt(x, 16) / 255)
+    .map(c => (
+      c <= 0.03928
+        ? c / 12.92
+        : Math.pow((c + 0.055) / 1.055, 2.4)
+    ));
+
+  return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+}
+
+function getBestTextColor(bgHex) {
+
+  if (!bgHex || typeof bgHex !== "string") {
+    return "#000"; // ✅ safe fallback
+  }
+
+  const bgLum = getLuminance(bgHex);
+
+  // ✅ WCAG contrast ratios
+  const whiteContrast = (1.05) / (bgLum + 0.05);
+  const blackContrast = (bgLum + 0.05) / 0.05;
+
+  return whiteContrast > blackContrast ? "#fff" : "#000";
+}
+
+/**************************************************************
+ * ✅ GOLD STANDARD: TOAST SYSTEM
+ * ------------------------------------------------------------
+ * FEATURES:
+ * ✅ non-blocking UX (no alert())
+ * ✅ auto-dismiss
+ * ✅ animated
+ * ✅ reusable
+ *
+ * TYPES:
+ * - success (green)
+ * - error (red)
+ * - neutral (gray)
+ **************************************************************/
+function showToast(message, type = "success") {
+
+  const toast = document.createElement("div");
+
+  toast.textContent = message;
+
+  /**************************************************************
+   * ✅ BASE STYLE
+   **************************************************************/
+  toast.style.position = "fixed";
+  toast.style.bottom = "20px";
+  toast.style.right = "20px";
+  toast.style.padding = "10px 14px";
+  toast.style.borderRadius = "6px";
+  toast.style.color = "#fff";
+  toast.style.fontSize = "13px";
+  toast.style.zIndex = "9999";
+
+  toast.style.boxShadow = "0 4px 10px rgba(0,0,0,0.25)";
+  toast.style.opacity = "0";
+  toast.style.transform = "translateY(10px)";
+  toast.style.transition = "all 0.25s ease";
+
+  /**************************************************************
+   * ✅ TYPE COLORS
+   **************************************************************/
+  if (type === "success") {
+    toast.style.background = "#16a34a";
+  } else if (type === "error") {
+    toast.style.background = "#dc2626";
+  } else {
+    toast.style.background = "#333";
+  }
+
+  document.body.appendChild(toast);
+
+  /**************************************************************
+   * ✅ ANIMATE IN
+   **************************************************************/
+  setTimeout(() => {
+    toast.style.opacity = "1";
+    toast.style.transform = "translateY(0)";
+  }, 10);
+
+  /**************************************************************
+   * ✅ AUTO REMOVE
+   **************************************************************/
+  setTimeout(() => {
+    toast.style.opacity = "0";
+    toast.style.transform = "translateY(10px)";
+    setTimeout(() => toast.remove(), 300);
+  }, 2500);
+}
+
+
+function setSyncBanner(state = "hidden") {
+
+  
+  // 🔕 GLOBAL DISABLE (safe toggle) AKA: HARD KILL SWITCH for that Pulsing Syncing Calendars... Orange banner
+  return;
+
+  const banner = document.getElementById("syncBanner");
+  if (!banner) return;
+
+  /**************************************************************
+   * ✅ RESET FIRST (CRITICAL)
+   **************************************************************/
+  banner.style.animation = "none";
+  banner.style.display = "none";
+  banner.style.background = "";
+  banner.style.color = "";
+
+  banner.style.display = "block";
+  banner.style.position = "fixed";
+  banner.style.top = "calc(var(--header-height, 60px) + 10px)";
+  banner.style.left = "50%";
+  banner.style.transform = "translateX(-50%)";
+  banner.style.padding = "8px 12px";
+  banner.style.borderRadius = "8px";
+  banner.style.fontSize = "13px";
+  banner.style.boxShadow = "0 4px 10px rgba(0,0,0,0.25)";
+  banner.style.zIndex = "9999";
+
+/*  SURGICAL FIX (DO THIS EXACTLY)
+✅ STEP 1 — Disable the ENTIRE SYNCING STATE
+
+  if (state === "syncing") {
+    banner.textContent = "⏳ Syncing calendars...";
+    banner.style.background = "#f59e0b";
+    banner.style.color = "#fff";
+    //banner.style.animation = "pulse 1s infinite";
+  }
+*/
+  if (state === "syncing") {
+    // 🔕 Sync banner disabled during debugging
+    banner.style.display = "none";
+  }
+  else if (state === "success") {
+    banner.textContent = "✅ Sync complete";
+    banner.style.background = "#16a34a";
+    banner.style.color = "#fff";
+
+    setTimeout(() => {
+      banner.style.display = "none";
+    }, 1500);
+  }
+}
+
+//CENTRALIZE RENDERING
+function renderAccountsSafe() {
+  if (!lastLoadedAccounts || !lastLoadedAccounts.length) return;
+  console.trace("🧠 RENDER ACCOUNTS TRIGGERED");
+  renderAccounts(lastLoadedAccounts);
+}
 
 /**************************************************************
  * ✅ NORMALIZE TO LOCAL DAY (CRITICAL FIX)
@@ -427,37 +635,87 @@ function createSourceIcon(source) {
   return icon;
 }
 
+/**************************************************************
+ * ✅ GOLD STANDARD: SINGLE ACCOUNT SYNC ENGINE
+ * ------------------------------------------------------------
+ * BEHAVIOR:
+ * 1. mark account as syncing
+ * 2. re-render UI (instant visual feedback)
+ * 3. perform API call
+ * 4. update status map
+ * 5. remove syncing state
+ * 6. refresh UI safely
+ *
+ * GUARANTEES:
+ * ✅ no stuck states (finally block)
+ * ✅ UI always consistent
+ * ✅ multi-account safe
+ **************************************************************/
 async function syncSingleAccount(accountKey) {
 
   console.log("🔄 Syncing only:", accountKey);
 
-  const res = await apiFetch(`/calendar/sync?account=${accountKey}`, {
-    method: "POST"
-  });
-
-  const data = await res.json();
-
-  console.log("✅ Sync result:", data);
-
   /**************************************************************
-   * ✅ UPDATE STATUS MAP (CRITICAL)
+   * ✅ STEP 1 — MARK THIS ACCOUNT SYNCING
    **************************************************************/
-  if (data.results) {
-    data.results.forEach(r => {
-      accountStatusMap[r.key] = r.status;
+  syncingAccounts.add(accountKey);
+  console.log("✅ ADD SYNC accountKey:", accountKey);
+  
+
+  try {
+    /**************************************************************
+     * ✅ STEP 2 — CALL BACKEND
+     **************************************************************/
+    const res = await apiFetch(`/calendar/sync?account=${accountKey}`, {
+      method: "POST"
     });
+
+    const data = await res.json();
+
+    console.log("✅ Sync result:", data);
+
+    /**************************************************************
+     * ✅ STEP 3 — UPDATE STATUS MAP
+     **************************************************************/
+    if (data.results) {
+      data.results.forEach(r => {
+        accountStatusMap[r.key] = r.status;
+      });
+    }
+
+    /**************************************************************
+     * ✅ STEP 4 — USER FEEDBACK (TOAST)
+     **************************************************************/
+    showToast(`✅ Synced ${accountKey}`, "success");
+
+  } catch (err) {
+
+    console.error("❌ Sync failed:", err);
+
+    showToast(`❌ Sync failed: ${accountKey}`, "error");
+
+  } finally {
+
+    /**************************************************************
+     * ✅ STEP 5 — ALWAYS CLEAN UP STATE
+     * (this prevents stuck "syncing" UI)
+     **************************************************************/
+    syncingAccounts.delete(accountKey);
+    recentlySynced.add(accountKey);
+    renderAccountsSafe();  // ✅ THIS IS THE MISSING PIECE
+
+    setTimeout(() => {
+      recentlySynced.delete(accountKey);
+      renderAccountsSafe();
+    }, 1500);
   }
 
-  // ✅ mark cache dirty
+  /**************************************************************
+   * ✅ STEP 6 — REFRESH DATA
+   **************************************************************/
   needsCacheRefresh = true;
-
   smartRefresh({ reason: "single_account_sync" });
-
-  // ✅ re-render chips with status
-  renderAccounts(lastLoadedAccounts);
 }
-
-
 
 /**************************************************************
  * ✅ INIT APP
@@ -492,8 +750,8 @@ async function init() {
 
   // ✅ Final validation
   getTokenOrFail();
-
   await loadAccounts();
+  renderAccountsSafe();
 
   // ✅ LOAD DATA FIRST (critical) check for Full preload or parial
   if (!sessionEventCache.length || needsCacheRefresh) {
@@ -630,7 +888,11 @@ function applyChipStyle(row, key, isActive) {
   /**************************************************************
    * ✅ TEXT — DARK FOR LIGHT BACKGROUND
    **************************************************************/
-  row.style.color = "#222";
+  /**************************************************************
+   * ✅ DYNAMIC TEXT CONTRAST (REPLACES HARDCODE)
+   **************************************************************/
+  row.style.color = getBestTextColor(softBg);
+  //row.style.color = "#222";
 
   // ✅ CLEAN CHIP LOOK
   row.style.borderRadius = "999px";
@@ -657,19 +919,36 @@ function applyChipStyle(row, key, isActive) {
 async function preloadEventCache() {
   console.log("🧠 PRELOADING CACHE");
   isAppSyncing = true;
-  renderAccounts(lastLoadedAccounts);
+  
   console.log("🟡 SYNC MODE ON");
-  document.getElementById("syncBanner").style.display = "block";
+  /****************************************************************
+   * ✅ FORCE SYNC STATE FOR DOTS DURING PRELOAD
+   ****************************************************************/
+  syncingAccounts.clear();
+  lastLoadedAccounts.forEach(acc => {
+    const provider = normalizeProvider(acc.provider || "other");
+    const email = (acc.account_email || "").toLowerCase().trim();
+    if (!email) return;
 
+    const key = normalizeKey(provider, email);
 
+    syncingAccounts.add(key);
+
+    console.log("✅ PRELOAD SYNC KEY:", key);
+  });
+
+  /**************************************************************
+   ✅ ADD THIS LINE RIGHT HERE
+  **************************************************************/
+  renderAccountsSafe();
+
+  //setSyncBanner("syncing");
   const now = new Date();
   const start = new Date(now);
   const end = new Date(now);
-
   
   start.setMonth(start.getMonth() - 6);
   end.setMonth(end.getMonth() + 6);
-
 
   const res = await apiFetch(
     `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
@@ -698,8 +977,12 @@ async function preloadEventCache() {
     let account = ev.account_email || ev.account || "";
     account = account.toLowerCase().trim();
 
-    const account_key = `${provider}:${account}`;
+    const normalizedAccount = (account || "")
+      .toLowerCase()
+      .trim();
 
+    const account_key = normalizeKey(provider, account);
+    
     const color = getColorByKey(account_key, provider);
 
     return {
@@ -721,11 +1004,14 @@ async function preloadEventCache() {
   sessionCacheRange = { start, end };
   isInitialLoadComplete = true;
   
-  document.getElementById("syncBanner").style.display = "none";
+  //setSyncBanner("success");
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
     isAppSyncing = false;
-  renderAccounts(lastLoadedAccounts);
+  
   console.log("✅ SYNC MODE OFF");  
+  syncingAccounts.clear();
+  console.log("🧼 CLEARED syncingAccounts:", syncingAccounts);
+  renderAccountsSafe();
   // ✅ ADD THIS LINE (CRITICAL — ONLY PLACE IT NEEDS TO RUN)
   updateCustomRangeTooltip();
 
@@ -759,9 +1045,22 @@ function initCalendar(el) {
       const viewStart = normalizeToLocalDay(fetchInfo.start);
       const viewEnd   = normalizeToLocalDay(fetchInfo.end);   
       const visibleEvents = sessionEventCache.filter(ev => {
-        const evDay = normalizeToLocalDay(ev.start);
-        return evDay >= viewStart && evDay < viewEnd;
-      });
+
+      if (!ev.start) return false;
+
+      const evDay = normalizeToLocalDay(ev.start);
+
+      const inRange =
+        evDay >= viewStart && evDay < viewEnd;
+
+      const key = ev.extendedProps?.account_key;
+
+      const matchesAccount =
+        key === "local:local" ||
+        activeAccountFilters.has(key);
+
+      return inRange && matchesAccount;
+    });
 
 
       successCallback(visibleEvents);
@@ -901,7 +1200,11 @@ function initCalendar(el) {
       );
 
       container.style.backgroundColor = color;
-      container.style.color = "#222";
+
+      /**************************************************************
+       * ✅ APPLY CONTRAST TEXT (CRITICAL FIX)
+       **************************************************************/
+      container.style.color = getBestTextColor(color);
 
       container.style.display = "flex";
       container.style.alignItems = "center";
@@ -1049,64 +1352,31 @@ To:   ${format(end)}
 Single source of truth for ALL client-side filtering
 ===================================================== */
 function applyClientSideFilters() {
-  // ✅ Use session cache (not calendar events)
   if (!calendar) return;
-
-  // ✅ ALWAYS RESET FIRST (prevents sticky hidden events)
-  calendar.getEvents().forEach(ev => {
-    ev.setProp("display", "auto");
-  });
-
-  const view = calendar.view;
-
-  // ✅ use visible calendar range ONLY (no custom math)
-  let viewStart, viewEnd;
-
-  const base = calendar.getDate();
-
-  viewStart = new Date(base);
-  viewEnd = new Date(base);
-
-  viewStart.setHours(0,0,0,0);
-  viewEnd.setHours(23,59,59,999);
-
-  viewEnd.setDate(viewEnd.getDate() + currentRangeDays);
-
-  const allEvents = calendar.getEvents();
 
   console.log("ACTIVE FILTERS:", [...activeAccountFilters]);
 
-  allEvents.forEach(ev => {
+  /**************************************************************
+   * ✅ JUST REFETCH EVENTS (THEY ARE NOW FILTERED AT SOURCE)
+   **************************************************************/
+  calendar.refetchEvents();
 
-    if (!ev.start) return;
-
-    const key = ev.extendedProps?.account_key;
-    
-    const evDay = normalizeToLocalDay(ev.start);
-    const evDate = evDay;  // ✅ REQUIRED
-
-    const passesAccount =
-      key === "local:local" || activeAccountFilters.has(key);
-
-    const passesRange =
-      evDate >= viewStart && evDate <= viewEnd;
-
-    if (passesAccount && passesRange) {
-      ev.setProp("display", "auto");
-    } else {
-      ev.setProp("display", "none");
-    }
-  });
-
-  // ✅ KEEP UI IN SYNC
   updateDayDetails();
   updateWeekView();
 }
+
 
 /* =====================================================
 ✅ ACCOUNT LIST + COLOR MAP BUILDER (WITH HIDE SUPPORT)
 ===================================================== */
 function renderAccounts(accounts) {
+  
+  /*
+  if (syncingAccounts.size > 0) {
+    setSyncBanner("syncing");
+  }
+  */
+
   providerAccountCounts = {};
   const el = document.getElementById("accounts");
   if (!el) return;
@@ -1171,7 +1441,7 @@ function renderAccounts(accounts) {
 
     const index = providerCounts[provider]++;
 
-    const key = `${provider}:${(email || "").toLowerCase().trim()}`;
+    const key = normalizeKey(provider, email);
 
     const color = getFinalAccountColor(key, provider, index);
 
@@ -1201,8 +1471,13 @@ function renderAccounts(accounts) {
       // ✅ SINGLE SOURCE (NO DRIFT)
       const baseColor = getColorByKey(key, provider);
       badge.style.background = baseColor;
+      
+      /**************************************************************
+       * ✅ CONTRAST-SAFE BADGE TEXT
+       **************************************************************/
+      badge.style.color = getBestTextColor(baseColor);
 
-      badge.style.color = "#fff";
+      //badge.style.color = "#fff";
       badge.style.border = "none";
       badge.style.fontSize = "10px";
       badge.style.fontWeight = "bold";
@@ -1212,6 +1487,9 @@ function renderAccounts(accounts) {
 
       container.appendChild(badge);
     }
+
+    //✅ INSERT DEBUG LOG RIGHT HERE:
+    console.log("🔍 CHIP STATE:", key, syncingAccounts.has(key)); // ✅ ADD THIS
 
     const title = document.createElement("span");
     title.textContent = `${provider}: ${email.split("@")[0]}`;
@@ -1225,194 +1503,600 @@ function renderAccounts(accounts) {
      **************************************************************/
     const pickerWrap = document.createElement("div");
 
-    pickerWrap.style.display = "grid";
-    pickerWrap.style.gridTemplateColumns = "repeat(6, 12px)";
-    pickerWrap.style.gap = "3px";
-    pickerWrap.style.marginLeft = "8px";
-    pickerWrap.style.alignItems = "center";
+    /**************************************************************
+     * ✅ Color Picker INITIAL STATE — ALWAYS HIDDEN
+     **************************************************************/
+    pickerWrap.style.display = "none";
+    pickerWrap.style.position = "fixed";
+    pickerWrap.style.background = "#fff";
+    pickerWrap.style.padding = "8px";
+    pickerWrap.style.border = "1px solid #ccc";
+    pickerWrap.style.borderRadius = "8px";
+    pickerWrap.style.zIndex = "9999";
+    pickerWrap.style.boxShadow = "0 8px 20px rgba(0,0,0,0.2)";
 
     /**************************************************************
-     * ✅ COLOR PALETTE (TUNED FOR VISIBILITY)
+     * ✅ IRO COLOR PICKER (ADVANCED)
      **************************************************************/
-    const palette = [
-      "#000000","#444","#888","#ccc","#eee","#fff",
-      "#ff0000","#ff9900","#ffff00","#00cc00","#00cccc","#0066ff",
-      "#cc0000","#cc6600","#cccc00","#009900","#009999","#000099"
-    ];
+    let iroPicker = null;
 
-    /**************************************************************
-     * ✅ BUILD SWATCHES
-     **************************************************************/
-    palette.forEach(col => {
+    //🔥 ADD RANDOM PALETTE GENERATOR
+    function generateDynamicPalette() {
 
-      const swatch = document.createElement("div");
+      const baseTypes = ["red", "green", "blue"];
+      const type = baseTypes[Math.floor(Math.random() * baseTypes.length)];
 
-      swatch.style.width = "12px";
-      swatch.style.height = "12px";
-      swatch.style.background = col;
-      swatch.style.border = "1px solid rgba(0,0,0,0.25)";
-      swatch.style.borderRadius = "2px";
-      swatch.style.cursor = "pointer";
+      let colors = [];
 
-      // ✅ SHOW ACTIVE COLOR
-      if (col === color) {
-        swatch.style.outline = "2px solid #000";
+      for (let i = 0; i < 24; i++) {
+
+        let r = 0, g = 0, b = 0;
+        
+        /*   Your Dynamic palette now behaves like your others:
+          Row 1 → base tones
+          Row 2 → brighter / lighter
+          Row 3 → deeper / more saturated ✅
+        */
+        const row = Math.floor(i / 8); // ✅ 0,1,2 → rows
+
+        if (type === "red") {
+          r = 180 + Math.random() * 75;
+          g = 60 + Math.random() * 80;
+          b = 60 + Math.random() * 80;
+        }
+        else if (type === "green") {
+          r = 60 + Math.random() * 80;
+          g = 180 + Math.random() * 75;
+          b = 60 + Math.random() * 80;
+        }
+        else { // blue
+          r = 60 + Math.random() * 80;
+          g = 60 + Math.random() * 80;
+          b = 180 + Math.random() * 75;
+        }
+
+        // ✅ ADJUST BY ROW (THIS IS THE MAGIC)
+        if (row === 1) {
+          // lighter
+          r += 30; g += 30; b += 30;
+        }
+        if (row === 2) {
+          // stronger / richer
+          r *= 0.85; g *= 0.85; b *= 0.85;
+        }
+
+
+        const col = "#" + [r, g, b]
+          .map(x => Math.floor(x).toString(16).padStart(2, "0"))
+          .join("");
+
+        colors.push(col);
+      }
+
+      return colors;
+    }
+
+    
+    function initIroPicker() {
+
+      pickerWrap.innerHTML = "";
+      /**************************************************************
+       * ✅ CURRENT COLOR PREVIEW (TOP BAR)
+       **************************************************************/
+      const preview = document.createElement("div");
+      preview.style.height = "20px";
+      preview.style.marginBottom = "6px";
+      preview.style.borderRadius = "4px";
+      const previewColor = getColorByKey(key, provider);
+
+      preview.style.background = previewColor;
+
+      /**************************************************************
+       * ✅ CONTRAST TEXT (PREVIEW PANEL)
+       **************************************************************/
+      preview.style.color = getBestTextColor(previewColor);
+
+      /**************************************************************
+       * ✅ CENTER TEXT (PRO UX TOUCH)
+       **************************************************************/
+      preview.style.display = "flex";
+      preview.style.alignItems = "center";
+      preview.style.justifyContent = "center";
+      preview.style.fontSize = "11px";
+      preview.textContent = "Preview";
+
+
+      // ✅ ADD TO UI FIRST (TOP)
+      pickerWrap.appendChild(preview);
+
+
+      /**************************************************************
+       * ✅ TAB BAR
+       **************************************************************/
+      const tabBar = document.createElement("div");
+      tabBar.style.display = "flex";
+      tabBar.style.gap = "8px";
+      tabBar.style.marginBottom = "6px";
+
+      const standardTab = document.createElement("button");
+      standardTab.textContent = "Standard";
+
+      const customTab = document.createElement("button");
+      customTab.textContent = "Custom";
+
+      [standardTab, customTab].forEach(btn => {
+        btn.style.padding = "4px 6px";
+        btn.style.cursor = "pointer";
+        btn.style.border = "1px solid #ccc";
+        btn.style.borderRadius = "4px";
+        btn.style.background = "#f5f5f5";
+      });
+
+      tabBar.appendChild(standardTab);
+      tabBar.appendChild(customTab);
+
+      /**************************************************************
+       * ✅ CONTENT AREAS
+       **************************************************************/
+      const standardView = document.createElement("div");
+
+      /**************************************************************
+       * ✅ PALETTE SELECTOR
+       **************************************************************/
+      const paletteBar = document.createElement("div");
+      paletteBar.style.display = "flex";
+      paletteBar.style.gap = "6px";
+      paletteBar.style.marginBottom = "6px";
+
+      const softBtn = document.createElement("button");
+      softBtn.textContent = "Soft";
+
+      const greyBtn = document.createElement("button");
+      greyBtn.textContent = "Greys";
+
+      const neutralBtn = document.createElement("button");
+      neutralBtn.textContent = "Neutral";
+
+      const dynamicBtn = document.createElement("button");
+      dynamicBtn.textContent = "Dynamic";
+
+      [softBtn, neutralBtn, dynamicBtn, greyBtn].forEach(btn => {
+        btn.style.cursor = "pointer";
+        btn.style.border = "1px solid #ccc";
+        btn.style.borderRadius = "4px";
+        btn.style.padding = "3px 6px";
+      });
+
+      paletteBar.appendChild(softBtn);
+      paletteBar.appendChild(greyBtn);
+      paletteBar.appendChild(neutralBtn);
+      paletteBar.appendChild(dynamicBtn);
+
+      /**************************************************************
+       * ✅ PALETTE BUTTON HOOKS
+       **************************************************************/
+      softBtn.onclick = () => renderPalette(palettes.soft);
+      greyBtn.onclick = () => renderPalette(palettes.greyscale);
+      neutralBtn.onclick = () => renderPalette(palettes.neutral);
+
+      dynamicBtn.onclick = () => {
+        palettes.dynamic = generateDynamicPalette();  // ✅ refresh
+        renderPalette(palettes.dynamic);
+      };
+
+      pickerWrap.appendChild(paletteBar);
+
+      const customView = document.createElement("div");
+
+      customView.style.display = "none";
+
+      /**************************************************************
+       * ✅ PALETTES (3 MODES)
+       **************************************************************/
+
+      const palettes = {
+
+        
+          /**************************************************************
+           * ✅ GREYSCALE PALETTE (24 PERFECTLY SPACED SHADES)
+          **************************************************************/
+          greyscale: [
+            // ✅ ROW 1 — Dark (strong anchors)
+            "#111111", "#1a1a1a", "#222222", "#2b2b2b",
+            "#333333", "#3d3d3d", "#474747", "#525252",
+
+            // ✅ ROW 2 — Mid (balanced UI grays)
+            "#5c5c5c", "#666666", "#707070", "#7a7a7a",
+            "#858585", "#8f8f8f", "#999999", "#a3a3a3",
+
+            // ✅ ROW 3 — Light (soft UI tones)
+            "#adadad", "#b8b8b8", "#c2c2c2", "#cccccc",
+            "#d6d6d6", "#e0e0e0", "#ebebeb", "#f5f5f5"
+          ],
+          soft: [
+            // ✅ ROW 1 — base soft
+            "#d66a6a", "#e09a5f", "#e5d26f",
+            "#76c893", "#6fa8dc", "#8e7cc3",
+            "#c27ba0", "#6ccccc",
+
+            // ✅ ROW 2 — lighter / pastel
+            "#e8a1a1", "#edb784", "#f0e19c",
+            "#9edbb0", "#9ec5f5", "#b4a7d6",
+            "#d9a8bf", "#9adede",
+
+            // ✅ ROW 3 — RICH / BRIGHT (THIS IS WHAT YOU WANT)
+            "#dc2626", // 🔴 strong red (matches your outlined red)
+            "#f97316", // bold orange
+            "#facc15", // vivid yellow
+            "#22c55e", // rich green
+            "#2563eb", // 🔵 ROYAL BLUE (your target)
+            "#7c3aed", // vibrant purple
+            "#db2777", // vivid pink
+            "#0ea5e9"  // bright cyan-blue
+          ],
+          neutral: [
+            // ✅ ROW 1 — deep earth (foundation)
+            "#3b2f2f", // dark brown
+            "#4a3f35", // coffee
+            "#5c4a3d", // clay
+            "#6a5c4f", // stone
+            "#7c6a58", // driftwood
+            "#8b7765", // sand brown
+            "#9c8a73", // warm taupe
+            "#a99a85", // dry grass
+
+            // ✅ ROW 2 — mid earth (balanced tones)
+            "#5a4632", // rich soil
+            "#6b5138", // bark
+            "#7a5c3d", // leather
+            "#8a6a45", // camel
+            "#9b7b54", // warm tan
+            "#ac8d64", // desert sand
+            "#bfa176", // wheat
+            "#d2b78a", // light ochre
+
+            
+            // ✅ ROW 3 — lighter / warm neutrals (UI friendly)
+            "#7a6a58", 
+            "#8c7b66", 
+            "#9e8d74", 
+            "#b0a083", 
+            "#c3b59b", 
+            "#d6cbb4", 
+            "#e3d8c6", 
+            "#f0e6d6"
+          ],
+          dynamic: generateDynamicPalette()
+      };
+
+      //RENDER FUNCTION (CRITICAL)
+      function renderPalette(colors) {
+
+        standardView.innerHTML = "";
+
+        colors.forEach(col => {
+
+          const sw = document.createElement("div");
+
+          sw.style.width = "18px";
+          sw.style.height = "18px";
+          sw.style.background = col;
+          sw.style.cursor = "pointer";
+          sw.style.border = "1px solid rgba(0,0,0,0.25)";
+
+          sw.onclick = () => {
+
+            const safeColor = normalizeColorHarmony(col);
+            accountColorOverrides[key] = safeColor;
+
+            accountColorMap[key] = col;
+            saveColorOverrides(accountColorOverrides);
+
+            preview.style.background = col;
+            preview.style.color = getBestTextColor(col);
+
+            applyChipStyle(row, key, true);
+
+            const badge = row.querySelector(".account-badge");
+            if (badge) badge.style.background = col;
+
+            calendar.refetchEvents();
+            updateWeekView();
+          };
+
+          standardView.appendChild(sw);
+
+        });
+      }
+
+      standardView.style.display = "grid";
+      standardView.style.gridTemplateColumns = "repeat(8, 18px)";
+      standardView.style.gap = "4px";
+
+      /**************************************************************
+       * ✅ CUSTOM (IRO PICKER)
+       **************************************************************/
+      let iroPicker = null;
+
+      function initCustomPicker() {
+        if (iroPicker) return;
+
+        iroPicker = new iro.ColorPicker(customView, {
+          width: 150,
+          color: getColorByKey(key, provider),
+          layout: [
+            { component: iro.ui.Wheel },
+            { component: iro.ui.Slider },
+          ]
+        });
+
+        iroPicker.on("color:change", (c) => {
+          
+          const raw = c.hexString;
+          const col = lightenColor(raw, 0.4);   // ✅ soften it
+          const soft = lightenColor(col, 0.4);  // ✅ softness level
+
+          accountColorOverrides[key] = soft;
+          accountColorMap[key] = soft;
+
+          preview.style.background = soft;
+          accountColorMap[key] = col;
+          saveColorOverrides(accountColorOverrides);
+
+          applyChipStyle(row, key, true);
+
+          const badge = row.querySelector(".account-badge");
+          if (badge) badge.style.background = col;
+
+          calendar.refetchEvents();
+          updateWeekView();
+        });
       }
 
       /**************************************************************
-       * ✅ CLICK → APPLY COLOR (USES YOUR ENGINE)
+       * ✅ TAB SWITCHING
        **************************************************************/
-      swatch.onclick = (e) => {
-        e.stopPropagation();
+      standardTab.onclick = () => {
+        standardView.style.display = "grid";
+        customView.style.display = "none";
 
-        accountColorOverrides[key] = col;
-        accountColorMap[key] = col;
-
-        saveColorOverrides(accountColorOverrides);
-
-        // ✅ Update chip immediately
-        applyChipStyle(row, key, true);
-
-        const badge = row.querySelector(".account-badge");
-        if (badge) badge.style.background = col;
-
-        // ✅ Force calendar repaint (existing pattern)
-        calendar.refetchEvents();
-        updateWeekView();
-
-        // ✅ Refresh selection UI
-        pickerWrap.querySelectorAll("div").forEach(el => {
-          el.style.outline = "";
-        });
-        swatch.style.outline = "2px solid #000";
+        // ✅ ACTIVE TAB STYLE
+        standardTab.style.background = "#fff";
+        customTab.style.background = "#ddd";
       };
+      customTab.onclick = () => {
+        standardView.style.display = "none";
+        customView.style.display = "block";
 
-      swatch.onmouseenter = () => {
-        swatch.style.transform = "scale(1.15)";
-      };
+        // ✅ ACTIVE TAB STYLE
+        customTab.style.background = "#fff";
+        standardTab.style.background = "#ddd";
 
-      swatch.onmouseleave = () => {
-        swatch.style.transform = "scale(1)";
+        initCustomPicker();
       };
 
       /**************************************************************
-       * ✅ RIGHT CLICK → RESET (POWER USER FEATURE)
+       * ✅ BUILD DOM
        **************************************************************/
-      swatch.oncontextmenu = (e) => {
-        e.preventDefault();
+      pickerWrap.appendChild(tabBar);
+      pickerWrap.appendChild(standardView);
+      pickerWrap.appendChild(customView);
 
-        delete accountColorOverrides[key];
+      
+      /**************************************************************
+       * ✅ DEFAULT PALETTE (INITIAL VIEW)
+       **************************************************************/
+      renderPalette(palettes.soft);
 
-        const defaultColor = getAccountColor(provider, index);
-        accountColorMap[key] = defaultColor;
-
-        saveColorOverrides(accountColorOverrides);
-
-        applyChipStyle(row, key, true);
-        calendar.refetchEvents();
-        updateWeekView();
-
-        pickerWrap.querySelectorAll("div").forEach(el => {
-          el.style.outline = "";
-        });
-      };
-
-      pickerWrap.appendChild(swatch);
-    });
+    }
 
     /**************************************************************
      * ✅ ADD TO ROW (EXACT SAME POSITION AS OLD PICKER)
      * ✅ SMALL COLOR DOT (PRIMARY UI)
      **************************************************************/
     const colorDot = document.createElement("div");
+    colorDot.classList.add("color-dot");
+
     
     /**************************************************************
-     * ✅ APPLY SYNC STATUS VISUAL
+     * ✅ GOLD STANDARD: STATUS + ANIMATION ENGINE
+     * ------------------------------------------------------------
+     * RULES:     * 1. NEVER apply animation before reset
+     * 2. syncingAccounts overrides backend state
+     * 3. ONLY ONE place defines animation
      **************************************************************/
-    let status = accountStatusMap[key] || "ok";
+    let status;
 
-    // ✅ GLOBAL OVERRIDE WHEN SYNCING
-    if (isAppSyncing) {
+    /**************************************************************
+     * ✅ HARD OVERRIDE: syncing ALWAYS wins
+     **************************************************************/
+    if (syncingAccounts.has(key)) {
       status = "syncing";
-      colorDot.style.animation = "pulse 1s infinite";
+    }
+    else {
+      status = accountStatusMap[key] || "ok";
     }
 
-    console.log("🎯 FINAL STATUS:", key, status);
+    /****************************************************************
+     * ✅ APPLY VISUAL STATE TO DOT (CRITICAL FIX)
+     ****************************************************************/
 
-    // ✅ BASE DEFAULT (always set FIRST)
+    // ALWAYS reset first
+    colorDot.classList.remove("syncing-dot");
+
+    /**************************************************************
+     * ✅ RESET FIRST (CRITICAL — PREVENTS STALE UI)
+     **************************************************************/
     colorDot.style.boxShadow = "0 0 0 2px transparent";
-    colorDot.title = "Change color";
 
-    // ✅ STATUS-DRIVEN OVERRIDE
-    if (status.toLowerCase() === "error") {
-
+    /**************************************************************
+     * ✅ STATE: ERROR
+     **************************************************************/
+    if (status === "error") {
       colorDot.style.boxShadow = "0 0 0 4px #ef4444";
       colorDot.title = "⚠ Reconnect required";
+    }
 
-      // ✅ RECONNECT CLICK (ONLY FOR ERROR)
-      colorDot.onclick = (e) => {
-        e.stopPropagation();
+    /**************************************************************
+     * ✅ STATE: SYNCING (ONLY PLACE WITH ANIMATION)
+     **************************************************************/
+    else if (status === "syncing") {
+      colorDot.style.boxShadow = "0 0 0 2px #f59e0b";
+      colorDot.title = "⏳ Syncing...";
+      colorDot.style.opacity = "1";
+    }
+
+    colorDot.addEventListener("click", (e) => {
+      e.stopPropagation();
+
+      /**************************************************************
+       * ✅ ERROR STATE → REDIRECT
+       **************************************************************/
+      if (status === "error") {
 
         const [provider, email] = key.split(":");
-        const token = getTokenOrFail();  // ✅ REQUIRED
+        const token = getTokenOrFail();
 
         if (provider === "google") {
           window.location.href =
             `/auth/google/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
-
         } else if (provider === "microsoft") {
           window.location.href =
             `/ms/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
         }
-      };
 
-    } else if (status.toLowerCase() === "syncing") {
+        return;
+      }
 
-      colorDot.style.boxShadow = "0 0 0 2px #f59e0b";
-      colorDot.title = "⏳ Syncing accounts...";
+      /**************************************************************
+       * ✅ SYNCING STATE → DO NOTHING
+       **************************************************************/
+      if (status === "syncing") {
+        return;
+      }
 
-    } else {
-      // ✅ NORMAL CLICK (ONLY IF NOT ERROR)
-      colorDot.onclick = (e) => {
-        e.stopPropagation();
+      /**************************************************************
+       * ✅ TOGGLE PICKER (FIXED + IRO INIT)
+       **************************************************************/
+      const isOpen = pickerWrap.style.display !== "none";
 
-        pickerWrap.style.display =
-          pickerWrap.style.display === "none" ? "grid" : "none";
-      };
-    }
+      document.querySelectorAll(".color-picker-pop").forEach(el => {
+        el.style.display = "none";
+      });
 
-    // ✅ ALWAYS APPLY VISUAL BASE LAST
+      if (isOpen) {
+        pickerWrap.style.display = "none";
+        iroPicker = null; // ✅ reset instance
+          return;
+
+      }
+
+      /**************************************************************
+       * ✅ SHOW PICKER
+       **************************************************************/
+      pickerWrap.style.display = "block";
+
+      /**************************************************************
+       * ✅ ⚡ INITIALIZE IRO HERE (THIS IS STEP 4)
+       **************************************************************/
+      initIroPicker();
+
+
+      const rect = colorDot.getBoundingClientRect();
+
+      let top = rect.bottom + 6;
+      let left = rect.left;
+
+      if (left + 160 > window.innerWidth) {
+        left = window.innerWidth - 160 - 8;
+      }
+
+      if (top + 120 > window.innerHeight) {
+        top = rect.top - 120;
+      }
+
+      pickerWrap.style.top = `${top}px`;
+      pickerWrap.style.left = `${left}px`;
+
+      pickerWrap.classList.add("color-picker-pop");
+
+      pickerWrap.style.opacity = "1";
+      pickerWrap.style.visibility = "visible";
+
+      console.log("✅ DOT CLICK → PICKER OPENED:", key);
+    });
+
+    /**************************************************************
+     * ✅ ALWAYS APPLY BASE DOT VISUAL (CRITICAL)
+     **************************************************************/
+    colorDot.style.position = "relative";
+    colorDot.style.zIndex = "10";
     colorDot.style.width = "10px";
     colorDot.style.height = "10px";
     colorDot.style.borderRadius = "50%";
     colorDot.style.background = color;
     colorDot.style.marginLeft = "6px";
     colorDot.style.cursor = "pointer";
-    colorDot.style.border = "1px solid rgba(0,0,0,0.4)";
+    
+    //colorDot.style.border = "1px solid rgba(0,0,0,0.4)";
+    /*********************************************************************
+     * ✅ SMART BORDER CONTRAST (PRO UX DETAIL) AUTO-ADAPT PICKER BORDER
+     *********************************************************************/
+    const borderColor =
+      getBestTextColor(color) === "#fff"
+        ? "rgba(255,255,255,0.7)"
+        : "rgba(0,0,0,0.4)";
+
+    colorDot.style.border = `1px solid ${borderColor}`;
+
+    
+    colorDot.style.outline = `1px solid ${getBestTextColor(color)}`;
 
     /**************************************************************
      * ✅ HIDDEN PALETTE (POPUP STYLE)
      **************************************************************/
-    pickerWrap.style.position = "absolute";
-    pickerWrap.style.background = "#fff";
-    pickerWrap.style.padding = "5px";
-    pickerWrap.style.border = "1px solid #ccc";
-    pickerWrap.style.borderRadius = "6px";
-    pickerWrap.style.display = "none";
-    pickerWrap.style.zIndex = "999";
+    /**************************************************************
+     * ✅ FIX: FORCE PROPER POSITIONING (CRITICAL)
+     **************************************************************/
+    pickerWrap.style.position = "fixed";
+    /**************************************************************
+     * ✅ GOLD STANDARD: UI SURFACE (NEUTRAL PANEL)
+     * ------------------------------------------------------------
+     * DO NOT USE dynamic contrast here
+     * This is a stable UI layer (like modals / menus)
+     *
+     * WHY:
+     * - prevents visual instability
+     * - ensures consistent UX
+     * - mirrors pro apps (Notion, Google, Apple)
+     **************************************************************/
+    /**************************************************************
+     * ✅ SMART NEUTRAL SURFACE (SUBTLE BRAND TINT)
+     * ------------------------------------------------------------
+     * Uses a VERY light tint of the account color
+     * Keeps UI consistent but adds personality
+     **************************************************************/
+    const baseColor = getColorByKey(key, provider);
+
+    // ✅ super-light tint (barely visible)
+    const panelBg = lightenColor(baseColor, 0.92);
+
+    pickerWrap.style.background = panelBg;
 
     /**************************************************************
-     * ✅ TOGGLE PALETTE
+     * ✅ GUARANTEED READABILITY
      **************************************************************/
-    // ✅ ONLY assign click handler if NOT error
-    if (status.toLowerCase() !== "error") {
-      colorDot.onclick = (e) => {
-        e.stopPropagation();
+    pickerWrap.style.color = getBestTextColor(panelBg);
 
-        pickerWrap.style.display =
-          pickerWrap.style.display === "none" ? "grid" : "none";
-      };
-    }
+    /**************************************************************
+     * ✅ OPTIONAL: subtle elevation polish
+     **************************************************************/
+    pickerWrap.style.color = "#111";  // ✅ fixed readable text baseline
+    pickerWrap.style.padding = "8px";
+    pickerWrap.style.border = "1px solid #ccc";
+    pickerWrap.style.borderRadius = "8px";
+    pickerWrap.style.zIndex = "9999";
+    pickerWrap.style.boxShadow = "0 8px 20px rgba(0,0,0,0.2)";
 
     colorDot.onmouseenter = () => {
       colorDot.style.transform = "scale(1.2)";
@@ -1421,25 +2105,94 @@ function renderAccounts(accounts) {
     colorDot.onmouseleave = () => {
       colorDot.style.transform = "scale(1)";
     };
-    ``
-
-    /**************************************************************
-     * ✅ CLOSE WHEN CLICKING OUTSIDE
-     **************************************************************/
-    document.addEventListener("click", () => {
-      pickerWrap.style.display = "none";
-    });
-
 
     /**************************************************************
      * ✅ APPEND BOTH
      **************************************************************/
     row.appendChild(colorDot);
-    row.appendChild(pickerWrap);
+    document.body.appendChild(pickerWrap);
 
-    applyChipStyle(row, key, true); // default all active
+    /**************************************************************
+     * ✅ CHIP STATE ENGINE (SYNC / SUCCESS / ERROR)
+     **************************************************************/
+    row.classList.remove("syncing");
 
+    // ✅ remove ALL transient icons first (prevents stacking)
+    const existingSpinner = container.querySelector(".chip-spinner");
+    if (existingSpinner) existingSpinner.remove();
+
+    const existingSuccess = container.querySelector(".chip-success");
+    if (existingSuccess) existingSuccess.remove();
+
+    const existingError = container.querySelector(".chip-error");
+    if (existingError) existingError.remove();
+
+    /**************************************************************
+     * ✅ STATE 1 — SYNCING
+     **************************************************************/
+    if (syncingAccounts.has(key)) {
+
+      row.classList.add("syncing");
+
+      const spinner = document.createElement("div");
+      spinner.className = "chip-spinner";
+
+      spinner.style.borderTopColor = color;
+      spinner.style.marginRight = "4px";
+
+      container.insertBefore(spinner, container.firstChild);
+    }
+
+    /**************************************************************
+     * ✅ STATE 2 — ERROR (takes priority after sync)
+     **************************************************************/
+    else if (accountStatusMap[key] === "error") {
+
+      const errorIcon = document.createElement("div");
+      errorIcon.className = "chip-error";
+      errorIcon.textContent = "⚠️";
+      errorIcon.style.marginRight = "4px";
+
+      errorIcon.title = "Sync failed — click to retry";
+
+      errorIcon.onclick = (e) => {
+        e.stopPropagation();
+
+        syncingAccounts.add(key);  // ✅ immediate visual feedback
+        renderAccountsSafe();      // ✅ show spinner instantly
+
+        syncSingleAccount(key);
+      };
+
+
+      container.insertBefore(errorIcon, container.firstChild);
+    }
+
+    /**************************************************************
+     * ✅ STATE 3 — SUCCESS (only if not syncing or error)
+     **************************************************************/
+    else if (recentlySynced.has(key)) {
+      const check = document.createElement("div");
+      check.className = "chip-success";
+      check.textContent = "✅";
+      check.style.marginRight = "4px";
+
+      container.insertBefore(check, container.firstChild);
+
+      // ✅ auto remove (keeps UI clean)
+      setTimeout(() => {
+        check.remove();
+      }, 1200);
+    }
+    
     row.onclick = (e) => {
+
+      // ✅ DO NOT trigger when using color picker
+      if (e.target.closest(".color-picker-pop") ||
+          e.target.closest(".color-dot")) {
+        return;
+      }
+
       const isMultiSelect = e.ctrlKey || e.metaKey;
 
       if (!isMultiSelect) {
@@ -1465,8 +2218,13 @@ function renderAccounts(accounts) {
 
   /* ✅ RUN ONCE AFTER LOOP */
 
-  // ✅ ALWAYS SYNC FROM SOURCE
-  activeAccountFilters = new Set(allAccountKeys);
+  /**************************************************************
+   * ✅ PRESERVE FILTER STATE (DO NOT WIPE)
+   **************************************************************/
+  if (!activeAccountFilters.size) {
+    activeAccountFilters = new Set(allAccountKeys);
+  }
+  
   updateChipSelectionUI();
 
 }  // ✅ renderAccounts closes cleanly
@@ -1570,11 +2328,19 @@ function updateDayDetails() {
     // ✅ LEFT COLOR BAND (primary identity)
     row.style.borderLeft = `4px solid ${color}`;
 
-    // ✅ SOFT BACKGROUND (consistent tint)
     row.style.background = `${color}1a`;
 
-    // ✅ TEXT (readable on light bg)
-    row.style.color = "#222";
+    /**************************************************************
+     * ✅ FIX: FORCE READABLE TEXT (LIGHT BACKGROUND SAFE)
+     * ------------------------------------------------------------
+     * Background is always LIGHT (alpha tint)
+     * Use stable dark text (matches account chips + pro apps)
+     **************************************************************/
+    row.style.color = "#000";
+    /**************************************************************
+     * ✅ CONTRAST TEXT AGAINST SOFT BG
+     **************************************************************/
+    //row.style.color = getBestTextColor(color);
     
     row.style.display = "flex";
     row.style.alignItems = "center";
@@ -1636,10 +2402,18 @@ function updateDayDetails() {
       row.style.filter = "brightness(0.96)";
     };
 
-    row.onmouseleave = () => {
-      row.style.filter = "none";
+     /**************************************************************
+     * ✅ HOVER = SMART INVERT makes item “pop” automatically
+     **************************************************************/
+    row.onmouseenter = () => {
+      row.style.filter = "brightness(0.92)";
+      row.style.transform = "scale(1.01)";
     };
 
+    row.onmouseleave = () => {
+      row.style.filter = "none";
+      row.style.transform = "scale(1)";
+    };
     li.appendChild(row);
 
     // ✅ CLICK → open edit modal
@@ -1829,6 +2603,13 @@ function updateWeekView() {
       inner.style.borderRadius = "6px";
     }
     inner.style.background = `${color}1a`;
+
+    /**************************************************************
+     * ✅ FIX: FORCE READABLE TEXT (CONSISTENT WITH DAY VIEW)
+     **************************************************************/
+    inner.style.color = "#000";
+    //inner.style.color = getBestTextColor(color);
+
     inner.style.display = "flex";
     inner.style.alignItems = "center";
     inner.style.gap = "6px";
@@ -1902,38 +2683,107 @@ function connectOutlook() {
   window.location.href =
     `/ms/login?token=${encodeURIComponent(authToken)}`;
 }
+
+
 /**************************************************************
  * ✅ SYNC
  **************************************************************/
 async function syncNow() {
   try {
+    
+    /**************************************************************
+     * ✅ STEP 8.1 — START GLOBAL SYNC (SHOW BANNER)
+     **************************************************************/
+    //setSyncBanner("syncing");
+    
+    /**************************************************************
+     * ✅ GOLD STANDARD: BUILD KEYS EXACTLY LIKE renderAccounts
+     **************************************************************/
+    syncingAccounts.clear();
+
+    lastLoadedAccounts.forEach(acc => {
+
+      const provider = normalizeProvider(acc.provider || "other");
+
+      const email = (acc.account_email || acc.email || "")
+        .toLowerCase()
+        .trim();
+
+      if (!email) return;
+
+      const key = normalizeKey(provider, email);
+
+      syncingAccounts.add(key);
+      console.log("✅ ADD SYNC KEY:", key);
+    });
+
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    /**************************************************************
+     * ✅ FORCE UI UPDATE
+     **************************************************************/
+    renderAccountsSafe();   // ✅ ONLY THIS ONE HERE
+
+    /**************************************************************
+     * ✅ FORCE BROWSER TO PAINT BEFORE BLOCKING
+     **************************************************************/
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
     const res = await apiFetch("/calendar/sync", { method: "POST" });
     const data = await res.json();
+
     console.log("✅ Sync result:", data);
+
+    
+
     /**************************************************************
-     * ✅ CAPTURE ACCOUNT STATUS (NEW)
+     * ✅ SHOW SUCCESS STATE (still syncing visually)
      **************************************************************/
-    if (data.results) {
-      data.results.forEach(r => {
-        accountStatusMap[r.key] = r.status;
-      });
-    }
+    renderAccountsSafe();
+    showToast("✅ Sync complete");
+    //setSyncBanner("success");
+
     /**************************************************************
-     * ✅ REMOVE ALERT → REPLACE WITH UI STATE
+     * ✅ DELAY CLEAR SO USER SEES FINAL STATE
      **************************************************************/
-    console.log("✅ Sync complete");
-    /**************************************************************
-     * ✅ MARK CACHE FOR REFRESH (CRITICAL)
-     **************************************************************/
-    needsCacheRefresh = true;
-    /**************************************************************
-     * ✅ REFRESH UI + CHIPS
-     **************************************************************/
-    smartRefresh({ reason: "event_saved" });
-    renderAccounts(lastLoadedAccounts);
+    setTimeout(() => {
+
+      /**************************************************************
+       * ✅ UPDATE STATUS MAP
+       **************************************************************/
+      if (data.results) {
+        data.results.forEach(r => {
+          accountStatusMap[r.key] = r.status;
+        });
+      }
+
+      /**************************************************************
+       * ✅ 1. CLEAR SYNC STATE
+       **************************************************************/
+      syncingAccounts.clear();
+
+      /**************************************************************
+       * ✅ 2. FORCE CLEAN RENDER
+       **************************************************************/
+      renderAccountsSafe();
+      console.log("🧪 syncingAccounts contents:", [...syncingAccounts]);
+
+      /**************************************************************
+       * ✅ 4. NORMAL REFRESH
+       **************************************************************/
+      needsCacheRefresh = true;
+      smartRefresh({ reason: "event_saved" });
+
+    }, 800);
 
   } catch (err) {
-    console.error("❌ Sync failed:", err);
+    showToast("❌ Sync failed", "error");
+    syncingAccounts.clear();
+    
+    /**************************************************************
+     * ✅ STEP 8.3 — HIDE BANNER ON FAILURE
+     **************************************************************/
+    //setSyncBanner("hidden");
   }
 }
 
@@ -2172,6 +3022,22 @@ async function saveNoteEditor() {
   smartRefresh({ reason: "event_saved" });
 }
 
+//ADD ONE GLOBAL CLEAN VERSION (OUTSIDE LOOP, TOP LEVEL ONCE)
+document.addEventListener("click", (e) => {
+
+  // ✅ allow picker interactions
+  if (
+    e.target.closest(".color-picker-pop") ||
+    e.target.closest(".color-dot")
+  ) {
+    return;
+  }
+
+  document.querySelectorAll(".color-picker-pop").forEach(el => {
+    el.style.display = "none";
+  });
+
+});
 
 /**************************************************************
  * ✅ UI BUTTON BINDINGS
