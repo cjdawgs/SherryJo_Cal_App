@@ -180,6 +180,8 @@ class Note(Base):
 
 class Event(Base):
     __tablename__ = "events"
+    
+    
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -209,6 +211,16 @@ class Event(Base):
     # ✅ EXTERNAL SYNC
     externalId = Column(String, index=True)
     source = Column(String, default="local", index=True)
+    
+    # ==================================================
+    # ✅ CANONICAL ACCOUNT IDENTITY (CRITICAL)
+    # ==================================================
+    account_email = Column(String, nullable=True, index=True)
+
+    # ==================================================
+    # ✅ EVENT COLOR (PALETTE SUPPORT)
+    # ==================================================
+    color = Column(String, nullable=True)
 
     # ✅ MULTI-PROVIDER SUPPORT
     external_ids = Column(JSON, nullable=True)

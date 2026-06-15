@@ -37,6 +37,27 @@ ALGORITHM = "HS256"
 # --------------------------------------------------
 # PYDANTIC SCHEMAS
 # --------------------------------------------------
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+from app.security import hash_password
+
+@router.get("/debug/create-user")
+def create_test_user(db: Session = Depends(get_db)):
+
+    hashed_password = hash_password("test123")  # ✅ USE YOUR SYSTEM
+
+    user = User(
+        email="test@example.com",
+        username="test",
+        hashed_password=hashed_password,
+        role="staff"
+    )
+
+    db.add(user)
+    db.commit()
+
+    return {"status": "created"}
 
 class UserCreate(BaseModel):
     username: str

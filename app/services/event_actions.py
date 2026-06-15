@@ -38,13 +38,32 @@ class EventActions:
             )
 
         # ===============================
-        # ✅ STEP 3: UPDATE OUTLOOK
+        # ✅ STEP 3: UPDATE MICROSOFT (SAFE + CANONICAL)
         # ===============================
-        if event.external_ids and "outlook" in event.external_ids:
+        # --------------------------------------------------
+        # PURPOSE:
+        # Handle BOTH legacy ("outlook") and canonical ("microsoft")
+        #
+        # WHY:
+        # Your system is migrating to "microsoft"
+        # but older DB entries may still use "outlook"
+        # --------------------------------------------------
+
+        ms_id = None
+
+        if event.external_ids:
+            ms_id = (
+                event.external_ids.get("microsoft")  # ✅ NEW STANDARD
+                or event.external_ids.get("outlook")  # ✅ LEGACY FALLBACK
+            )
+
+        # ✅ ONLY RUN IF FOUND
+        if ms_id:
+            print("🧪 MICROSOFT UPDATE →", ms_id)  # ✅ DEBUG
 
             graph_client.update_event(
                 token=user.ms_access_token,
-                event_id=event.external_ids["outlook"],
+                event_id=ms_id,
                 updates=updates
             )
 
@@ -62,9 +81,9 @@ class EventActions:
         3. Delete from local DB
         """
 
-        # ===============================
+        # =============================================================
         # ✅ STEP 1: DELETE FROM GOOGLE
-        # ===============================
+        # =============================================================
         if event.external_ids and "google" in event.external_ids:
 
             google_service.delete_event(
@@ -72,19 +91,28 @@ class EventActions:
                 event_id=event.external_ids["google"]
             )
 
-        # ===============================
-        # ✅ STEP 2: DELETE FROM OUTLOOK
-        # ===============================
-        if event.external_ids and "outlook" in event.external_ids:
+        # =============================================================
+        # ✅ STEP 2: DELETE FROM MICROSOFT (SAFE + CANONICAL)
+        # =============================================================
+        ms_id = None
+
+        if event.external_ids:
+            ms_id = (
+                event.external_ids.get("microsoft")
+                or event.external_ids.get("outlook")
+            )
+
+        if ms_id:
+            print("🧪 MICROSOFT DELETE →", ms_id)  # ✅ DEBUG
 
             graph_client.delete_event(
                 token=user.ms_access_token,
-                event_id=event.external_ids["outlook"]
+                event_id=ms_id
             )
 
-        # ===============================
+        # =============================================================
         # ✅ STEP 3: DELETE FROM DATABASE
-        # ===============================
+        # =============================================================
         db.delete(event)
         db.commit()
 

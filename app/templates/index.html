@@ -1,5 +1,6 @@
 <!doctype html>
 <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
+
 <html lang="en">
 
 <head>
@@ -132,7 +133,6 @@
 
   <!-- ✅ RANGE + NAV BAR -->
   <div class="rangeBar">
-
     <!-- ✅ ✅ THESE ARE THE BUTTONS -->
     <div class="range-controls">
       <button class="range-btn active" id="monthly" data-range="30">(Monthly)</button>
@@ -152,8 +152,6 @@
       color:#555;
       margin-top:4px;
     "></div>
-
-
   </div>
 
   <div id="calendar"></div>
@@ -238,24 +236,31 @@
   </div>
 
   <!-- ✅ ACTION BUTTONS -->
-  
-<div style="display:flex; justify-content:space-between; align-items:center;">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
 
-  <!-- ✅ DELETE BUTTON -->
-  <button id="deleteEventBtn" style="display:none;">
-    🗑 Delete
-  </button>
+    <!-- ✅ DELETE BUTTON -->
+    <button id="deleteEventBtn" style="display:none;">
+      🗑 Delete
+    </button>
 
-  <!-- ✅ SAVE / CANCEL -->
-  <div style="display:flex; gap:10px;">
-    <button id="saveEventBtn">Save</button>
-    <button id="cancelEventBtn">Cancel</button>
+    <!-- ✅ SAVE / CANCEL -->
+    <div style="display:flex; gap:10px;">
+      <button id="saveEventBtn">Save</button>
+      <button id="cancelEventBtn">Cancel</button>
+    </div>
+
   </div>
 
 </div>
 
-</div>
+<!-- ✅ NEW (BRAIN FIRST) -->
+<script src="/static/calendar.colors.js?v=1"></script>
+<script src="/static/calendar.fullcalendar.js?v=124"></script>
 
+<!-- ✅ EXISTING -->
 <script src="/static/calendar.js?v=999"></script>
+<script src="/static/calendar.ui.js"></script>
+
+
 </body>
 </html>

@@ -274,7 +274,7 @@ def callback(
         refresh_token=refresh_token,
     )
 
-    print("✅ MICROSOFT ACCOUNT SAVED")
+    #print("✅ MICROSOFT ACCOUNT SAVED")
 
     # ==================================================
     # ✅ STEP 5: REDIRECT BACK TO UI (AUTO REFRESH ✅)

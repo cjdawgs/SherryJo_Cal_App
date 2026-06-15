@@ -31,6 +31,72 @@ import os
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG | INFO | ERROR
 
+# ==================================================
+# 🧠 GOLD STANDARD: CANONICAL PROVIDERS (CORE CONTRACT)
+# --------------------------------------------------
+# PURPOSE:
+# One single provider identity across ENTIRE system
+#
+# WHY:
+# Prevents:
+# - "outlook" vs "microsoft" drift
+# - broken filters
+# - broken sync keys
+#
+# RULE:
+# EVERYTHING must resolve to these values
+# ==================================================
+CANONICAL_PROVIDERS = ["google", "microsoft", "apple", "local"]
+
+def normalize_provider(p: str) -> str:
+    """
+    ✅ Canonical provider normalization
+    - Handles aliases
+    - Handles noise (None, whitespace)
+    - Returns ONLY known canonical values
+    """
+
+    if not p:
+        return "other"
+
+    p = str(p).lower().strip()
+
+    # ✅ MICROSOFT FAMILY
+    if p in {"outlook", "office365", "microsoft", "ms", "msft"}:
+        return "microsoft"
+
+    # ✅ APPLE FAMILY
+    if p in {"icloud", "caldav", "apple", "mac"}:
+        return "apple"
+
+    # ✅ GOOGLE FAMILY
+    if p in {"google", "gmail"}:
+        return "google"
+
+    # ✅ LOCAL EVENTS
+    if p in {"local", "internal"}:
+        return "local"
+
+    return p
+
+
+def build_event_id(e: dict) -> str:
+    """
+    ✅ SINGLE SOURCE OF TRUTH for event identity
+    - provider normalized
+    - external_id normalized
+    """
+
+    provider = normalize_provider(e.get("source"))
+    ext_id = str(e.get("external_id", "")).strip()
+
+    return f"{provider}:{ext_id}"
+
+def build_account_key(provider: str, email: str) -> str:
+    provider = normalize_provider(provider)
+    email = (email or "").lower().strip()
+    return f"{provider}:{email}"
+
 
 def log_debug(msg: str):
     if LOG_LEVEL == "DEBUG":
@@ -84,6 +150,10 @@ class CalendarService:
     # ==================================================
     def _normalize(self, google_events, ms_events):
         unified = []
+        
+        print("🧠 NORMALIZE INPUT COUNT:",
+            len(google_events), "primary |",
+            len(ms_events), "ms")
 
         # ✅ combine everything FIRST
         all_events = []
@@ -106,38 +176,83 @@ class CalendarService:
                 e["source"] = "microsoft"
 
             all_events.append(e)
+            #print("🟦 MS EVENT RAW:", e.get("id"))
+            #print("🧪 MS BEFORE:", e)
 
         # ✅ SINGLE NORMALIZATION PIPELINE (THIS FIXES EVERYTHING)
         for e in all_events:
 
-            provider = (e.get("provider") or "other").lower()
-            account = (e.get("account") or e.get("account_email") or "").lower()
+            # ==================================================
+            # 🔬 SURGICAL FIX — PROVIDER NORMALIZATION
+            # --------------------------------------------------
+            # FORCE ALL EVENTS INTO CANONICAL PROVIDER SPACE
+            # ==================================================
+            # ==================================================
+            # 🔬 SAFE PROVIDER DETECTION (CRITICAL FIX)
+            # ==================================================
+            raw_provider = (
+                e.get("provider")
+                or e.get("source")
+                or ("microsoft" if "subject" in e else None)
+            )
 
+            if not isinstance(raw_provider, str):
+                raw_provider = ""
+
+            provider = normalize_provider(raw_provider)
+
+            # ✅ DEBUG (REMOVE LATER)
+            #print("🧪 PROVIDER NORMALIZED →", provider)
+            
+            # ==================================================
+            # 🔬 SURGICAL FIX — ACCOUNT EMAIL CONTRACT
+            # --------------------------------------------------
+            # ALWAYS use account_email (frontend depends on this)
+            # ==================================================
+            account_email = (
+                e.get("account_email")
+                or e.get("account")
+                or "local"   # ✅ CRITICAL FIX
+            ).lower().strip()
+
+            #print("🧪 ACCOUNT NORMALIZED →", account_email)
 
             start = self._safe_datetime(e.get("start"))
             end = self._safe_datetime(e.get("end"))
 
             unified.append({
-                "external_id": e.get("id"),
+                "external_id": str(e.get("id")),
 
                 "title": (
                     e.get("summary") or
                     e.get("subject") or
                     "Untitled Event"
                 ),
-
-                "start": start,
-                "end": end,
-
+                # ==================================================
+                # 🔬 SURGICAL FIX — DATE CONSISTENCY
+                # --------------------------------------------------
+                # ENSURE ALL DATES ARE ISO STRINGS
+                # (frontend safeParseDate expects this)
+                # ==================================================
+                "start": (
+                    start.isoformat() if isinstance(start, datetime) else start
+                ),
+                "end": (
+                    end.isoformat() if isinstance(end, datetime) else end
+                ),
+                # ==================================================
                 "source": provider,
                 "provider": provider,
-
-                "account": account,
-                "account_key": f"{provider}:{account}",
-
+                # ✅ REQUIRED BY FRONTEND
+                "account_email": account_email,
+                # ✅ SINGLE SOURCE KEY
+                "account_key": f"{provider}:{account_email}",
                 "color": ACCOUNT_COLORS.get(provider, ACCOUNT_COLORS["other"])
             })
+            
+        sources = [e["source"] for e in unified]
 
+        #print("🚀 FINAL SOURCE BREAKDOWN:",{s: sources.count(s) for s in set(sources)})
         return unified
 
     # ==================================================
@@ -181,6 +296,37 @@ class CalendarService:
 
         return pytz.utc
     
+    def get_events_from_db(self, db, user, start_date, end_date):
+
+        events = db.query(Event).filter(
+            Event.owner_id == user.id,
+            Event.start_time >= start_date,
+            Event.start_time <= end_date
+        ).all()
+        
+        return [
+            {
+                "id": ev.id,
+                "external_id": ev.externalId,
+                "title": ev.title,
+                "start": ev.start_time.isoformat(),
+                "end": ev.end_time.isoformat() if ev.end_time else None,
+
+                # ✅ CANONICAL SOURCE
+                "source": ev.source or "local",
+
+                # ✅ KEEP FOR LEGACY COMPAT
+                "account_email": getattr(ev, "account_email", "local"),
+
+                # ✅ GOLD STANDARD: SINGLE SOURCE OF TRUTH
+                "account_key": build_account_key(
+                    ev.source or "local",
+                    getattr(ev, "account_email", "local")
+                )
+            }
+            for ev in events
+        ]
+        
     def fetch_all_events(self, db, user, start_date=None, end_date=None):
         """
         ✅ NEW: RANGE-AWARE FETCH
@@ -210,7 +356,7 @@ class CalendarService:
             start_date = now - relativedelta(days=90)
             end_date = now + relativedelta(days=90)
 
-            log_info("📦 Using default 30-day range")
+            log_info("📦 Using default 90-day range")
         else:
             log_info("📥 Using UI-provided range")
 
@@ -242,10 +388,10 @@ class CalendarService:
                 continue
 
 
-            print("🧪 ACCOUNT CHECK:",
-                acc.provider,
-                acc.account_email,
-                acc.access_token)
+            #print("🧪 ACCOUNT CHECK:",
+            #    acc.provider,
+            #    acc.account_email,
+            #    acc.access_token)
             # ==================================================
             # ✅ ACCOUNT PROCESSING START
             # ==================================================
@@ -388,7 +534,11 @@ class CalendarService:
                         log_debug(f"✅ Apple dt parsed: {dt}")
                         
                         if apple_start <= dt <= apple_end:
-                            e["account"] = acc.account_email
+                            
+                            # Apple MUST provide account_email or frontend breaks
+                            # ==================================================
+                            e["account_email"] = acc.account_email
+                            e["account"] = acc.account_email  # backward compatibility
                             e["provider"] = "apple"
                             e["source"] = "apple"
 
@@ -396,8 +546,7 @@ class CalendarService:
                             added += 1
 
                     log_info(f"   🍎 Apple events in range: {added}")
-                    log_debug(f"Apple raw start type: {type(e.get('start'))}")
-
+                    
                 # ==================================================
                 # ✅ MICROSOFT FETCH + PAGINATION
                 # ==================================================
@@ -492,10 +641,17 @@ class CalendarService:
                             ms_events.append({
                                 "id": e.get("id"),
                                 "subject": e.get("subject"),
+
                                 "start": dt.isoformat(),
                                 "end": end_dt.isoformat() if end_dt else None,
-                                "account_email": acc.account_email,  # ✅ CRITICAL FIX
-                            
+
+                                "account_email": acc.account_email,
+
+                                # ==================================================
+                                # 🔬 SURGICAL FIX — FORCE PROVIDER TAG
+                                # ==================================================
+                                "provider": "microsoft",
+                                "source": "microsoft",
                             })
                             added += 1
                     log_info(f"   🟦 Microsoft events in range: {added}")
@@ -565,7 +721,11 @@ class CalendarService:
                 log_debug(f"⚠️ Skipping invalid event: {e}")
                 continue
 
-            external_id = f"{e['source']}:{e['external_id']}"
+            external_id = build_event_id(e)
+            
+            # ✅ guard against bad data
+            if ":" not in external_id or external_id.endswith(":"):
+                continue
 
             start = self._to_utc(e["start"])
             end = self._to_utc(e["end"])
@@ -585,7 +745,13 @@ class CalendarService:
                     end_time=end,
                     source=e["source"],
                     externalId=external_id,
-                    owner_id=user.id
+                    owner_id=user.id,
+
+                    # ✅ CRITICAL — REQUIRED FOR PALETTE MATCHING
+                    account_email=e.get("account_email"),
+
+                    # ✅ OPTIONAL BUT POWERFUL (future-proof)
+                    color=e.get("color")
                 ))
                 created += 1
                 continue
@@ -603,6 +769,37 @@ class CalendarService:
             if changed:
                 updated += 1
 
+        # ==================================================
+        # ✅ HARD DELETE — REMOVE ORPHANED EVENTS
+        # ==================================================
+        existing_events = db.query(Event).filter(
+            Event.owner_id == user.id
+        ).all()
+
+        # build set of valid external IDs from fresh fetch
+        incoming_ids = set(
+            build_event_id(e)
+            for e in events
+            if e.get("external_id")
+        )
+
+        deleted = 0
+
+        for ev in existing_events:
+
+            ev_source = str(ev.source) if ev.source is not None else None
+            ev_external_id = str(ev.externalId) if ev.externalId is not None else None
+
+            # ✅ NEVER DELETE LOCAL EVENTS
+            if ev_source == "local":
+                continue
+
+            if ev_external_id and ev_external_id not in incoming_ids:
+                db.delete(ev)
+                deleted += 1
+
+        log_info(f"🗑 Deleted stale external events: {deleted}")
+        
         db.commit()
 
         return {

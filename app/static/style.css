@@ -485,11 +485,6 @@ button.primary:hover {
   width: 100%;
 }
 
-/* ✅ STRONGER VISUAL SEPARATION */
-.fc-event {
-  font-size: 12px;
-  border-left: 4px solid rgba(0,0,0,0.2) !important;
-}
 
 
 /* =====================================================
@@ -614,29 +609,105 @@ button.primary:hover {
 /* =====================================================
 ✅ CLEAN SIDEBAR EVENT STRIP (MATCH COLORS)
 ===================================================== */
+#sidebar {
+  width: 300px;
+  border-left: 1px solid #ccc;
+  padding: 10px;
+  background: #fff;
+}
 .sidebarEvent {
   border-left: 4px solid #ccc;
   padding-left: 6px;
 }
 
+#mainLayout {
+  display: flex;
+  height: 100vh;
+}
+
+#calendarContainer {
+  flex: 1;
+}
+
+
+#eventList {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
 /* =====================================================
 ✅ HOVER POLISH
 ===================================================== */
+.fc-highlight {
+  display: none !important;
+}
+
+.fc-daygrid-day.fc-day-today {
+  background: inherit !important;
+}
+.fc-daygrid-day.fc-day-range-selected {
+  background: none !important;
+}
+.fc-daygrid-day-frame.fc-scrollgrid-sync-inner {
+  background: transparent !important;
+}
 .fc-daygrid-day:hover {
   background-color: #f9fafb;
   cursor: pointer;
 }
 
-
+#calendar {
+  user-select: none;
+}
 /* =====================================================
 ✅ FULLCAL COLOR RULE (NEUTRAL — JS CONTROLS COLORS)
 ===================================================== */
 
-/* ✅ allow JS to fully control colors */
-.fc-event,
-.fc-daygrid-event,
-.fc-daygrid-event .fc-event-main {
-  background-color: inherit !important;
-  border-color: inherit !important;
-  color: inherit !important;
+
+.fc-event {
+  font-size: 12px;
+  border: none !important;
+}
+
+
+.fc-timegrid-event {
+  border: none !important;
+  border-radius: 4px;
+}
+
+
+/**************************************************************
+✅ HOVER POLISH
+**************************************************************/
+.fc-header-toolbar {
+  justify-content: space-between;
+}
+
+.fc .fc-button {
+  background-color: #2f3e4e !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: none !important;
+}
+
+.fc .fc-button:hover {
+  background-color: #3f4f60 !important;
+}
+
+.fc .fc-button-active {
+  background-color: #1f2b36 !important;
+}
+
+.fc .fc-button:focus {
+  box-shadow: none !important;
+}
+
+.fc-toolbar-chunk:last-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fc-daygrid-day-frame {
+  min-height: 120px;
 }
