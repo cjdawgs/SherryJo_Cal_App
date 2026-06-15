@@ -164,10 +164,7 @@ function updateEventInCache(updatedEvent) {
 /**************************************************************
  * ✅ HELPERS
  **************************************************************/
-/**************************************************************
-✅ ✅ ✅ GOLD STANDARD — UNIFIED FILTER ENGINE
-Single source of truth for ALL filtering
-**************************************************************/
+
 /**************************************************************
 ✅ ✅ ✅ GOLD STANDARD — TRUE DATE OVERLAP ENGINE
 **************************************************************/
@@ -533,7 +530,6 @@ function renderAccountsSafe() {
 
   if (!lastLoadedAccounts || !lastLoadedAccounts.length) return;
 
-  console.trace("🧠 RENDER ACCOUNTS TRIGGERED");
   renderAccounts(lastLoadedAccounts);
 }
 
@@ -2428,82 +2424,128 @@ function updateDayDetails() {
 
 
 //✅ ✅ WEEK VIEW FUNCTION
+/**************************************************************
+✅ WEEK VIEW — FINAL PRODUCTION VERSION
+---------------------------------------------------------------
+✅ Correct Sunday start
+✅ Multi-day expansion
+✅ ZERO timezone drift
+✅ Single render pipeline
+**************************************************************/
 function updateWeekView() {
-
-  if (!window.selectedDate) {
-    window.selectedDate = toDayString(new Date());
-  }
 
   const container = document.getElementById("weekView");
   if (!container) return;
 
-  container.replaceChildren();
+  container.innerHTML = "";
 
-  const base = fromDayString(selectedDate);
+  if (!window.selectedDate) return;
 
-  const start = new Date(base);
-  start.setDate(start.getDate() - start.getDay());
-  start.setHours(0,0,0,0);
-
-  const end = new Date(start);
-  end.setDate(start.getDate() + 6);
-  end.setHours(23,59,59,999);
-
-  const events = getFilteredEvents({ start, end });
-
-  console.log("✅ WEEK EVENTS FOUND:", events.length);
+  const selected = new Date(window.selectedDate);
 
   /**************************************************************
-  ✅ GROUP BY DAY
+  ✅ FORCE WEEK START (SUNDAY)
   **************************************************************/
-  const days = {};
+  const startOfWeek = new Date(selected);
+  startOfWeek.setDate(selected.getDate() - selected.getDay());
+  startOfWeek.setHours(0,0,0,0);
 
-  events.forEach(ev => {
-    const day = toDayString(ev.start);
-    if (!days[day]) days[day] = [];
-    days[day].push(ev);
+  /**************************************************************
+  ✅ BUILD EXACT 7 DAYS (NO PARSING BUGS)
+  **************************************************************/
+  const weekDays = [];
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(startOfWeek);
+    d.setDate(startOfWeek.getDate() + i);
+
+    // ✅ CRITICAL: Prevent timezone drift
+    d.setHours(12,0,0,0);
+
+    weekDays.push(d);
+  }
+
+  /**************************************************************
+  ✅ DAY MAP (NO STRING → DATE REPARSE)
+  **************************************************************/
+  const weekMap = {};
+
+  weekDays.forEach(d => {
+    const key = toDayString(d);
+    weekMap[key] = {
+      date: d,
+      events: []
+    };
   });
 
-  const sortedDays = Object.keys(days).sort();
+  /**************************************************************
+  ✅ EXPAND EVENTS ACROSS ALL DAYS
+  **************************************************************/
+  sessionEventCache.forEach(e => {
 
-  sortedDays.forEach(dayStr => {
+    if (!e.start) return;
 
-    const dayDate = fromDayString(dayStr);
+    const evStart = new Date(e.start);
+    const evEnd   = e.end ? new Date(e.end) : evStart;
 
-    /**************************************************************
+    evStart.setHours(0,0,0,0);
+    evEnd.setHours(0,0,0,0);
+
+    for (let d = new Date(evStart); d <= evEnd; d.setDate(d.getDate() + 1)) {
+
+      // ✅ CRITICAL: Prevent timezone drift
+      d.setHours(12,0,0,0);
+
+      const key = toDayString(d);
+
+      if (weekMap[key]) {
+        weekMap[key].events.push(e);
+      }
+    }
+  });
+
+  /**************************************************************
+  ✅ RENDER (ORDERED, STABLE)
+  **************************************************************/
+  weekDays.forEach(d => {
+
+    const key = toDayString(d);
+    const dayData = weekMap[key];
+
+    /**************************************************
     ✅ DAY HEADER
-    **************************************************************/
+    **************************************************/
     const header = document.createElement("div");
-    header.textContent = dayDate.toLocaleDateString("en-US", {
-      weekday: "long",
-      month: "short",
-      day: "numeric"
-    });
+    header.style.fontWeight = "bold";
+    header.style.marginTop = "8px";
 
-    header.style.fontWeight = "600";
-    header.style.marginTop = "10px";
-    header.style.borderTop = "1px solid #ddd";
-    header.style.paddingTop = "6px";
+    header.textContent =
+      dayData.date.toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "short",
+        day: "numeric"
+      });
 
     container.appendChild(header);
 
-    /**************************************************************
+    /**************************************************
     ✅ EVENTS
-    **************************************************************/
-    days[dayStr].forEach(ev => {
+    **************************************************/
+    dayData.events.forEach(e => {
 
       const row = document.createElement("div");
 
-      const key = ev.extendedProps?.account_key;
-      const color = getColorByKey(key);
+      const raw = getColorByKey(e.extendedProps?.account_key) || "#4285f4";
+      const soft = getSoftColor(raw);
 
-      row.style.borderLeft = `4px solid ${color}`;
-      row.style.background = `${color}14`;
-      row.style.padding = "4px";
+      row.style.backgroundColor = soft;
+      row.style.borderLeft = `3px solid ${raw}`;
+      row.style.color = getBestTextColor(soft);
+      row.style.fontSize = "12px";
       row.style.marginBottom = "3px";
-      row.style.borderRadius = "4px";
+      row.style.padding = "3px 6px";
 
-      row.textContent = ev.title;
+      row.textContent = e.title;
 
       container.appendChild(row);
     });

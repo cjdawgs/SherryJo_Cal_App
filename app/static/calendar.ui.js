@@ -4,13 +4,6 @@
  **************************************************************/
 window.isModalOpen = false;
 let isSavingEvent = false;
-// ==================================================
-// ✅ GOLD STANDARD — RESOLVE COLOR FROM PALETTE
-// ==================================================
-const localKey = "local:local";
-
-// ✅ use palette if exists
-const color = window.accountColors?.[localKey] || "#666666";
 
 /**************************************************************
  * ✅ UI BUTTON BINDINGS
@@ -19,7 +12,6 @@ function bindUIEvents() {
 
   // ✅ Create button
   const createBtn = document.getElementById("createBtn");
-  console.log("createBtn:", createBtn);
 
   if (createBtn) {
     createBtn.addEventListener("click", (e) => {
@@ -32,8 +24,6 @@ function bindUIEvents() {
 
       // ✅ SET IMMEDIATELY BEFORE ANY UI CHANGES
       window.isModalOpen = true;
-
-      console.log("🔥 CREATE BUTTON CLICKED");
       openCreateModal();
     });
   }
@@ -89,21 +79,21 @@ function bindUIEvents() {
         return;
       }
 
-      console.log("🔄 Switching view:", view);
-
       /**************************************************************
-       ✅ CHANGE VIEW
+      ✅ VIEW SWITCH — SAFE (NO STATE MUTATION)
+      ---------------------------------------------------------------
+      - Changes calendar view ONLY
+      - NEVER overrides selectedDate
+      - Uses existing source of truth
       **************************************************************/
       window.calendar.changeView(view);
 
       /**************************************************************
-       ✅ SYNC SELECTED DATE (CRITICAL)
+      ✅ RE-RENDER USING CURRENT STATE
       **************************************************************/
-      selectedDate = toDayString(window.calendar.getDate());
-
       updateDayDetails();
       updateWeekView();
-      highlightSelectedDay(selectedDate);
+      highlightSelectedDay(window.selectedDate);
 
       /**************************************************************
        ✅ UPDATE ACTIVE BUTTON UI
@@ -316,6 +306,13 @@ function closeCreateModal() {
 /**************************************************************
  * ✅ SAVE EVENT (CREATE OR UPDATE)
  **************************************************************/
+/**************************************************************
+✅ SAVE EVENT — FULLY CORRECT + CLOSED STRUCTURE
+---------------------------------------------------------------
+- No missing braces
+- Single source of truth
+- Safe async handling
+**************************************************************/
 async function saveEvent() {
 
   if (isSavingEvent) {
@@ -325,75 +322,42 @@ async function saveEvent() {
 
   isSavingEvent = true;
 
-  const title = document.getElementById("eventTitle").value;
-  const date  = document.getElementById("eventDate").value;
-  const start = document.getElementById("eventStart").value;
-  const end   = document.getElementById("eventEnd").value;
-
-  // ==================================================
-  // ✅ RESOLVE COLOR FROM SYSTEM (NO HARDCODING)
-  // PRIORITY:
-  // 1. color picker (user override)
-  // 2. palette for local account
-  // ==================================================
-  const localKey = "local:local";
-
-  const colorInput = document.getElementById("eventColor");
-
-  /**************************************************************
-  ✅ GOLD STANDARD COLOR RESOLUTION (USES EXISTING ENGINE)
-  **************************************************************/
-  const color =
-    colorInput?.value ||
-    getColorByKey(localKey, "local"); // ✅ USE SYSTEM
-
-  if (!title || !date) {
-    alert("Title and date required");
-    isSavingEvent = false;
-    return;
-  }
-
-  // ✅ ✅ FIXED ISO STRINGS
-  const startISO = start
-    ? new Date(`${date}T${start}`).toISOString()
-    : new Date(`${date}T00:00`).toISOString();
-
-  const endISO = end
-    ? new Date(`${date}T${end}`).toISOString()
-    : null;
-
-  console.log("📦 SAVE PAYLOAD:", {
-    title,
-    startISO,
-    endISO,
-    color
-  });
-
   try {
 
-    /* ==================================================
-    // ✅ BUILD PAYLOAD (CORRECT LOCATION)
-    // ✅ BACKEND CONTRACT — SINGLE SOURCE MATCH
-    //**************************************************************/
+    const title = document.getElementById("eventTitle").value;
+    const date  = document.getElementById("eventDate").value;
+    const start = document.getElementById("eventStart").value;
+    const end   = document.getElementById("eventEnd").value;
+
+    const localKey = "local:local";
+    const colorInput = document.getElementById("eventColor");
+
+    const color =
+      colorInput?.value ||
+      getColorByKey(localKey, "local");
+
+    if (!title || !date) {
+      alert("Title and date required");
+      return;
+    }
+
+    const startISO = start
+      ? new Date(`${date}T${start}`).toISOString()
+      : new Date(`${date}T00:00`).toISOString();
+
+    const endISO = end
+      ? new Date(`${date}T${end}`).toISOString()
+      : null;
+
     const payload = {
       title: title,
-
-      // ✅ FIXED KEYS — MATCH EXISTING API
       start_time: startISO,
       end_time: endISO,
-
       color: color,
-
       source: "local",
       account_key: localKey
     };
 
-    console.log("📦 SAVE PAYLOAD:", payload);
-
-    /**************************************************************
-    ✅ GOLD STANDARD API CALL (TOKEN SAFE + CENTRALIZED)
-    ✅ SINGLE FETCH CALL (CORRECT)
-    **************************************************************/
     const res = await apiFetch("/calendar/event", {
       method: "POST",
       headers: {
@@ -403,23 +367,12 @@ async function saveEvent() {
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) {
-      throw new Error("Save failed");
-    }
-
-    console.log("✅ Event saved");
-    showToast("✅ Event saved");
-    closeCreateModal();
-
-    /**************************************************************
-    ✅ GOLD STANDARD — CACHE INSERT (FULL NORMALIZATION)
-    **************************************************************/
-    if (res && res.ok) {
+    if (!res.ok) throw new Error("Save failed");
 
     const data = await res.json();
 
     /**************************************************************
-     ✅ NORMALIZED EVENT (you already did this part)
+    ✅ NORMALIZE EVENT
     **************************************************************/
     const normalizedEvent = {
       ...data.event,
@@ -427,7 +380,6 @@ async function saveEvent() {
       end: data.event.end
         ? new Date(data.event.end)
         : (data.event.end_time ? new Date(data.event.end_time) : null),
-
       extendedProps: {
         ...(data.event.extendedProps || {}),
         source: data.event.source || "local",
@@ -437,33 +389,29 @@ async function saveEvent() {
     };
 
     /**************************************************************
-     ✅ INSERT INTO CACHE
+    ✅ UPDATE CACHE
     **************************************************************/
     sessionEventCache.push(normalizedEvent);
 
-    console.log("✅ CACHE INSERTED:", normalizedEvent);
-
     /**************************************************************
-     ✅ ✅ ✅ FIX 3 — FORCE SIDEBAR TO TARGET NEW EVENT DAY
+    ✅ CONTROLLED STATE UPDATE
     **************************************************************/
-    selectedDate = toDayString(normalizedEvent.start);
-
-    console.log("✅ SELECTED DATE RESET:", selectedDate);
+    window.selectedDate = toDayString(normalizedEvent.start);
 
     /**************************************************************
-     ✅ ✅ ✅ FIX 4 — FORCE SIDEBAR + WEEK VIEW UPDATE
+    ✅ RENDER PIPELINE
     **************************************************************/
     updateDayDetails();
     updateWeekView();
-    highlightSelectedDay(selectedDate);
+    highlightSelectedDay(window.selectedDate);
 
     /**************************************************************
-     ✅ REFRESH CALENDAR UI
+    ✅ FINAL UI ACTIONS
     **************************************************************/
+    showToast("✅ Event saved");
+    closeCreateModal();
+
     smartRefresh({ reason: "event_saved", force: true });
-
-  }
-
 
   } catch (err) {
     console.error("❌ Save failed:", err);
@@ -489,13 +437,9 @@ async function deleteEvent() {
     /**************************************************************
      ✅ STEP 2 DEBUG — VERIFY EXACT EVENT BEFORE DELETE
     **************************************************************/
-    console.log("🧠 DELETE DEBUG → editingEventId:", editingEventId);
-
     const debugMatch = sessionEventCache.find(e =>
       e.extendedProps?.backendId === editingEventId
     );
-
-    console.log("🧠 MATCH BEFORE DELETE:", debugMatch);
 
     /**************************************************************
      ✅ DELETE FROM BACKEND
@@ -527,7 +471,6 @@ async function deleteEvent() {
       window.deletedEventIds.add(displayMatch.id);
     }
 
-    console.log("🚫 BLACKLISTED IDS:", Array.from(window.deletedEventIds));
     closeCreateModal();
     smartRefresh({ reason: "event_deleted" });
 
@@ -553,16 +496,9 @@ async function deleteEvent() {
 
         window.calendar.refetchEvents();   // ✅ ONLY THIS IS NEEDED
       }
-
-
     }
 
   } catch (err) {
     console.error("❌ Delete failed:", err);
   }
 }
-
-
-/**************************************************************
- 
- **************************************************************/

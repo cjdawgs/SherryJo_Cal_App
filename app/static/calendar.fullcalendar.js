@@ -2,22 +2,6 @@
  * ✅ GLOBAL STATE
  **************************************************************/
 window.sessionEventCache = [];
-console.log("✅ FULLCAL FILE VERSION (FIXED)");
-
-/**************************************************************
- ✅ SAFE DOM GETTER
-**************************************************************/
-function safeGet(id, warn = true) {
-  const el = document.getElementById(id);
-  if (!el && warn) console.warn(`❌ Missing element: #${id}`);
-  return el;
-}
-
-function toLocalDateStr(d) {
-  return d.getFullYear() + "-" +
-    String(d.getMonth() + 1).padStart(2, "0") + "-" +
-    String(d.getDate()).padStart(2, "0");
-}
 
 /**************************************************************
  ✅ HIGHLIGHT DAY (FINAL CLEAN VERSION)
@@ -51,11 +35,13 @@ function highlightSelectedDay(dateStr) {
 **************************************************************/
 function initFullCalendar() {
 
-  const el = safeGet("calendar");
+  const el = document.getElementById("calendar");
+  if (!el) return;
+
   // ✅ FORCE TODAY IMMEDIATELY
   if (!window.selectedDate) {
     const today = new Date();
-    window.selectedDate = toLocalDateStr(today);
+    window.selectedDate = toDayString(today);
     console.log("✅ INIT TODAY:", window.selectedDate);
   }
 
@@ -110,8 +96,6 @@ function initFullCalendar() {
      ✅ LIFECYCLE FIXES
     **************************************************************/
     eventsSet: () => {
-      console.log("🔥 eventsSet → forcing UI sync");
-
       /**************************************************************
       ✅ DO NOT OVERRIDE USER-SELECTION
       **************************************************************/
@@ -120,7 +104,6 @@ function initFullCalendar() {
         window.selectedDate = toDayString(today);
       }
 
-
       /**************************************************************
       ✅ DIRECT, SYNCHRONOUS, RELIABLE UPDATES
       **************************************************************/
@@ -128,7 +111,6 @@ function initFullCalendar() {
       updateWeekView();     // (optional but correct)
       highlightSelectedDay(window.selectedDate);
 
-      console.log("✅ DAY + WEEK SYNC COMPLETE:", window.selectedDate);
     },
 
 
