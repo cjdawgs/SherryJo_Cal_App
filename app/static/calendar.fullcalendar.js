@@ -47,98 +47,6 @@ function highlightSelectedDay(dateStr) {
 }
 
 /**************************************************************
- ✅ SIDEBAR
-**************************************************************/
-window.updateSidebar = function(dateStr) {
-  const dayContainer = document.getElementById("dayEventsList");
-  const weekContainer = document.getElementById("weekView");
-
-  if (!dayContainer || !weekContainer) return;
-
-  dayContainer.innerHTML = "";
-  weekContainer.innerHTML = "";
-
-  if (!window.sessionEventCache.length) {
-    dayContainer.innerHTML = "<li>No events</li>";
-    return;
-  }
-
-  const selectedDate = dateStr || window.selectedDate;
-
-  const dayEvents = window.sessionEventCache.filter(e => {
-    if (!e.start) return false;
-
-    const selected = new Date(selectedDate);
-
-    const start = new Date(e.start);
-    const end = e.end ? new Date(e.end) : start;
-
-    // ✅ normalize to remove time portion
-    start.setHours(0,0,0,0);
-    end.setHours(0,0,0,0);
-    selected.setHours(0,0,0,0);
-
-    return selected >= start && selected <= end;
-  });
-
-  if (dayEvents.length === 0) {
-    dayContainer.innerHTML = "<li>No events</li>";
-  } else {
-    dayEvents.forEach(e => {
-      const li = document.createElement("li");
-
-      const raw = getColorByKey(e.extendedProps?.account_key) || "#4285f4";
-      const soft = getSoftColor(raw);
-
-      li.style.backgroundColor = soft;
-      li.style.borderLeft = `3px solid ${raw}`;
-      li.style.color = getBestTextColor(soft);
-      li.style.padding = "3px 5px";
-      li.style.borderRadius = "5px";
-      li.style.marginBottom = "3px";
-      li.style.fontSize = "12px";
-      li.style.lineHeight = "1.2";
-
-
-      li.textContent = e.title;
-      dayContainer.appendChild(li);
-    });
-  }
-
-  // WEEK
-  const selected = new Date(selectedDate);
-  const startOfWeek = new Date(selected);
-  startOfWeek.setDate(selected.getDate() - selected.getDay());
-
-  const endOfWeek = new Date(startOfWeek);
-  endOfWeek.setDate(startOfWeek.getDate() + 7);
-
-  const weekEvents = window.sessionEventCache.filter(e => {
-    if (!e.start) return false;
-    const d = new Date(e.start);
-    return d >= startOfWeek && d < endOfWeek;
-  });
-
-  weekEvents.forEach(e => {
-    const row = document.createElement("div");
-
-    const raw = getColorByKey(e.extendedProps?.account_key) || "#4285f4";
-    const soft = getSoftColor(raw);
-
-    row.style.backgroundColor = soft;
-    row.style.borderLeft = `3px solid ${raw}`;
-    row.style.color = getBestTextColor(soft);
-    row.style.fontSize = "12px";
-    row.style.lineHeight = "1.2";
-    row.style.marginBottom = "3px";
-    row.style.padding = "3px 6px";
-
-    row.textContent = e.title;
-    weekContainer.appendChild(row);
-  });
-};
-
-/**************************************************************
  ✅ CALENDAR INIT (FIXED)
 **************************************************************/
 function initFullCalendar() {
@@ -185,32 +93,19 @@ function initFullCalendar() {
     
     /**************************************************************
      ✅ EVENTS PIPELINE (FIXED)
+     ✅ SINGLE SOURCE FILTER ENGINE (NO DUPLICATE LOGIC)
     **************************************************************/
     events: function(fetchInfo, successCallback) {
 
-      /**************************************************************
-      ✅ SINGLE SOURCE OF TRUTH (NO DUPLICATE LOGIC)
-      **************************************************************/
+      // ✅ use unified engine ONLY
       const events = getFilteredEvents({
         start: fetchInfo.start,
         end: fetchInfo.end
       });
 
-      /**************************************************************
-      ✅ ENSURE DATE OBJECT SAFETY
-      **************************************************************/
-      const normalized = events.map(ev => ({
-        ...ev,
-        start: ev.start instanceof Date ? ev.start : new Date(ev.start),
-        end: ev.end
-          ? (ev.end instanceof Date ? ev.end : new Date(ev.end))
-          : null
-      }));
-
-      successCallback(normalized);
+      successCallback(events);
     },
 
-  
     /**************************************************************
      ✅ LIFECYCLE FIXES
     **************************************************************/
@@ -218,11 +113,13 @@ function initFullCalendar() {
       console.log("🔥 eventsSet → forcing UI sync");
 
       /**************************************************************
-      ✅ ENSURE selectedDate EXISTS
+      ✅ DO NOT OVERRIDE USER-SELECTION
       **************************************************************/
       if (!window.selectedDate) {
-        window.selectedDate = toDayString(calendar.getDate());
+        const today = new Date();
+        window.selectedDate = toDayString(today);
       }
+
 
       /**************************************************************
       ✅ DIRECT, SYNCHRONOUS, RELIABLE UPDATES
@@ -303,10 +200,6 @@ function initFullCalendar() {
       el.style.opacity = "0";
       el.style.transform = "translateY(-4px)";
 
-      requestAnimationFrame(() => {
-        el.style.opacity = "1";
-        el.style.transform = "translateY(0)";
-      });
       // ==================================================
       // ✅ STICKY HEADER
       // ==================================================
@@ -351,26 +244,33 @@ function initFullCalendar() {
         el.style.border = "1px solid rgba(255,255,255,0.08)";
       }
 
-
-      // ✅ KEEP YOUR EXISTING LOGIC
-      setTimeout(() => {
-        highlightSelectedDay(window.selectedDate);
-        updateSidebar(window.selectedDate);
-      }, 50);
+      /**************************************************************
+      ✅ SAFE SYNC (NO TIMING HACKS)
+      **************************************************************/
+      if (!window.selectedDate) {
+        window.selectedDate = toDayString(calendar.getDate());
+      }
+      highlightSelectedDay(window.selectedDate);
     },
 
     dateClick: (info) => {
-      window.selectedDate = info.dateStr;
-      highlightSelectedDay(window.selectedDate);
-      updateSidebar(window.selectedDate);
-    }
 
+      window.selectedDate = info.dateStr;
+
+      console.log("✅ CLICK:", window.selectedDate);
+
+      highlightSelectedDay(window.selectedDate);
+
+      /**************************************************************
+      ✅ USE NEW RENDER ENGINE ONLY
+      **************************************************************/
+      updateDayDetails();
+      updateWeekView();
+    }
   });
 
   // ✅ RENDER AFTER CONFIG
   window.calendar.render();
- 
-  setTimeout(() => window.calendar?.refetchEvents(), 0);
 
   console.log("✅ FullCalendar loaded");
 

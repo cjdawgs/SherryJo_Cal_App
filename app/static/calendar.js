@@ -74,10 +74,10 @@ let calendar = null;
 let isAppSyncing = false;
 let editingEventId = null;
 let editingNoteId = null;
-let lastGoodEvents = [];
 let providerAccountCounts = {};
 let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
-let needsCacheRefresh = false;
+window.selectedDate = null;
+
 let lastLoadedAccounts = [];
 let recentlySynced = new Set();
 /**************************************************************
@@ -113,9 +113,6 @@ let accountStatusMap = {};
 let currentRangeDays = 30;  // ✅ Default = Monthly
 let currentRangeStart = null;
 let currentRangeEnd = null; 
-
-// ✅ Track selected day
-let selectedDate = null;
 
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
@@ -540,28 +537,6 @@ function renderAccountsSafe() {
   renderAccounts(lastLoadedAccounts);
 }
 
-/**************************************************************
- * ✅ NORMALIZE TO LOCAL DAY (CRITICAL FIX)
- **************************************************************/
-function normalizeToLocalDay(dateInput) {
-  const d = new Date(dateInput);
-
-  return new Date(
-    d.getFullYear(),
-    d.getMonth(),
-    d.getDate(),
-    0, 0, 0, 0
-  );
-}
-
-function sameDay(a, b) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
 //CREATE A SINGLE SOURCE FORMATTED STRING (FOR COMPARISON + KEYS)
 function toDayString(d) {
   if (!d) return null;
@@ -582,21 +557,6 @@ function fromDayString(dayStr) {
   return new Date(y, m - 1, d);
 }
 
-
-/**************************************************************
- * ✅ SAFE DAY KEY (CRITICAL FIX FOR TIMEZONE DRIFT)
- * - Uses LOCAL calendar day exactly as FullCalendar sees it
- * - DO NOT normalize again
- **************************************************************/
-function getEventDayKey(dateInput) {
-  if (!dateInput) return null;
-
-  const d = new Date(dateInput);
-
-  return d.getFullYear() + "-" +
-    String(d.getMonth() + 1).padStart(2, "0") + "-" +
-    String(d.getDate()).padStart(2, "0");
-}
 
 /**************************************************************
  * ✅ ABSOLUTE COLOR SOURCE (DO NOT BYPASS)
@@ -865,7 +825,6 @@ async function syncSingleAccount(accountKey) {
   /**************************************************************
    * ✅ STEP 6 — REFRESH DATA
    **************************************************************/
-  //needsCacheRefresh = true;
   smartRefresh({ reason: "single_account_sync" });
 }
 
@@ -900,12 +859,11 @@ async function init() {
   renderAccountsSafe();
 
   // ✅ LOAD DATA FIRST (critical) check for Full preload or parial
-  if (!sessionEventCache.length || needsCacheRefresh) {
+  if (!sessionEventCache.length) {
     console.log("🔄 Refreshing cache (needed)");
 
     await preloadEventCache();          // ✅ ADD THIS BACK
-    needsCacheRefresh = false;          // ✅ ADD THIS
-
+    
   } else {
     console.log("⚡ Using existing session cache");
   }
@@ -913,27 +871,12 @@ async function init() {
   
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
-
-  /**************************************************************
-   * ✅ APPLY TOOLTIPS AFTER CALENDAR READY
-   **************************************************************/
-  setTimeout(() => {
-    applyRangeTooltips();
-  }, 50);
   
-  /**************************************************************
-   * ✅ INITIAL RANGE DISPLAY (FIRST LOAD)
-   **************************************************************/
-  setTimeout(() => {
-
-    const { label } = getActiveRangeLabel(currentRangeDays);
-
-    
-  }, 0);
+  applyRangeTooltips();
 
   // ✅ CRITICAL FIX — ALIGN SELECTED DATE
   if (window.calendar) {
-    selectedDate = toDayString(window.calendar.getDate());
+    window.selectedDate = toDayString(window.calendar.getDate());
   }
 
   bindUIEvents();
@@ -1011,23 +954,10 @@ async function loadAccounts() {
 function handleOAuthRedirect() {
   const params = new URLSearchParams(window.location.search);
   const connected = params.get("connected");
-  //needsCacheRefresh = true;
-
-  
+    
   if (connected) {
     console.log("✅ Connected:", connected);
-    //needsCacheRefresh = true;   // ✅ ADD THIS
     syncSingleAccount(connected);
-
-    // ✅ FORCE CALENDAR REFRESH AFTER AUTH
-    setTimeout(() => {
-      if (calendar) {
-        console.log("🔄 FORCING REFETCH AFTER LOGIN");
-        smartRefresh({ reason: "event_saved" });
-      } else {
-        console.warn("⚠️ Calendar not ready yet for refetch");
-      }
-    }, 500);
 
     // Clean URL
     window.history.replaceState({}, document.title, "/calendar-ui");
@@ -1274,78 +1204,43 @@ function initCalendar(el) {
     dayMaxEvents: false,
 
     // ✅ ONLY ONE EVENTS BLOCK EXISTS
-    events: function(fetchInfo, successCallback) {
+    /**************************************************************
+✅ SINGLE SOURCE FILTER ENGINE (FINAL)
+**************************************************************/
+events: function(fetchInfo, successCallback) {
 
-      const viewStart = normalizeToLocalDay(fetchInfo.start);
-      const viewEnd   = normalizeToLocalDay(fetchInfo.end);   
-      const visibleEvents = sessionEventCache.filter(ev => {
-        if (!ev.start) return false;
+  const events = getFilteredEvents({
+    start: fetchInfo.start,
+    end: fetchInfo.end
+  });
 
-        const evStart = normalizeToLocalDay(ev.start);
-        const evEnd = ev.end
-          ? normalizeToLocalDay(ev.end)
-          : evStart;
-
-        const inRange =
-          evStart <= viewEnd && evEnd >= viewStart;
-
-        const key = ev.extendedProps?.account_key;
-
-        if (key === "local:local") {
-          return inRange;
-        }
-
-        const matchesAccount =
-          activeAccountFilters.size === 0 ||
-          activeAccountFilters.has(key);
-
-        return inRange && matchesAccount;
-      });
-
-      const cleanEvents = visibleEvents.map(ev => ({
-        ...ev,
-        start: ev.start instanceof Date ? ev.start : new Date(ev.start),
-        end: ev.end
-          ? (ev.end instanceof Date ? ev.end : new Date(ev.end))
-          : null
-      }));
-
-      const seen = new Set();
-
-      const deduped = cleanEvents.filter(ev => {
-        const key = `${ev.title}-${ev.start.toISOString()}`;
-
-        if (seen.has(key)) return false;
-
-        seen.add(key);
-        return true;
-      });
-
-      successCallback(deduped);
-
-    },
+  successCallback(events);
+},
 
     // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
     eventsSet: () => {
 
-      if (!selectedDate) {
-        selectedDate = toDayString(new Date());
+      // ✅ ONLY set default ON FIRST LOAD
+      if (!window.selectedDate) {
+        window.selectedDate = toDayString(new Date());
       }
+
+      console.log("✅ eventsSet using:", window.selectedDate);
 
       updateWeekView();
       updateDayDetails();
-      highlightSelectedDay(selectedDate);
+      highlightSelectedDay(window.selectedDate);
     },
     
     datesSet: () => {
 
-      if (!selectedDate) {
-        selectedDate = toDayString(calendar.getDate());
+      if (!window.selectedDate) {
+        window.selectedDate = toDayString(calendar.getDate());
       }
 
       updateWeekView();
       updateDayDetails();
-      highlightSelectedDay(selectedDate);
+      highlightSelectedDay(window.selectedDate);
 
       /**************************************************************
        * ✅ NEW: UPDATE RANGE TOOLTIPS ON NAVIGATION
@@ -1363,16 +1258,13 @@ function initCalendar(el) {
      * CLICK EVENT
      **************************************************/
     // ✅ CLICK DAY → CREATE + UPDATE SIDEBAR
-    dateClick: (info) => {
+    eventClick: (info) => {
 
-      console.log("🧠 DATE CLICK:", info.date);
-
-      // ✅ THIS is the actual clicked cell
-      selectedDate = toDayString(info.date);
+      window.selectedDate = toDayString(info.event.start);
 
       updateDayDetails();
       updateWeekView();
-      highlightSelectedDay(selectedDate);
+      highlightSelectedDay(window.selectedDate);
     },
 
     /**************************************************
@@ -1418,14 +1310,12 @@ function initCalendar(el) {
 
       // ✅ use event date to update sidebar
       if (info.event.start) {
-        selectedDate = toDayString(info.event.start);
+        window.selectedDate = toDayString(info.event.start);
 
         updateDayDetails();
-        highlightSelectedDay(selectedDate);
+        highlightSelectedDay(window.selectedDate);
 
-        setTimeout(() => {
-          scrollWeekToDate(selectedDate);
-        }, 50);
+        scrollWeekToDate(window.selectedDate);
       }
    },
 
@@ -2482,8 +2372,8 @@ function updateChipSelectionUI() {
 //✅ ✅ DAY DETAILS FUNCTION
 function updateDayDetails() {
 
-  if (!selectedDate) {
-    selectedDate = toDayString(new Date());
+  if (!window.selectedDate) {
+    window.selectedDate = toDayString(new Date());
   }
 
   const titleEl = document.getElementById("selectedDateTitle");
@@ -2491,7 +2381,7 @@ function updateDayDetails() {
 
   if (!titleEl || !listEl) return;
 
-  const safeDate = fromDayString(selectedDate);
+  const safeDate = fromDayString(window.selectedDate);
 
   /**************************************************************
   ✅ HEADER
@@ -2540,8 +2430,8 @@ function updateDayDetails() {
 //✅ ✅ WEEK VIEW FUNCTION
 function updateWeekView() {
 
-  if (!selectedDate) {
-    selectedDate = toDayString(new Date());
+  if (!window.selectedDate) {
+    window.selectedDate = toDayString(new Date());
   }
 
   const container = document.getElementById("weekView");
@@ -2681,8 +2571,6 @@ async function syncNow() {
       console.log("✅ ADD SYNC KEY:", key);
     });
 
-    await new Promise(resolve => requestAnimationFrame(resolve));
-
     /**************************************************************
      * ✅ FORCE UI UPDATE
      **************************************************************/
@@ -2691,7 +2579,6 @@ async function syncNow() {
     /**************************************************************
      * ✅ FORCE BROWSER TO PAINT BEFORE BLOCKING
      **************************************************************/
-    await new Promise(resolve => requestAnimationFrame(resolve));
     const res = await apiFetch("/calendar/sync", { method: "POST" });
     if (!res) return;
 
@@ -2707,37 +2594,35 @@ async function syncNow() {
     //setSyncBanner("success");
 
     /**************************************************************
-     * ✅ DELAY CLEAR SO USER SEES FINAL STATE
+     * ✅ UPDATE STATUS MAP
      **************************************************************/
+    if (data.results) {
+      data.results.forEach(r => {
+        accountStatusMap[r.key] = r.status;
+      });
+    }
+
+    /**************************************************************
+     * ✅ 1. CLEAR SYNC STATE
+     **************************************************************/
+    syncingAccounts.clear();
+
+    /**************************************************************
+     * ✅ 2. FORCE CLEAN RENDER
+     **************************************************************/
+    renderAccountsSafe();
+    console.log("🧪 syncingAccounts contents:", [...syncingAccounts]);
+
+    /**************************************************************
+     * ✅ 4. NORMAL REFRESH
+     **************************************************************/
+    smartRefresh({ reason: "event_saved" });
+
+    
     setTimeout(() => {
+      showToast("✅ Sync complete");
+    }, 300);
 
-      /**************************************************************
-       * ✅ UPDATE STATUS MAP
-       **************************************************************/
-      if (data.results) {
-        data.results.forEach(r => {
-          accountStatusMap[r.key] = r.status;
-        });
-      }
-
-      /**************************************************************
-       * ✅ 1. CLEAR SYNC STATE
-       **************************************************************/
-      syncingAccounts.clear();
-
-      /**************************************************************
-       * ✅ 2. FORCE CLEAN RENDER
-       **************************************************************/
-      renderAccountsSafe();
-      console.log("🧪 syncingAccounts contents:", [...syncingAccounts]);
-
-      /**************************************************************
-       * ✅ 4. NORMAL REFRESH
-       **************************************************************/
-      //needsCacheRefresh = true;
-      smartRefresh({ reason: "event_saved" });
-
-    }, 800);
 
   } catch (err) {
     showToast("❌ Sync failed", "error");
