@@ -30,6 +30,40 @@ function highlightSelectedDay(dateStr) {
   }
 }
 
+/*******************************************************
+✅ RANGE PILL RENDER ENGINE (GLOBAL — CORRECT PLACEMENT)
+*******************************************************/
+function renderRangePill() {
+
+  let el = document.getElementById("rangeDisplay");
+
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "rangeDisplay";
+
+    const calendarEl = document.getElementById("calendar");
+
+    if (calendarEl && calendarEl.parentNode) {
+      calendarEl.parentNode.insertBefore(el, calendarEl);
+    } else {
+      document.body.prepend(el);
+    }
+  }
+
+  const days = window.currentRangeDays || 30;
+  const range = getActiveRangeLabel(days);
+
+  el.textContent = "📅 " + (range?.label || "NO RANGE");
+
+  el.style.display = "inline-block";
+  el.style.padding = "6px 12px";
+  el.style.margin = "8px 0";
+  el.style.borderRadius = "999px";
+  el.style.background = "#eee";
+
+  console.log("✅ RANGE PILL RENDER:", el.textContent);
+}
+
 /**************************************************************
  ✅ CALENDAR INIT (FIXED)
 **************************************************************/
@@ -57,6 +91,30 @@ function initFullCalendar() {
       right: "dayGridMonth,timeGridWeek,timeGridDay"
     },
 
+    /**************************************************************
+     ✅ EVENTS PIPELINE (FIXED)
+     ✅ SINGLE SOURCE FILTER ENGINE (NO DUPLICATE LOGIC)    
+    **************************************************************/ 
+    events: function(fetchInfo, successCallback) {
+
+      if (!window.ALL_EVENTS) {
+        console.log("❌ NO EVENTS AVAILABLE");
+        successCallback([]);
+        return;
+      }
+
+      const filtered = window.ALL_EVENTS.filter(e => {
+        const start = new Date(e.start);
+        const end = e.end ? new Date(e.end) : start;
+
+        return start < fetchInfo.end && end >= fetchInfo.start;
+      });
+
+      console.log("✅ EVENTS SERVED:", filtered.length);
+
+      successCallback(filtered);
+    },
+
     // ✅ RESTORE EVENT COLORS (CRITICAL)
     eventContent: function(arg) {
       const ev = arg.event;
@@ -78,163 +136,48 @@ function initFullCalendar() {
     },
     
     /**************************************************************
-     ✅ EVENTS PIPELINE (FIXED)
-     ✅ SINGLE SOURCE FILTER ENGINE (NO DUPLICATE LOGIC)
-    **************************************************************/
-    events: function(fetchInfo, successCallback) {
-
-      // ✅ use unified engine ONLY
-      const events = getFilteredEvents({
-        start: fetchInfo.start,
-        end: fetchInfo.end
-      });
-
-      successCallback(events);
-    },
-
-    /**************************************************************
      ✅ LIFECYCLE FIXES
     **************************************************************/
     eventsSet: () => {
       /**************************************************************
-      ✅ DO NOT OVERRIDE USER-SELECTION
+      ✅ RESERVED HOOK (NO UI SIDE EFFECTS)
+      - DO NOT UPDATE selectedDate HERE
+      - DO NOT UPDATE DAY/WEEK UI HERE
+      - Pure lifecycle observation only
       **************************************************************/
-      if (!window.selectedDate) {
-        const today = new Date();
-        window.selectedDate = toDayString(today);
-      }
+    },
+    
 
+    /**************************************************************
+     ✅ LIFECYCLE FIXES
+    **************************************************************/
+    eventDidMount: () => {
       /**************************************************************
-      ✅ DIRECT, SYNCHRONOUS, RELIABLE UPDATES
+      ✅ RESERVED HOOK (NO UI SIDE EFFECTS)
+      - DO NOT UPDATE selectedDate HERE
+      - DO NOT UPDATE DAY/WEEK UI HERE
+      - Pure lifecycle observation only
       **************************************************************/
-      updateDayDetails();   // ✅ FIXES YOUR 1 EVENT BUG
-      updateWeekView();     // (optional but correct)
-      highlightSelectedDay(window.selectedDate);
-
     },
 
+    datesSet: function () {
+      console.log("[FC datesSet fired]");
 
-    datesSet: (arg) => {
-      console.log("[FC datesSet]", arg);
+      renderRangePill();
 
-      let el = document.getElementById("rangeDisplay");
+      const cal = window.calendar;
+      if (!cal) return;
 
-      if (!el) {
-        el = document.createElement("div");
-        el.id = "rangeDisplay";
+      const current = toDayString(cal.getDate());
 
-        // ✅ NEW: semantic + styling hook
-        el.className = "range-badge";
+      window.selectedDate = current;
 
-        // ✅ ALWAYS ATTACH (NO CONDITIONS, NO FAILURES)
-        const calendarEl = document.getElementById("calendar");
+      updateDayDetails();
+      updateWeekView();
+      highlightSelectedDay(current);
 
-        if (calendarEl && calendarEl.parentNode) {
-          calendarEl.parentNode.insertBefore(el, calendarEl);
-        } else {
-          document.body.prepend(el); // fallback (never fails)
-        }
-      }
-
-      // ✅ SAFE DATE EXTRACTION
-      // ==================================================
-      // ✅ GOOGLE-STYLE RANGE FORMATTER (GOLD STANDARD)
-      // ==================================================
-      function formatRange(start, end) {
-          // ✅ CLONE to avoid mutation
-          const s = new Date(start);
-          const e = new Date(end);
-
-          // ✅ FullCalendar end is exclusive → subtract 1 day
-          e.setDate(e.getDate() - 1);
-
-          const sameYear = s.getFullYear() === e.getFullYear();
-          const sameMonth = s.getMonth() === e.getMonth();
-
-          const format = (d, options) =>
-              d.toLocaleDateString(undefined, options);
-
-          // ✅ CASE 1: SAME MONTH + YEAR
-          if (sameYear && sameMonth) {
-              return `${format(s, { month: "short" })} ${s.getDate()} → ${e.getDate()}, ${e.getFullYear()}`;
-          }
-
-          // ✅ CASE 2: SAME YEAR, DIFFERENT MONTH
-          if (sameYear) {
-              return `${format(s, { month: "short", day: "numeric" })} → ${format(e, { month: "short", day: "numeric" })}, ${e.getFullYear()}`;
-          }
-
-          // ✅ CASE 3: DIFFERENT YEAR
-          return `${format(s, { month: "short", day: "numeric", year: "numeric" })} → ${format(e, { month: "short", day: "numeric", year: "numeric" })}`;
-      }
-
-      // ✅ FORCE TEXT (NO OPTIONALS)
-      
-      // ==================================================
-      // ✅ SINGLE SOURCE TEXT (NO DUPLICATES)
-      // ==================================================
-      const displayText = formatRange(arg.start, arg.end);
-      // ✅ ICON + TEXT (THIS IS THE ONLY RENDER POINT)
-      el.innerHTML = `<span style="margin-right:6px">📅</span>${displayText}`;
-      // ==================================================
-      // ✅ FADE-IN ANIMATION
-      // ==================================================
-      el.style.opacity = "0";
-      el.style.transform = "translateY(-4px)";
-
-      // ==================================================
-      // ✅ STICKY HEADER
-      // ==================================================
-      el.style.position = "sticky";
-      el.style.top = "0";
-      el.style.zIndex = "1000";
-
-      el.style.backdropFilter = "blur(6px)";
-
-      
-      console.log("✅ RANGE SET:", el.textContent);
-
-      // ==================================================
-      // ✅ GOOGLE-STYLE BADGE UI (PRODUCTION GRADE)
-      // ==================================================
-      el.style.all = "unset";
-
-      el.style.display = "inline-block";
-      el.style.padding = "6px 12px";
-      el.style.borderRadius = "999px"; // ✅ pill shape
-
-      el.style.fontSize = "13px";
-      el.style.fontWeight = "500";
-
-      el.style.background = "rgba(241,243,244,0.85)";
-      el.style.color = "#202124";
-
-      el.style.boxShadow = "0 1px 2px rgba(0,0,0,0.1)";
-      el.style.border = "1px solid rgba(0,0,0,0.08)";
-
-      el.style.margin = "8px 0";
-      el.style.transition = "all 0.25s ease";
-
-      // ==================================================
-      // ✅ DARK MODE SUPPORT
-      // ==================================================
-      const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-
-      if (isDark) {
-        el.style.background = "rgba(60,64,67,0.85)";
-        el.style.color = "#e8eaed";
-        el.style.border = "1px solid rgba(255,255,255,0.08)";
-      }
-
-      /**************************************************************
-      ✅ SAFE SYNC (NO TIMING HACKS)
-      **************************************************************/
-      if (!window.selectedDate) {
-        window.selectedDate = toDayString(calendar.getDate());
-      }
-      highlightSelectedDay(window.selectedDate);
+      console.log("✅ DATE SYNC:", current);
     },
-
     dateClick: (info) => {
 
       window.selectedDate = info.dateStr;

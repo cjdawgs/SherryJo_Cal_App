@@ -70,7 +70,6 @@ async function apiFetch(url, options = {}) {
 /**************************************************************
  * ✅ GLOBAL STATE
  **************************************************************/
-let calendar = null;
 let isAppSyncing = false;
 let editingEventId = null;
 let editingNoteId = null;
@@ -110,7 +109,8 @@ let accountStatusMap = {};
 
 
 // ✅ RANGE CONTROL (NEW)
-let currentRangeDays = 30;  // ✅ Default = Monthly
+window.currentRangeDays = window.currentRangeDays || 30;
+// ✅ Default = Monthly
 let currentRangeStart = null;
 let currentRangeEnd = null; 
 
@@ -139,7 +139,7 @@ function smartRefresh({ reason = "unknown", force = false } = {}) {
   console.log(`🧠 SMART REFRESH → ${reason}`);
 
   if (force) {
-    calendar.refetchEvents();
+    window.calendar.refetchEvents();
     return;
   }
 
@@ -166,60 +166,50 @@ function updateEventInCache(updatedEvent) {
  **************************************************************/
 
 /**************************************************************
+✅ GLOBAL CALENDAR ACCESSOR (SINGLE SOURCE OF TRUTH)
+**************************************************************/
+function getCalendarSafe() {
+  if (!window.calendar) {
+    console.warn("⚠️ calendar not ready");
+    return null;
+  }
+  return window.calendar;
+}
+
+/**************************************************************
 ✅ ✅ ✅ GOLD STANDARD — TRUE DATE OVERLAP ENGINE
 **************************************************************/
 function getFilteredEvents({ start, end }) {
 
-  /**************************************************************
-  ✅ FORCE LOCAL DAY RANGE (NO UTC EVER)
-  **************************************************************/
-  const rangeStart = start
-    ? new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0)
-    : null;
+  if (!start || !end) {
+    console.warn("❌ INVALID RANGE PASSED TO FILTER", start, end);
+    return [];
+  }
 
-  const rangeEnd = end
-    ? new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999)
-    : null;
-
-  const active = [...activeAccountFilters];
+  const rangeStart = new Date(start);
+  const rangeEnd   = new Date(end);
 
   return sessionEventCache.filter(ev => {
 
-    if (!ev.start) return false;
+    if (!ev || !ev.start) return false;
 
-    /**************************************************************
-    ✅ FORCE LOCAL EVENT BOUNDS (CRITICAL)
-    **************************************************************/
-    const s = new Date(ev.start);
-    const e = ev.end ? new Date(ev.end) : new Date(ev.start);
+    const evStart = new Date(ev.start);
+    const evEnd   = ev.end ? new Date(ev.end) : evStart;
 
-    const evStart = new Date(
-      s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0, 0
-    );
+    // ✅ STRICT OVERLAP ONLY
+    if (evEnd < rangeStart) return false;
+    if (evStart > rangeEnd) return false;
 
-    const evEnd = new Date(
-      e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59, 999
-    );
-
-    /**************************************************************
-    ✅ TRUE LOCAL OVERLAP
-    **************************************************************/
-    const inRange =
-      !rangeStart || !rangeEnd
-        ? true
-        : (evStart <= rangeEnd && evEnd >= rangeStart);
-
-    /**************************************************************
-    ✅ ACCOUNT FILTER
-    **************************************************************/
+    // ✅ ACCOUNT FILTER ONLY
     const key = ev.extendedProps?.account_key;
+    if (activeAccountFilters.size && !activeAccountFilters.has(key)) {
+      return false;
+    }
 
-    const matchesAccount =
-      active.length === 0 || active.includes(key);
-
-    return inRange && matchesAccount;
+    return true;
   });
 }
+
 
 
 function normalizeKey(provider, email) {
@@ -304,62 +294,53 @@ function isDateInActiveRange(date) {
 }
 
 /**************************************************************
- * ✅ APPLY RANGE TOOLTIPS (SAFE + REUSABLE)
- **************************************************************/
-function applyRangeTooltips() {
+✅ RANGE RESOLVER (SINGLE SOURCE OF TRUTH)
+- ALL UI and logic must use this
+**************************************************************/
+function getRangeDays(type) {
 
-  document.querySelectorAll(".range-btn").forEach(btn => {
+  const map = {
+    monthly: 30,
+    quarterly: 90,
+    semi: 180,
+    yearly: 365
+  };
 
-    if (btn.id === "customRange") return;
-
-    const previewDays =
-      btn.id === "monthly" ? 30 :
-      btn.id === "quarterly" ? 90 :
-      btn.id === "semiAnnual" ? 180 :
-      btn.id === "yearly" ? 365 :
-      currentRangeDays;
-
-    const preview = getActiveRangeLabel(previewDays);
-
-    if (preview.label) {
-      btn.title = `Range: ${preview.label}`;
-    }
-  });
+  return map[type] || currentRangeDays;
 }
 
-
 /**************************************************************
- * ✅ RANGE CALCULATOR (SINGLE SOURCE OF TRUTH)
- * ------------------------------------------------------------
- * DO NOT duplicate logic elsewhere
- * ALL range UI derives from here
- **************************************************************/
+ ✅ RANGE CALCULATOR (SINGLE SOURCE OF TRUTH)
+ ✅ RANGE ENGINE (FIXED — GLOBAL SAFE)
+**************************************************************/
 function getActiveRangeLabel(days) {
 
-  if (!calendar) {
+  const cal = getCalendarSafe();
+  if (!cal) {
     return { start: null, end: null, label: "" };
   }
 
-  const base = calendar.getDate();
+  const base = new Date(); // ✅ anchor to TODAY
 
   const start = new Date(base);
   const end = new Date(base);
 
-  start.setDate(base.getDate() - days);
-  end.setDate(base.getDate() + days);
+  // ✅ split range evenly around today
+  const half = Math.floor(days / 2);
 
-  const format = d =>
+  start.setDate(base.getDate() - half);
+  end.setDate(base.getDate() + half);
+
+  const format = (d) =>
     d.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
       year: "numeric"
     });
 
-  return {
-    start,
-    end,
-    label: `${format(start)} → ${format(end)}`
-  };
+  const label = `${format(start)} → ${format(end)}`;
+
+  return { start, end, label };
 }
 
 /**************************************************************
@@ -867,6 +848,7 @@ async function init() {
   
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
+  renderRangePill(); // ✅ ensure initial render
   
   applyRangeTooltips();
 
@@ -876,6 +858,8 @@ async function init() {
   }
 
   bindUIEvents();
+  applyRangeTooltips(); // ✅ ensures hover text shows immediately
+
 }
 
 function showReconnectBanner(accounts) {
@@ -1165,7 +1149,9 @@ async function preloadEventCache() {
   
   //setSyncBanner("success");
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
-    isAppSyncing = false;
+  // ✅ ✅ ✅ CRITICAL — MAKE EVENTS AVAILABLE TO FULLCALENDAR
+  window.ALL_EVENTS = sessionEventCache;
+  isAppSyncing = false;
   
   console.log("✅ SYNC MODE OFF");  
   syncingAccounts.clear();
@@ -1196,8 +1182,10 @@ function initCalendar(el) {
     // ✅ LOCK WEEK START (CRITICAL FOR CONSISTENCY)
     firstDay: 0,  // ✅ Sunday = start of week
 
-    dayMaxEventRows: 3,
-    dayMaxEvents: false,
+    
+  dayMaxEventRows: false,
+  dayMaxEvents: false,
+  eventDisplay: "block",
 
     // ✅ ONLY ONE EVENTS BLOCK EXISTS
     /**************************************************************
@@ -1406,7 +1394,7 @@ events: function(fetchInfo, successCallback) {
     }
   });
   window.calendar = calendar;
-  calendar.render();
+  window.calendar.render();
 }
 
 function openCustomRange() {
@@ -1451,7 +1439,7 @@ function applyClientSideFilters() {
   /**************************************************************
    * ✅ JUST REFETCH EVENTS (THEY ARE NOW FILTERED AT SOURCE)
    **************************************************************/
-  calendar.refetchEvents();
+  window.calendar.refetchEvents();
 }
 
 
@@ -1966,7 +1954,7 @@ function renderAccounts(accounts) {
             badge.style.color = getBestTextColor(raw);
           }
 
-          calendar.refetchEvents();   // ✅ events stay RAW
+          window.calendar.refetchEvents();   // ✅ events stay RAW
           updateWeekView();
         });
       }
@@ -2378,6 +2366,19 @@ function updateDayDetails() {
   if (!titleEl || !listEl) return;
 
   const safeDate = fromDayString(window.selectedDate);
+  /**************************************************************
+  ✅ STRICT DAY RANGE (THIS IS THE FIX)
+  **************************************************************/
+  const start = new Date(safeDate);
+  start.setHours(0, 0, 0, 0);
+
+  const end = new Date(safeDate);
+  end.setHours(23, 59, 59, 999);
+
+  const events = getFilteredEvents({ start, end });
+
+  console.log("✅ DAY FILTER RANGE:", start, end);
+  console.log("✅ DAY EVENTS FOUND:", events.length);
 
   /**************************************************************
   ✅ HEADER
@@ -2386,14 +2387,6 @@ function updateDayDetails() {
     weekday: "long",
     month: "long",
     day: "numeric"
-  });
-
-  /**************************************************************
-  ✅ EVENTS (SINGLE SOURCE)
-  **************************************************************/
-  const events = getFilteredEvents({
-    start: safeDate,
-    end: safeDate
   });
 
   console.log("✅ DAY EVENTS FOUND:", events.length);

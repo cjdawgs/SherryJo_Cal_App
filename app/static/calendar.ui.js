@@ -6,6 +6,35 @@ window.isModalOpen = false;
 let isSavingEvent = false;
 
 /**************************************************************
+✅ RANGE TOOLTIP ENGINE (UI LAYER ONLY)
+- NO logic duplication
+- Uses core range engine (single source of truth)
+✅ RANGE TOOLTIPS (NUMERIC SAFE VERSION)
+**************************************************************/
+function applyRangeTooltips() {
+
+  document.querySelectorAll(".range-btn").forEach(btn => {
+
+    // ✅ skip custom (no range)
+    if (!btn.dataset.range) return;
+
+    const days = parseInt(btn.dataset.range);
+    if (!days) return;
+
+    const preview = getActiveRangeLabel(days);
+
+    if (preview?.label) {
+      btn.title = `Range: ${preview.label}
+Start: ${preview.start.toLocaleDateString()}
+End: ${preview.end.toLocaleDateString()}`;
+    }
+
+  });
+
+}
+
+
+/**************************************************************
  * ✅ UI BUTTON BINDINGS
  **************************************************************/
 function bindUIEvents() {
@@ -65,50 +94,6 @@ function bindUIEvents() {
   document.getElementById("syncBtn")
     ?.addEventListener("click", syncNow);
 
-  /**************************************************************
-  ✅ VIEW SWITCH ENGINE (MONTH / WEEK / DAY)
-  **************************************************************/
-  document.querySelectorAll(".view-btn").forEach(btn => {
-
-    btn.addEventListener("click", () => {
-
-      const view = btn.dataset.view;
-
-      if (!window.calendar) {
-        console.warn("⚠ calendar not ready");
-        return;
-      }
-
-      /**************************************************************
-      ✅ VIEW SWITCH — SAFE (NO STATE MUTATION)
-      ---------------------------------------------------------------
-      - Changes calendar view ONLY
-      - NEVER overrides selectedDate
-      - Uses existing source of truth
-      **************************************************************/
-      window.calendar.changeView(view);
-
-      /**************************************************************
-      ✅ RE-RENDER USING CURRENT STATE
-      **************************************************************/
-      updateDayDetails();
-      updateWeekView();
-      highlightSelectedDay(window.selectedDate);
-
-      /**************************************************************
-       ✅ UPDATE ACTIVE BUTTON UI
-      **************************************************************/
-      document.querySelectorAll(".view-btn").forEach(b =>
-        b.classList.remove("active")
-      );
-
-      btn.classList.add("active");
-
-    });
-
-  });
-
-
   document.getElementById("logoutBtn")
     ?.addEventListener("click", logout);
 
@@ -128,61 +113,66 @@ function bindUIEvents() {
         endDate.toTimeString().slice(0, 5);
     });
 
-  /**************************************************
-  ✅ RANGE BUTTONS (THIS WAS MISSING)
-  **************************************************/
+  
+  /**************************************************************
+  ✅ RANGE BUTTON ENGINE (FULL REPLACEMENT — SINGLE SOURCE)
+  - Updates:
+    • currentRangeDays
+    • label (UI)
+    • tooltips
+    • triggers refresh
+  ✅ RANGE BUTTON ENGINE (FINAL — SINGLE SOURCE)
+  **************************************************************/
   document.querySelectorAll(".range-btn").forEach(btn => {
 
     btn.addEventListener("click", () => {
 
-      document.querySelectorAll(".range-btn")
-        .forEach(b => b.classList.remove("active"));
+      const days = parseInt(btn.dataset.range);
+      if (!days) return;
 
-      btn.classList.add("active");
+      console.log("✅ RANGE SELECTED:", days);
 
-      /**************************************************************
-       * ✅ CUSTOM BUTTON
-       **************************************************************/
-      if (btn.id === "customRange") {
+      currentRangeDays = days;
+      window.currentRangeDays = days;
 
-        openCustomRange();
 
-        const rangeEl = document.getElementById("rangeDisplay");
+      const { label } = getActiveRangeLabel(days);
 
-        if (rangeEl && sessionCacheRange.start && sessionCacheRange.end) {
-
-          const format = d => d.toLocaleDateString();
-
-          console.log("ℹ️ Custom range selected");
-        }
-
-        return;
+      const labelEl = document.getElementById("activeRangeLabel");
+      if (labelEl) {
+        labelEl.textContent = label;
       }
 
-      /**************************************************************
-       * ✅ RANGE MAPPING
-       **************************************************************/
-      if (btn.id === "monthly") currentRangeDays = 30;
-      else if (btn.id === "quarterly") currentRangeDays = 90;
-      else if (btn.id === "semiAnnual") currentRangeDays = 180;
-      else if (btn.id === "yearly") currentRangeDays = 365;
-
-      /**************************************************************
-       * ✅ UPDATE DISPLAY
-       **************************************************************/
-      const { label } = getActiveRangeLabel(currentRangeDays);
-
-      const rangeEl = document.getElementById("rangeDisplay");
-
-      // ✅ DO NOT override FullCalendar range display
-      console.log("ℹ️ Range label (UI only):", label);
-
-
-      applyClientSideFilters();
       applyRangeTooltips();
 
+      // ✅ ✅ ✅ THIS WAS CORRECT — KEEP IT
+      const cal = window.calendar;
+      if (cal && sessionEventCache.length) {
+
+        // ✅ DO NOT MOVE CALENDAR ANYMORE
+        // Keep current visible month intact
+
+        const cal = window.calendar;
+        if (cal) {
+
+          // ✅ Force refresh only (no position change)
+          cal.refetchEvents();
+
+          console.log("✅ RANGE UPDATED (NO NAV):", days);
+        }
+        cal.refetchEvents();
+
+        console.log("✅ CAL MOVED:", days);
+      }
+
+      smartRefresh({ reason: "range_change" });
+
+      renderRangePill(); // ✅ force UI update immediately
+
     });
+
   });
+
 }
 
 /**************************************************************
