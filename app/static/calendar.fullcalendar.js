@@ -1,12 +1,19 @@
+//import { getColorByKey, getSoftColor, getBestTextColor } from "./calendar.colors.js";
+
+import {
+  toDayString,
+  getActiveRangeLabel
+} from "./core.js";
+
 /**************************************************************
  * ✅ GLOBAL STATE
+ * (do not initialize sessionEventCache here — single source in calendar.js)
  **************************************************************/
-window.sessionEventCache = [];
 
 /**************************************************************
  ✅ HIGHLIGHT DAY (FINAL CLEAN VERSION)
 **************************************************************/
-function highlightSelectedDay(dateStr) {
+export function highlightSelectedDay(dateStr) {
 
   // ✅ clear previous highlights (MONTH VIEW ONLY)
   document.querySelectorAll(".fc-daygrid-day").forEach(d => {
@@ -33,21 +40,14 @@ function highlightSelectedDay(dateStr) {
 /*******************************************************
 ✅ RANGE PILL RENDER ENGINE (GLOBAL — CORRECT PLACEMENT)
 *******************************************************/
-function renderRangePill() {
+export function renderRangePill() {
 
   let el = document.getElementById("rangeDisplay");
 
   if (!el) {
-    el = document.createElement("div");
-    el.id = "rangeDisplay";
-
-    const calendarEl = document.getElementById("calendar");
-
-    if (calendarEl && calendarEl.parentNode) {
-      calendarEl.parentNode.insertBefore(el, calendarEl);
-    } else {
-      document.body.prepend(el);
-    }
+    // ✅ Retry after header injection completes
+    setTimeout(renderRangePill, 50);
+    return;
   }
 
   const days = window.currentRangeDays || 30;
@@ -64,139 +64,177 @@ function renderRangePill() {
   console.log("✅ RANGE PILL RENDER:", el.textContent);
 }
 
-/**************************************************************
- ✅ CALENDAR INIT (FIXED)
-**************************************************************/
-function initFullCalendar() {
+/**
+ * ==========================================================
+ * ✅ FULLCALENDAR INIT (EXPORTED — SINGLE SOURCE OF TRUTH)
+ * ==========================================================
+ * This MUST be imported — never global
+ * ==========================================================
+ */
+export function initFullCalendar() {
 
   const el = document.getElementById("calendar");
-  if (!el) return;
+  if (!el) {
+    console.warn("⚠️ Missing #calendar element");
+    return;
+  }
 
-  // ✅ FORCE TODAY IMMEDIATELY
+  console.log("✅ Initializing FullCalendar");
+
+  // ✅ SAFE DEFAULT DATE
   if (!window.selectedDate) {
     const today = new Date();
     window.selectedDate = toDayString(today);
-    console.log("✅ INIT TODAY:", window.selectedDate);
   }
-
-  if (!el) return;
 
   window.calendar = new FullCalendar.Calendar(el, {
 
-    initialView: "dayGridMonth",
-
+    /* ✅ UNIFIED HEADER ROW */
     headerToolbar: {
-      left: "prev,next today",
-      center: "title",
-      right: "dayGridMonth,timeGridWeek,timeGridDay"
+      left: "title",
+      center: "rangeGroup",
+      right: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
     },
 
-    /**************************************************************
-     ✅ EVENTS PIPELINE (FIXED)
-     ✅ SINGLE SOURCE FILTER ENGINE (NO DUPLICATE LOGIC)    
-    **************************************************************/ 
-    events: function(fetchInfo, successCallback) {
+    customButtons: {
+      rangeGroup: {
+        text: ""   // placeholder
+      }
+    },
 
-      if (!window.ALL_EVENTS) {
-        console.log("❌ NO EVENTS AVAILABLE");
+    /* ✅ ✅ ✅ ADD THIS BLOCK RIGHT HERE */
+    buttonText: {
+      dayGridMonth: "Month",
+      timeGridWeek: "Week",
+      timeGridDay: "Day"
+    },
+
+    eventDisplay: "block",
+
+    events: function(fetchInfo, successCallback) {
+      if (!window.sessionEventCache) {
+        console.warn("❌ No cache yet");
         successCallback([]);
         return;
       }
 
-      const filtered = window.ALL_EVENTS.filter(e => {
-        const start = new Date(e.start);
-        const end = e.end ? new Date(e.end) : start;
+      const rangeStart = new Date(fetchInfo.start);
+      const rangeEnd = new Date(fetchInfo.end);
 
-        return start < fetchInfo.end && end >= fetchInfo.start;
+      const events = window.sessionEventCache.map(ev => {
+
+        const provider = normalizeProvider(ev.extendedProps?.source);
+
+        let email = ev.extendedProps?.account || "";
+
+        // ✅ STRIP BAD SUFFIX
+        email = email.split(" ")[0];
+
+        email = email.toLowerCase().trim();
+
+        const key = `${provider}:${email}`;
+        const raw =
+          (window.getColorByKey && window.getColorByKey(key)) ||
+          "#4285f4";
+
+        const soft =
+          (window.applySoftColor && window.applySoftColor(raw)) ||
+          raw;
+
+        return {
+          ...ev,
+          backgroundColor: soft,
+          borderColor: raw,
+          textColor:
+            (window.getBestTextColor &&
+            window.getBestTextColor(soft)) ||
+            "#000"
+        };
+
+      }).filter(ev => {
+
+        const evStart = new Date(ev.start);
+        const evEnd = ev.end ? new Date(ev.end) : evStart;
+
+        return evStart <= rangeEnd && evEnd >= rangeStart;
       });
 
-      console.log("✅ EVENTS SERVED:", filtered.length);
+      console.log("✅ EVENTS SENT:", events.length);
 
-      successCallback(filtered);
+      successCallback(events);
     },
+    eventDidMount: function(info) {
 
-    // ✅ RESTORE EVENT COLORS (CRITICAL)
-    eventContent: function(arg) {
-      const ev = arg.event;
+      
+      const provider = normalizeProvider(info.event.extendedProps?.source);
 
-      const color = getColorByKey(ev.extendedProps?.account_key) || "#4285f4";
+      let email = info.event.extendedProps?.account || "";
 
-      const container = document.createElement("div");
-      container.style.fontSize = "12px";
-      container.style.lineHeight = "1.2";
-      container.style.padding = "1.5px 3px";
-      container.style.borderRadius = "4px";
-      container.style.backgroundColor = color;
-      container.style.borderLeft = `4px solid ${color}`;
-      container.style.color = getBestTextColor(color);
+      // ✅ REMOVE ANY TRAILING " 2", " 3", ETC
+      email = email.split(" ")[0];
 
-      container.textContent = ev.title;
+      email = email.toLowerCase().trim();
 
-      return { domNodes: [container] };
-    },
-    
-    /**************************************************************
-     ✅ LIFECYCLE FIXES
-    **************************************************************/
-    eventsSet: () => {
-      /**************************************************************
-      ✅ RESERVED HOOK (NO UI SIDE EFFECTS)
-      - DO NOT UPDATE selectedDate HERE
-      - DO NOT UPDATE DAY/WEEK UI HERE
-      - Pure lifecycle observation only
-      **************************************************************/
-    },
-    
+      const key = `${provider}:${email}`;
 
-    /**************************************************************
-     ✅ LIFECYCLE FIXES
-    **************************************************************/
-    eventDidMount: () => {
-      /**************************************************************
-      ✅ RESERVED HOOK (NO UI SIDE EFFECTS)
-      - DO NOT UPDATE selectedDate HERE
-      - DO NOT UPDATE DAY/WEEK UI HERE
-      - Pure lifecycle observation only
-      **************************************************************/
-    },
+      const raw =
+        (window.getColorByKey && window.getColorByKey(key)) || "#4285f4";
 
-    datesSet: function () {
-      console.log("[FC datesSet fired]");
+      const soft =
+        (window.applySoftColor && window.applySoftColor(raw)) || raw;
 
-      renderRangePill();
+      // ✅ KILL fullcalendar default wrapper styles
+      info.el.style.background = "transparent";
+      info.el.style.border = "none";
 
-      const cal = window.calendar;
-      if (!cal) return;
+      // ✅ TARGET ACTUAL CONTENT
+      const inner = info.el.querySelector(".fc-event-main");
 
-      const current = toDayString(cal.getDate());
-
-      window.selectedDate = current;
-
-      updateDayDetails();
-      updateWeekView();
-      highlightSelectedDay(current);
-
-      console.log("✅ DATE SYNC:", current);
-    },
-    dateClick: (info) => {
-
-      window.selectedDate = info.dateStr;
-
-      console.log("✅ CLICK:", window.selectedDate);
-
-      highlightSelectedDay(window.selectedDate);
-
-      /**************************************************************
-      ✅ USE NEW RENDER ENGINE ONLY
-      **************************************************************/
-      updateDayDetails();
-      updateWeekView();
+      if (inner) {
+        inner.style.backgroundColor = soft;
+        inner.style.boxShadow = "inset 0 0 0 9999px " + soft;
+        inner.style.borderLeft = `4px solid ${raw}`;
+        inner.style.borderRadius = "6px";
+        inner.style.padding = "2px 6px";
+        inner.style.fontSize = "11px";
+      }
     }
+
   });
 
-  // ✅ RENDER AFTER CONFIG
   window.calendar.render();
+  /* ======================================================
+  ✅ INJECT RANGE INTO HEADER (SAFE ADDITION)
+  ✅ CENTER RANGE PILL (FINAL LAYOUT)
+  ====================================================== */
+  setTimeout(() => {
 
-  console.log("✅ FullCalendar loaded");
+    const center = document.querySelector(".fc-toolbar-chunk:nth-child(2)");
 
+    if (!center) {
+      console.warn("❌ center toolbar not found");
+      return;
+    }
+
+    center.innerHTML = `
+      <div style="
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        width:100%;
+      ">
+        <div id="rangeDisplay" style="
+          font-size:12px;
+          padding:6px 12px;
+          border-radius:999px;
+          background:#eee;
+        "></div>
+      </div>
+    `;
+
+    console.log("✅ RANGE PILL CENTERED");
+
+  }, 50);
+  
+    console.log("✅ FullCalendar loaded");
 }

@@ -46,26 +46,6 @@
         ⏳ Syncing calendar...
       </div>
 
-      <!-- ✅ CONNECT BUTTONS -->
-      <div class="authButtons">
-        
-        <button id="googleBtn" class="providerBtn google">
-          <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png">
-          Google
-        </button>
-
-        <button id="outlookBtn" class="providerBtn microsoft">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg">
-          Microsoft
-        </button>
-
-        <button id="appleBtn" class="providerBtn apple">
-          <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg">
-          Apple
-        </button>
-
-      </div>
-
       <!-- ✅ CONNECTED ACCOUNTS -->
       <div id="accounts" class="accounts hidden"></div>
       
@@ -131,31 +111,10 @@
   <!-- ✅ CALENDAR -->
   <div class="calendarPanel">
 
-  <!-- ✅ RANGE + NAV BAR -->
-  <div class="rangeBar">
-    <!-- ✅ ✅ THESE ARE THE BUTTONS -->
-    <div class="range-controls">
-      <button class="range-btn active" id="monthly" data-range="30">(Monthly)</button>
-      <button class="range-btn" id="quarterly" data-range="90">(Quarterly)</button>
-      <button class="range-btn" id="semiAnnual" data-range="180">(Semi-Annual)</button>
-      <button class="range-btn" id="yearly" data-range="360">(Yearly)</button>
-      <button class="range-btn" id="customRange">(Custom)</button>
-    </div>
+    <!-- ✅ FULLCALENDAR WILL OWN HEADER NOW -->
+    <div id="calendar"></div>
 
-    <!-- ***********************************************************
-    ✅ RANGE DISPLAY (READ-ONLY UI STATE)
-    • Shows active data window
-    • MUST stay synced with JS logic
-    ************************************************************ -->
-    <div id="rangeDisplay" style="
-      font-size:12px;
-      color:#555;
-      margin-top:4px;
-    "></div>
   </div>
-
-  <div id="calendar"></div>
-</div>
 
   <!-- ✅ RIGHT SIDEBAR -->
   <div class="leftSidebar">
@@ -253,13 +212,16 @@
 
 </div>
 
-<!-- ✅ NEW (BRAIN FIRST) -->
+<!-- ✅ Deprecating with new structure for .js handling 
+    <script src="/static/calendar.js?v=999"></script> 
+    <script src="/static/calendar.ui.js"></script>
+    <script src="/static/calendar.fullcalendar.js?v=124"></script>
+    <script src="/static/calendar.colors.js?v=1"></script>
+    -->
 <script src="/static/calendar.colors.js?v=1"></script>
-<script src="/static/calendar.fullcalendar.js?v=124"></script>
+<script type="module" src="/static/calendar.js?v=999"></script>
 
-<!-- ✅ EXISTING -->
-<script src="/static/calendar.js?v=999"></script>
-<script src="/static/calendar.ui.js"></script>
+
 
 
 </body>

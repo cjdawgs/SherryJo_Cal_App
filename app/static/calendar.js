@@ -1,3 +1,21 @@
+import {
+  initFullCalendar,
+  renderRangePill,
+  highlightSelectedDay
+} from "./calendar.fullcalendar.js";
+
+import {
+  applyRangeTooltips,
+  bindUIEvents,
+  openCreateModal
+} from "./calendar.ui.js";
+
+import {
+  toDayString,
+  fromDayString,
+  getActiveRangeLabel
+} from "./core.js";
+
 console.log("🔥 JS FILE LOADED");
 console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));
 
@@ -70,6 +88,7 @@ async function apiFetch(url, options = {}) {
 /**************************************************************
  * ✅ GLOBAL STATE
  **************************************************************/
+let calendar = null;
 let isAppSyncing = false;
 let editingEventId = null;
 let editingNoteId = null;
@@ -180,7 +199,6 @@ function getCalendarSafe() {
 ✅ ✅ ✅ GOLD STANDARD — TRUE DATE OVERLAP ENGINE
 **************************************************************/
 function getFilteredEvents({ start, end }) {
-
   if (!start || !end) {
     console.warn("❌ INVALID RANGE PASSED TO FILTER", start, end);
     return [];
@@ -209,8 +227,11 @@ function getFilteredEvents({ start, end }) {
     return true;
   });
 }
-
-
+window.getFilteredEvents = getFilteredEvents;
+function normalizeProvider(provider) {
+  const p = (provider || "").toLowerCase();
+  return p === "outlook" ? "microsoft" : p;
+}
 
 function normalizeKey(provider, email) {
   return `${normalizeProvider(provider)}:${(email || "").toLowerCase().trim()}`;
@@ -313,35 +334,7 @@ function getRangeDays(type) {
  ✅ RANGE CALCULATOR (SINGLE SOURCE OF TRUTH)
  ✅ RANGE ENGINE (FIXED — GLOBAL SAFE)
 **************************************************************/
-function getActiveRangeLabel(days) {
 
-  const cal = getCalendarSafe();
-  if (!cal) {
-    return { start: null, end: null, label: "" };
-  }
-
-  const base = new Date(); // ✅ anchor to TODAY
-
-  const start = new Date(base);
-  const end = new Date(base);
-
-  // ✅ split range evenly around today
-  const half = Math.floor(days / 2);
-
-  start.setDate(base.getDate() - half);
-  end.setDate(base.getDate() + half);
-
-  const format = (d) =>
-    d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric"
-    });
-
-  const label = `${format(start)} → ${format(end)}`;
-
-  return { start, end, label };
-}
 
 /**************************************************************
  * ✅ GOLD STANDARD: CONTRAST ENGINE (WCAG SAFE)
@@ -357,50 +350,7 @@ function getActiveRangeLabel(days) {
  * - prevents unreadable text on vibrant colors
  * - matches modern design systems (Google, Apple, Microsoft)
  **************************************************************/
-function normalizeColorHarmony(hex) {
 
-  // ✅ round color to softer palette bands
-  const num = parseInt(hex.replace("#", ""), 16);
-
-  let r = (num >> 16) & 0xff;
-  let g = (num >> 8) & 0xff;
-  let b = num & 0xff;
-
-  // ✅ clamp extremes (removes neon harshness)
-  r = Math.min(220, Math.max(60, r));
-  g = Math.min(220, Math.max(60, g));
-  b = Math.min(220, Math.max(60, b));
-
-  return "#" + [r, g, b]
-    .map(x => x.toString(16).padStart(2, "0"))
-    .join("");
-}
-function getLuminance(hex) {
-  const rgb = hex.replace("#", "").match(/.{2}/g)
-    .map(x => parseInt(x, 16) / 255)
-    .map(c => (
-      c <= 0.03928
-        ? c / 12.92
-        : Math.pow((c + 0.055) / 1.055, 2.4)
-    ));
-
-  return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-}
-
-function getBestTextColor(bgHex) {
-
-  if (!bgHex || typeof bgHex !== "string") {
-    return "#000"; // ✅ safe fallback
-  }
-
-  const bgLum = getLuminance(bgHex);
-
-  // ✅ WCAG contrast ratios
-  const whiteContrast = (1.05) / (bgLum + 0.05);
-  const blackContrast = (bgLum + 0.05) / 0.05;
-
-  return whiteContrast > blackContrast ? "#fff" : "#000";
-}
 
 /**************************************************************
  * ✅ GOLD STANDARD: TOAST SYSTEM
@@ -513,27 +463,6 @@ function renderAccountsSafe() {
 
   renderAccounts(lastLoadedAccounts);
 }
-
-//CREATE A SINGLE SOURCE FORMATTED STRING (FOR COMPARISON + KEYS)
-function toDayString(d) {
-  if (!d) return null;
-
-  const dt = new Date(d);
-
-  return dt.getFullYear() + "-" +
-    String(dt.getMonth() + 1).padStart(2, "0") + "-" +
-    String(dt.getDate()).padStart(2, "0");
-}
-
-function fromDayString(dayStr) {
-  if (!dayStr || typeof dayStr !== "string") {
-    console.warn("⚠️ invalid dayStr → fallback to today:", dayStr);
-    return new Date();
-  }
-  const [y, m, d] = dayStr.split("-");
-  return new Date(y, m - 1, d);
-}
-
 
 /**************************************************************
  * ✅ ABSOLUTE COLOR SOURCE (DO NOT BYPASS)
@@ -852,11 +781,6 @@ async function init() {
   
   applyRangeTooltips();
 
-  // ✅ CRITICAL FIX — ALIGN SELECTED DATE
-  if (window.calendar) {
-    window.selectedDate = toDayString(window.calendar.getDate());
-  }
-
   bindUIEvents();
   applyRangeTooltips(); // ✅ ensures hover text shows immediately
 
@@ -951,7 +875,8 @@ function applyChipStyle(row, key, isActive) {
   /************************************************************
    ✅ CENTRAL COLOR ENGINE (DO NOT BYPASS)
   ************************************************************/
-  const finalColor = getSoftAccountColor(key, provider);
+  const raw = getColorByKey(key);
+  const finalColor = applySoftColor(raw);
 
   row.style.backgroundColor = finalColor;
   row.style.color = getBestTextColor(finalColor);
@@ -1073,18 +998,11 @@ async function preloadEventCache() {
 
     account = account.toLowerCase().trim();
 
-    const normalizedAccount = (account || "")
-      .toLowerCase()
-      .trim();
-
-    
     const account_key = buildAccountKey({
       source: provider,
       account_email: account
     });
-
     
-    const color = getColorByKey(account_key, provider);
     const backendId = ev.id || null;           // ✅ ONLY DB ID
     const displayId = ev.external_id || ev.id; // ✅ used for UI
     /**************************************************************
@@ -1149,6 +1067,20 @@ async function preloadEventCache() {
   
   //setSyncBanner("success");
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
+
+  // ✅ FORCE SIDEBAR INITIALIZATION (PERMANENT FIX)
+  window.selectedDate = new Date().toISOString().slice(0,10);
+
+  if (typeof updateDayDetails === "function") {
+    console.log("🔥 INIT DAY VIEW");
+    updateDayDetails();
+  }
+
+  if (typeof updateWeekView === "function") {
+    console.log("🔥 INIT WEEK VIEW");
+    updateWeekView();
+  }
+
   // ✅ ✅ ✅ CRITICAL — MAKE EVENTS AVAILABLE TO FULLCALENDAR
   window.ALL_EVENTS = sessionEventCache;
   isAppSyncing = false;
@@ -1168,233 +1100,6 @@ async function preloadEventCache() {
     }, new Date(0))
   );
 
-}
-
-/************************************************************
- * ✅ INIT FULLCALENDAR
- **************************************************************/
-function initCalendar(el) {
-  calendar = new FullCalendar.Calendar(el, {
-    
-    initialView: "dayGridMonth",
-    timeZone: "local",
-
-    // ✅ LOCK WEEK START (CRITICAL FOR CONSISTENCY)
-    firstDay: 0,  // ✅ Sunday = start of week
-
-    
-  dayMaxEventRows: false,
-  dayMaxEvents: false,
-  eventDisplay: "block",
-
-    // ✅ ONLY ONE EVENTS BLOCK EXISTS
-    /**************************************************************
-✅ SINGLE SOURCE FILTER ENGINE (FINAL)
-**************************************************************/
-events: function(fetchInfo, successCallback) {
-
-  const events = getFilteredEvents({
-    start: fetchInfo.start,
-    end: fetchInfo.end
-  });
-
-  successCallback(events);
-},
-
-    // ✅ ✅ ✅ PUT IT RIGHT HERE (IMPORTANT)
-    eventsSet: () => {
-
-      // ✅ ONLY set default ON FIRST LOAD
-      if (!window.selectedDate) {
-        window.selectedDate = toDayString(new Date());
-      }
-
-      console.log("✅ eventsSet using:", window.selectedDate);
-
-      updateWeekView();
-      updateDayDetails();
-      highlightSelectedDay(window.selectedDate);
-    },
-    
-    datesSet: () => {
-
-      if (!window.selectedDate) {
-        window.selectedDate = toDayString(calendar.getDate());
-      }
-
-      updateWeekView();
-      updateDayDetails();
-      highlightSelectedDay(window.selectedDate);
-
-      /**************************************************************
-       * ✅ NEW: UPDATE RANGE TOOLTIPS ON NAVIGATION
-       **************************************************************/
-      applyRangeTooltips();
-
-      /**************************************************************
-       * ✅ NEW: UPDATE RANGE DISPLAY (STAYS IN SYNC)
-       **************************************************************/
-      const { label } = getActiveRangeLabel(currentRangeDays);
-
-    },
-
-    /**************************************************
-     * CLICK EVENT
-     **************************************************/
-    // ✅ CLICK DAY → CREATE + UPDATE SIDEBAR
-    eventClick: (info) => {
-
-      window.selectedDate = toDayString(info.event.start);
-
-      updateDayDetails();
-      updateWeekView();
-      highlightSelectedDay(window.selectedDate);
-    },
-
-    /**************************************************
-     * ✅ DOUBLE CLICK HANDLER (SAFE)
-     **************************************************/
-    dayCellDidMount: function (info) {
-
-      let clickTimer = null;
-
-      /**************************************************************
-       * ✅ RANGE VISUALIZATION (NEW)
-       **************************************************************/
-      const cellDate = new Date(info.date);
-
-      if (!isDateInActiveRange(cellDate)) {
-        info.el.style.opacity = "0.35";   // ✅ dim out-of-range
-        info.el.style.filter = "grayscale(0.2)";
-      } else {
-        info.el.style.backgroundColor = "rgba(59,130,246,0.08)"; // ✅ subtle blue highlight
-      }
-
-      /**************************************************************
-       * ✅ EXISTING DOUBLE CLICK LOGIC
-       **************************************************************/
-      info.el.addEventListener("click", () => {
-        if (clickTimer) {
-          clearTimeout(clickTimer);
-          clickTimer = null;
-          openCreateModal(info.date);
-        } else {
-          clickTimer = setTimeout(() => {
-            clickTimer = null;
-          }, 250);
-        }
-      });
-
-    },
-    
-
-    // ✅ CLICK EVENT → EDIT + UPDATE SIDEBAR
-    eventClick: (info) => {
-      openCreateModal(null, info.event);
-
-      // ✅ use event date to update sidebar
-      if (info.event.start) {
-        window.selectedDate = toDayString(info.event.start);
-
-        updateDayDetails();
-        highlightSelectedDay(window.selectedDate);
-
-        scrollWeekToDate(window.selectedDate);
-      }
-   },
-
-    /**************************************************
-     * DRAG → UPDATE BACKEND
-     **************************************************/
-    eventDrop: async (info) => {
-      try {
-        const res = await apiFetch(`/calendar/event/${info.event.id}`, {
-          method: "PUT",
-          body: JSON.stringify({
-            start_time: info.event.start.toISOString(),
-            end_time: info.event.end?.toISOString()
-          })
-        });
-
-        if (!res) return;
-
-      } catch (err) {
-        console.error("❌ Drag update failed:", err);
-      }
-    },
-
-    /**************************************************
-     * NOTES UI
-     **************************************************/
-    eventContent: function(arg) {
-
-      const ev = arg.event;
-      const source = ev.extendedProps?.source;
-
-      const container = document.createElement("div");
-
-      const color = getColorByKey(
-        ev.extendedProps.account_key
-      );
-
-      container.style.backgroundColor = color;
-
-      /**************************************************************
-       * ✅ APPLY CONTRAST TEXT (CRITICAL FIX)
-       **************************************************************/
-      container.style.color = getBestTextColor(color);
-
-      container.style.display = "flex";
-      container.style.alignItems = "center";
-      container.style.gap = "4px";
-
-      container.style.padding = "2px 4px";
-      container.style.borderRadius = "4px";
-      container.style.height = "100%";
-
-      // ✅ ICON
-      const icon = createSourceIcon(source);
-      container.appendChild(icon);
-
-      // ✅ TITLE
-      // ✅ TIME
-      const timeEl = document.createElement("span");
-
-      if (ev.start) {
-        timeEl.textContent =
-          new Date(ev.start).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit"
-          }) + " ";
-
-        timeEl.style.fontSize = "11px";
-        timeEl.style.opacity = "0.75";
-      }
-
-      // ✅ TITLE
-      const title = document.createElement("span");
-      title.textContent = ev.title;
-      title.style.fontWeight = "500";
-
-      // ✅ APPEND
-      container.appendChild(timeEl);
-      container.appendChild(title);
-
-      container.style.transition = "transform 0.1s ease";
-
-      container.onmouseenter = () => {
-        container.style.transform = "scale(1.02)";
-      };
-
-      container.onmouseleave = () => {
-        container.style.transform = "scale(1)";
-      };
-
-      return { domNodes: [container] };
-    }
-  });
-  window.calendar = calendar;
-  window.calendar.render();
 }
 
 function openCustomRange() {
@@ -1518,10 +1223,7 @@ function renderAccounts(accounts) {
     const index = providerCounts[provider]++;
 
     const key = normalizeKey(provider, email);
-
-    const color = getFinalAccountColor(key, provider, index);
-
-    accountColorMap[key] = color;
+    const raw = getColorByKey(key);
 
     const row = document.createElement("div");
     row.classList.add("chip");
@@ -1545,7 +1247,7 @@ function renderAccounts(accounts) {
       badge.textContent = prefix;
 
       // ✅ SINGLE SOURCE (NO DRIFT)
-      const baseColor = getColorByKey(key, provider);
+      const baseColor = raw;
       badge.style.background = baseColor;
       
       /**************************************************************
@@ -1663,7 +1365,7 @@ function renderAccounts(accounts) {
       preview.style.height = "20px";
       preview.style.marginBottom = "6px";
       preview.style.borderRadius = "4px";
-      const previewColor = getColorByKey(key, provider);
+      const previewColor = raw;
 
       preview.style.background = previewColor;
 
@@ -1863,13 +1565,13 @@ function renderAccounts(accounts) {
           sw.onclick = () => {
 
             accountColorOverrides[key] = col;
-            accountColorMap[key] = col;
             saveColorOverrides(accountColorOverrides);
 
             preview.style.background = col;
             preview.style.color = getBestTextColor(col);
 
             applyChipStyle(row, key, true);
+            updateChipSelectionUI();
 
             const badge = row.querySelector(".account-badge");
             if (badge) badge.style.background = col;
@@ -1905,7 +1607,7 @@ function renderAccounts(accounts) {
 
         iroPicker = new iro.ColorPicker(customView, {
           width: 150,
-          color: getColorByKey(key, provider),
+          color: getColorByKey(key),
           layout: [
             { component: iro.ui.Wheel },
             { component: iro.ui.Slider },
@@ -1926,35 +1628,31 @@ function renderAccounts(accounts) {
 
           const raw = c.hexString;
 
-          /************************************************************
-           ✅ STORE RAW COLOR (SOURCE OF TRUTH)
-          ************************************************************/
+          // ✅ SINGLE SOURCE OF TRUTH
           accountColorOverrides[key] = raw;
-          accountColorMap[key] = raw;
 
           saveColorOverrides(accountColorOverrides);
 
-          /************************************************************
-           ✅ PREVIEW = SOFT (UI ONLY)
-          ************************************************************/
+          // ✅ UI SOFT COLOR
           const soft = applySoftColor(raw);
 
           preview.style.background = soft;
           preview.style.color = getBestTextColor(soft);
 
-          /************************************************************
-           ✅ UI UPDATE
-          ************************************************************/
           applyChipStyle(row, key, true);
+          updateChipSelectionUI();   // ✅ ADD THIS
 
           const badge = row.querySelector(".account-badge");
 
           if (badge) {
-            badge.style.background = raw;                 // ✅ stays strong
+            badge.style.background = raw;
             badge.style.color = getBestTextColor(raw);
           }
 
-          window.calendar.refetchEvents();   // ✅ events stay RAW
+          if (window.calendar) {
+            window.calendar.refetchEvents();
+          }
+
           updateWeekView();
         });
       }
@@ -2140,7 +1838,7 @@ function renderAccounts(accounts) {
     colorDot.style.width = "10px";
     colorDot.style.height = "10px";
     colorDot.style.borderRadius = "50%";
-    colorDot.style.background = color;
+    colorDot.style.background = raw;
     colorDot.style.marginLeft = "6px";
     colorDot.style.cursor = "pointer";
     
@@ -2149,14 +1847,14 @@ function renderAccounts(accounts) {
      * ✅ SMART BORDER CONTRAST (PRO UX DETAIL) AUTO-ADAPT PICKER BORDER
      *********************************************************************/
     const borderColor =
-      getBestTextColor(color) === "#fff"
+      getBestTextColor(raw) === "#fff"
         ? "rgba(255,255,255,0.7)"
         : "rgba(0,0,0,0.4)";
 
     colorDot.style.border = `1px solid ${borderColor}`;
 
     
-    colorDot.style.outline = `1px solid ${getBestTextColor(color)}`;
+    colorDot.style.outline = `1px solid ${getBestTextColor(raw)}`;
 
     /**************************************************************
      * ✅ HIDDEN PALETTE (POPUP STYLE)
@@ -2182,7 +1880,7 @@ function renderAccounts(accounts) {
      * Uses a VERY light tint of the account color
      * Keeps UI consistent but adds personality
      **************************************************************/
-    const baseColor = getColorByKey(key, provider);
+    const baseColor = raw;
 
     // ✅ super-light tint (barely visible)
     const panelBg = lightenColor(baseColor, 0.92);
@@ -2243,7 +1941,7 @@ function renderAccounts(accounts) {
       const spinner = document.createElement("div");
       spinner.className = "chip-spinner";
 
-      spinner.style.borderTopColor = color;
+      spinner.style.borderTopColor = raw;
       spinner.style.marginRight = "4px";
 
       container.insertBefore(spinner, container.firstChild);
@@ -2331,7 +2029,9 @@ function renderAccounts(accounts) {
   /**************************************************************
    ✅ FORCE ALL ACCOUNTS ACTIVE (CRITICAL FIX)
   **************************************************************/
-  activeAccountFilters = new Set([...allAccountKeys]);
+  if (activeAccountFilters.size === 0) {
+    activeAccountFilters = new Set([...allAccountKeys]);
+  }
   
   updateChipSelectionUI();
 
@@ -2356,64 +2056,54 @@ function updateChipSelectionUI() {
 //✅ ✅ DAY DETAILS FUNCTION
 function updateDayDetails() {
 
-  if (!window.selectedDate) {
-    window.selectedDate = toDayString(new Date());
-  }
-
-  const titleEl = document.getElementById("selectedDateTitle");
   const listEl = document.getElementById("dayEventsList");
+  const titleEl = document.getElementById("selectedDateTitle");
 
-  if (!titleEl || !listEl) return;
+  if (!listEl) return;
 
-  const safeDate = fromDayString(window.selectedDate);
-  /**************************************************************
-  ✅ STRICT DAY RANGE (THIS IS THE FIX)
-  **************************************************************/
-  const start = new Date(safeDate);
-  start.setHours(0, 0, 0, 0);
+  const selected = new Date(window.selectedDate);
 
-  const end = new Date(safeDate);
-  end.setHours(23, 59, 59, 999);
+  const start = new Date(selected);
+  start.setHours(0,0,0,0);
 
-  const events = getFilteredEvents({ start, end });
+  const end = new Date(start);
+  end.setDate(start.getDate() + 1);
 
-  console.log("✅ DAY FILTER RANGE:", start, end);
-  console.log("✅ DAY EVENTS FOUND:", events.length);
+  const events = window.sessionEventCache.filter(ev => {
 
-  /**************************************************************
-  ✅ HEADER
-  **************************************************************/
-  titleEl.textContent = safeDate.toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric"
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : evStart;
+
+    return evStart < end && evEnd >= start;
   });
 
-  console.log("✅ DAY EVENTS FOUND:", events.length);
+  console.log("✅ DAY EVENTS:", events.length);
 
-  listEl.replaceChildren();
+  listEl.innerHTML = "";
 
-  /**************************************************************
-  ✅ RENDER
-  **************************************************************/
   events.forEach(ev => {
 
-    const li = document.createElement("li");
+    const key = ev?.extendedProps?.account_key || "";
+    const raw = getColorByKey(key);
+    const soft = applySoftColor(raw);
+    const div = document.createElement("div");
 
-    const key = ev.extendedProps?.account_key;
-    const color = getColorByKey(key);
+    div.textContent = ev.title;
+    div.style.padding = "6px";
+    div.style.marginBottom = "6px";
+    div.style.borderLeft = `4px solid ${raw}`;
+    div.style.background = soft;
+    div.style.borderRadius = "6px";
 
-    li.style.borderLeft = `4px solid ${color}`;
-    li.style.background = `${color}14`;
-    li.style.padding = "6px";
-    li.style.marginBottom = "4px";
-    li.style.borderRadius = "6px";
-
-    li.textContent = ev.title;
-
-    listEl.appendChild(li);
+    listEl.appendChild(div);
   });
+
+  if (titleEl) {
+    titleEl.textContent = selected.toDateString();
+  }
 }
+
+window.updateDayDetails = updateDayDetails;
 
 
 //✅ ✅ WEEK VIEW FUNCTION
@@ -2427,152 +2117,53 @@ function updateDayDetails() {
 **************************************************************/
 function updateWeekView() {
 
-  const container = document.getElementById("weekView");
-  if (!container) return;
-
-  container.innerHTML = "";
-
-  if (!window.selectedDate) return;
+  const weekEl = document.getElementById("weekView");
+  if (!weekEl) return;
 
   const selected = new Date(window.selectedDate);
 
-  /**************************************************************
-  ✅ FORCE WEEK START (SUNDAY)
-  **************************************************************/
-  const startOfWeek = new Date(selected);
-  startOfWeek.setDate(selected.getDate() - selected.getDay());
-  startOfWeek.setHours(0,0,0,0);
+  const start = new Date(selected);
+  start.setDate(start.getDate() - start.getDay());
 
-  /**************************************************************
-  ✅ BUILD EXACT 7 DAYS (NO PARSING BUGS)
-  **************************************************************/
-  const weekDays = [];
+  weekEl.innerHTML = "";
 
   for (let i = 0; i < 7; i++) {
-    const d = new Date(startOfWeek);
-    d.setDate(startOfWeek.getDate() + i);
 
-    // ✅ CRITICAL: Prevent timezone drift
-    d.setHours(12,0,0,0);
+    const day = new Date(start);
+    day.setDate(start.getDate() + i);
 
-    weekDays.push(d);
-  }
-
-  /**************************************************************
-  ✅ DAY MAP (NO STRING → DATE REPARSE)
-  **************************************************************/
-  const weekMap = {};
-
-  weekDays.forEach(d => {
-    const key = toDayString(d);
-    weekMap[key] = {
-      date: d,
-      events: []
-    };
-  });
-
-  /**************************************************************
-  ✅ EXPAND EVENTS ACROSS ALL DAYS
-  **************************************************************/
-  sessionEventCache.forEach(e => {
-
-    if (!e.start) return;
-
-    const evStart = new Date(e.start);
-    const evEnd   = e.end ? new Date(e.end) : evStart;
-
-    evStart.setHours(0,0,0,0);
-    evEnd.setHours(0,0,0,0);
-
-    for (let d = new Date(evStart); d <= evEnd; d.setDate(d.getDate() + 1)) {
-
-      // ✅ CRITICAL: Prevent timezone drift
-      d.setHours(12,0,0,0);
-
-      const key = toDayString(d);
-
-      if (weekMap[key]) {
-        weekMap[key].events.push(e);
-      }
-    }
-  });
-
-  /**************************************************************
-  ✅ RENDER (ORDERED, STABLE)
-  **************************************************************/
-  weekDays.forEach(d => {
-
-    const key = toDayString(d);
-    const dayData = weekMap[key];
-
-    /**************************************************
-    ✅ DAY HEADER
-    **************************************************/
     const header = document.createElement("div");
-    header.style.fontWeight = "bold";
+    header.textContent = day.toDateString();
+    header.style.fontWeight = "600";
     header.style.marginTop = "8px";
 
-    header.textContent =
-      dayData.date.toLocaleDateString(undefined, {
-        weekday: "long",
-        month: "short",
-        day: "numeric"
-      });
+    weekEl.appendChild(header);
 
-    container.appendChild(header);
+    const events = window.sessionEventCache.filter(ev => {
 
-    /**************************************************
-    ✅ EVENTS
-    **************************************************/
-    dayData.events.forEach(e => {
-
-      const row = document.createElement("div");
-
-      const raw = getColorByKey(e.extendedProps?.account_key) || "#4285f4";
-      const soft = getSoftColor(raw);
-
-      row.style.backgroundColor = soft;
-      row.style.borderLeft = `3px solid ${raw}`;
-      row.style.color = getBestTextColor(soft);
-      row.style.fontSize = "12px";
-      row.style.marginBottom = "3px";
-      row.style.padding = "3px 6px";
-
-      row.textContent = e.title;
-
-      container.appendChild(row);
+      const evStart = new Date(ev.start);
+      return evStart.toDateString() === day.toDateString();
     });
-  });
+
+    events.forEach(ev => {
+
+      const key = ev?.extendedProps?.account_key || "";
+      const raw = getColorByKey(key);
+      const soft = applySoftColor(raw)
+      const div = document.createElement("div");
+
+      div.textContent = ev.title;
+      div.style.padding = "4px";
+      div.style.marginBottom = "4px";
+      div.style.borderLeft = `4px solid ${raw}`;
+      div.style.background = soft;
+      div.style.borderRadius = "6px";
+
+      weekEl.appendChild(div);
+    });
+  }
 }
-
-/**************************************************************
- * ✅ OAUTH BUTTONS (TOKEN SAFE)
- **************************************************************/
-function connectGoogle() {
-
-  // ✅ ALWAYS GET FRESH TOKEN
-  const authToken = getTokenSafe();
-  window.location.href =
-    `/auth/google/login?token=${encodeURIComponent(authToken)}`;
-}
-
-// ==================================================
-// ✅ ✅ NEW: APPLE OAUTH (MATCHES PATTERN)
-// ==================================================
-function connectApple() {
-  const authToken = getTokenSafe();
-  window.location.href =
-    `/auth/apple/login?token=${encodeURIComponent(authToken)}`;
-}
-
-function connectOutlook() {
-
-  // ✅ ALWAYS GET FRESH TOKEN
-  const authToken = getTokenSafe();
-  window.location.href =
-    `/ms/login?token=${encodeURIComponent(authToken)}`;
-}
-
+window.updateWeekView = updateWeekView;
 
 /**************************************************************
  * ✅ SYNC
@@ -2584,6 +2175,8 @@ async function syncNow() {
      * ✅ STEP 8.1 — START GLOBAL SYNC (SHOW BANNER)
      **************************************************************/
     //setSyncBanner("syncing");
+    window.syncNow = syncNow;
+
     
     /**************************************************************
      * ✅ GOLD STANDARD: BUILD KEYS EXACTLY LIKE renderAccounts
@@ -2601,7 +2194,6 @@ async function syncNow() {
       if (!email) return;
 
       const key = normalizeKey(provider, email);
-
       syncingAccounts.add(key);
       console.log("✅ ADD SYNC KEY:", key);
     });
@@ -2677,6 +2269,28 @@ function logout() {
   localStorage.removeItem("token");
   window.location.href = "/login";
 }
+window.logout = logout;
+
+async function deleteEvent() {
+
+  if (!editingEventId) {
+    console.warn("No event selected for deletion");
+    return;
+  }
+
+  const res = await apiFetch(`/events/${editingEventId}`, {
+    method: "DELETE"
+  });
+
+  if (!res) return;
+
+  console.log("✅ Event deleted");
+
+  smartRefresh({ reason: "event_deleted" });
+}
+
+window.deleteEvent = deleteEvent;
+
 
 /**************************************************************
  * ✅ NOTES

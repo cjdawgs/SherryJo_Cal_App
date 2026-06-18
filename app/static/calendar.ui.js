@@ -1,3 +1,6 @@
+import { getActiveRangeLabel, toDayString } from "./core.js";
+import { connectGoogle, connectMicrosoft, connectApple } from "./account_connections.js";
+import { renderRangePill } from "./calendar.fullcalendar.js";
 
 /**************************************************************
  * ✅ GLOBAL STATE
@@ -71,7 +74,7 @@ function bindUIEvents() {
     ?.addEventListener("click", connectGoogle);
 
   document.getElementById("outlookBtn")
-    ?.addEventListener("click", connectOutlook);
+    ?.addEventListener("click", connectMicrosoft);
 
   document.getElementById("appleBtn")
     ?.addEventListener("click", connectApple);    
@@ -88,14 +91,32 @@ function bindUIEvents() {
     ?.addEventListener("click", closeCreateModal);
 
   document.getElementById("deleteEventBtn")
-    ?.addEventListener("click", deleteEvent);
+  ?.addEventListener("click", () => {
+    if (typeof window.deleteEvent === "function") {
+      window.deleteEvent();
+    } else {
+      console.error("❌ deleteEvent not ready");
+    }
+  });
 
   // ✅ Existing buttons
   document.getElementById("syncBtn")
-    ?.addEventListener("click", syncNow);
-
+    ?.addEventListener("click", () => {
+      if (typeof window.syncNow === "function") {
+        window.syncNow();
+      } else {
+        console.error("❌ syncNow not ready");
+      }
+    });
   document.getElementById("logoutBtn")
-    ?.addEventListener("click", logout);
+    ?.addEventListener("click", () => {
+      if (typeof window.logout === "function") {
+        window.logout();
+      } else {
+        console.error("❌ logout not ready");
+      }
+    });
+
 
   // ✅ Make sure endDate is always after startDate and is deafulted to StartDate plus 1 hr
   document.getElementById("eventStart")
@@ -492,3 +513,13 @@ async function deleteEvent() {
     console.error("❌ Delete failed:", err);
   }
 }
+
+// Export UI functions for the main entrypoint
+export {
+  applyRangeTooltips,
+  bindUIEvents,
+  openCreateModal,
+  closeCreateModal,
+  saveEvent,
+  deleteEvent
+};

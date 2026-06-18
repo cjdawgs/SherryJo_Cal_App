@@ -76,6 +76,13 @@ function lightenColor(hex, percent) {
   return "#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("");
 }
 
+function applySoftColor(raw) {
+  return lightenColor(raw, 0.85);
+}
+// ✅ expose globally (matches your current architecture)
+window.applySoftColor = applySoftColor;
+
+
 /**************************************************************
  * ✅ COLOR NORMALIZATION (REMOVES HARSH / NEON)
  **************************************************************/
@@ -108,18 +115,19 @@ function getSoftColor(hex) {
 function getColorByKey(key, provider) {
   if (!key) return "#999";
 
-  // ✅ user override (TOP PRIORITY)
   if (accountColorOverrides[key]) {
     return accountColorOverrides[key];
   }
 
-  // ✅ generated color
   if (accountColorMap[key]) {
     return accountColorMap[key];
   }
 
-  // ✅ fallback
-  return getBaseProviderColor(provider);
+  const derivedProvider =
+    provider ||
+    (key && key.split(":")[0]);
+
+  return getBaseProviderColor(derivedProvider);
 }
 
 /**************************************************************

@@ -1,6 +1,6 @@
 
 /* =====================================================
-✅ BASE (GLOBAL)
+✅ GLOBAL BASE
 ===================================================== */
 * {
   box-sizing: border-box;
@@ -9,325 +9,137 @@
 body {
   margin: 0;
   font-family: system-ui, -apple-system, BlinkMacSystemFont,
-               "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   background: #f1f3f4;
 }
 
+
 /* =====================================================
-✅ HEADER (CENTERED + CLEAN)
+✅ TOPBAR (HEADER)
 ===================================================== */
-.header-container {
-  padding: 10px 20px;
-  margin-bottom: 10px;
-}
-
-.header-top {
-  text-align: center;
-  margin-bottom: 8px;
-}
-
-.provider-buttons {
-  margin: 6px 0;
-}
-
-.account-chips {
+.topbar {
   display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  transition: background 0.2s ease, border-color 0.2s ease; /* ✅ FIXED */
-  gap: 6px;
+  width: 100%;
+  padding-bottom: 2px;
 }
 
-.accounts .chip.active {
-  transform: translateY(-1px);
-}
-/**************************************************************
-✅ COLOR PICKER — PRO UX
-**************************************************************/
-
-/* ✅ remove ugly native border (Safari fix) */
-.accounts input[type="color"] {
-  border: none;
-  background: transparent;
-  padding: 0;
-  border-radius: 50%;
+.topbar-inner,
+.authContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  max-width: 95%;
 }
 
-/* ✅ cleaner circular picker */
-.accounts input[type="color"]::-webkit-color-swatch-wrapper {
-  padding: 0;
-}
-.accounts input[type="color"]::-webkit-color-swatch {
-  border: 1px solid rgba(0,0,0,0.2);
-  border-radius: 50%;
+.appTitle {
+  font-size: 26px;
+  font-weight: bold;
+  text-align: center;
 }
 
-.accounts input[type="color"]:hover {
-  opacity: 1;
-  transform: scale(1.1);
+
+/* =====================================================
+✅ ACCOUNT CHIPS
+===================================================== */
+#accounts {
+  margin-bottom: 2px;
+}
+
+.accounts {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.accounts::-webkit-scrollbar {
+  display: none;
 }
 
 .accounts .chip {
   display: flex;
   align-items: center;
   gap: 6px;
-  user-select: none;
+
   padding: 6px 10px;
   border-radius: 999px;
 
   background: #f1f3f4;
-  border: 2px solid transparent;
-
   font-size: 12px;
-  line-height: 1;
   white-space: nowrap;
 
-  opacity: 1;
-  filter: brightness(1) saturate(0.85);
-  transition:
-    transform 0.12s ease,
-    background 0.15s ease,
-    border-color 0.15s ease;
+  transition: transform 0.12s ease, background 0.15s ease;
 }
- 
-.accounts .chip span {
-  display: flex;
-  align-items: center;
-}
-
-.accounts .chip span:last-child {
-  font-weight: 500;
-  font-size: 13px;
-  color: #333;
-  white-space: nowrap;
-}
-
 
 .accounts .chip:hover {
   transform: translateY(-1px) scale(1.02);
   background: #e8eaed;
-  filter: brightness(0.95) saturate(1);
   cursor: pointer;
 }
 
-/* ✅ FORCE HEADER CONTENT CENTERING */
-.topbar {
-  display: flex;
-  justify-content: center;   /* ✅ centers inner container horizontally */
-  width: 100%;
+
+/* ✅ COLOR PICKER */
+.accounts input[type="color"] {
+  border: none;
+  background: transparent;
+  border-radius: 50%;
 }
 
-.fc-daygrid-event {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.fc-event-title {
-  word-break: break-word !important;
-}
-
-/* ✅ inner container */
-.topbar-inner {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  max-width: 95%;   /* ✅ allows 1-row chips - auto-adapt*/
-  text-align: center;
-}
-
-.providerBtn {
-  padding: 6px 10px;
-  font-size: 13px;
-}
-
-.providerBtn img {
-  width: 20px;
-  height: 20px;
-}
-
-/* ✅ TITLE (bigger + bold + centered) */
-.appTitle {
-  font-size: 26px;   /* ✅ +5pts */
-  font-weight: bold;
-  text-align: center;
-}
 
 /* =====================================================
-✅ AUTH + BUTTON SECTION (CENTERED BLOCK)
+✅ ACTION BUTTONS
 ===================================================== */
-.authContainer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;  /* ✅ was 6px */
-}
-
-.authButtons {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-/* ✅ SECOND ROW (Create / Sync / Logout) */
 .actionButtons {
   display: flex;
-  gap: 8px;
   justify-content: center;
-  margin-top: 2px;       /* ✅ pulls buttons up */
+  gap: 4px;
+  margin: 0;
 }
 
-
-.actionButtons button.primary {
-  background: #2563eb;
-  color: #fff;
-  border: none; /* ✅ ensures consistent look */
-  transition: opacity 0.15s ease, transform 0.1s ease;
-}
-
-.actionButtons button:hover {
-  opacity: 1;
-  transform: scale(1.05);
-}
-
-.actionButtons button.primary:hover {
-  background: #1d4ed8;
-}
-
-/* =====================================================
-✅ CONNECTED ACCOUNTS DISPLAY (POLISHED CHIP STYLE)
-===================================================== */
-.accounts {
-  display: flex;
-  flex-wrap: nowrap;     /* ✅ force single row */
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  scrollbar-width: none; /* Firefox */
-  overflow-x: auto;      /* ✅ allow scroll if needed */
-  scroll-behavior: smooth;
-  padding-bottom: 4px;   /* prevents scrollbar clipping */
-}
-
-.accounts::-webkit-scrollbar {
-  display: none; /* Chrome/Safari */
-}
-
-.color-dot {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-
-.color-picker-pop {
-  position: fixed;
-  max-width: calc(100vw - 16px);
-  max-height: calc(100vh - 16px);
-  z-index: 10000; /* ✅ above everything */
-  transform: translateZ(0); /* ✅ forces GPU layer */
-}
-
-/*
-@keyframes pulse {
-  0%   { transform: scale(1); opacity: 1; }
-  50%  { transform: scale(1.4); opacity: 0.6; }
-  100% { transform: scale(1); opacity: 1; }
-}
-*/
-
-/* =====================================================
-✅ CHIP SYNCING STATE (PRIMARY UX SIGNAL)
-===================================================== */
-/* ✅ CHIP SPINNER (GOOGLE-STYLE) */
-.chip-success {
-  font-size: 12px;
-  margin-right: 4px;
-}
-
-.chip-error {
-  font-size: 12px;
-  margin-right: 4px;
+button {
+  padding: 6px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: #f5f5f5;
   cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
 }
 
-.chip-spinner {
-  width: 14px;
-  height: 14px;
-  margin-right: 4px;
-  border: 2.5px solid rgba(0,0,0,0.2);
-  border-top-color: rgba(0,0,0,0.6);
-
-  border-radius: 50%;
-
-  animation: chipSpin 0.6s linear infinite;
-  flex-shrink: 0;
+button:hover {
+  background: #e0e0e0;
 }
 
-@keyframes chipSpin {
-  to {
-    transform: rotate(360deg);
-  }
+button.primary {
+  background: #2563eb;
+  color: white;
+  border: none;
 }
 
-.chip {
-  backface-visibility: hidden;
-}
-
-
-.chip.syncing {
-  /*
-  will-change: transform, opacity;
-  animation: chipPulse 1s infinite;
-  */
-  cursor: wait;
-}
-
-@keyframes chipPulse {
-  0%   { transform: scale(1) translateY(0); opacity: 1; }
-  50%  { transform: scale(1.05) translateY(-1px); opacity: 0.7; }
-  100% { transform: scale(1) translateY(0); opacity: 1; }
-}
-/*
-.accounts .chip.syncing:hover {
-  animation-play-state: paused;
-  transform: none;
-}
-
-*/
-/* ✅ hidden when no accounts */
-.hidden {
-  display: none;
-}
 
 /* =====================================================
-✅ MAIN LAYOUT (CALENDAR + SIDEBAR)
+✅ MAIN LAYOUT
 ===================================================== */
-
 .layout {
   display: grid;
   grid-template-columns: 1fr 280px;
-  gap: 16px;
-  padding: 16px;
+  gap: 12px;
+  padding: 12px;
 }
 
-/* ✅ MAIN CALENDAR PANEL */
 .calendarPanel {
   background: white;
   border-radius: 10px;
-  padding: 10px;
+  padding: 8px;
   box-shadow: 0 1px 4px rgba(0,0,0,0.08);
 }
-
-#calendar {
-  height: 700px;
-}
-
-
-/* =====================================================
-✅ RIGHT SIDEBAR (DAY / WEEK / TASKS)
-===================================================== */
 
 .leftSidebar {
   background: white;
@@ -343,102 +155,103 @@ body {
 
 
 /* =====================================================
-✅ CARD BLOCKS
+✅ FULLCALENDAR CORE
 ===================================================== */
+#calendar {
+  height: 700px;
+  user-select: none;
+}
 
-.card h4 {
-  margin: 0 0 8px 0;
-  font-size: 15px;
+.fc {
+  width: 100%;
+}
+
+/* ✅ SINGLE SOURCE OF HEADER LAYOUT */
+.fc-toolbar {
+  margin: 0;
+  padding: 2px 6px;
+}
+
+.fc-toolbar-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* ✅ CRITICAL: 3-COLUMN LAYOUT */
+.fc-toolbar-chunk:nth-child(1) {
+  flex: 1;
+}
+
+.fc-toolbar-chunk:nth-child(2) {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.fc-toolbar-chunk:nth-child(3) {
+  flex: 1;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.fc-toolbar-chunk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 
 /* =====================================================
-✅ DAY DETAILS
+✅ EVENT RENDERING
 ===================================================== */
-
-#selectedDateTitle {
-  font-weight: 600;
+.fc-event {
+  font-size: 12px;
+  border: none;
 }
 
-#dayEventsList {
+.fc-daygrid-event {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fc-event-title {
+  word-break: break-word;
+}
+
+
+/* =====================================================
+✅ DAY GRID INTERACTION
+===================================================== */
+.fc-daygrid-day:hover {
+  background-color: #f9fafb;
+  cursor: pointer;
+}
+
+.fc-daygrid-day.fc-day-today {
+  background: transparent;
+}
+
+
+/* =====================================================
+✅ SIDEBAR CONTENT
+===================================================== */
+.card h4 {
+  margin-bottom: 8px;
+}
+
+#dayEventsList,
+#taskList {
   list-style: none;
   padding: 0;
   margin: 0;
 }
 
 #dayEventsList li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-
   padding: 4px;
   margin-bottom: 6px;
-
   border-left: 4px solid #1a73e8;
-}
-
-
-/* =====================================================
-✅ WEEK VIEW (OUTLOOK STYLE — CLEAN + FIXED)
-===================================================== */
-
-#weekView {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 3px solid black;
-}
-
-/* ✅ DAY BLOCK */
-.agendaDayBlock {
-  margin-bottom: 14px;
-}
-
-/* ✅ DAY TITLE */
-.agendaDayTitle {
-  font-weight: bold;
-  font-size: 14px;
-  margin-bottom: 6px;
-}
-
-/* ✅ EVENT ROW (FORCED HORIZONTAL) */
-.agendaEventRow {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-
-  padding-left: 20px;
-  margin-bottom: 6px;
-}
-
-/* ✅ TIME */
-.agendaTime {
-  width: 70px;
-  font-size: 12px;
-  display: inline-block;
-}
-
-/* ✅ COLOR BAR */
-.agendaBar {
-  width: 4px;
-  height: 16px;
-  margin-right: 8px;
-  flex-shrink: 0;
-}
-
-/* ✅ TEXT */
-.agendaText {
-  font-size: 13px;
-}
-
-
-/* =====================================================
-✅ TASKS
-===================================================== */
-
-#taskList {
-  list-style: none;
-  padding: 0;
-  margin: 0;
 }
 
 #taskList li {
@@ -446,268 +259,98 @@ body {
   border-bottom: 1px solid #eee;
 }
 
+
 /* =====================================================
-✅ BUTTONS (CONSISTENT UI)
+✅ MONTH GRID SIZE
 ===================================================== */
-
-button {
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background-color: #f5f5f5;
-  cursor: pointer;
-  font-size: 13px;
-  transition: background 0.15s ease, transform 0.1s ease;
+.fc-daygrid-day-frame {
+  min-height: 160px;
 }
-
-button:hover {
-  background-color: #e0e0e0;
-}
-
-button:active {
-  background-color: #d0d0d0;
-}
-
-button.primary {
-  background: #2563eb;
-  color: #fff;
-  border: none;
-}
-
-button.primary:hover {
-  background: #1d4ed8;
-}
-/* =====================================================
-✅ FULLCALENDAR CLEANUP
-===================================================== */
-
-.fc {
-  width: 100%;
-}
-
 
 
 /* =====================================================
-✅ NOTE ICONS
+✅ MODAL SYSTEM
 ===================================================== */
-
-.sticky-note-icon {
-  margin-left: 4px;
-  cursor: pointer;
-}
-
-/* =====================================================
-✅ MODAL SYSTEM (ANIMATED + OVERLAY)
-===================================================== */
-
-/* ✅ DARK BACKGROUND OVERLAY */
 .modalOverlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-
-  background: rgba(0, 0, 0, 0.3);
-
+  inset: 0;
+  background: rgba(0,0,0,0.3);
   opacity: 0;
   pointer-events: none;
-
   transition: opacity 0.2s ease;
-
-  z-index: 999;
 }
 
-/* ✅ WHEN OVERLAY IS ACTIVE */
 .modalOverlay.show {
   opacity: 1;
   pointer-events: auto;
 }
 
-
-/* ✅ MAIN MODAL BOX */
 .modal {
   position: fixed;
   top: 25%;
   left: 50%;
+  transform: translate(-50%, -20px);
 
-  transform: translate(-50%, -20px) translateZ(0); /* ✅ start slightly above */
-  
-  will-change: transform, opacity;
   background: #fff;
-
   padding: 20px;
   border-radius: 10px;
 
   width: 320px;
   max-width: 90%;
 
-  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-
-  opacity: 0;                /* ✅ hidden by default */
+  opacity: 0;
   pointer-events: none;
+  transition: all 0.2s ease;
 
- transition: opacity 0.2s ease, transform 0.2s ease;
-
-  z-index: 1000;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.2);
 }
 
-/* ✅ SHOW MODAL (animation happens here) */
 .modal.show {
-  transform: translate(-50%, 0) translateZ(0);
-  /* slides downward */
+  transform: translate(-50%, 0);
   opacity: 1;
   pointer-events: auto;
 }
 
 
-/* ✅ SMALL BUTTON POLISH INSIDE MODAL */
-.modal button {
-  padding: 6px 10px;
-}
-
 /* =====================================================
-✅ EVENT PILLS (PRO LOOK)
+✅ RANGE PILL (CENTERED)
 ===================================================== */
-/* ✅ EVENT PILL IMPROVED */
-.event-pill {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
-  border-radius: 6px;
-  font-weight: 500;
-}
-
-
-
-/* =====================================================
-✅ LEGEND (ACCOUNT KEY)
-===================================================== */
-.calendarLegend {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: center;
-  font-size: 13px;
-  margin: 8px 0;
-}
-
-.legendItem {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* ✅ LEGEND DOT */
-.legendDot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-}
-
-/* =====================================================
-✅ CLEAN SIDEBAR EVENT STRIP (MATCH COLORS)
-===================================================== */
-#sidebar {
-  width: 300px;
-  border-left: 1px solid #ccc;
-  padding: 10px;
-  background: #fff;
-}
-.sidebarEvent {
-  border-left: 4px solid #ccc;
-  padding-left: 6px;
-}
-
-#mainLayout {
-  display: flex;
-  height: 100vh;
-}
-
-#calendarContainer {
-  flex: 1;
-}
-
-
-#eventList {
-  max-height: 70vh;
-  overflow-y: auto;
-}
-
-/* =====================================================
-✅ HOVER POLISH
-===================================================== */
-.fc-highlight {
-  display: none !important;
-}
-
-.fc-daygrid-day.fc-day-today {
-  background: inherit !important;
-}
-.fc-daygrid-day.fc-day-range-selected {
-  background: none !important;
-}
-.fc-daygrid-day-frame.fc-scrollgrid-sync-inner {
-  background: transparent !important;
-}
-.fc-daygrid-day:hover {
-  background-color: #f9fafb;
-  cursor: pointer;
-}
-
-#calendar {
-  user-select: none;
-}
-/* =====================================================
-✅ FULLCAL COLOR RULE (NEUTRAL — JS CONTROLS COLORS)
-===================================================== */
-
-
-.fc-event {
+#rangeDisplay {
   font-size: 12px;
-  border: none !important;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #eee;
+  white-space: nowrap;
 }
 
 
-.fc-timegrid-event {
-  border: none !important;
-  border-radius: 4px;
-}
+/* =========================================
+✅ 3 COLUMN ACCOUNT GRID for Account.html
+========================================= */
+  /* =========================================
+  ✅ UNIFORM COLUMN STACKING
+  ========================================= */
+  .provider-col {
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ✅ ensures consistent spacing under description */
+  .provider-desc {
+    min-height: 40px; /* normalize text height */
+  }
+
+  /* ✅ spacer area (align with Apple connect block height) */
+  .provider-spacer {
+    min-height: 70px;
+  }
+  
+  .provider-accounts {
+    margin-top: 12px;
+  }
 
 
-/**************************************************************
-✅ HOVER POLISH
-**************************************************************/
-.fc-header-toolbar {
-  justify-content: space-between;
-}
+  body > div {
+    max-width: 1200px;
+  }
 
-.fc .fc-button {
-  background-color: #2f3e4e !important;
-  border: none !important;
-  color: #fff !important;
-  box-shadow: none !important;
-}
-
-.fc .fc-button:hover {
-  background-color: #3f4f60 !important;
-}
-
-.fc .fc-button-active {
-  background-color: #1f2b36 !important;
-}
-
-.fc .fc-button:focus {
-  box-shadow: none !important;
-}
-
-.fc-toolbar-chunk:last-child {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.fc-daygrid-day-frame {
-  min-height: 160px;
-}
