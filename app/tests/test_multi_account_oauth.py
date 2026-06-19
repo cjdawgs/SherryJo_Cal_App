@@ -9,7 +9,7 @@ This file demonstrates how to:
 """
 
 import pytest
-from datetime import datetime, UTC
+from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, patch
 from sqlalchemy.orm import Session
 
@@ -58,6 +58,8 @@ def oauth_accounts_setup(db: Session, multi_account_user: User):
     """
     
     # Google Account 1 (Primary)
+    common_expiry = datetime.now(timezone.utc) + timedelta(days=3650)
+
     google_acc1 = OAuthAccount(
         user_id=multi_account_user.id,
         provider="google",
@@ -65,7 +67,7 @@ def oauth_accounts_setup(db: Session, multi_account_user: User):
         display_name="Sherry Jo (Personal)",
         access_token="google_access_token_1_abc123",
         refresh_token="google_refresh_token_1_xyz789",
-        token_expires_at=9999999999.0,
+        token_expires_at=common_expiry,
         provider_id="google_id_001",
         is_primary=True,
         sync_enabled=True
@@ -79,7 +81,7 @@ def oauth_accounts_setup(db: Session, multi_account_user: User):
         display_name="Sherry Jo (Work)",
         access_token="google_access_token_2_def456",
         refresh_token="google_refresh_token_2_uvw000",
-        token_expires_at=9999999999.0,
+        token_expires_at=common_expiry,
         provider_id="google_id_002",
         is_primary=False,
         sync_enabled=True
@@ -93,7 +95,7 @@ def oauth_accounts_setup(db: Session, multi_account_user: User):
         display_name="Sherry Jo (Outlook)",
         access_token="ms_access_token_ghi789",
         refresh_token="ms_refresh_token_jkl012",
-        token_expires_at=9999999999.0,
+        token_expires_at=common_expiry,
         provider_id="ms_id_azure_001",
         is_primary=True,
         sync_enabled=True
@@ -435,6 +437,12 @@ def test_get_accounts_endpoint(client, multi_account_user: User, oauth_accounts_
     data = response.json()
     assert len(data) == 3  # 2 Google + 1 Microsoft
     assert data[0]["provider"] in ["google", "microsoft"]
+    assert "status" in data[0]
+    assert "sync_enabled" in data[0]
+    assert "last_sync" in data[0]
+    assert "created_at" in data[0]
+    assert "updated_at" in data[0]
+    assert "account_email" in data[0]
 
 
 def test_get_accounts_filtered_endpoint(client, multi_account_user: User, oauth_accounts_setup, db: Session):

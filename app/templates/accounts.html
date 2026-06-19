@@ -200,12 +200,13 @@
 
   </div>
 
-  <!-- ✅ APPLE -->
-  <div class="provider-col">
 
-    <button class="providerBtn apple" onclick="openAppleID()">
-      <img src="https://upload.wikimedia.org/wikipedia/commons/f/fa/Apple_logo_black.svg">
-      Apple
+  <!-- ✅ APPLE -->
+    <div class="provider-col">
+
+    <!-- ✅ ✅ ✅ ADD THIS BUTTON -->
+    <button class="providerBtn apple" onclick="toggleAppleForm()">
+      🍎 Apple
     </button>
 
     <div class="provider-desc">
@@ -305,6 +306,46 @@ function getHealthStatus(acc) {
 
 
 // ============================
+// AUTH HELPERS
+// ============================
+function getAuthToken() {
+    return localStorage.getItem("token");
+}
+
+function setAuthToken(token) {
+    if (token) {
+        localStorage.setItem("token", token);
+    }
+}
+
+function requireAuth() {
+    const token = getAuthToken();
+    if (!token) {
+        const errorBox = document.getElementById("error");
+        if (errorBox) {
+            errorBox.innerText = "Missing login token. Please sign in first.";
+        }
+    }
+    return token;
+}
+
+async function apiFetch(url, options = {}) {
+    const token = requireAuth();
+    if (!token) {
+        throw new Error("Missing auth token");
+    }
+
+    options.headers = options.headers || {};
+    options.headers["Authorization"] = "Bearer " + token;
+
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        window.location.href = "/login";
+    }
+    return response;
+}
+
+// ============================
 // ERROR DISPLAY
 // ============================
 function getErrorMessage(acc) {
@@ -350,11 +391,8 @@ async function retryAccount(id) {
     const token = localStorage.getItem("token");
 
     try {
-        const res = await fetch(`/accounts/${id}/retry`, {
-            method: "POST",
-            headers: {
-                "Authorization": "Bearer " + token
-            }
+        const res = await apiFetch(`/accounts/${id}/retry`, {
+            method: "POST"
         });
 
         let data;
@@ -389,11 +427,7 @@ async function loadAccounts() {
     }
 
     try {
-        const res = await fetch("/accounts", {
-            headers: {
-                "Authorization": "Bearer " + token
-            }
-        });
+        const res = await apiFetch("/accounts");
 
         if (!res.ok) {
             errorBox.innerText = "Failed to load accounts";
@@ -455,6 +489,7 @@ async function loadAccounts() {
                 </span>
 
                 ${acc.is_primary ? "⭐" : ""}
+                <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
             </div>
 
             <div>
@@ -464,6 +499,7 @@ async function loadAccounts() {
                 </button>
                 <button onclick="removeAccount(${acc.id})">Remove</button>
                 <button onclick="retryAccount(${acc.id})">Retry</button>
+                ${getErrorMessage(acc)}
             </div>
             `;
 
@@ -493,41 +529,25 @@ function addMicrosoft() {
 }
 
 // ============================
-// APPLE ID MANAGEMENT
-// ============================
-function openAppleID() {
-    window.open("https://appleid.apple.com/account/manage", "_blank");
-}
-
-// ============================
 // ACTIONS
 // ============================
 async function setPrimary(id) {
-    await fetch(`/accounts/${id}/set-primary`, {
-        method: "PUT",
-        headers: {
-            "Authorization": "Bearer " + localStorage.getItem("token")
-        }
+    await apiFetch(`/accounts/${id}/set-primary`, {
+        method: "PUT"
     });
     loadAccounts();
 }
 
 async function toggleSync(id, enabled) {
-    await fetch(`/accounts/${id}/sync/${enabled}`, {
-        method: "PUT",
-        headers: {
-            "Authorization": "Bearer " + localStorage.getItem("token")
-        }
+    await apiFetch(`/accounts/${id}/sync/${enabled}`, {
+        method: "PUT"
     });
     loadAccounts();
 }
 
 async function removeAccount(id) {
-    await fetch(`/accounts/${id}`, {
-        method: "DELETE",
-        headers: {
-            "Authorization": "Bearer " + localStorage.getItem("token")
-        }
+    await apiFetch(`/accounts/${id}`, {
+        method: "DELETE"
     });
     loadAccounts();
 }
@@ -543,11 +563,10 @@ async function testApple() {
     statusDiv.innerText = "Testing...";
 
     try {
-        const res = await fetch("/accounts/apple/test", {
+        const res = await apiFetch("/accounts/apple/test", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + localStorage.getItem("token")
+                "Content-Type": "application/json"
             },
             body: JSON.stringify({
                 email: email,
@@ -586,11 +605,10 @@ async function connectApple() {
     statusDiv.innerText = "Connecting...";
 
     try {
-        const res = await fetch("/accounts/apple/connect", {
+        const res = await apiFetch("/accounts/apple/connect", {
             method: "POST",
             headers: {
-                "Content-Type": "application/json",
-                "Authorization": "Bearer " + localStorage.getItem("token")
+                "Content-Type": "application/json"
             },
             body: JSON.stringify({
                 email: email,
@@ -620,12 +638,39 @@ async function connectApple() {
 }
 
 // ============================
+// APPLE FORM TOGGLE ✅ ADD HERE
+// ============================
+function toggleAppleForm() {
+    const details = document.querySelector("details");
+    if (details) {
+        details.open = !details.open;
+    }
+}
+
+// ============================
 // INIT
 // ============================
 const params = new URLSearchParams(window.location.search);
+const token = params.get("token");
+const connected = params.get("connected");
+const oauthError = params.get("error");
 
-if (params.get("token")) {
-    localStorage.setItem("token", params.get("token"));
+if (token) {
+    setAuthToken(token);
+    if (connected) {
+        const message = document.getElementById("error");
+        if (message) {
+            message.innerText = `Connected ${connected} successfully.`;
+        }
+    }
+    window.history.replaceState({}, "", window.location.pathname);
+}
+
+if (oauthError) {
+    const message = document.getElementById("error");
+    if (message) {
+        message.innerText = oauthError.replace(/_/g, " ");
+    }
 }
 
 loadAccounts();

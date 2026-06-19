@@ -12,6 +12,7 @@ import jwt
 
 from app.deps import get_current_user
 from app.routers.auth import SECRET_KEY
+from app.security import create_token
 
 
 from app.database import get_db
@@ -128,4 +129,5 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     # ==================================================
     # ✅ REDIRECT BACK TO UI (AUTO REFRESH ✅)
     # ==================================================
-    return RedirectResponse("/accounts/ui?connected=google")
+    new_token = create_token(user_id)
+    return RedirectResponse(f"/accounts/ui?connected=google&token={new_token}")

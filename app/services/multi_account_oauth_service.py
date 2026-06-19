@@ -178,6 +178,81 @@ class MultiAccountOAuthService:
             OAuthAccount.sync_enabled == True
         ).all()
 
+    @staticmethod
+    def get_primary_account(db: Session, user_id: int, provider: str):
+        return db.query(OAuthAccount).filter(
+            OAuthAccount.user_id == user_id,
+            OAuthAccount.provider == provider,
+            OAuthAccount.is_primary == True
+        ).first()
+
+    @staticmethod
+    def set_primary(db: Session, account_id: int, user_id: int):
+        account = db.query(OAuthAccount).filter(
+            OAuthAccount.id == account_id,
+            OAuthAccount.user_id == user_id
+        ).first()
+
+        if not account:
+            return None
+
+        # Demote other primary accounts for this provider
+        db.query(OAuthAccount).filter(
+            OAuthAccount.user_id == user_id,
+            OAuthAccount.provider == account.provider,
+            OAuthAccount.id != account_id,
+            OAuthAccount.is_primary == True
+        ).update({"is_primary": False}, synchronize_session="fetch")
+
+        account.is_primary = True
+        account.updated_at = datetime.now(timezone.utc)
+        safe_commit(db)
+        db.refresh(account)
+        return account
+
+    @staticmethod
+    def disable_account(db: Session, account_id: int):
+        account = db.query(OAuthAccount).filter(
+            OAuthAccount.id == account_id
+        ).first()
+
+        if not account:
+            return None
+
+        account.sync_enabled = False
+        account.updated_at = datetime.now(timezone.utc)
+        safe_commit(db)
+        db.refresh(account)
+        return account
+
+    @staticmethod
+    def delete_account(db: Session, account_id: int):
+        account = db.query(OAuthAccount).filter(
+            OAuthAccount.id == account_id
+        ).first()
+
+        if not account:
+            return False
+
+        db.delete(account)
+        safe_commit(db)
+        return True
+
+    @staticmethod
+    def update_last_sync(db: Session, account_id: int):
+        account = db.query(OAuthAccount).filter(
+            OAuthAccount.id == account_id
+        ).first()
+
+        if not account:
+            return None
+
+        account.last_sync = datetime.now(timezone.utc)
+        account.updated_at = datetime.now(timezone.utc)
+        safe_commit(db)
+        db.refresh(account)
+        return account
+
 # --------------------------------------------------
 # ✅ VALIDATE ICLOUD CREDENTIALS (NEW)
 # --------------------------------------------------

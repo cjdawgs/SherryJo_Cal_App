@@ -12,8 +12,8 @@ import os
 import jwt
 
 from app.database import get_db
-from app.deps import get_current_user
 from app.routers.auth import SECRET_KEY
+from app.security import create_token
 
 # ✅ THIS IS THE KEY: multi-account support
 from app.services.multi_account_oauth_service import MultiAccountOAuthService

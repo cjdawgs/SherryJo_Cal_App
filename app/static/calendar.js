@@ -764,11 +764,16 @@ async function init() {
   await loadAccounts();
   renderAccountsSafe();
 
-  // ✅ LOAD DATA FIRST (critical) check for Full preload or parial
+  // ✅ LOAD DATA FIRST (critical) check for Full preload or partial
   if (!sessionEventCache.length) {
     console.log("🔄 Refreshing cache (needed)");
 
-    await preloadEventCache();          // ✅ ADD THIS BACK
+    try {
+      await preloadEventCache();          // ✅ ADD THIS BACK
+    } catch (err) {
+      console.error("❌ preloadEventCache failed:", err);
+      showToast("Calendar failed to load. Please refresh.", "error");
+    }
     
   } else {
     console.log("⚡ Using existing session cache");
@@ -941,10 +946,15 @@ async function preloadEventCache() {
     `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
   );
 
-  if (!res) return;
+  if (!res) {
+    throw new Error("No response from /calendar/unified");
+  }
 
-
-  if (!res.ok) throw new Error("API failed");
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("❌ /calendar/unified failed:", res.status, text);
+    throw new Error(`Calendar preload failed: ${res.status}`);
+  }
 
   const data = await res.json();
 

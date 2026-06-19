@@ -8,8 +8,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
-
-
+from sqlalchemy import inspect, text
 
 from app.database import engine, Base
 
@@ -55,6 +54,39 @@ from app import models  # DO NOT REMOVE
 
 # ✅ Create tables (safe for dev; in prod you'd use migrations)
 Base.metadata.create_all(bind=engine)
+
+# ✅ Ensure local SQLite schema is up to date for optional columns
+if engine.url.drivername.startswith("sqlite"):
+    inspector = inspect(engine)
+    if "oauth_accounts" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("oauth_accounts")}
+        required_columns = {
+            "last_sync_success",
+            "last_sync_failure",
+            "last_error",
+            "status",
+            "token_expires_at",
+            "updated_at"
+        }
+        missing = required_columns - columns
+        if missing:
+            print(f"⚠️ SQLite schema missing columns: {missing}. Applying ALTER TABLE fixes.")
+            with engine.connect() as conn:
+                for col in missing:
+                    if col == "last_sync_success":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN last_sync_success DATETIME"))
+                    elif col == "last_sync_failure":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN last_sync_failure DATETIME"))
+                    elif col == "last_error":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN last_error VARCHAR"))
+                    elif col == "status":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN status VARCHAR DEFAULT 'ok'"))
+                    elif col == "token_expires_at":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN token_expires_at DATETIME"))
+                    elif col == "updated_at":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN updated_at DATETIME"))
+                conn.commit()
+            print("✅ SQLite schema upgrade complete.")
 
 print("✅ Tables registered:", Base.metadata.tables.keys())
 

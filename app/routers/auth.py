@@ -2,13 +2,15 @@
 # IMPORTS
 # --------------------------------------------------
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer  # ✅ NEW
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-import os
-import jwt  # ✅ NEW: used for decoding token
+from jose import jwt
 
+from app.config import settings
 from app.database import get_db
 from app.models import User, Roles
 from app.security import hash_password, verify_password, create_token
@@ -29,9 +31,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 # ✅ IMPORTANT: must match your create_token() settings
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-#SECRET_KEY = "SECRET_KEY"   # 🔥 Replace if you have a real one elsewhere
-ALGORITHM = "HS256"
+SECRET_KEY = settings.jwt_secret_key
+ALGORITHM = settings.jwt_algorithm
 
 
 # --------------------------------------------------
@@ -39,8 +40,6 @@ ALGORITHM = "HS256"
 # --------------------------------------------------
 from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-from app.security import hash_password
 
 @router.get("/debug/create-user")
 def create_test_user(db: Session = Depends(get_db)):

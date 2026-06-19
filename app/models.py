@@ -119,6 +119,10 @@ class OAuthAccount(Base):
 
     # ✅ SYNC TRACKING
     last_sync = Column(DateTime(timezone=True), nullable=True)
+    last_sync_success = Column(DateTime(timezone=True), nullable=True)
+    last_sync_failure = Column(DateTime(timezone=True), nullable=True)
+    last_error = Column(String, nullable=True)
+    status = Column(String, default="ok")
 
     # ✅ TIMESTAMPS
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

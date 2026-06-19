@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.orm import Session
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 import os
 
 from app.database import get_db
@@ -228,13 +228,16 @@ def get_my_accounts(
             "provider": acc.provider,
             "account_email": acc.account_email,
             "display_name": acc.display_name,
+            "provider_id": acc.provider_id,
             "is_primary": acc.is_primary,
             "sync_enabled": acc.sync_enabled,
             "last_sync": acc.last_sync.isoformat() if acc.last_sync else None,
-            "created_at": acc.created_at.isoformat(),
-
-            # ✅ ADD THIS EXACT LINE
+            "last_sync_success": getattr(acc, "last_sync_success", None).isoformat() if getattr(acc, "last_sync_success", None) else None,
+            "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
+            "last_error": getattr(acc, "last_error", None),
             "status": getattr(acc, "status", "ok"),
+            "created_at": acc.created_at.isoformat(),
+            "updated_at": acc.updated_at.isoformat() if acc.updated_at else None,
         }
         for acc in accounts
     ]
