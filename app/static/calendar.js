@@ -931,8 +931,10 @@ async function init() {
   bindUIEvents();
   applyRangeTooltips(); // ✅ ensures hover text shows immediately
 
-  window.addEventListener("accountsUpdated", () => {
-    refreshAccountStateFromBackend("accountsUpdated");
+  window.addEventListener("accountsUpdated", async () => {
+    await reloadAccounts();
+    rerenderChips();
+    refreshEvents();
   });
 
 }
@@ -1015,6 +1017,18 @@ function refreshAccountStateFromBackend(reason = "accountsUpdated") {
     renderAccountsSafe();
     smartRefresh({ reason, force: true });
   });
+}
+
+async function reloadAccounts() {
+  return loadAccounts();
+}
+
+function rerenderChips() {
+  renderAccountsSafe();
+}
+
+function refreshEvents() {
+  smartRefresh({ reason: "accountsUpdated", force: true });
 }
 
 /**************************************************************
@@ -1951,7 +1965,7 @@ function renderAccounts(accounts) {
       status = "syncing";
     }
     else {
-      status = accountStatusMap[key] || "ok";
+      status = accountStatusMap[key] || "unknown";
     }
 
     /****************************************************************

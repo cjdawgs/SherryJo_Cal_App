@@ -2,7 +2,7 @@
 # GOOGLE OAUTH ROUTER
 # ==================================================
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ import jwt
 from app.deps import get_current_user
 from app.routers.auth import SECRET_KEY
 from app.security import create_token
+from app.config import get_google_redirect_uri
 
 
 from app.database import get_db
@@ -22,7 +23,6 @@ from app.services.google_calendar_service import GoogleCalendarService
 router = APIRouter(prefix="/auth/google", tags=["Google Auth"])
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI")
 
 service = GoogleCalendarService()
 
@@ -32,7 +32,7 @@ service = GoogleCalendarService()
 # ==================================================
 
 @router.get("/login")
-def google_login(token: str, reconnect: str = Query(None)):
+def google_login(request: Request, token: str, reconnect: str = Query(None)):
     """
     ✅ Receive JWT token from URL (not header)
     """
@@ -61,7 +61,7 @@ def google_login(token: str, reconnect: str = Query(None)):
     params = {
         "client_id": GOOGLE_CLIENT_ID,
         "response_type": "code",
-        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "redirect_uri": get_google_redirect_uri(request),
         "scope": "openid email profile https://www.googleapis.com/auth/calendar",
         "access_type": "offline",
         "prompt": "select_account consent",
@@ -80,7 +80,13 @@ def google_login(token: str, reconnect: str = Query(None)):
 # CALLBACK (HANDLE GOOGLE RESPONSE)
 # ==================================================
 @router.get("/callback")
-def google_callback(code: str, state: str, db: Session = Depends(get_db)):
+def google_callback(
+    request: Request,
+    code: str,
+    state: str,
+    db: Session = Depends(get_db)
+):
+    print("✅ CALLBACK HIT:", str(request.url))
 
     # ==================================================
     # ✅ DECODE STATE (extract user_id from JWT)
@@ -95,7 +101,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     # ==================================================
     # ✅ EXCHANGE AUTH CODE FOR TOKENS
     # ==================================================
-    token_data = service.exchange_code(code)
+    token_data = service.exchange_code(code, redirect_uri=get_google_redirect_uri(request))
 
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")

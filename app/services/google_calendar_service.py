@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import requests
 from app.config import settings
+from app.config import get_google_redirect_uri
 
 
 # ==================================================
@@ -59,7 +60,7 @@ class GoogleCalendarService:
         url = (
                 f"{self.AUTH_URL}"
                 f"?client_id={settings.GOOGLE_CLIENT_ID}"
-                f"&redirect_uri={settings.GOOGLE_REDIRECT_URI}"
+            f"&redirect_uri={get_google_redirect_uri()}"
                 f"&response_type=code"
                 f"&scope={scope_str}"
                 f"&access_type=offline"
@@ -74,7 +75,7 @@ class GoogleCalendarService:
     # ==================================================
     # ✅ EXCHANGE CODE → TOKENS
     # ==================================================
-    def exchange_code(self, code: str) -> Dict[str, Any]:
+    def exchange_code(self, code: str, redirect_uri: str | None = None) -> Dict[str, Any]:
         """
         ✅ PURPOSE:
         Exchange authorization code for tokens
@@ -95,7 +96,7 @@ class GoogleCalendarService:
             "code": code,
             "client_id": settings.GOOGLE_CLIENT_ID,
             "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+            "redirect_uri": redirect_uri or get_google_redirect_uri(),
             "grant_type": "authorization_code",
         }
 

@@ -58,8 +58,6 @@ def resolve_account_status(account: OAuthAccount):
         return "error"
 
     if getattr(account, "last_sync_success", None):
-        if getattr(account, "last_sync_failure", None) and account.last_sync_failure > account.last_sync_success:
-            return "error"
         return "ok"
 
     if getattr(account, "last_sync_failure", None):

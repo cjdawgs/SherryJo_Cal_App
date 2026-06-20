@@ -2,6 +2,7 @@
 # Standard Library Imports
 # --------------------------------------------------
 import os
+from typing import Any
 
 # --------------------------------------------------
 # Third-Party Imports
@@ -11,11 +12,29 @@ from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _is_truthy(value: str | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_production_environment() -> bool:
+    """Return True when running in production-like hosting contexts."""
+    env_name = (os.getenv("ENV") or os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "").strip().lower()
+    if env_name in {"prod", "production", "stage", "staging"}:
+        return True
+
+    # Common cloud host markers; if present, prefer host-provided env over local .env.
+    if os.getenv("WEBSITE_SITE_NAME") or os.getenv("AZURE_HTTP_USER_AGENT"):
+        return True
+
+    return False
+
+
 # --------------------------------------------------
 # Load environment variables from .env
-# override=True ensures .env values always apply
+# Dev-only: never let local .env override production runtime settings.
 # --------------------------------------------------
-load_dotenv(override=True)
+if not is_production_environment() and not _is_truthy(os.getenv("DISABLE_DOTENV")):
+    load_dotenv(override=False)
 
 
 # --------------------------------------------------
@@ -24,7 +43,6 @@ load_dotenv(override=True)
 # --------------------------------------------------
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
         extra="ignore"  # ✅ Allows extra vars in .env (CRITICAL FIX)
     )
 
@@ -39,6 +57,8 @@ class Settings(BaseSettings):
     MS_CLIENT_SECRET: str
     MS_TENANT_ID: str 
     MS_REDIRECT_URI: str
+
+    BASE_URL: str = "http://127.0.0.1:8000"
 
     
     # ✅ ADD THESE 3 LINES for the "google_calendar_service" config
@@ -56,6 +76,83 @@ class Settings(BaseSettings):
 
 # Instantiate settings object
 settings = Settings()
+
+
+def _normalize_base_url(base_url: str) -> str:
+    return str(base_url or "").strip().rstrip("/")
+
+
+def resolve_runtime_base_url(request: Any = None) -> str:
+    """
+    Resolve externally reachable base URL with strong precedence rules.
+
+    Order:
+    1) Explicit BASE_URL env when it is non-localhost
+    2) Forwarded headers / request host (works for DevTunnel/reverse proxies)
+    3) Explicit BASE_URL env (including local fallback)
+    4) localhost default
+    """
+    configured_base_url = _normalize_base_url(settings.BASE_URL)
+
+    # Respect explicit non-local URLs first.
+    lowered = configured_base_url.lower()
+    if configured_base_url and not (
+        lowered.startswith("http://127.0.0.1")
+        or lowered.startswith("http://localhost")
+        or lowered.startswith("https://localhost")
+    ):
+        return configured_base_url
+
+    if request is not None:
+        headers = getattr(request, "headers", {})
+
+        forwarded_host = (headers.get("x-forwarded-host") or "").strip()
+        forwarded_proto = (headers.get("x-forwarded-proto") or "https").strip() or "https"
+        if forwarded_host:
+            return _normalize_base_url(f"{forwarded_proto}://{forwarded_host}")
+
+        host = (headers.get("host") or "").strip()
+        scheme = (getattr(getattr(request, "url", None), "scheme", None) or "http").strip()
+        if host:
+            return _normalize_base_url(f"{scheme}://{host}")
+
+    if configured_base_url:
+        return configured_base_url
+
+    return "http://127.0.0.1:8000"
+
+
+def get_google_redirect_uri(request: Any = None) -> str:
+    # Single source of truth for Google callback URI across local and DevTunnel runs.
+    return f"{resolve_runtime_base_url(request)}/auth/google/callback"
+
+
+def get_ms_redirect_uri(request: Any = None) -> str:
+    # Single source of truth for Microsoft callback URI across local and DevTunnel runs.
+    return f"{resolve_runtime_base_url(request)}/ms/callback"
+
+
+def validate_runtime_configuration() -> None:
+    """Fail fast for production deployments missing required env vars."""
+    if not is_production_environment():
+        return
+
+    required_keys = [
+        "GOOGLE_CLIENT_ID",
+        "GOOGLE_CLIENT_SECRET",
+        "MS_CLIENT_ID",
+        "MS_CLIENT_SECRET",
+        "MS_TENANT_ID",
+        "jwt_secret_key",
+    ]
+
+    missing = [key for key in required_keys if not getattr(settings, key, None)]
+    if missing:
+        joined = ", ".join(sorted(missing))
+        raise RuntimeError(f"Missing required production environment variables: {joined}")
+
+
+validate_runtime_configuration()
 
 
 # --------------------------------------------------

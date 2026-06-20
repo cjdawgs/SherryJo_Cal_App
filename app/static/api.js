@@ -1,6 +1,6 @@
 /*
- * Central API helper for authorization and error handling.
- * Used by all authenticated frontend pages.
+ * Central API client for auth headers, request normalization, and error handling.
+ * This is the single fetch abstraction used by frontend modules.
  */
 
 function getAuthToken() {
@@ -13,43 +13,68 @@ function setAuthToken(token) {
   }
 }
 
+function clearAuthToken() {
+  localStorage.removeItem("token");
+}
+
 function requireAuth() {
   const token = getAuthToken();
   if (!token) {
-    console.warn("⚠️ Missing auth token");
     window.location.href = "/login";
     return null;
   }
   return token;
 }
 
-async function apiRequest(url, options = {}) {
+async function request(url, options = {}) {
+  const {
+    method = "GET",
+    auth = true,
+    body,
+    headers: extraHeaders = {},
+    ...rest
+  } = options;
+
   const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {})
+    ...extraHeaders,
   };
 
-  if (options.auth !== false) {
+  let payload = body;
+  const isFormLike = typeof FormData !== "undefined" && body instanceof FormData;
+  const isJsonBody = payload != null && typeof payload !== "string" && !isFormLike;
+
+  if (isJsonBody) {
+    payload = JSON.stringify(payload);
+  }
+
+  if (!isFormLike && payload != null && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  if (auth) {
     const token = getAuthToken();
-    if (token) {
-      headers.Authorization = "Bearer " + token;
+    if (!token) {
+      window.location.href = "/login";
+      return null;
     }
+    headers.Authorization = `Bearer ${token}`;
   }
 
   let response;
   try {
     response = await fetch(url, {
-      ...options,
-      headers
+      method,
+      headers,
+      body: payload,
+      ...rest,
     });
-  } catch (err) {
-    console.error("⚠️ Network request failed:", err);
+  } catch (error) {
+    console.error("Network request failed:", error);
     return null;
   }
 
-  if (response.status === 401 && options.auth !== false) {
-    console.warn("⚠️ Authentication expired, redirecting to login");
-    localStorage.removeItem("token");
+  if (response.status === 401 && auth) {
+    clearAuthToken();
     window.location.href = "/login";
     return null;
   }
@@ -57,43 +82,23 @@ async function apiRequest(url, options = {}) {
   return response;
 }
 
-async function apiFetch(url, options = {}) {
-  const token = requireAuth();
-  if (!token) {
-    return null;
-  }
+const api = {
+  request,
+  get: (url, options = {}) => request(url, { ...options, method: "GET" }),
+  post: (url, body, options = {}) => request(url, { ...options, method: "POST", body }),
+  put: (url, body, options = {}) => request(url, { ...options, method: "PUT", body }),
+  del: (url, options = {}) => request(url, { ...options, method: "DELETE" }),
+};
 
-  const headers = {
-    "Content-Type": "application/json",
-    "Authorization": "Bearer " + token,
-    ...(options.headers || {})
-  };
+// Backward-compatible aliases used by existing modules.
+const apiRequest = request;
+const apiFetch = (url, options = {}) => request(url, { ...options, auth: options.auth !== false });
 
-  let response;
-  try {
-    response = await fetch(url, {
-      ...options,
-      headers
-    });
-  } catch (err) {
-    console.error("⚠️ Network request failed:", err);
-    return null;
-  }
-
-  if (response.status === 401) {
-    console.warn("⚠️ Authentication expired, redirecting to login");
-    localStorage.removeItem("token");
-    window.location.href = "/login";
-    return null;
-  }
-
-  return response;
-}
-
+window.api = api;
 window.apiRequest = apiRequest;
 window.apiFetch = apiFetch;
 window.getAuthToken = getAuthToken;
 window.setAuthToken = setAuthToken;
 window.requireAuth = requireAuth;
 
-export { apiRequest, apiFetch, requireAuth, getAuthToken, setAuthToken };
+export { api, apiRequest, apiFetch, requireAuth, getAuthToken, setAuthToken, clearAuthToken };

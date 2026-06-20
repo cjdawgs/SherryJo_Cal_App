@@ -148,6 +148,7 @@ def retry_account_sync(
     """
 
     from app.services.calendar_service import CalendarService
+    from app.services.multi_account_oauth_service import safe_commit
 
     account = db.query(OAuthAccount).filter(
         OAuthAccount.id == account_id,
@@ -158,24 +159,44 @@ def retry_account_sync(
         raise HTTPException(404, "Account not found")
 
     service = CalendarService()
+    retry_started_at = datetime.now(timezone.utc)
 
     try:
-        # ✅ Reuse the existing sync pipeline for the current user
+        print(
+            f"🔁 RETRY START account_id={account.id} provider={account.provider} email={account.account_email} "
+            f"prev_status={account.status} prev_success={account.last_sync_success} prev_failure={account.last_sync_failure}"
+        )
+
+        # Reuse the sync pipeline to re-evaluate account health and refresh event state.
         service.fetch_all_events(db, current_user)
 
-        account.last_sync_success = datetime.now(timezone.utc)
-        account.last_sync_failure = None
-        account.last_error = None
-        account.status = "ok"
+        db.refresh(account)
 
-        db.commit()
+        # Rule: any recorded successful sync must force backend status to ok.
+        if account.last_sync_success:
+            account.status = "ok"
+            account.last_error = None
+            account.last_sync_failure = None
+        else:
+            account.last_sync_success = retry_started_at
+            account.last_sync_failure = None
+            account.last_error = None
+            account.status = "ok"
+
+        safe_commit(db)
+
+        resolved_status = resolve_account_status(account)
+        print(
+            f"✅ RETRY SUCCESS account_id={account.id} provider={account.provider} email={account.account_email} "
+            f"status={resolved_status} success={account.last_sync_success} failure={account.last_sync_failure}"
+        )
 
         return {
             "success": True,
             "message": "✅ Sync successful",
             "account": {
                 "id": account.id,
-                "status": resolve_account_status(account),
+                "status": resolved_status,
                 "last_sync_success": account.last_sync_success.isoformat(),
                 "last_sync_failure": None,
                 "last_error": None
@@ -183,11 +204,17 @@ def retry_account_sync(
         }
 
     except Exception as e:
+        db.refresh(account)
         account.last_sync_failure = datetime.now(timezone.utc)
         account.status = "error"
         account.last_error = str(e)
 
-        db.commit()
+        safe_commit(db)
+
+        print(
+            f"❌ RETRY FAILED account_id={account.id} provider={account.provider} email={account.account_email} "
+            f"error={e}"
+        )
 
         return {"success": False, "message": "❌ Sync failed", "error": str(e)}
     

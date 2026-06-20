@@ -2,7 +2,7 @@
 # MICROSOFT OAUTH ROUTER (FULLY FIXED ✅)
 # ==================================================
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
 from sqlalchemy.orm import Session
@@ -14,6 +14,7 @@ import jwt
 from app.database import get_db
 from app.routers.auth import SECRET_KEY
 from app.security import create_token
+from app.config import get_ms_redirect_uri
 
 # ✅ THIS IS THE KEY: multi-account support
 from app.services.multi_account_oauth_service import MultiAccountOAuthService
@@ -50,7 +51,8 @@ print("✅ CLIENT_SECRET LOADED:", CLIENT_SECRET)
 
 print("✅ CLIENT_ID:", CLIENT_ID)
 print("✅ CLIENT_SECRET LENGTH:", len(CLIENT_SECRET) if CLIENT_SECRET else "None")
-print("✅ REDIRECT_URI:", REDIRECT_URI)
+print("✅ REDIRECT_URI env (legacy):", REDIRECT_URI)
+print("✅ REDIRECT_URI runtime template: {base_url}/ms/callback")
 
 print("✅ TENANT_ID:", TENANT_ID)
 print("✅ AUTHORITY:", AUTHORITY)
@@ -71,7 +73,7 @@ SCOPES = [
 # LOGIN (START OAUTH FLOW)
 # ==================================================
 @router.get("/login")
-def login(token: str, reconnect: str = None):
+def login(request: Request, token: str, reconnect: str = None):
 
     """
     ✅ Starts Microsoft OAuth flow
@@ -111,7 +113,7 @@ def login(token: str, reconnect: str = None):
     params = {
         "client_id": CLIENT_ID,
         "response_type": "code",
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": get_ms_redirect_uri(request),
         "response_mode": "query",
         "scope": " ".join(SCOPES),
         "state": state,   # ✅ ties login back to user
@@ -135,12 +137,14 @@ from typing import Optional
 
 @router.get("/callback")
 def callback(
+    request: Request,
     code: Optional[str] = None,
     state: Optional[str] = None,
     error: Optional[str] = None,
     error_subcode: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
+    print("✅ CALLBACK HIT:", f"/ms/callback?code_present={bool(code)}")
 
     """
     ✅ Handles Microsoft OAuth response
@@ -198,7 +202,7 @@ def callback(
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
             "code": code,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": get_ms_redirect_uri(request),
             "grant_type": "authorization_code",
         },
     )
