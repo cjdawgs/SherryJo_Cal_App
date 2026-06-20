@@ -11,7 +11,8 @@ from app.services.external_calendar_service import ExternalCalendarService
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     ensure_valid_token,
-    safe_commit
+    safe_commit,
+    resolve_account_status
 )
 import pytz
 
@@ -85,17 +86,36 @@ def build_event_id(e: dict) -> str:
     ✅ SINGLE SOURCE OF TRUTH for event identity
     - provider normalized
     - external_id normalized
+    - account_email normalized (prevents cross-account collisions)
     """
 
     provider = normalize_provider(e.get("source"))
     ext_id = str(e.get("external_id", "")).strip()
+    account_email = str(e.get("account_email", "")).lower().strip()
 
-    return f"{provider}:{ext_id}"
+    return f"{provider}:{account_email}:{ext_id}"
 
 def build_account_key(provider: str, email: str) -> str:
     provider = normalize_provider(provider)
     email = (email or "").lower().strip()
     return f"{provider}:{email}"
+
+
+def build_fallback_external_id(provider: str, account_email: str, title: str, start_val) -> str:
+    """Build a stable fallback ID when provider payload omits event ID."""
+    safe_provider = normalize_provider(provider)
+    safe_account = (account_email or "").lower().strip()
+    safe_title = (title or "Untitled Event").strip()
+
+    if isinstance(start_val, datetime):
+        if start_val.tzinfo is None:
+            safe_start = start_val.replace(tzinfo=timezone.utc).isoformat()
+        else:
+            safe_start = start_val.astimezone(timezone.utc).isoformat()
+    else:
+        safe_start = str(start_val or "")
+
+    return f"fb:{safe_provider}:{safe_account}:{safe_title}:{safe_start}"
 
 
 def log_debug(msg: str):
@@ -219,15 +239,26 @@ class CalendarService:
 
             start = self._safe_datetime(e.get("start"))
             end = self._safe_datetime(e.get("end"))
+            title = (
+                e.get("summary") or
+                e.get("subject") or
+                "Untitled Event"
+            )
+
+            raw_external_id = e.get("id")
+            external_id = str(raw_external_id).strip() if raw_external_id is not None else ""
+            if not external_id or external_id.lower() == "none":
+                external_id = build_fallback_external_id(
+                    provider=provider,
+                    account_email=account_email,
+                    title=title,
+                    start_val=start,
+                )
 
             unified.append({
-                "external_id": str(e.get("id")),
+                "external_id": external_id,
 
-                "title": (
-                    e.get("summary") or
-                    e.get("subject") or
-                    "Untitled Event"
-                ),
+                "title": title,
                 # ==================================================
                 # 🔬 SURGICAL FIX — DATE CONSISTENCY
                 # --------------------------------------------------
@@ -303,6 +334,15 @@ class CalendarService:
             Event.start_time >= start_date,
             Event.start_time <= end_date
         ).all()
+
+        per_account_counts = {}
+        for ev in events:
+            provider = normalize_provider(getattr(ev, "source", None) or "local")
+            email = (getattr(ev, "account_email", None) or "local").lower().strip()
+            key = f"{provider}:{email}"
+            per_account_counts[key] = per_account_counts.get(key, 0) + 1
+
+        log_info(f"🧪 DB VIEW ACCOUNT TOTALS | {per_account_counts}")
         
         return [
             {
@@ -337,6 +377,7 @@ class CalendarService:
         google_events = []
         ms_events = []
         apple_events = []
+        account_sync_totals = []
 
 
         # ==================================================
@@ -397,11 +438,16 @@ class CalendarService:
             # ==================================================
             log_info(f"🔄 Processing: {acc.provider} | {acc.account_email}")
 
+            sync_time = datetime.now(timezone.utc)
+
             token = ensure_valid_token(db, acc)
 
             if not token:
                 log_error(f"🚫 No token: {acc.account_email}")
 
+                acc.last_sync = sync_time
+                acc.last_sync_failure = sync_time
+                acc.last_error = "No valid token available"
                 acc.status = "error"
 
                 safe_commit(db)
@@ -412,6 +458,9 @@ class CalendarService:
                 # ==================================================
                 # ✅ PROVIDER ROUTING (FAIL SAFE)
                 # ==================================================
+                fetched_raw_count = 0
+                added = 0
+
                 if acc.provider not in ["google", "apple", "microsoft"]:
                     log_error(f"Unknown provider: {acc.provider}")
                     continue
@@ -428,9 +477,9 @@ class CalendarService:
                     end_date=end_date
                 ) or []
 
-                    log_debug(f"Google raw count: {len(events)}")
+                    fetched_raw_count = len(events)
 
-                    added = 0
+                    log_debug(f"Google raw count: {len(events)}")
 
                     for e in events:
                         #/**************************************************************
@@ -493,8 +542,8 @@ class CalendarService:
                 elif acc.provider == "apple":
 
                     events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
+                    fetched_raw_count = len(events)
                     log_debug(f"Apple raw count: {len(events)}")
-                    added = 0
                     
                     # ✅ WHY:
                     # Apple data spans MANY years and is not "window-based"
@@ -585,6 +634,7 @@ class CalendarService:
 
                     
                     log_debug(f"Microsoft raw events: {len(events)}")
+                    fetched_raw_count = len(events)
 
                     # ==================================================
                     # ✅ MICROSOFT DATE NORMALIZATION + FILTER
@@ -656,11 +706,43 @@ class CalendarService:
                             added += 1
                     log_info(f"   🟦 Microsoft events in range: {added}")
 
+                log_info(
+                    f"🧪 ACCOUNT SYNC TOTALS | {acc.provider}:{acc.account_email} | raw={fetched_raw_count} | in_range={added}"
+                )
+
+                account_sync_totals.append({
+                    "provider": acc.provider,
+                    "account_email": acc.account_email,
+                    "raw": fetched_raw_count,
+                    "in_range": added,
+                    "status": "ok"
+                })
+
+                acc.last_sync = sync_time
+                acc.last_sync_success = sync_time
+                acc.last_sync_failure = None
+                acc.last_error = None
+                acc.status = "ok"
+                safe_commit(db)
+
             # ==================================================
             # ✅ ACCOUNT ERROR HANDLING (STANDARDIZED)
             # ==================================================
             except Exception as e:
                 log_error(f"Account failed ({acc.account_email}): {e}")
+                account_sync_totals.append({
+                    "provider": acc.provider,
+                    "account_email": acc.account_email,
+                    "raw": 0,
+                    "in_range": 0,
+                    "status": "error",
+                    "error": str(e)
+                })
+                acc.last_sync = sync_time
+                acc.last_sync_failure = sync_time
+                acc.last_error = str(e)
+                acc.status = "error"
+                safe_commit(db)
                 continue
 
         
@@ -683,7 +765,7 @@ class CalendarService:
         accounts = MultiAccountOAuthService.get_user_accounts(db, user.id)
 
         account_status = {
-            f"{acc.provider}:{(acc.account_email or '').lower().strip()}": getattr(acc, "status", "ok")
+            f"{acc.provider}:{(acc.account_email or '').lower().strip()}": resolve_account_status(acc)
             for acc in accounts
         }
 
@@ -697,7 +779,8 @@ class CalendarService:
         return {
             "events": self._normalize(combined_primary, ms_events),
 
-            "account_status": account_status
+            "account_status": account_status,
+            "account_sync_totals": account_sync_totals
         }
 
     # ==================================================
@@ -706,6 +789,7 @@ class CalendarService:
     def sync_all(self, db: Session, user):
 
         result = self.fetch_all_events(db, user)
+        account_sync_totals = result.get("account_sync_totals", []) if isinstance(result, dict) else []
 
         events = result.get("events", []) if isinstance(result, dict) else []
 
@@ -804,5 +888,6 @@ class CalendarService:
 
         return {
             "created": created,
-            "updated": updated
+            "updated": updated,
+            "account_sync_totals": account_sync_totals
         }

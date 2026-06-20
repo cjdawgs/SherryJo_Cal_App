@@ -198,11 +198,40 @@ export function initFullCalendar() {
         inner.style.padding = "2px 6px";
         inner.style.fontSize = "11px";
       }
+    },
+
+    eventsSet: function() {
+      if (typeof window.updateChipEventCounts === "function") {
+        setTimeout(() => {
+          window.updateChipEventCounts();
+        }, 0);
+      }
+    },
+
+    datesSet: function() {
+      if (typeof window.updateChipEventCounts === "function") {
+        setTimeout(() => {
+          window.updateChipEventCounts();
+        }, 0);
+      }
+    },
+
+    viewDidMount: function() {
+      if (typeof window.updateChipEventCounts === "function") {
+        setTimeout(() => {
+          window.updateChipEventCounts();
+        }, 0);
+      }
     }
 
   });
 
   window.calendar.render();
+  setTimeout(() => {
+    if (typeof window.updateChipEventCounts === "function") {
+      window.updateChipEventCounts();
+    }
+  }, 0);
   /* ======================================================
   ✅ INJECT RANGE INTO HEADER (SAFE ADDITION)
   ✅ CENTER RANGE PILL (FINAL LAYOUT)

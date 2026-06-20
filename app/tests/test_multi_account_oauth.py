@@ -14,7 +14,7 @@ from unittest.mock import Mock, patch
 from sqlalchemy.orm import Session
 
 from app.models import User, OAuthAccount
-from app.services.multi_account_oauth_service import MultiAccountOAuthService
+from app.services.multi_account_oauth_service import MultiAccountOAuthService, resolve_account_status
 from app.database import get_db
 
 
@@ -169,6 +169,36 @@ def test_add_oauth_account_update_existing(db: Session, multi_account_user: User
     assert len(accounts) == 1
 
 
+def test_add_oauth_account_update_existing_clears_error_state(db: Session, multi_account_user: User):
+    stale = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="broken@gmail.com",
+        access_token="__REAUTH_REQUIRED__",
+        refresh_token="refresh_old",
+        status="error",
+        last_error="No valid token available",
+        last_sync_failure=datetime.now(timezone.utc) - timedelta(days=1),
+        sync_enabled=True
+    )
+    db.add(stale)
+    db.commit()
+
+    updated = MultiAccountOAuthService.add_oauth_account(
+        db=db,
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="broken@gmail.com",
+        access_token="new_access_token",
+        refresh_token="new_refresh_token"
+    )
+
+    assert updated.status == "ok"
+    assert updated.last_error is None
+    assert updated.last_sync_failure is None
+    assert updated.last_sync_success is not None
+
+
 def test_get_user_accounts_all(db: Session, multi_account_user: User, oauth_accounts_setup):
     """Test retrieving all accounts for a user."""
     
@@ -258,19 +288,33 @@ def test_delete_account(db: Session, multi_account_user: User, oauth_accounts_se
 
 def test_update_last_sync(db: Session, multi_account_user: User, oauth_accounts_setup):
     """Test updating the last_sync timestamp."""
-    
+
     accounts = oauth_accounts_setup
     account_id = accounts["google_primary"].id
-    
+
     # Last sync should be None initially
     before = db.query(OAuthAccount).filter(OAuthAccount.id == account_id).first()
     assert before.last_sync is None
-    
+
     # Update last sync
     after = MultiAccountOAuthService.update_last_sync(db, account_id)
-    
+
     assert after.last_sync is not None
     assert after.last_sync.year == 2026
+
+
+def test_resolve_account_status_flags_reauth_required_token(db: Session, multi_account_user: User):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="sherrychip@gmail.com",
+        access_token="__REAUTH_REQUIRED__",
+        refresh_token="refresh_token",
+        last_sync_success=datetime.now(timezone.utc),
+        status="ok"
+    )
+
+    assert resolve_account_status(account) == "error"
 
 
 # ============================================================

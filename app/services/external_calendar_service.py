@@ -11,7 +11,7 @@ SAFE DESIGN:
 - Can be plugged into routers/services later
 """
     
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import List, Dict, Any
 import logging
 
@@ -20,6 +20,11 @@ try:
     import caldav
 except ImportError:
     caldav = None
+
+try:
+    import vobject
+except ImportError:
+    vobject = None
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +37,84 @@ class ExternalCalendarService:
     def __init__(self):
         pass
     
+    def _extract_vevent(self, event):
+        """Return a VEVENT-like object from diverse CalDAV event wrappers."""
+        vobj = getattr(event, "vobject_instance", None)
+        if callable(vobj):
+            try:
+                vobj = vobj()
+            except Exception:
+                vobj = None
+
+        if vobj is not None and hasattr(vobj, "vevent"):
+            return vobj.vevent
+
+        # Some backends expose raw ICS text instead of vobject_instance.
+        raw_ics = getattr(event, "data", None)
+        if isinstance(raw_ics, str) and raw_ics.strip() and vobject is not None:
+            try:
+                parsed = vobject.readOne(raw_ics)
+                if hasattr(parsed, "vevent"):
+                    return parsed.vevent
+            except Exception as e:
+                logger.warning(f"⚠️ Apple ICS parse failed: {e}")
+
+        return None
+
     # --------------------------------------------------
     # ✅ VALIDATE ICLOUD CREDENTIALS (REQUIRED FIX)
     # --------------------------------------------------
+    def validate_icloud_credentials_detailed(
+        self,
+        url: str,
+        username: str,
+        password: str
+    ):
+        """
+        Returns (is_valid, message) with actionable diagnostics.
+        """
+
+        if caldav is None:
+            logger.error("❌ caldav not installed")
+            return False, "Server missing caldav dependency"
+
+        if not url or not username or not password:
+            return False, "Apple ID email, App Password, and CalDAV URL are required"
+
+        try:
+            client = caldav.DAVClient(
+                url=url,
+                username=username,
+                password=password
+            )
+
+            principal = client.principal()
+            if not principal:
+                return False, "No CalDAV principal returned from Apple"
+
+            calendars = principal.calendars() or []
+            if not calendars:
+                return False, "Authenticated, but no iCloud calendars found (enable Calendar in iCloud settings)"
+
+            logger.info(f"✅ Apple credentials valid: {username}")
+            return True, "✅ Connection successful"
+
+        except Exception as e:
+            raw = str(e)
+            lowered = raw.lower()
+            logger.error(f"❌ Apple validation failed: {raw}")
+
+            if "401" in lowered or "unauthorized" in lowered or "invalid credentials" in lowered:
+                return False, "Apple rejected credentials (check Apple ID email + App Password)"
+            if "403" in lowered or "forbidden" in lowered:
+                return False, "Apple access forbidden (verify app-specific password and iCloud Calendar access)"
+            if "ssl" in lowered or "certificate" in lowered:
+                return False, "SSL/TLS error reaching Apple CalDAV"
+            if "timed out" in lowered or "timeout" in lowered:
+                return False, "Connection timed out reaching Apple CalDAV"
+
+            return False, f"Apple CalDAV error: {raw}"
+
     def validate_icloud_credentials(
         self,
         url: str,
@@ -51,31 +131,8 @@ class ExternalCalendarService:
         - MUST be lightweight (no event fetch)
         """
 
-        if caldav is None:
-            logger.error("❌ caldav not installed")
-            return False
-
-        try:
-            client = caldav.DAVClient(
-                url=url,
-                username=username,
-                password=password
-            )
-
-            # ✅ LIGHTWEIGHT check (NO events)
-            principal = client.principal()
-
-            if not principal:
-                logger.warning("❌ No principal returned")
-                return False
-
-            logger.info(f"✅ Apple credentials valid: {username}")
-            return True
-
-        except Exception as e:
-            # ✅ NEVER crash API
-            logger.error(f"❌ Apple validation failed: {e}")
-            return False
+        ok, _message = self.validate_icloud_credentials_detailed(url, username, password)
+        return ok
 
 
     # --------------------------------------------------
@@ -103,18 +160,33 @@ class ExternalCalendarService:
 
             results = []
 
+            search_start = datetime.now(timezone.utc) - timedelta(days=365)
+            search_end = datetime.now(timezone.utc) + timedelta(days=730)
+
             for calendar in calendars:
-                events = calendar.events()
+                try:
+                    # Apple can under-return with plain events(); date_search is more reliable.
+                    events = calendar.date_search(
+                        start=search_start,
+                        end=search_end,
+                        expand=True
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Apple date_search fallback to events(): {e}")
+                    events = calendar.events()
+
+                logger.info(f"🍎 Apple calendar fetch count: {len(events)}")
+
+                skipped_missing_vevent = 0
+                skipped_missing_start = 0
 
                 for event in events:
                     try:
-                        vobj = getattr(event, "vobject_instance", None)
+                        vevent = self._extract_vevent(event)
 
-                        if not vobj or not hasattr(vobj, "vevent"):
-                            logger.warning("⚠️ Skipping event (no vevent)")
+                        if not vevent:
+                            skipped_missing_vevent += 1
                             continue
-
-                        vevent = vobj.vevent
 
                         parsed_start = self._parse_date(getattr(vevent, "dtstart", None))
                         parsed_end = self._parse_date(getattr(vevent, "dtend", None))
@@ -127,19 +199,35 @@ class ExternalCalendarService:
                             parsed_start = parsed_end  # fallback for some Apple events
 
                         if not parsed_start:
+                            skipped_missing_start += 1
                             continue
 
 
+                        uid_obj = getattr(vevent, "uid", None)
+                        uid = getattr(uid_obj, "value", None) if uid_obj else None
+
+                        summary_obj = getattr(vevent, "summary", None)
+                        summary = getattr(summary_obj, "value", summary_obj)
+
+                        description_obj = getattr(vevent, "description", None)
+                        description = getattr(description_obj, "value", description_obj)
+
                         results.append(self._normalize_event({
-                            "title": str(getattr(vevent, "summary", "")).replace("<SUMMARY{}", "").replace(">", ""),
+                            "id": str(uid) if uid else None,
+                            "title": str(summary or ""),
                             "start": parsed_start,
                             "end": parsed_end,
-                            "description": str(getattr(vevent, "description", "")),
+                            "description": str(description or ""),
                             "source": "apple"
                         }))
 
                     except Exception as e:
                         logger.warning(f"Skipping malformed iCloud event: {e}")
+
+                if skipped_missing_vevent:
+                    logger.warning(f"⚠️ Apple skipped (missing vevent): {skipped_missing_vevent}")
+                if skipped_missing_start:
+                    logger.warning(f"⚠️ Apple skipped (missing start): {skipped_missing_start}")
 
             return results  # ✅ INSIDE try block
 
@@ -147,28 +235,18 @@ class ExternalCalendarService:
             logger.error(f"iCloud fetch failed: {e}")
             return []
         
-    # --------------------------------------------------
-    # APPLE (PLACEHOLDER FOR YOUR IMPLEMENTATION)
-    # --------------------------------------------------
     @staticmethod
     def fetch_apple_calendar_events(account):
         """
-        ✅ Apple → iCloud bridge
-        ✅ Uses existing CalDAV implementation
-        ✅ Minimal, safe integration
+        Bridge from OAuthAccount row → fetch_icloud_events().
+        Reads CalDAV URL from access_token and app-password from refresh_token.
         """
-
         try:
             service = ExternalCalendarService()
-
-            # ✅ You will need these fields on account
-            # ✅ FIX: use stored credentials correctly
-            url = account.access_token          # caldav_url
+            url = account.access_token          # CalDAV URL stored here
             username = account.account_email
-            password = account.refresh_token    # app_password
+            password = account.refresh_token    # App Password stored here
 
-
-            # ✅ SAFETY: do not break pipeline
             if not url or not username or not password:
                 logger.warning("⚠️ Apple account missing CalDAV credentials")
                 return []
@@ -178,12 +256,10 @@ class ExternalCalendarService:
                 username=username,
                 password=password
             )
-            
-            
         except Exception as e:
             logger.error(f"❌ Apple calendar fetch failed: {e}")
             return []
-    
+        
     # --------------------------------------------------
     # GOOGLE (PLACEHOLDER FOR YOUR IMPLEMENTATION)
     # --------------------------------------------------
@@ -250,7 +326,31 @@ class ExternalCalendarService:
             return None
 
         try:
-            value = date_obj.value
+            # Some vobject/caldav versions return native datetime/date directly.
+            if isinstance(date_obj, datetime):
+                if date_obj.tzinfo is None:
+                    return date_obj.replace(tzinfo=timezone.utc)
+                return date_obj.astimezone(timezone.utc)
+
+            if isinstance(date_obj, date):
+                return datetime(
+                    date_obj.year,
+                    date_obj.month,
+                    date_obj.day,
+                    0, 0, 0,
+                    tzinfo=timezone.utc
+                )
+
+            if isinstance(date_obj, str):
+                value = date_obj.replace("Z", "+00:00")
+                parsed = datetime.fromisoformat(value)
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+
+            value = getattr(date_obj, "value", None)
+            if value is None:
+                return None
 
             # ✅ CASE 1: datetime (normal timed events)
             if isinstance(value, datetime):
@@ -261,7 +361,7 @@ class ExternalCalendarService:
                 return value
 
             # ✅ CASE 2: date (ALL-DAY events — VERY COMMON IN APPLE)
-            if hasattr(value, "year") and hasattr(value, "month") and hasattr(value, "day"):
+            if isinstance(value, date):
                 return datetime(
                     value.year,
                     value.month,
@@ -270,9 +370,17 @@ class ExternalCalendarService:
                     tzinfo=timezone.utc
                 )
 
+            if isinstance(value, str):
+                as_iso = value.replace("Z", "+00:00")
+                parsed = datetime.fromisoformat(as_iso)
+                if parsed.tzinfo is None:
+                    return parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+
             return None
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"⚠️ Apple date parse failed for {type(date_obj)}: {e}")
             return None
 
 

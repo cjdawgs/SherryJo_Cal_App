@@ -88,7 +88,8 @@ def test_register_admin_user():
         "username": unique_username,   # ✅ FIXED
         "email": unique_email,
         "password": "password",
-        "role": "admin"
+        "role": "admin",
+        "admin_setup_code": "mintmule99999"
     })
 
     assert response.status_code == 200   # ✅ FIX (was 20 typo)

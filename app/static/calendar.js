@@ -16,8 +16,22 @@ import {
   getActiveRangeLabel
 } from "./core.js";
 
+import { apiFetch, requireAuth, getAuthToken } from "./api.js";
+
 console.log("🔥 JS FILE LOADED");
 console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));
+
+if (!document.getElementById("chip-spinner-style")) {
+  const style = document.createElement("style");
+  style.id = "chip-spinner-style";
+  style.textContent = `
+    @keyframes chipSpin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+  `;
+  document.head.appendChild(style);
+}
 
 
 function getCalendar() {
@@ -25,65 +39,16 @@ function getCalendar() {
 }
 
 /**************************************************************
- * ✅ TOKEN ENGINE (SINGLE SOURCE OF TRUTH)
- **************************************************************/
-function getTokenSafe() {
-  const token = localStorage.getItem("token");
-
-  if (!token) {
-    console.warn("⚠️ No token → redirecting to login");
-    window.location.replace("/login");
-    return null;
-  }
-
-  return token;
-}
-
-/**************************************************************
  * ✅ AUTH GUARD (SAFE VERSION + NO STALE TOKEN)
- ****************************+**********************************/
+ **************************************************************/
 if (window.location.pathname.includes("calendar-ui")) {
-  getTokenSafe();
+  requireAuth();
 }
 
 
 /**************************************************************
  * ✅ CENTRALIZED API FETCH (TOKEN SAFE)
  **************************************************************/
-async function apiFetch(url, options = {}) {
-  const authToken = getTokenSafe();
-  // ✅ STOP EARLY (NO TOKEN)
-  if (!authToken) return null;
-
-  let res;
-
-  try {
-    res = await fetch(url, {
-      ...options,
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + authToken,
-        ...(options.headers || {})
-      }
-    });
-  } catch (err) {
-    console.warn("⚠️ Network issue:", err);
-    return null; // ✅ NO CRASH
-  }
-
-  // ✅ HANDLE AUTH CLEANLY
-  if (res.status === 401) {
-    console.warn("⚠️ Session expired → redirect");
-
-    localStorage.removeItem("token");
-
-    window.location.replace("/login");
-
-    return null; // ✅ NO THROW
-  }
-
-  return res;
-}
 
 /**************************************************************
  * ✅ GLOBAL STATE
@@ -135,6 +100,7 @@ let currentRangeEnd = null;
 
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
+let currentViewEventCounts = {};
 
 /**************************************************************
  * ✅ SESSION EVENT CACHE (SEC) — GOLD STANDARD
@@ -163,6 +129,169 @@ function smartRefresh({ reason = "unknown", force = false } = {}) {
   }
 
   applyClientSideFilters(); // ✅ ONLY THIS
+}
+
+function getCalendarEventAccountKey(ev) {
+  if (!ev) return "";
+
+  const directKey = ev.extendedProps?.account_key;
+  if (directKey) return directKey;
+
+  const provider = normalizeProvider(ev.extendedProps?.source || ev.source || "local");
+  const account = (
+    ev.extendedProps?.account ||
+    ev.extendedProps?.account_email ||
+    "local"
+  ).toLowerCase().trim();
+
+  return normalizeKey(provider, account);
+}
+
+function computeCurrentViewEventCounts() {
+  const cal = getCalendar();
+  if (!cal || typeof cal.getEvents !== "function") return {};
+
+  const view = cal.view;
+  const activeStart = view?.activeStart ? new Date(view.activeStart) : null;
+  const activeEnd = view?.activeEnd ? new Date(view.activeEnd) : null;
+
+  const counts = {};
+
+  cal.getEvents().forEach((ev) => {
+    if (activeStart && activeEnd) {
+      const evStart = ev.start ? new Date(ev.start) : null;
+      const evEnd = ev.end ? new Date(ev.end) : evStart;
+
+      if (!evStart) return;
+      if (evEnd < activeStart || evStart >= activeEnd) return;
+    }
+
+    const key = getCalendarEventAccountKey(ev);
+    if (!key) return;
+
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  return counts;
+}
+
+function updateChipEventCounts() {
+  const accountsContainer = document.getElementById("accounts");
+  if (!accountsContainer) return;
+
+  const hasGetColor = typeof getColorByKey === "function";
+  const hasSoftColor = typeof applySoftColor === "function";
+  const hasTextColor = typeof getBestTextColor === "function";
+
+  currentViewEventCounts = computeCurrentViewEventCounts();
+
+  accountsContainer.querySelectorAll(".chip").forEach((chip) => {
+    const key = chip.dataset.key;
+    if (!key) return;
+
+    const count = currentViewEventCounts[key] || 0;
+
+    let badge = chip.querySelector(".chip-event-count");
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "chip-event-count";
+      badge.style.marginLeft = "4px";
+      badge.style.padding = "0 5px";
+      badge.style.borderRadius = "999px";
+      badge.style.fontSize = "9px";
+      badge.style.fontWeight = "600";
+      badge.style.lineHeight = "1.2";
+      badge.style.display = "inline-flex";
+      badge.style.alignItems = "center";
+      badge.style.justifyContent = "center";
+      badge.style.minWidth = "14px";
+
+      const header = chip.firstElementChild;
+      if (header) {
+        header.appendChild(badge);
+      }
+    }
+
+    const raw = hasGetColor ? getColorByKey(key) : "#64748b";
+    const soft = hasSoftColor ? applySoftColor(raw) : raw;
+    const text = hasTextColor ? getBestTextColor(soft) : "#111";
+
+    badge.textContent = String(count);
+    badge.title = `${count} events in current view`;
+    badge.style.background = soft;
+    badge.style.color = text;
+    badge.style.border = `1px solid ${raw}`;
+    badge.style.opacity = count === 0 ? "0.5" : "0.82";
+  });
+}
+
+window.updateChipEventCounts = updateChipEventCounts;
+
+function consumePendingReconnectSync() {
+  const raw = localStorage.getItem("postReconnectSync");
+  if (!raw) return null;
+
+  try {
+    const parsed = JSON.parse(raw);
+    localStorage.removeItem("postReconnectSync");
+
+    if (!parsed || typeof parsed !== "object") return null;
+
+    const createdAt = Number(parsed.createdAt || 0);
+    if (!createdAt || Date.now() - createdAt > 10 * 60 * 1000) {
+      return null;
+    }
+
+    return {
+      provider: String(parsed.provider || ""),
+      account: String(parsed.account || "")
+    };
+  } catch {
+    localStorage.removeItem("postReconnectSync");
+    return null;
+  }
+}
+
+function shouldAutoSyncApple(accountTotals = {}) {
+  const hasAppleAccount = lastLoadedAccounts.some((acc) => {
+    const provider = normalizeProvider(acc.provider || "");
+    const email = (acc.account_email || acc.email || "").toLowerCase().trim();
+    return provider === "apple" && !!email;
+  });
+
+  if (!hasAppleAccount) return false;
+
+  const appleTotal = Object.entries(accountTotals)
+    .filter(([k]) => String(k).startsWith("apple:"))
+    .reduce((sum, [, v]) => sum + (Number(v) || 0), 0);
+
+  if (appleTotal > 0) return false;
+
+  const now = Date.now();
+  const raw = localStorage.getItem("appleZeroAutoSyncAt");
+  const lastRun = raw ? Number(raw) : 0;
+
+  if (lastRun && now - lastRun < 10 * 60 * 1000) {
+    return false;
+  }
+
+  localStorage.setItem("appleZeroAutoSyncAt", String(now));
+  return true;
+}
+
+async function logAppleFetchDiagnostics() {
+  try {
+    const res = await apiFetch("/accounts/apple/debug-fetch");
+    if (!res || !res.ok) {
+      console.warn("🧪 APPLE DEBUG FETCH unavailable");
+      return;
+    }
+
+    const data = await res.json();
+    console.log("🧪 APPLE DEBUG FETCH:", data);
+  } catch (err) {
+    console.warn("🧪 APPLE DEBUG FETCH failed", err);
+  }
 }
 
 /**************************************************************
@@ -760,7 +889,7 @@ async function init() {
   }
 
   // ✅ Final validation
-  if (!getTokenSafe()) return;
+  if (!requireAuth()) return;
   await loadAccounts();
   renderAccountsSafe();
 
@@ -783,11 +912,28 @@ async function init() {
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
   renderRangePill(); // ✅ ensure initial render
+
+  const reconnectSyncRequest = consumePendingReconnectSync();
+  if (reconnectSyncRequest) {
+    const label = reconnectSyncRequest.account || reconnectSyncRequest.provider || "reconnected account";
+    showToast(`Syncing ${label} after reconnect...`);
+
+    try {
+      await syncNow();
+    } catch (err) {
+      console.error("❌ post-reconnect sync failed:", err);
+      showToast("Reconnect succeeded, but auto-sync failed. Click Sync Now.", "error");
+    }
+  }
   
   applyRangeTooltips();
 
   bindUIEvents();
   applyRangeTooltips(); // ✅ ensures hover text shows immediately
+
+  window.addEventListener("accountsUpdated", () => {
+    refreshAccountStateFromBackend("accountsUpdated");
+  });
 
 }
 
@@ -795,9 +941,24 @@ function showReconnectBanner(accounts) {
 
   const broken = accounts.filter(a => a.status === "error");
 
+  const existing = document.getElementById("reconnect-banner");
+  if (existing) {
+    existing.remove();
+  }
+
   if (!broken.length) return;
 
+  const firstFixable = broken.find(a => {
+    const provider = normalizeProvider(a.provider || "");
+    return provider === "google" || provider === "microsoft" || provider === "apple";
+  });
+
+  const fixUrl = firstFixable
+    ? buildReconnectUrl(firstFixable.provider, firstFixable.account_email)
+    : "/accounts/ui";
+
   const banner = document.createElement("div");
+  banner.id = "reconnect-banner";
 
   banner.style.background = "#fee2e2";
   banner.style.color = "#991b1b";
@@ -807,10 +968,53 @@ function showReconnectBanner(accounts) {
   banner.innerHTML = `
     ⚠ Some accounts need reconnect:
     ${broken.map(a => a.account_email).join(", ")}
-    <button onclick="window.location='/accounts/ui'">Fix</button>
+    <button style="border:1px solid #b91c1c; color:#b91c1c; font-weight:700;" onclick="window.location='${fixUrl}'">Fix</button>
   `;
 
   document.body.prepend(banner);
+}
+
+function buildReconnectUrl(provider, email) {
+  const token = getAuthToken() || localStorage.getItem("token") || "";
+
+  if (!token) return "/accounts/ui";
+
+  const safeProvider = normalizeProvider(provider || "");
+  const encodedToken = encodeURIComponent(token);
+  const encodedEmail = encodeURIComponent((email || "").trim());
+
+  if (safeProvider === "google") {
+    return `/auth/google/login?token=${encodedToken}&reconnect=${encodedEmail}`;
+  }
+
+  if (safeProvider === "microsoft") {
+    return `/ms/login?token=${encodedToken}&reconnect=${encodedEmail}`;
+  }
+
+  if (safeProvider === "apple") {
+    return `/accounts/ui?reconnect=apple&email=${encodedEmail}`;
+  }
+
+  return "/accounts/ui";
+}
+
+function startReconnect(provider, email) {
+  const url = buildReconnectUrl(provider, email);
+
+  if (!url || url === "/accounts/ui") {
+    window.location.href = "/accounts/ui";
+    return;
+  }
+
+  window.location.href = url;
+}
+
+function refreshAccountStateFromBackend(reason = "accountsUpdated") {
+  console.log(`🔁 Refreshing account state from backend: ${reason}`);
+  loadAccounts().then(() => {
+    renderAccountsSafe();
+    smartRefresh({ reason, force: true });
+  });
 }
 
 /**************************************************************
@@ -825,7 +1029,7 @@ async function loadAccounts() {
 
     if (!res.ok) {
       console.error("API error:", res.status, await res.text());
-      throw new Error("API failed: " + res.status);
+      return [];
     }
 
     const data = await res.json();  // ✅ DEFINE HERE
@@ -960,12 +1164,27 @@ async function preloadEventCache() {
 
   const rawEvents = data.events || [];
   const backendStatus = data.account_status || {};
+  const backendTotals = data.account_event_totals || {};
   console.log("🔥 BACKEND account_status:", backendStatus);
+  console.log("🧪 VIEW ACCOUNT TOTALS:", backendTotals);
+  Object.entries(backendTotals).forEach(([k, v]) => {
+    console.log(`🧪 ACCOUNT VIEW TOTAL | ${k} | ${v}`);
+  });
+  const existingDiagnostics = document.getElementById("accountDiagnostics");
+  if (existingDiagnostics) existingDiagnostics.remove();
 
   // ✅ 🔴 CRITICAL: UPDATE GLOBAL STATUS MAP
   Object.assign(accountStatusMap, backendStatus);
 
   console.log("🧠 STATUS MAP UPDATED:", accountStatusMap);
+
+  if (shouldAutoSyncApple(backendTotals)) {
+    logAppleFetchDiagnostics();
+    showToast("Apple has zero events in view. Running one sync...", "error");
+    setTimeout(() => {
+      syncNow();
+    }, 0);
+  }
 
   sessionEventCache = rawEvents.map(ev => {
     const safeStart = safeParseDate(ev.start);
@@ -1066,7 +1285,7 @@ async function preloadEventCache() {
     const key = `${ev.id}-${ev.start.toISOString()}`;
 
     if (seen.has(key)) {
-      console.warn("🚫 DUPLICATE REMOVED:", ev.title, key);
+      //console.warn("🚫 DUPLICATE REMOVED:", ev.title, key);
       return false;
     }
 
@@ -1155,6 +1374,10 @@ function applyClientSideFilters() {
    * ✅ JUST REFETCH EVENTS (THEY ARE NOW FILTERED AT SOURCE)
    **************************************************************/
   window.calendar.refetchEvents();
+
+  setTimeout(() => {
+    updateChipEventCounts();
+  }, 0);
 }
 
 
@@ -1769,15 +1992,7 @@ function renderAccounts(accounts) {
       if (status === "error") {
 
         const [provider, email] = key.split(":");
-        const token = getTokenSafe();
-
-        if (provider === "google") {
-          window.location.href =
-            `/auth/google/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
-        } else if (provider === "microsoft") {
-          window.location.href =
-            `/ms/login?token=${encodeURIComponent(token)}&reconnect=${encodeURIComponent(email)}`;
-        }
+        startReconnect(provider, email);
 
         return;
       }
@@ -1951,7 +2166,13 @@ function renderAccounts(accounts) {
       const spinner = document.createElement("div");
       spinner.className = "chip-spinner";
 
+      spinner.style.width = "12px";
+      spinner.style.height = "12px";
+      spinner.style.border = "2px solid rgba(0,0,0,0.15)";
       spinner.style.borderTopColor = raw;
+      spinner.style.borderRadius = "50%";
+      spinner.style.animation = "chipSpin 0.9s linear infinite";
+
       spinner.style.marginRight = "4px";
 
       container.insertBefore(spinner, container.firstChild);
@@ -1967,15 +2188,13 @@ function renderAccounts(accounts) {
       errorIcon.textContent = "⚠️";
       errorIcon.style.marginRight = "4px";
 
-      errorIcon.title = "Sync failed — click to retry";
+      errorIcon.title = "Reconnect required — click to reconnect";
 
       errorIcon.onclick = (e) => {
         e.stopPropagation();
 
-        syncingAccounts.add(key);  // ✅ immediate visual feedback
-        renderAccountsSafe();      // ✅ show spinner instantly
-
-        syncSingleAccount(key);
+        const [provider, email] = key.split(":");
+        startReconnect(provider, email);
       };
 
 
@@ -2024,6 +2243,7 @@ function renderAccounts(accounts) {
 
       updateChipSelectionUI();
       applyClientSideFilters();
+      updateChipEventCounts();
     };
 
     el.appendChild(row);
@@ -2044,6 +2264,9 @@ function renderAccounts(accounts) {
   }
   
   updateChipSelectionUI();
+  setTimeout(() => {
+    updateChipEventCounts();
+  }, 0);
 
 }  // ✅ renderAccounts closes cleanly
 
@@ -2060,6 +2283,8 @@ function updateChipSelectionUI() {
     // ✅ ONLY DO THIS
     applyChipStyle(row, key, isActive);
   });
+
+  updateChipEventCounts();
 }
 
 
@@ -2179,13 +2404,19 @@ window.updateWeekView = updateWeekView;
  * ✅ SYNC
  **************************************************************/
 async function syncNow() {
+  const syncBtn = document.getElementById("syncBtn");
+
+  if (syncBtn) {
+    syncBtn.classList.add("is-syncing");
+    syncBtn.disabled = true;
+  }
+
   try {
     
     /**************************************************************
      * ✅ STEP 8.1 — START GLOBAL SYNC (SHOW BANNER)
      **************************************************************/
     //setSyncBanner("syncing");
-    window.syncNow = syncNow;
 
     
     /**************************************************************
@@ -2220,8 +2451,16 @@ async function syncNow() {
     if (!res) return;
 
     const data = await res.json();
+    const resultPayload = data.result || data || {};
 
     console.log("✅ Sync result:", data);
+
+    const accountSyncTotals = resultPayload.account_sync_totals || [];
+    if (Array.isArray(accountSyncTotals) && accountSyncTotals.length) {
+      accountSyncTotals.forEach((r) => {
+        console.log(`🧪 ACCOUNT SYNC TOTAL | ${r.provider}:${r.account_email} | raw=${r.raw || 0} | in_range=${r.in_range || 0} | status=${r.status || "ok"}`);
+      });
+    }
 
     /**************************************************************
      * ✅ SHOW SUCCESS STATE (still syncing visually)
@@ -2233,8 +2472,8 @@ async function syncNow() {
     /**************************************************************
      * ✅ UPDATE STATUS MAP
      **************************************************************/
-    if (data.results) {
-      data.results.forEach(r => {
+    if (resultPayload.results) {
+      resultPayload.results.forEach(r => {
         accountStatusMap[r.key] = r.status;
       });
     }
@@ -2248,12 +2487,12 @@ async function syncNow() {
      * ✅ 2. FORCE CLEAN RENDER
      **************************************************************/
     renderAccountsSafe();
-    console.log("🧪 syncingAccounts contents:", [...syncingAccounts]);
 
     /**************************************************************
      * ✅ 4. NORMAL REFRESH
      **************************************************************/
-    smartRefresh({ reason: "event_saved" });
+    await preloadEventCache();
+    smartRefresh({ reason: "event_saved", force: true });
 
     
     setTimeout(() => {
@@ -2262,6 +2501,7 @@ async function syncNow() {
 
 
   } catch (err) {
+    console.error("❌ syncNow failed:", err);
     showToast("❌ Sync failed", "error");
     syncingAccounts.clear();
     
@@ -2269,8 +2509,15 @@ async function syncNow() {
      * ✅ STEP 8.3 — HIDE BANNER ON FAILURE
      **************************************************************/
     //setSyncBanner("hidden");
+  } finally {
+    if (syncBtn) {
+      syncBtn.classList.remove("is-syncing");
+      syncBtn.disabled = false;
+    }
   }
 }
+
+window.syncNow = syncNow;
 
 /**************************************************************
  * ✅ LOGOUT

@@ -63,6 +63,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: str = Roles.STAFF
+    admin_setup_code: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -85,15 +86,22 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already taken")
 
-    # ✅ Prevent admin creation outside dev
-    if user.role == Roles.ADMIN and os.getenv("ENV", "dev") != "dev":
-        raise HTTPException(status_code=403, detail="Admin creation not allowed")
+    role = (user.role or Roles.STAFF).strip().lower()
+    if role not in {Roles.ADMIN, Roles.STAFF}:
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'staff'")
+
+    # ✅ New requirement: admin accounts require setup passphrase.
+    ADMIN_SETUP_CODE = "mintmule99999"
+    if role == Roles.ADMIN:
+        provided_code = (user.admin_setup_code or "").strip()
+        if provided_code != ADMIN_SETUP_CODE:
+            raise HTTPException(status_code=403, detail="Invalid admin setup code")
 
     new_user = User(
         username=user.username,
         email=user.email,
         hashed_password=hash_password(user.password),
-        role=user.role if user.role else Roles.STAFF
+        role=role
     )
 
     db.add(new_user)

@@ -22,7 +22,8 @@ def create_admin_headers():
         "username": unique_username,   # ✅ FIXED
         "email": unique_email,
         "password": "password",
-        "role": "admin"
+        "role": "admin",
+        "admin_setup_code": "mintmule99999"
     })
 
     response = client.post("/auth/login", json={

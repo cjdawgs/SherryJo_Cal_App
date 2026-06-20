@@ -5,12 +5,16 @@
     <title>Account Manager</title>
 
     <style>
+        *, *::before, *::after { box-sizing: border-box; }
+
         body {
             font-family: Arial;
-            margin: 40px;
+            margin: 0;
+            padding: 16px 20px;
             background: #f5f6fa;
+            overflow-x: hidden;
         }
-        
+
         img {
             max-width: 100%;
             height: auto;
@@ -22,10 +26,8 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-
             width: auto;
             height: auto;
-
             padding: 6px 10px;
         }
 
@@ -78,27 +80,27 @@
             text-decoration: underline;
         }
 
-        .account {
-        max-width: 700px;
-        overflow: hidden;
-        }
-
-        h2 {
-            margin-bottom: 20px;
+        .apple-panel {
+            margin-top: 8px;
         }
 
         .account {
-            padding: 12px;
+            width: 100%;
+            max-width: 100%;
+            overflow: hidden;
+            padding: 10px 12px;
             margin-bottom: 8px;
             background: white;
             border-radius: 6px;
             display: flex;
+            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
+            gap: 4px;
         }
 
         .account:hover {
-        background: #f9fafb;
+            background: #f9fafb;
         }
 
         .left {
@@ -128,9 +130,95 @@
             background: #f0f0f0;
         }
 
+        button:disabled {
+            opacity: 0.65;
+            cursor: wait;
+        }
+
+        .reconnect-btn {
+            border: 1px solid #dc2626;
+            color: #dc2626;
+            background: #fff;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .reconnect-btn:hover {
+            background: #fef2f2;
+        }
+
+        .reconnect-btn.processing {
+            border-color: #b91c1c;
+            color: #b91c1c;
+            background: #fff1f2;
+        }
+
+        .reconnect-btn.success {
+            border-color: #16a34a;
+            color: #166534;
+            background: #dcfce7;
+            cursor: default;
+        }
+
+        .btn-spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid #fecaca;
+            border-top-color: #dc2626;
+            border-radius: 999px;
+            animation: reconnectSpin 0.8s linear infinite;
+            display: inline-block;
+        }
+
+        @keyframes reconnectSpin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        .status-line {
+            margin-top: 8px;
+            font-size: 13px;
+        }
+
+        .status-line.success {
+            color: #15803d;
+        }
+
+        .status-line.error {
+            color: #b91c1c;
+        }
+
         .error {
             color: red;
             margin-top: 10px;
+        }
+
+        .onboarding {
+            display: none;
+            width: 100%;
+            background: #eef6ff;
+            border: 1px solid #c7defe;
+            border-radius: 10px;
+            padding: 12px;
+            margin: 0 0 14px 0;
+        }
+
+        .onboarding h3 {
+            margin: 0 0 8px 0;
+            color: #0f376d;
+            font-size: 15px;
+        }
+
+        .onboarding p {
+            margin: 4px 0;
+            font-size: 13px;
+            color: #1f3f66;
+        }
+
+        .hidden {
+            display: none !important;
         }
     </style>
 </head>
@@ -153,6 +241,14 @@
   </div>
 </div>
 
+<div id="onboardingGuide" class="onboarding">
+    <h3>Setup Guide: Connect Your Calendars</h3>
+    <p><strong>Step 1:</strong> Click Google and complete sign-in.</p>
+    <p><strong>Step 2:</strong> Click Microsoft and approve calendar access.</p>
+    <p><strong>Step 3:</strong> Open Apple and enter your Apple ID + App Password, then Test and Connect.</p>
+    <p><strong>Step 4:</strong> Click the back arrow to return to Calendar and run Sync.</p>
+</div>
+
 <!-- =====================================================
 ✅ PROVIDER CONNECT BUTTONS (MOVED FROM CALENDAR UI)
 ✅ SAME IDs → JS CONTINUES TO WORK
@@ -161,7 +257,7 @@
 ✅ TRUE 3-COLUMN PROVIDER SYSTEM (FINAL ARCHITECTURE)
 ======================================================= -->
 <div class="provider-grid"
-     style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:24px;">
+     style="display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; width:100%; max-width:100%; overflow:hidden;">
 
 
   <!-- ✅ GOOGLE -->
@@ -201,68 +297,51 @@
   </div>
 
 
-  <!-- ✅ APPLE -->
-    <div class="provider-col">
+    <!-- ✅ APPLE -->
+        <div class="provider-col">
 
-    <!-- ✅ ✅ ✅ ADD THIS BUTTON -->
-    <button class="providerBtn apple" onclick="toggleAppleForm()">
-      🍎 Apple
-    </button>
+        <button class="providerBtn apple" onclick="toggleAppleForm()">
+            🍎 Apple
+        </button>
 
-    <div class="provider-desc">
-      Requires an App Password —
-      <a href="https://support.apple.com/en-us/HT204397" target="_blank">learn more</a>
-    </div>
+        <div class="provider-desc">
+            Apple calendar setup and management
+        </div>
 
-    <!-- ✅ MOVE APPLE CONNECT HERE -->
-    <details style="margin-top:8px;">
-        <summary style="cursor:pointer; font-weight:600; font-size:13px;">
-            + Connect Apple (Manual)
+        <div id="apple-connect-panel" class="apple-panel">
+
+            <!-- Apple connect form -->
+            <details id="apple-details" style="margin-top:8px;" open>
+        <summary style="cursor:pointer; font-weight:600; font-size:13px; user-select:none;">
+            + Connect / Reconnect Apple
         </summary>
 
-        <div style="
-            background:white;
-            padding:12px;
-            border-radius:6px;
-            margin-top:8px;
-            max-width:100%;
-        ">
-            
-            <p style="
-            background:#fffbeb;
-            border-left:4px solid #f59e0b;
-            padding:10px;
-            margin:0 0 10px 0;
-            border-radius:4px;
-            font-size:12px;
-            color:#78350f;
-            ">
-            <strong>Apple requires an App Password</strong> from your Apple ID settings.
+        <div style="background:white; padding:10px; border-radius:6px; margin-top:6px; width:100%;">
+
+            <p id="apple-requirements" style="background:#fffbeb; border-left:3px solid #f59e0b; padding:8px; margin:0 0 8px 0; border-radius:4px; font-size:11px; color:#78350f;">
+                <strong>Requires an App Password</strong> —
+                <a href="https://support.apple.com/en-us/HT204397" target="_blank" style="color:#b45309;">create one</a>
             </p>
 
-            <input id="apple-email" placeholder="Apple ID Email" style="
-            display:block;
-            width:100%;
-            margin-bottom:6px;
-            padding:6px;
-            " />
+            <input id="apple-email" type="email" placeholder="Apple ID (e.g. name@icloud.com)" autocomplete="username"
+                list="apple-email-options" style="display:block; width:100%; margin-bottom:5px; padding:5px 6px; font-size:12px; border:1px solid #ccc; border-radius:4px;" />
+            <datalist id="apple-email-options"></datalist>
 
-            <input id="apple-password" placeholder="App Password" style="
-            display:block;
-            width:100%;
-            margin-bottom:6px;
-            padding:6px;
-            " />
+            <input id="apple-password" type="password" name="apple-app-password" placeholder="App Password (xxxx-xxxx-xxxx-xxxx)" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false"
+                style="display:block; width:100%; margin-bottom:8px; padding:5px 6px; font-size:12px; border:1px solid #ccc; border-radius:4px;" />
 
-            <button onclick="testApple()">Test</button>
-            <button onclick="connectApple()">Connect</button>
+            <div style="display:flex; gap:6px;">
+                <button onclick="testApple()" style="flex:1; font-size:12px;">Test</button>
+                <button onclick="connectApple()" style="flex:1; font-size:12px; background:#3b82f6; color:#fff; border-color:#2563eb;">Connect</button>
+            </div>
 
-            <div id="apple-status" style="margin-top:8px;"></div>
+            <div id="apple-status" style="margin-top:6px; font-size:12px;"></div>
 
         </div>
-    </details>
+            </details>
 
-    <div id="appleAccounts"></div>
+            <div id="appleAccounts"></div>
+        </div>
 
   </div>
 
@@ -276,7 +355,8 @@
 <!-- ERRORS -->
 <div id="error" class="error"></div>
 
-<script>
+<script type="module">
+import { apiFetch, setAuthToken } from "/static/api.js";
 
 // ============================
 // HEALTH STATUS
@@ -285,65 +365,21 @@
  * ✅ ENHANCED SYNC STATUS (VISUAL + ACTIONABLE)
  **************************************************************/
 function getHealthStatus(acc) {
+    if (acc.status === "ok") {
+        return `<span style="color:#16a34a; font-weight:500;">✅ Connected</span>`;
+    }
 
-    // ✅ NEVER TRIED
+    if (acc.status === "error") {
+        return `<span style="color:#dc2626; font-weight:500;">❌ Needs reconnect</span>`;
+    }
+
     if (!acc.last_sync_success && !acc.last_sync_failure) {
         return `<span style="color:#999;">⚪ Never Synced</span>`;
-    }
-
-    // ✅ SUCCESS
-    if (acc.last_sync_success && !acc.last_sync_failure) {
-        return `<span style="color:#16a34a; font-weight:500;">✅ Synced</span>`;
-    }
-
-    // ✅ ERROR (failure AFTER success or alone)
-    if (acc.last_sync_failure) {
-        return `<span style="color:#dc2626; font-weight:500;">❌ Error</span>`;
     }
 
     return `<span style="color:#999;">Unknown</span>`;
 }
 
-
-// ============================
-// AUTH HELPERS
-// ============================
-function getAuthToken() {
-    return localStorage.getItem("token");
-}
-
-function setAuthToken(token) {
-    if (token) {
-        localStorage.setItem("token", token);
-    }
-}
-
-function requireAuth() {
-    const token = getAuthToken();
-    if (!token) {
-        const errorBox = document.getElementById("error");
-        if (errorBox) {
-            errorBox.innerText = "Missing login token. Please sign in first.";
-        }
-    }
-    return token;
-}
-
-async function apiFetch(url, options = {}) {
-    const token = requireAuth();
-    if (!token) {
-        throw new Error("Missing auth token");
-    }
-
-    options.headers = options.headers || {};
-    options.headers["Authorization"] = "Bearer " + token;
-
-    const response = await fetch(url, options);
-    if (response.status === 401) {
-        window.location.href = "/login";
-    }
-    return response;
-}
 
 // ============================
 // ERROR DISPLAY
@@ -364,11 +400,65 @@ function getErrorMessage(acc) {
     `;
 }
 
+function getAppleKnownEmails() {
+    try {
+        const raw = localStorage.getItem("appleKnownEmails");
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+    } catch {
+        return [];
+    }
+}
+
+function rememberAppleEmail(email) {
+    const clean = (email || "").trim().toLowerCase();
+    if (!clean) return;
+
+    const emails = getAppleKnownEmails();
+    const next = [clean, ...emails.filter((item) => item !== clean)].slice(0, 8);
+    localStorage.setItem("appleKnownEmails", JSON.stringify(next));
+    renderAppleEmailSuggestions();
+}
+
+function renderAppleEmailSuggestions() {
+    const datalist = document.getElementById("apple-email-options");
+    if (!datalist) return;
+
+    const emails = getAppleKnownEmails();
+    datalist.innerHTML = emails.map((email) => `<option value="${email}"></option>`).join("");
+}
+
+function updateAppleSetupVisibility(accounts = []) {
+    const appleAccounts = accounts.filter((acc) => normalizeProvider(acc.provider) === "apple");
+    const hasAppleSuccess = appleAccounts.some((acc) => acc.status === "ok");
+    const hasAppleError = appleAccounts.some((acc) => acc.status === "error");
+    const setupBlock = document.getElementById("apple-details");
+    const requirements = document.getElementById("apple-requirements");
+
+    if (requirements) {
+        requirements.classList.toggle("hidden", hasAppleSuccess);
+    }
+
+    if (setupBlock) {
+        setupBlock.open = hasAppleError || appleAccounts.length === 0 || !hasAppleSuccess;
+    }
+}
+
 // ============================
 // NAVIGATION
 // ============================
 function goToCalendar() {
     window.location.href = "/calendar-ui";
+}
+
+function markPendingCalendarSync(provider, email) {
+    const payload = {
+        provider: normalizeProvider(provider),
+        account: (email || "").toLowerCase().trim(),
+        createdAt: Date.now()
+    };
+
+    localStorage.setItem("postReconnectSync", JSON.stringify(payload));
 }
 
 function goBack() {
@@ -386,30 +476,119 @@ window.addEventListener("load", () => {
 // ============================
 // RETRY ACCOUNT SYNC
 // ============================
-async function retryAccount(id) {
+function setErrorMessage(message) {
+    const errorBox = document.getElementById("error");
+    if (errorBox) {
+        errorBox.innerText = message;
+    }
+}
 
-    const token = localStorage.getItem("token");
+function normalizeProvider(provider) {
+    const p = (provider || "").toLowerCase().trim();
 
+    if (["google", "gmail"].includes(p)) return "google";
+    if (["microsoft", "ms", "msft", "outlook", "office365"].includes(p)) return "microsoft";
+    if (["apple", "icloud", "caldav"].includes(p)) return "apple";
+
+    return p || "other";
+}
+
+function makeAccountKey(provider, email) {
+    return `${normalizeProvider(provider)}:${(email || "").toLowerCase().trim()}`;
+}
+
+function markRecentlyReconnected(provider, email) {
+    const key = makeAccountKey(provider, email);
+
+    sessionStorage.setItem("recentlyReconnected", JSON.stringify({
+        key,
+        expiresAt: Date.now() + 8000
+    }));
+}
+
+function wasRecentlyReconnected(provider, email) {
     try {
-        const res = await apiFetch(`/accounts/${id}/retry`, {
-            method: "POST"
-        });
+        const raw = sessionStorage.getItem("recentlyReconnected");
+        if (!raw) return false;
 
-        let data;
-        try {
-            data = await res.json();
-        } catch {
-            data = { message: "Server error" };
+        const parsed = JSON.parse(raw);
+        if (!parsed || !parsed.key || !parsed.expiresAt) return false;
+
+        if (Date.now() > parsed.expiresAt) {
+            sessionStorage.removeItem("recentlyReconnected");
+            return false;
         }
 
-        alert(data.message || "Retry complete");
+        return parsed.key === makeAccountKey(provider, email);
+    } catch {
+        return false;
+    }
+}
 
-        // ✅ refresh UI after retry
-        loadAccounts();
+function buildReconnectUrl(provider, email) {
+    const token = localStorage.getItem("token") || "";
 
+    if (!token) return "/accounts/ui";
+
+    const safeProvider = normalizeProvider(provider);
+    const encodedToken = encodeURIComponent(token);
+    const encodedEmail = encodeURIComponent((email || "").trim());
+
+    if (safeProvider === "google") {
+        return `/auth/google/login?token=${encodedToken}&reconnect=${encodedEmail}`;
+    }
+
+    if (safeProvider === "microsoft") {
+        return `/ms/login?token=${encodedToken}&reconnect=${encodedEmail}`;
+    }
+
+    return "/accounts/ui";
+}
+
+function getReconnectButton(acc) {
+    const safeProvider = String(acc.provider || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+    const safeEmail = String(acc.account_email || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+
+    if (acc.status === "error") {
+        return `<button class="reconnect-btn" onclick="reconnectAccount(${acc.id}, '${safeProvider}', '${safeEmail}', this)">Reconnect</button>`;
+    }
+
+    if (acc.status === "ok" && wasRecentlyReconnected(acc.provider, acc.account_email)) {
+        return `<button class="reconnect-btn success" disabled>Connected</button>`;
+    }
+
+    return "";
+}
+
+async function reconnectAccount(id, provider, email, buttonEl) {
+    const button = buttonEl || null;
+
+    if (button) {
+        button.disabled = true;
+        button.classList.add("processing");
+        button.innerHTML = `<span class="btn-spinner"></span>Reconnecting...`;
+    }
+
+    setErrorMessage(`Redirecting to ${normalizeProvider(provider)} reconnect...`);
+
+    try {
+        const reconnectUrl = buildReconnectUrl(provider, email);
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        window.location.href = reconnectUrl;
     } catch (err) {
         console.error(err);
-        alert("Retry failed");
+        setErrorMessage("Reconnect failed to start. Please try again.");
+
+        if (button) {
+            button.disabled = false;
+            button.classList.remove("processing");
+            button.textContent = "Reconnect";
+        }
     }
 }
 
@@ -428,6 +607,10 @@ async function loadAccounts() {
 
     try {
         const res = await apiFetch("/accounts");
+        if (!res) {
+            errorBox.innerText = "Failed to load accounts";
+            return;
+        }
 
         if (!res.ok) {
             errorBox.innerText = "Failed to load accounts";
@@ -436,6 +619,9 @@ async function loadAccounts() {
 
         const data = await res.json();
         const accounts = Array.isArray(data) ? data : (data.accounts || []);
+
+        updateAppleSetupVisibility(accounts);
+        renderAppleEmailSuggestions();
 
         /**************************************************************
         ✅ SINGLE SOURCE — GROUP BY PROVIDER
@@ -498,7 +684,7 @@ async function loadAccounts() {
                 ${acc.sync_enabled ? "Disable" : "Enable"}
                 </button>
                 <button onclick="removeAccount(${acc.id})">Remove</button>
-                <button onclick="retryAccount(${acc.id})">Retry</button>
+                ${getReconnectButton(acc)}
                 ${getErrorMessage(acc)}
             </div>
             `;
@@ -556,10 +742,18 @@ async function removeAccount(id) {
 // APPLE TEST (SAFE)
 // ============================
 async function testApple() {
-    const email = document.getElementById("apple-email").value;
-    const password = document.getElementById("apple-password").value;
+    const email = document.getElementById("apple-email").value.trim();
+    const password = document.getElementById("apple-password").value.trim();
 
     const statusDiv = document.getElementById("apple-status");
+
+    if (!email || !password) {
+        statusDiv.innerText = "❌ Enter Apple ID email and App Password";
+        return;
+    }
+
+    rememberAppleEmail(email);
+
     statusDiv.innerText = "Testing...";
 
     try {
@@ -586,6 +780,7 @@ async function testApple() {
             statusDiv.innerText = "❌ " + (data.message || "Connection failed");
         } else {
             statusDiv.innerText = "✅ Connection successful";
+            rememberAppleEmail(email);
         }
 
     } catch (err) {
@@ -598,10 +793,18 @@ async function testApple() {
 // APPLE CONNECT (SAFE)
 // ============================
 async function connectApple() {
-    const email = document.getElementById("apple-email").value;
-    const password = document.getElementById("apple-password").value;
+    const email = document.getElementById("apple-email").value.trim();
+    const password = document.getElementById("apple-password").value.trim();
 
     const statusDiv = document.getElementById("apple-status");
+
+    if (!email || !password) {
+        statusDiv.innerText = "❌ Enter Apple ID email and App Password";
+        return;
+    }
+
+    rememberAppleEmail(email);
+
     statusDiv.innerText = "Connecting...";
 
     try {
@@ -628,6 +831,7 @@ async function connectApple() {
             statusDiv.innerText = "❌ " + (data.message || "Failed");
         } else {
             statusDiv.innerText = "✅ Apple connected!";
+            rememberAppleEmail(email);
             loadAccounts();
         }
 
@@ -638,12 +842,13 @@ async function connectApple() {
 }
 
 // ============================
-// APPLE FORM TOGGLE ✅ ADD HERE
+// APPLE FORM TOGGLE
 // ============================
 function toggleAppleForm() {
-    const details = document.querySelector("details");
+    const details = document.getElementById("apple-details");
     if (details) {
-        details.open = !details.open;
+        details.open = true;
+        if (details.open) details.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 }
 
@@ -653,14 +858,23 @@ function toggleAppleForm() {
 const params = new URLSearchParams(window.location.search);
 const token = params.get("token");
 const connected = params.get("connected");
+const connectedAccount = params.get("account");
 const oauthError = params.get("error");
 
 if (token) {
     setAuthToken(token);
+    if (connected && connectedAccount) {
+        markRecentlyReconnected(connected, connectedAccount);
+        markPendingCalendarSync(connected, connectedAccount);
+    }
     if (connected) {
         const message = document.getElementById("error");
         if (message) {
-            message.innerText = `Connected ${connected} successfully.`;
+            if (connectedAccount) {
+                message.innerText = `Connected ${connectedAccount} successfully.`;
+            } else {
+                message.innerText = `Connected ${connected} successfully.`;
+            }
         }
     }
     window.history.replaceState({}, "", window.location.pathname);
@@ -674,6 +888,60 @@ if (oauthError) {
 }
 
 loadAccounts();
+
+// Auto-open Apple reconnect form when redirected from calendar banner
+(function handleAppleReconnectParam() {
+    const p = new URLSearchParams(window.location.search);
+    const reconnect = p.get("reconnect");
+    const email = p.get("email");
+    if (reconnect === "apple") {
+        const details = document.getElementById("apple-details");
+        if (details) {
+            details.open = true;
+            setTimeout(() => details.scrollIntoView({ behavior: "smooth", block: "center" }), 200);
+        }
+        if (email) {
+            const emailInput = document.getElementById("apple-email");
+            if (emailInput) emailInput.value = decodeURIComponent(email);
+        }
+        const statusDiv = document.getElementById("apple-status");
+        if (statusDiv) statusDiv.innerText = "⚠️ Re-enter your App Password to reconnect.";
+        window.history.replaceState({}, "", window.location.pathname);
+    }
+})();
+
+(function handleOnboardingParam() {
+    const p = new URLSearchParams(window.location.search);
+    const onboarding = p.get("onboarding");
+    if (onboarding === "1") {
+        const guide = document.getElementById("onboardingGuide");
+        if (guide) {
+            guide.style.display = "block";
+            setTimeout(() => guide.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
+        }
+
+        const next = new URLSearchParams(window.location.search);
+        next.delete("onboarding");
+        const newQuery = next.toString();
+        const nextUrl = newQuery ? `${window.location.pathname}?${newQuery}` : window.location.pathname;
+        window.history.replaceState({}, "", nextUrl);
+    }
+})();
+
+window.addEventListener("accountsUpdated", () => {
+    loadAccounts();
+});
+
+window.goToCalendar = goToCalendar;
+window.addGoogle = addGoogle;
+window.addMicrosoft = addMicrosoft;
+window.toggleAppleForm = toggleAppleForm;
+window.testApple = testApple;
+window.connectApple = connectApple;
+window.reconnectAccount = reconnectAccount;
+window.setPrimary = setPrimary;
+window.toggleSync = toggleSync;
+window.removeAccount = removeAccount;
 
 </script>
 

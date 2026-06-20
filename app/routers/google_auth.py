@@ -32,7 +32,7 @@ service = GoogleCalendarService()
 # ==================================================
 
 @router.get("/login")
-def google_login(token: str):
+def google_login(token: str, reconnect: str = Query(None)):
     """
     ✅ Receive JWT token from URL (not header)
     """
@@ -47,8 +47,13 @@ def google_login(token: str):
     """
 
     # ✅ Store user ID in state (VERY important)
+    reconnect_email = (reconnect or "").strip().lower() or None
+
     state = jwt.encode(
-        {"user_id": user_id},
+        {
+            "user_id": user_id,
+            "reconnect": reconnect_email
+        },
         SECRET_KEY,
         algorithm="HS256"
     )
@@ -62,6 +67,9 @@ def google_login(token: str):
         "prompt": "select_account consent",
         "state": state,
     }
+
+    if reconnect_email:
+        params["login_hint"] = reconnect_email
 
     url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
 
@@ -80,6 +88,7 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("user_id")
+        expected_reconnect = (payload.get("reconnect") or "").strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid state")
 
@@ -96,6 +105,17 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     # ==================================================
     user_info = service.get_user_info(access_token)
     email = user_info.get("email")
+    normalized_email = (email or "").strip().lower()
+
+    if expected_reconnect and normalized_email != expected_reconnect:
+        new_token = create_token(user_id)
+        mismatch = urlencode({
+            "error": "google_reconnect_mismatch",
+            "expected": expected_reconnect,
+            "actual": normalized_email,
+            "token": new_token
+        })
+        return RedirectResponse(f"/accounts/ui?{mismatch}")
 
     print("✅ GOOGLE EMAIL:", email)
 
@@ -116,11 +136,11 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
         db=db,
         user_id=user_id,
         provider="google",
-        account_email=email,
+        account_email=normalized_email,
         access_token=access_token,
         refresh_token=refresh_token,
         token_expires_at=token_expires_at,
-        display_name=email
+        display_name=normalized_email
     )
 
 
@@ -130,4 +150,9 @@ def google_callback(code: str, state: str, db: Session = Depends(get_db)):
     # ✅ REDIRECT BACK TO UI (AUTO REFRESH ✅)
     # ==================================================
     new_token = create_token(user_id)
-    return RedirectResponse(f"/accounts/ui?connected=google&token={new_token}")
+    query = urlencode({
+        "connected": "google",
+        "account": normalized_email,
+        "token": new_token
+    })
+    return RedirectResponse(f"/accounts/ui?{query}")

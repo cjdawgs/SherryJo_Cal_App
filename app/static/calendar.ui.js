@@ -101,9 +101,9 @@ function bindUIEvents() {
 
   // ✅ Existing buttons
   document.getElementById("syncBtn")
-    ?.addEventListener("click", () => {
+    ?.addEventListener("click", async () => {
       if (typeof window.syncNow === "function") {
-        window.syncNow();
+        await window.syncNow();
       } else {
         console.error("❌ syncNow not ready");
       }

@@ -32,7 +32,7 @@ def safe_commit(db: Session):
     except Exception as e:
         print("❌ DB commit failed:", e)
 
-        # ✅ EMERGENCY FIX — detect NULL token issue
+        # ✅ EMERGENCY Fix — detect NULL access token issue
         if "access_token" in str(e):
             print("🚫 FIXING NULL ACCESS TOKEN BEFORE RETRY")
 
@@ -48,6 +48,27 @@ def safe_commit(db: Session):
         except Exception as e2:
             print("❌ Commit retry failed:", e2)
             raise
+
+
+def resolve_account_status(account: OAuthAccount):
+    """Return the authoritative backend status for an account."""
+    token_val = (getattr(account, "access_token", "") or "").strip()
+
+    if token_val == "__REAUTH_REQUIRED__":
+        return "error"
+
+    if getattr(account, "last_sync_success", None):
+        if getattr(account, "last_sync_failure", None) and account.last_sync_failure > account.last_sync_success:
+            return "error"
+        return "ok"
+
+    if getattr(account, "last_sync_failure", None):
+        return "error"
+
+    if getattr(account, "status", "ok") == "error":
+        return "error"
+
+    return "ok"
 
 
 # ==================================================
@@ -114,6 +135,14 @@ class MultiAccountOAuthService:
 
             if token_expires_at:
                 existing.token_expires_at = token_expires_at
+
+            if existing.access_token and existing.access_token != "__REAUTH_REQUIRED__":
+                now = datetime.now(timezone.utc)
+                existing.status = "ok"
+                existing.last_error = None
+                existing.last_sync = now
+                existing.last_sync_success = now
+                existing.last_sync_failure = None
                 
             existing.display_name = display_name
             existing.provider_id = provider_id
@@ -144,6 +173,14 @@ class MultiAccountOAuthService:
             is_primary = (account_count == 0 or locals().get("set_as_primary", False))
 
         )
+
+        if oauth_account.access_token and oauth_account.access_token != "__REAUTH_REQUIRED__":
+            now = datetime.now(timezone.utc)
+            oauth_account.status = "ok"
+            oauth_account.last_error = None
+            oauth_account.last_sync = now
+            oauth_account.last_sync_success = now
+            oauth_account.last_sync_failure = None
 
         # --------------------------------------------------
         # ✅ APPLE SUPPORT (STORE CREDENTIALS SAFELY)

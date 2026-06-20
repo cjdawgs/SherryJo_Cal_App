@@ -71,7 +71,7 @@ SCOPES = [
 # LOGIN (START OAUTH FLOW)
 # ==================================================
 @router.get("/login")
-def login(token: str):
+def login(token: str, reconnect: str = None):
 
     """
     ✅ Starts Microsoft OAuth flow
@@ -94,8 +94,13 @@ def login(token: str):
     # ==================================================
     # ✅ CREATE STATE TOKEN (IMPORTANT)
     # ==================================================
+    reconnect_email = (reconnect or "").strip().lower() or None
+
     state = jwt.encode(
-        {"user_id": user_id},   # ✅ FIXED HERE
+        {
+            "user_id": user_id,
+            "reconnect": reconnect_email
+        },   # ✅ FIXED HERE
         SECRET_KEY,
         algorithm="HS256"
     )
@@ -113,6 +118,9 @@ def login(token: str):
         # ✅ FORCE Microsoft to show account picker
         "prompt": "select_account",
     }
+
+    if reconnect_email:
+        params["login_hint"] = reconnect_email
 
     url = f"{AUTHORIZE_URL}?{urlencode(params)}"
 
@@ -169,6 +177,7 @@ def callback(
     try:
         payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("user_id")
+        expected_reconnect = (payload.get("reconnect") or "").strip().lower()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid state")
 
@@ -245,21 +254,32 @@ def callback(
     """
 
     email = user_info.get("mail") or user_info.get("userPrincipalName")
+    normalized_email = (email or "").strip().lower()
 
     # ✅ DEBUG
-    print("✅ EXTRACTED EMAIL:", email)
+    print("✅ EXTRACTED EMAIL:", normalized_email)
 
     # ✅ VALIDATION (prevents crashes)
-    if not email:
+    if not normalized_email:
         raise HTTPException(
             status_code=400,
             detail=f"Could not extract email from Microsoft response: {user_info}"
         )
 
+    if expected_reconnect and normalized_email != expected_reconnect:
+        new_token = create_token(user_id)
+        mismatch = urlencode({
+            "error": "microsoft_reconnect_mismatch",
+            "expected": expected_reconnect,
+            "actual": normalized_email,
+            "token": new_token
+        })
+        return RedirectResponse(f"/accounts/ui?{mismatch}")
+
     
     print("✅ SAVING ACCOUNT:", {
         "user_id": user_id,
-        "email": email
+        "email": normalized_email
     })
 
     # ==================================================
@@ -269,7 +289,7 @@ def callback(
         db=db,
         user_id=user_id,
         provider="microsoft",
-        account_email=email,
+        account_email=normalized_email,
         access_token=access_token,
         refresh_token=refresh_token,
     )
@@ -286,6 +306,12 @@ def callback(
     new_token = create_token(user_id)
 
     # ✅ Send it back to UI
+    query = urlencode({
+        "connected": "microsoft",
+        "account": normalized_email,
+        "token": new_token
+    })
+
     return RedirectResponse(
-        f"/accounts/ui?connected=microsoft&token={new_token}"
+        f"/accounts/ui?{query}"
     )

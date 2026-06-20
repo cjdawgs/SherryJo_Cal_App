@@ -24,7 +24,10 @@ import os
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import User, OAuthAccount
-from app.services.multi_account_oauth_service import MultiAccountOAuthService
+from app.services.multi_account_oauth_service import (
+    MultiAccountOAuthService,
+    resolve_account_status
+)
 
 
 # ============================================================
@@ -80,7 +83,7 @@ def connect_apple_account(
         # --------------------------------------------------
         # ✅ VALIDATE (same as /test endpoint)
         # --------------------------------------------------
-        is_valid = service.validate_icloud_credentials(
+        is_valid, validation_message = service.validate_icloud_credentials_detailed(
             url=payload.caldav_url,
             username=payload.email,
             password=payload.app_password
@@ -90,7 +93,7 @@ def connect_apple_account(
         if not is_valid:
             return {
                 "success": False,
-                "message": "Invalid Apple credentials"
+                "message": validation_message
             }
 
         # --------------------------------------------------
@@ -157,23 +160,36 @@ def retry_account_sync(
     service = CalendarService()
 
     try:
-        # ✅ Reuse your existing pipeline (single-account style)
+        # ✅ Reuse the existing sync pipeline for the current user
         service.fetch_all_events(db, current_user)
 
         account.last_sync_success = datetime.now(timezone.utc)
+        account.last_sync_failure = None
         account.last_error = None
+        account.status = "ok"
 
         db.commit()
 
-        return {"success": True, "message": "✅ Sync successful"}
+        return {
+            "success": True,
+            "message": "✅ Sync successful",
+            "account": {
+                "id": account.id,
+                "status": resolve_account_status(account),
+                "last_sync_success": account.last_sync_success.isoformat(),
+                "last_sync_failure": None,
+                "last_error": None
+            }
+        }
 
     except Exception as e:
         account.last_sync_failure = datetime.now(timezone.utc)
+        account.status = "error"
         account.last_error = str(e)
 
         db.commit()
 
-        return {"success": False, "message": "❌ Sync failed"}
+        return {"success": False, "message": "❌ Sync failed", "error": str(e)}
     
 # ============================================================
 # ✅ TEST APPLE CONNECTION (NEW)
@@ -198,16 +214,61 @@ def test_apple_connection(
 
     service = ExternalCalendarService()
 
-    is_valid = service.validate_icloud_credentials(
+    if not payload.email or not payload.app_password:
+        return {"success": False, "message": "Email and App Password are required"}
+
+    is_valid, validation_message = service.validate_icloud_credentials_detailed(
         url=payload.caldav_url,
         username=payload.email,
         password=payload.app_password
     )
 
     if not is_valid:
-        raise HTTPException(400, "❌ Connection failed")
+        return {"success": False, "message": validation_message}
 
-    return {"message": "✅ Connection successful"}
+    return {"success": True, "message": "✅ Connection successful"}
+
+
+@router.get("/apple/debug-fetch")
+def debug_apple_fetch(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    accounts = db.query(OAuthAccount).filter(
+        OAuthAccount.user_id == current_user.id,
+        OAuthAccount.provider == "apple"
+    ).all()
+
+    diagnostics = []
+
+    for acc in accounts:
+        try:
+            events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
+            sample_starts = []
+
+            for ev in events[:5]:
+                start = ev.get("start")
+                if hasattr(start, "isoformat"):
+                    sample_starts.append(start.isoformat())
+                else:
+                    sample_starts.append(str(start))
+
+            diagnostics.append({
+                "account": acc.account_email,
+                "raw_count": len(events),
+                "sample_starts": sample_starts
+            })
+        except Exception as e:
+            diagnostics.append({
+                "account": acc.account_email,
+                "raw_count": 0,
+                "error": str(e)
+            })
+
+    return {
+        "accounts": diagnostics,
+        "total_accounts": len(diagnostics)
+    }
 
 # ============================================================
 # GET ALL OAUTH ACCOUNTS
@@ -235,7 +296,7 @@ def get_my_accounts(
             "last_sync_success": getattr(acc, "last_sync_success", None).isoformat() if getattr(acc, "last_sync_success", None) else None,
             "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
             "last_error": getattr(acc, "last_error", None),
-            "status": getattr(acc, "status", "ok"),
+            "status": resolve_account_status(acc),
             "created_at": acc.created_at.isoformat(),
             "updated_at": acc.updated_at.isoformat() if acc.updated_at else None,
         }

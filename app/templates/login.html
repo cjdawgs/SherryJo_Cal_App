@@ -2,43 +2,130 @@
 <html>
 <head>
   <title>Login</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' d='M0 0h16v16H0z'/%3E%3C/svg%3E">
 
   <style>
     body {
       font-family: Arial;
       text-align: center;
-      margin-top: 100px;
+      margin: 0;
+      padding: 40px 14px;
+      background: #f6f8fc;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 540px;
+      margin: 0 auto;
+      background: #fff;
+      border: 1px solid #dbe3ef;
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.08);
     }
 
     input {
       padding: 10px;
       margin: 10px;
-      width: 250px;
+      width: 100%;
+      max-width: 420px;
+      border: 1px solid #ccd7ea;
+      border-radius: 8px;
+    }
+
+    select {
+      padding: 10px;
+      margin: 10px;
+      width: 100%;
+      max-width: 420px;
+      border: 1px solid #ccd7ea;
+      border-radius: 8px;
+      background: #fff;
     }
 
     button {
       padding: 10px 20px;
       cursor: pointer;
+      border: 1px solid #c8d2e5;
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .primary-btn {
+      background: #2563eb;
+      color: #fff;
+      border-color: #1d4ed8;
+    }
+
+    .small-text {
+      font-size: 14px;
+      color: #555;
+      margin-top: 8px;
+    }
+
+    .button-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: #5f6b7a;
+      margin-top: 6px;
+    }
+
+    #registerForm {
+      margin-top: 16px;
+      background: #f8fbff;
+      border: 1px solid #d9e7ff;
+      border-radius: 10px;
+      padding: 12px;
     }
   </style>
 </head>
 
 <body>
 
-  <h2>Login</h2>
+  <div class="card">
+    <h2>Login or Create Account</h2>
 
-  <!-- ✅ Email input -->
-  <input id="email" type="text" placeholder="Email"><br>
+    <input id="email" type="email" placeholder="Email" autocomplete="username"><br>
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password"><br>
 
-  <!-- ✅ Password input -->
-  <input id="password" type="password" placeholder="Password"><br>
+    <div class="button-row">
+      <button class="primary-btn" onclick="login()">Login</button>
+      <button onclick="showRegisterForm()">Create Account</button>
+    </div>
 
-  <!-- ✅ Button triggers login() -->
-  <button onclick="login()">Login</button>
+    <div id="registerForm" style="display:none;">
+      <input id="registerUsername" type="text" placeholder="Username" autocomplete="nickname"><br>
+      <input id="registerEmail" type="email" placeholder="Email" autocomplete="email"><br>
+      <input id="registerPassword" type="password" placeholder="Password" autocomplete="new-password"><br>
 
+      <select id="registerRole" onchange="toggleAdminCode()">
+        <option value="staff">Staff</option>
+        <option value="admin">Admin</option>
+      </select>
 
-  <script>
-    
+      <div id="adminCodeWrap" style="display:none;">
+        <input id="adminSetupCode" type="password" placeholder="Admin Setup Code" autocomplete="off"><br>
+        <div class="hint">Admin mode requires setup code.</div>
+      </div>
+
+      <div class="button-row">
+        <button class="primary-btn" onclick="registerUser()">Create User</button>
+        <button onclick="hideRegisterForm()">Cancel</button>
+      </div>
+      <div id="registerStatus" class="small-text"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { apiRequest, setAuthToken } from "/static/api.js";
+
     /**************************************************************
     * ✅ AUTO-REDIRECT IF ALREADY LOGGED IN
     **************************************************************/
@@ -57,20 +144,28 @@
       try {
 
         // ✅ Get user input
-        const email = document.getElementById("email").value;
+        const email = document.getElementById("email").value.trim();
         const password = document.getElementById("password").value;
 
+        if (!email || !password) {
+          alert("Please enter email and password.");
+          return;
+        }
+
         // ✅ Call backend login endpoint
-        const response = await fetch('/auth/login', {
+        const response = await apiRequest('/auth/login', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          auth: false,
           body: JSON.stringify({
             email: email,
             password: password
           })
         });
+
+        if (!response) {
+          alert("Login failed. Check console.");
+          return;
+        }
 
         // ✅ Parse response
         const data = await response.json();
@@ -90,11 +185,22 @@
         }
 
         // ✅ SAVE TOKEN TO BROWSER STORAGE
-        localStorage.setItem("token", token);
+        setAuthToken(token);
 
         console.log("✅ Token saved to localStorage");
 
-        // ✅ Redirect to calendar UI
+        // ✅ Decide onboarding redirect based on existing accounts
+        const accountRes = await apiRequest('/accounts', {
+          method: 'GET'
+        });
+        if (accountRes && accountRes.ok) {
+          const accounts = await accountRes.json();
+          if (Array.isArray(accounts) && accounts.length === 0) {
+            window.location.href = "/accounts/ui?onboarding=1";
+            return;
+          }
+        }
+
         window.location.href = "/calendar-ui";
 
       } catch (error) {
@@ -102,6 +208,108 @@
         alert("Login failed. Check console.");
       }
     }
+
+    function showRegisterForm() {
+      document.getElementById('registerForm').style.display = 'block';
+      document.getElementById('registerStatus').textContent = '';
+    }
+
+    function hideRegisterForm() {
+      document.getElementById('registerForm').style.display = 'none';
+      document.getElementById('registerStatus').textContent = '';
+    }
+
+    function toggleAdminCode() {
+      const role = document.getElementById('registerRole').value;
+      const wrap = document.getElementById('adminCodeWrap');
+      if (!wrap) return;
+      wrap.style.display = role === 'admin' ? 'block' : 'none';
+    }
+
+    async function registerUser() {
+      try {
+        const email = document.getElementById('registerEmail').value.trim();
+        const username = document.getElementById('registerUsername').value;
+        const password = document.getElementById('registerPassword').value;
+        const role = document.getElementById('registerRole').value;
+        const adminSetupCode = document.getElementById('adminSetupCode').value;
+
+        if (!email || !username || !password) {
+          alert('Please enter email, username, and password.');
+          return;
+        }
+
+        const response = await apiRequest('/auth/register', {
+          method: 'POST',
+          auth: false,
+          body: JSON.stringify({
+            email,
+            username,
+            password,
+            role,
+            admin_setup_code: adminSetupCode || null
+          })
+        });
+
+        if (!response) {
+          document.getElementById('registerStatus').textContent = 'Registration failed. Check console.';
+          return;
+        }
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          const detail = data.detail || data.message || 'Registration failed';
+          document.getElementById('registerStatus').textContent = detail;
+          return;
+        }
+
+        document.getElementById('registerStatus').textContent = 'Account created. Logging in...';
+
+        const loginResponse = await apiRequest('/auth/login', {
+          method: 'POST',
+          auth: false,
+          body: JSON.stringify({
+            email,
+            password
+          })
+        });
+
+        if (!loginResponse) {
+          document.getElementById('registerStatus').textContent = 'Registration succeeded, but login failed. Please try logging in.';
+          return;
+        }
+
+        const loginData = await loginResponse.json();
+        const token = loginData.token || loginData.access_token;
+
+        if (!token) {
+          document.getElementById('registerStatus').textContent = 'Registration succeeded, but login failed. Please try logging in.';
+          return;
+        }
+
+        setAuthToken(token);
+
+        const accountRes = await apiRequest('/accounts', { method: 'GET' });
+        if (accountRes && accountRes.ok) {
+          const accounts = await accountRes.json();
+          window.location.href = Array.isArray(accounts) && accounts.length === 0 ? '/accounts/ui?onboarding=1' : '/calendar-ui';
+          return;
+        }
+
+        window.location.href = '/accounts/ui?onboarding=1';
+
+      } catch (error) {
+        console.error('❌ Register error:', error);
+        document.getElementById('registerStatus').textContent = 'Registration failed. Check console.';
+      }
+    }
+
+    window.login = login;
+    window.showRegisterForm = showRegisterForm;
+    window.hideRegisterForm = hideRegisterForm;
+    window.toggleAdminCode = toggleAdminCode;
+    window.registerUser = registerUser;
   </script>
 
 </body>

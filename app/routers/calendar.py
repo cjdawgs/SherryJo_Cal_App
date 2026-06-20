@@ -14,7 +14,11 @@ from app.models import Event, Note, OAuthAccount
 from app.deps import get_current_user
 
 from app.services.calendar_service import CalendarService, normalize_provider
-from app.services.multi_account_oauth_service import MultiAccountOAuthService, ensure_valid_token
+from app.services.multi_account_oauth_service import (
+    MultiAccountOAuthService,
+    ensure_valid_token,
+    resolve_account_status
+)
 
 
 
@@ -234,6 +238,13 @@ def get_unified_calendar(
         end_date
     )
 
+    account_event_totals = {}
+    for ev in events:
+        key = ev.get("account_key")
+        if not key:
+            continue
+        account_event_totals[key] = account_event_totals.get(key, 0) + 1
+
     print(f"⚡ FAST DB EVENTS: {len(events)}")
 
     # ✅ ACCOUNT STATUS
@@ -248,14 +259,10 @@ def get_unified_calendar(
 
         key = f"{provider}:{(acc.account_email or '').lower().strip()}"
 
-        token_val = (acc.access_token or "").strip()
-
-        if token_val == "__REAUTH_REQUIRED__":
-            account_status[key] = "error"
-        else:
-            account_status[key] = getattr(acc, "status", "ok")
+        account_status[key] = resolve_account_status(acc)
 
     return {
         "events": events,
-        "account_status": account_status
+        "account_status": account_status,
+        "account_event_totals": account_event_totals
     }

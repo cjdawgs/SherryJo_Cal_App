@@ -14,6 +14,10 @@ WHY these matter:
 These are PURE logic tests (no API, no DB, no external calls)
 """
 
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+
+from app.models import OAuthAccount, User
 from app.services.calendar_service import CalendarService
 
 
@@ -214,3 +218,41 @@ def test_normalize_outlook_event_structure():
 
     assert result[0]["title"] == "Outlook Event"
     assert result[0]["source"] == "outlook"
+
+
+@patch("app.services.calendar_service.GoogleCalendarService.fetch_events", return_value=[])
+@patch("app.services.calendar_service.ensure_valid_token", return_value="token")
+def test_fetch_all_events_clears_stale_account_error(mock_token, mock_fetch, db):
+    service = CalendarService()
+
+    user = User(
+        username="status_heal_user",
+        email="status_heal_user@example.com",
+        hashed_password="hashed"
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="sherrychip@example.com",
+        access_token="token",
+        refresh_token="refresh",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        status="error",
+        last_sync_failure=datetime.now(timezone.utc) - timedelta(minutes=5),
+        last_error="stale failure"
+    )
+    db.add(account)
+    db.commit()
+
+    service.fetch_all_events(db, user)
+
+    db.refresh(account)
+
+    assert account.status == "ok"
+    assert account.last_sync_success is not None
+    assert account.last_sync_failure is None
+    assert account.last_error is None
