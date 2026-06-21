@@ -1,5 +1,0 @@
-
-# TEST RULE
-
-Always say:
-PROJECT CONFIG IS ACTIVE
