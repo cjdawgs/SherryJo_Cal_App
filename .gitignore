@@ -11,6 +11,7 @@ __pycache__/
 # Logs
 *.log
 *.txt
+!requirements.txt
 
 # Specific log file
 commit_sherryjo_cal_app_log.txt
