@@ -154,18 +154,6 @@ def validate_runtime_configuration() -> None:
 
 validate_runtime_configuration()
 
-
-# --------------------------------------------------
-# Database Mode Selection
-# --------------------------------------------------
-# Options:
-#   "postgres" → force PostgreSQL
-#   "sqlite"   → force SQLite
-#   "auto"     → try Postgres, fallback to SQLite
-# --------------------------------------------------
-DB_TYPE = os.getenv("DB_TYPE", "auto")
-
-
 # --------------------------------------------------
 # Function: Test PostgreSQL Connection (REAL LOGIN)
 # --------------------------------------------------
@@ -200,43 +188,64 @@ def can_connect_postgres():
 # --------------------------------------------------
 # Resolve Which Database to Use
 # --------------------------------------------------
-if DB_TYPE == "postgres":
-    # User explicitly wants PostgreSQL
-    if can_connect_postgres():
-        resolved_db = "postgres"
-    else:
-        print("⚠️ WARNING: PostgreSQL requested but login failed → using SQLite")
-        resolved_db = "sqlite"
 
-elif DB_TYPE == "sqlite":
-    # User explicitly wants SQLite
-    resolved_db = "sqlite"
+DATABASE_URL_ENV = os.getenv("DATABASE_URL")
+
+if DATABASE_URL_ENV:
+    # ✅ PRIORITY: Use external DB (Supabase / Render / etc.)
+    print("✅ Using DATABASE_URL from environment")
+    DATABASE_URL = DATABASE_URL_ENV
+
+    # Optional parse type just for logging
+    if "postgres" in DATABASE_URL_ENV:
+        resolved_db = "postgres"
+    elif "sqlite" in DATABASE_URL_ENV:
+        resolved_db = "sqlite"
+    else:
+        resolved_db = "unknown"
 
 else:
-    # AUTO MODE (recommended)
-    if can_connect_postgres():
-        resolved_db = "postgres"
-    else:
-        print("ℹ️ PostgreSQL not usable → falling back to SQLite")
+
+    # --------------------------------------------------
+    # Fallback to your existing logic
+    # Database Mode Selection
+    # --------------------------------------------------
+    # Options:
+    #   "postgres" → force PostgreSQL
+    #   "sqlite"   → force SQLite
+    #   "auto"     → try Postgres, fallback to SQLite
+    # --------------------------------------------------
+    DB_TYPE = os.getenv("DB_TYPE", "auto")
+
+    if DB_TYPE == "postgres":
+        if can_connect_postgres():
+            resolved_db = "postgres"
+        else:
+            print("⚠️ PostgreSQL requested but login failed → using SQLite")
+            resolved_db = "sqlite"
+
+    elif DB_TYPE == "sqlite":
         resolved_db = "sqlite"
 
+    else:
+        if can_connect_postgres():
+            resolved_db = "postgres"
+        else:
+            print("ℹ️ PostgreSQL not usable → falling back to SQLite")
+            resolved_db = "sqlite"
 
-# --------------------------------------------------
-# Build Final DATABASE_URL
-# --------------------------------------------------
-if resolved_db == "postgres":
-    DATABASE_URL = (
-        f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:"
-        f"{os.getenv('POSTGRES_PASSWORD')}@"
-        f"{os.getenv('POSTGRES_HOST', 'localhost')}:"
-        f"{os.getenv('POSTGRES_PORT', '5432')}/"
-        f"{os.getenv('POSTGRES_DB')}"
-    )
-
-else:
-    SQLITE_PATH = os.getenv("SQLITE_PATH", "./app.db")
-    DATABASE_URL = f"sqlite:///{SQLITE_PATH}"
-
+    # Build fallback connection string
+    if resolved_db == "postgres":
+        DATABASE_URL = (
+            f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:"
+            f"{os.getenv('POSTGRES_PASSWORD')}@"
+            f"{os.getenv('POSTGRES_HOST', 'localhost')}:"
+            f"{os.getenv('POSTGRES_PORT', '5432')}/"
+            f"{os.getenv('POSTGRES_DB')}"
+        )
+    else:
+        SQLITE_PATH = os.getenv("SQLITE_PATH", "./app.db")
+        DATABASE_URL = f"sqlite:///{SQLITE_PATH}"
 
 # --------------------------------------------------
 # Debug / Visibility Output (Safe to Keep)
