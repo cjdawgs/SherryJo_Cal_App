@@ -243,6 +243,25 @@ button.primary {
   border: none;
 }
 
+/* =====================================================
+✅ PHASE 4: EVENT SELECTION HIGHLIGHT
+---------------------------------------------------------
+Applied by FullCalendar eventClassNames when an event's
+id matches window.selectedEventId.
+- Wrapper (.fc-event): elevated z-index
+- Inner (.fc-event-main): visible outline + brightness boost
+  Uses outline (not border) to avoid disturbing layout.
+===================================================== */
+.fc-event.event-selected {
+  z-index: 10 !important;
+}
+
+.fc-event.event-selected .fc-event-main {
+  outline: 3px solid #1e293b !important;
+  outline-offset: 1px;
+  filter: brightness(1.15);
+}
+
 .fc-daygrid-event {
   white-space: nowrap;
   overflow: hidden;
@@ -311,6 +330,8 @@ button.primary {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
+  /* ✅ Must be below the modal but above all FullCalendar z-index layers */
+  z-index: 999998;
 }
 
 .modalOverlay.show {
@@ -336,6 +357,9 @@ button.primary {
   transition: all 0.2s ease;
 
   box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+
+  /* ✅ Always on top of FullCalendar popovers, tooltips, and other overlays */
+  z-index: 999999;
 }
 
 .modal.show {
@@ -386,4 +410,55 @@ button.primary {
   body > div {
     max-width: 1200px;
   }
+
+
+/* =====================================================
+✅ RIGHT-CLICK CONTEXT MENU
+===================================================== */
+#eventContextMenu {
+  position: fixed;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 1000000;   /* above modal */
+  display: none;
+  font-size: 13px;
+  user-select: none;
+}
+
+#eventContextMenu.visible {
+  display: block;
+}
+
+.ctx-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: #1e293b;
+  transition: background 0.1s ease;
+  white-space: nowrap;
+}
+
+.ctx-menu-item:hover {
+  background: #f1f5f9;
+}
+
+.ctx-menu-item.danger {
+  color: #dc2626;
+}
+
+.ctx-menu-item.danger:hover {
+  background: #fee2e2;
+}
+
+.ctx-menu-separator {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 4px 0;
+}
 

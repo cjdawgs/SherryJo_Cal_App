@@ -55,7 +55,10 @@ if (window.location.pathname.includes("calendar-ui")) {
  **************************************************************/
 let calendar = null;
 let isAppSyncing = false;
-let editingEventId = null;
+// ✅ editingEventId is shared with calendar.ui.js via window so both modules
+//    read/write the same value without circular imports.
+window.editingEventId = window.editingEventId ?? null;
+let editingEventId = null;   // kept for backward-compat within this module
 let editingNoteId = null;
 let providerAccountCounts = {};
 let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
@@ -130,6 +133,8 @@ function smartRefresh({ reason = "unknown", force = false } = {}) {
 
   applyClientSideFilters(); // ✅ ONLY THIS
 }
+// ✅ Expose so calendar.ui.js (separate module) can call it
+window.smartRefresh = smartRefresh;
 
 function getCalendarEventAccountKey(ev) {
   if (!ev) return "";
@@ -548,6 +553,8 @@ function showToast(message, type = "success") {
     setTimeout(() => toast.remove(), 300);
   }, 2500);
 }
+// ✅ Expose so calendar.ui.js (separate module) can call it
+window.showToast = showToast;
 
 
 function setSyncBanner(state = "hidden") {
@@ -887,6 +894,10 @@ async function init() {
   await loadAccounts();
   renderAccountsSafe();
 
+  // ✅ Expose openCreateModal for use by FullCalendar eventClick / dateClick
+  //    (those callbacks live in calendar.fullcalendar.js which is a separate module)
+  window.openCreateModal = openCreateModal;
+
   // ✅ LOAD DATA FIRST (critical) check for Full preload or partial
   if (!sessionEventCache.length) {
     console.log("🔄 Refreshing cache (needed)");
@@ -1150,22 +1161,27 @@ function applyChipStyle(row, key, isActive) {
   const [provider] = key.split(":");
 
   /************************************************************
-   ✅ CENTRAL COLOR ENGINE (DO NOT BYPASS)
-  ************************************************************/
-  const raw = getColorByKey(key);
-  const finalColor = applySoftColor(raw);
+   * ✅ SINGLE SOURCE OF TRUTH — ALL sub-elements derive color
+   *    ONLY from getColorByKey(key) → accountColorMap → backend
+   *
+   * RAW  = identity color  (dot background, badge, event strips)
+   * SOFT = display color   (chip background tint)
+   *
+   * ❌ FORBIDDEN: hardcoded colors, per-element overrides,
+   *              separate dotColor vs chipColor variables
+   ************************************************************/
+  const raw = getColorByKey(key);          // ← THE ONLY COLOR SOURCE
+  const finalColor = applySoftColor(raw);  // ← chip bg only (tinted)
 
+  // ✅ CHIP BACKGROUND (soft tint for readability)
   row.style.backgroundColor = finalColor;
   row.style.color = getBestTextColor(finalColor);
-
   row.style.transition = "all 0.15s ease";
-
   row.style.borderRadius = "999px";
   row.style.display = "inline-flex";
   row.style.alignItems = "center";
   row.style.gap = "4px";
   row.style.padding = "4px 8px";
-
   row.style.boxShadow = "none";
   row.style.transform = "none";
 
@@ -1175,6 +1191,32 @@ function applyChipStyle(row, key, isActive) {
   } else {
     row.style.border = "2px solid transparent";
     row.style.opacity = "0.45";
+  }
+
+  // ✅ COLOR DOT — must always equal raw (account color, NOT soft)
+  // ROOT CAUSE FIX: dot was only set once at chip-creation time.
+  // Any subsequent call to applyChipStyle (color picker, filter
+  // toggle, updateChipSelectionUI) now keeps dot in sync with
+  // the chip background — eliminating the divergence entirely.
+  const dot = row.querySelector(".color-dot");
+  if (dot) {
+    dot.style.background = raw;
+
+    // Adaptive border contrast so dot edge is always visible
+    const dotBorderColor = getBestTextColor(raw) === "#fff"
+      ? "rgba(255,255,255,0.7)"
+      : "rgba(0,0,0,0.4)";
+    dot.style.border  = `1px solid ${dotBorderColor}`;
+    dot.style.outline = `1px solid ${getBestTextColor(raw)}`;
+
+    console.log("DOT COLOR SOURCE:", key, raw, "→ dot.background =", raw);
+  }
+
+  // ✅ ACCOUNT BADGE — same raw color (multi-account disambiguation)
+  const badge = row.querySelector(".account-badge");
+  if (badge) {
+    badge.style.background = raw;
+    badge.style.color = getBestTextColor(raw);
   }
 }
 
@@ -1361,6 +1403,10 @@ async function preloadEventCache() {
     return true;
   });
   isInitialLoadComplete = true;
+
+  // ✅ Sync window reference so calendar.fullcalendar.js events callback and
+  //    calendar.ui.js saveEvent both see the live filled array.
+  window.sessionEventCache = sessionEventCache;
   
   //setSyncBanner("success");
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
@@ -1872,21 +1918,27 @@ function renderAccounts(accounts) {
           sw.style.border = "1px solid rgba(0,0,0,0.25)";
 
           sw.onclick = () => {
+            // 1. Push new color into the single-source-of-truth map FIRST
             setAccountColor(key, col);
+            // 2. Queue backend persist (debounced 220 ms)
             queuePersistAccountColor(accountId, key, col);
 
+            // 3. Update picker preview bar
             preview.style.background = col;
             preview.style.color = getBestTextColor(col);
 
-            applyChipStyle(row, key, true);
+            // 4. applyChipStyle is now the ONLY place that touches
+            //    chip background + color dot + badge — all from getColorByKey(key).
+            //    Since setAccountColor ran first, getColorByKey returns `col`.
+            applyChipStyle(row, key, true);   // ✅ dot + badge + bg all update here
+
+            // 5. Sync all other chips in case filters changed
             updateChipSelectionUI();
 
-            const badge = row.querySelector(".account-badge");
-            if (badge) badge.style.background = col;
+            console.log("RENDER CHIP:", accountId ?? "local", key, col);
 
-            // ✅ SAFE CALENDAR ACCESS (FIXED)
+            // 6. Refresh calendar event colors
             const cal = window.calendar;
-
             if (cal) {
               cal.refetchEvents();
             } else {
@@ -1924,27 +1976,24 @@ function renderAccounts(accounts) {
 
         iroPicker.on("color:change", (c) => {
 
-          const raw = c.hexString;
+          const picked = c.hexString;
 
-          // ✅ SINGLE SOURCE OF TRUTH
-          setAccountColor(key, raw);
-          queuePersistAccountColor(accountId, key, raw);
+          // 1. Push into single-source-of-truth map FIRST so
+          //    every downstream call sees the new value immediately.
+          setAccountColor(key, picked);
+          queuePersistAccountColor(accountId, key, picked);
 
-          // ✅ UI SOFT COLOR
-          const soft = applySoftColor(raw);
-
+          // 2. Update picker preview bar (uses soft tint for visual polish)
+          const soft = applySoftColor(picked);
           preview.style.background = soft;
           preview.style.color = getBestTextColor(soft);
 
+          // 3. applyChipStyle now updates chip bg + color dot + badge
+          //    all from getColorByKey(key) = picked  →  single source.
           applyChipStyle(row, key, true);
-          updateChipSelectionUI();   // ✅ ADD THIS
+          updateChipSelectionUI();
 
-          const badge = row.querySelector(".account-badge");
-
-          if (badge) {
-            badge.style.background = raw;
-            badge.style.color = getBestTextColor(raw);
-          }
+          console.log("RENDER CHIP:", accountId ?? "local", key, picked);
 
           if (window.calendar) {
             window.calendar.refetchEvents();
@@ -2361,40 +2410,90 @@ function updateDayDetails() {
 
   if (!listEl) return;
 
-  const selected = new Date(window.selectedDate);
+  // ✅ FIX: Parse date string in LOCAL time (not UTC).
+  // new Date("2026-06-03") treats the string as UTC midnight, which shifts
+  // to the previous day in US timezones. Splitting and using the Date
+  // constructor with year/month/day avoids the timezone offset entirely.
+  const parts = (window.selectedDate || "").split("-").map(Number);
+  if (parts.length < 3 || !parts[0]) return;
+  const selected = new Date(parts[0], parts[1] - 1, parts[2]);
 
   const start = new Date(selected);
-  start.setHours(0,0,0,0);
+  start.setHours(0, 0, 0, 0);
 
   const end = new Date(start);
   end.setDate(start.getDate() + 1);
 
-  const events = window.sessionEventCache.filter(ev => {
-
+  // ✅ Filter events for this day
+  const events = (window.sessionEventCache || []).filter(ev => {
     const evStart = new Date(ev.start);
     const evEnd = ev.end ? new Date(ev.end) : evStart;
-
     return evStart < end && evEnd >= start;
   });
 
-  console.log("✅ DAY EVENTS:", events.length);
+  // ✅ Sort ascending by start time
+  events.sort((a, b) => new Date(a.start) - new Date(b.start));
+
+  console.log("✅ DAY EVENTS:", events.length, "for", window.selectedDate);
 
   listEl.innerHTML = "";
 
-  events.forEach(ev => {
+  if (events.length === 0) {
+    const empty = document.createElement("div");
+    empty.style.color = "#94a3b8";
+    empty.style.fontSize = "11px";
+    empty.style.padding = "6px 4px";
+    empty.textContent = "No events";
+    listEl.appendChild(empty);
+    if (titleEl) titleEl.textContent = selected.toDateString();
+    return;
+  }
 
+  events.forEach(ev => {
     const key = ev?.extendedProps?.account_key || "";
     const raw = getColorByKey(key);
     const soft = applySoftColor(raw);
+
+    // ✅ Format start time compact: "8a", "12:30p", "2p"
+    const evStart = new Date(ev.start);
+    const hours = evStart.getHours();
+    const mins  = evStart.getMinutes();
+    const ampm  = hours >= 12 ? "p" : "a";
+    const h12   = hours % 12 || 12;
+    const timeStr = mins === 0
+      ? `${h12}${ampm}`
+      : `${h12}:${String(mins).padStart(2, "0")}${ampm}`;
+
+    // ✅ Row: [time] [title]
     const div = document.createElement("div");
+    div.style.display        = "flex";
+    div.style.alignItems     = "center";
+    div.style.gap            = "5px";
+    div.style.padding        = "3px 6px 3px 5px";
+    div.style.marginBottom   = "3px";
+    div.style.borderLeft     = `4px solid ${raw}`;
+    div.style.background     = soft;
+    div.style.borderRadius   = "5px";
+    div.style.overflow       = "hidden";
 
-    div.textContent = ev.title;
-    div.style.padding = "6px";
-    div.style.marginBottom = "6px";
-    div.style.borderLeft = `4px solid ${raw}`;
-    div.style.background = soft;
-    div.style.borderRadius = "6px";
+    const timeSpan = document.createElement("span");
+    timeSpan.textContent     = timeStr;
+    timeSpan.style.fontSize  = "10px";
+    timeSpan.style.fontWeight = "700";
+    timeSpan.style.color     = "#475569";
+    timeSpan.style.whiteSpace = "nowrap";
+    timeSpan.style.minWidth  = "26px";
+    timeSpan.style.flexShrink = "0";
 
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent      = ev.title;
+    titleSpan.style.fontSize   = "11px";
+    titleSpan.style.overflow   = "hidden";
+    titleSpan.style.textOverflow = "ellipsis";
+    titleSpan.style.whiteSpace = "nowrap";
+
+    div.appendChild(timeSpan);
+    div.appendChild(titleSpan);
     listEl.appendChild(div);
   });
 
@@ -2595,20 +2694,46 @@ window.logout = logout;
 
 async function deleteEvent() {
 
-  if (!editingEventId) {
+  // ✅ Use window.editingEventId so we pick up the value set by
+  //    openCreateModal (which lives in calendar.ui.js module scope)
+  const targetId = window.editingEventId || editingEventId;
+
+  if (!targetId) {
     console.warn("No event selected for deletion");
     return;
   }
 
-  const res = await apiFetch(`/events/${editingEventId}`, {
+  const confirmDelete = confirm("Delete this event?");
+  if (!confirmDelete) return;
+
+  console.log("SAVE EVENT TRIGGERED (delete)", targetId);
+
+  const res = await apiFetch(`/calendar/event/${targetId}`, {
     method: "DELETE"
   });
 
-  if (!res) return;
+  if (!res || !res.ok) {
+    console.error("❌ Delete request failed", res?.status);
+    showToast("❌ Delete failed", "error");
+    return;
+  }
 
-  console.log("✅ Event deleted");
+  console.log("✅ Event deleted", targetId);
 
-  smartRefresh({ reason: "event_deleted" });
+  // Remove from cache immediately
+  sessionEventCache = sessionEventCache.filter(
+    e => e.extendedProps?.backendId !== targetId && String(e.id) !== String(targetId)
+  );
+  window.sessionEventCache = sessionEventCache;
+
+  window.deletedEventIds = window.deletedEventIds || new Set();
+  window.deletedEventIds.add(targetId);
+
+  // Close the edit modal
+  if (typeof closeCreateModal === "function") closeCreateModal();
+
+  showToast("🗑 Event deleted");
+  smartRefresh({ reason: "event_deleted", force: true });
 }
 
 window.deleteEvent = deleteEvent;
@@ -2619,6 +2744,7 @@ window.deleteEvent = deleteEvent;
  **************************************************************/
 function editNote(eventId, noteId = null) {
   editingEventId = eventId;
+  window.editingEventId = eventId;   // keep window in sync
   editingNoteId = noteId;
   document.getElementById("noteEditorModal")?.classList.remove("hidden");
 }
