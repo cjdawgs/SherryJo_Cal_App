@@ -15,3 +15,45 @@ psycopg2-binary==2.9.12
 pytz==2026.2
 pytest==9.1.1
 httpx==0.28.1
+=======
+# =========================
+# Core Framework
+# =========================
+fastapi
+uvicorn
+
+# =========================
+# Database
+# =========================
+sqlalchemy
+
+# =========================
+# Templates / UI
+# =========================
+jinja2
+
+# =========================
+# Auth + API calls
+# =========================
+msal
+requests
+
+# =========================
+# Background scheduler
+# =========================
+apscheduler
+
+# =========================
+# Optional (only if used)
+# =========================
+python-dotenv
+
+psycopg2-binary
+pydantic-settings
+python-jose
+passlib[bcrypt]
+email-validator
+python-dateutil
+pytz
+argon2-cffi
+
