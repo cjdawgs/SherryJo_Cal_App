@@ -67,7 +67,8 @@ if engine.url.drivername.startswith("sqlite"):
             "last_error",
             "status",
             "token_expires_at",
-            "updated_at"
+            "updated_at",
+            "color"
         }
         missing = required_columns - columns
         if missing:
@@ -86,6 +87,8 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN token_expires_at DATETIME"))
                     elif col == "updated_at":
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN updated_at DATETIME"))
+                    elif col == "color":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN color VARCHAR"))
                 conn.commit()
             print("✅ SQLite schema upgrade complete.")
 

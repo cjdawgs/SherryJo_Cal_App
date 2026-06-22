@@ -54,6 +54,7 @@ templates = Jinja2Templates(
 # ============================================================
 
 from pydantic import BaseModel, EmailStr
+import re
 
 class AppleConnectRequest(BaseModel):
     email: EmailStr
@@ -62,6 +63,43 @@ class AppleConnectRequest(BaseModel):
 
 
 from app.services.external_calendar_service import ExternalCalendarService
+
+
+PROVIDER_DEFAULT_COLORS = {
+    "google": "#34a853",
+    "microsoft": "#2563eb",
+    "apple": "#ef4444",
+    "local": "#7ca3af",
+    "other": "#999999",
+}
+
+
+def normalize_provider(provider: str) -> str:
+    value = (provider or "").strip().lower()
+    if value in {"outlook", "office365", "ms", "msft", "microsoft"}:
+        return "microsoft"
+    if value in {"gmail", "google"}:
+        return "google"
+    if value in {"icloud", "caldav", "apple"}:
+        return "apple"
+    if value in {"local", "internal"}:
+        return "local"
+    return value or "other"
+
+
+def default_account_color(provider: str) -> str:
+    return PROVIDER_DEFAULT_COLORS.get(normalize_provider(provider), PROVIDER_DEFAULT_COLORS["other"])
+
+
+def sanitize_hex_color(value: str) -> str:
+    color = (value or "").strip().lower()
+    if not re.fullmatch(r"#[0-9a-f]{6}", color):
+        raise HTTPException(status_code=422, detail="Color must be a 6-digit hex value like #34a853")
+    return color
+
+
+class AccountColorUpdateRequest(BaseModel):
+    color: str
 
 @router.post("/apple/connect")
 def connect_apple_account(
@@ -324,11 +362,40 @@ def get_my_accounts(
             "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
             "last_error": getattr(acc, "last_error", None),
             "status": resolve_account_status(acc),
+            "color": acc.color or default_account_color(acc.provider),
             "created_at": acc.created_at.isoformat(),
             "updated_at": acc.updated_at.isoformat() if acc.updated_at else None,
         }
         for acc in accounts
     ]
+
+
+@router.put("/{account_id}/color")
+def update_account_color(
+    account_id: int,
+    payload: AccountColorUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    account = db.query(OAuthAccount).filter(
+        OAuthAccount.id == account_id,
+        OAuthAccount.user_id == current_user.id
+    ).first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    new_color = sanitize_hex_color(payload.color)
+    account.color = new_color
+    db.commit()
+    db.refresh(account)
+
+    return {
+        "id": account.id,
+        "provider": account.provider,
+        "account_email": account.account_email,
+        "color": account.color,
+    }
 
 
 # ============================================================

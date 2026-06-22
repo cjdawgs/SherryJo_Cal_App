@@ -23,6 +23,32 @@ from datetime import datetime, timedelta, timezone
 from app.config import settings
 
 
+DEFAULT_ACCOUNT_COLORS = {
+    "google": "#34a853",
+    "microsoft": "#2563eb",
+    "apple": "#ef4444",
+    "local": "#7ca3af",
+    "other": "#999999",
+}
+
+
+def normalize_provider(provider: str) -> str:
+    value = (provider or "").strip().lower()
+    if value in {"outlook", "office365", "ms", "msft", "microsoft"}:
+        return "microsoft"
+    if value in {"gmail", "google"}:
+        return "google"
+    if value in {"icloud", "caldav", "apple"}:
+        return "apple"
+    if value in {"local", "internal"}:
+        return "local"
+    return value or "other"
+
+
+def provider_default_color(provider: str) -> str:
+    return DEFAULT_ACCOUNT_COLORS.get(normalize_provider(provider), DEFAULT_ACCOUNT_COLORS["other"])
+
+
 # ==================================================
 # ✅ SAFE COMMIT HELPER (CRITICAL)
 # ==================================================
@@ -141,6 +167,9 @@ class MultiAccountOAuthService:
                 existing.last_sync = now
                 existing.last_sync_success = now
                 existing.last_sync_failure = None
+
+            if not existing.color:
+                existing.color = provider_default_color(existing.provider)
                 
             existing.display_name = display_name
             existing.provider_id = provider_id
@@ -167,6 +196,7 @@ class MultiAccountOAuthService:
 
             display_name=display_name,
             provider_id=provider_id,
+            color=provider_default_color(provider),
 
             is_primary = (account_count == 0 or locals().get("set_as_primary", False))
 

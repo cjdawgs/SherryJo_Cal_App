@@ -35,29 +35,38 @@ function getBaseProviderColor(provider) {
 }
 
 /**************************************************************
- * ✅ USER COLOR STORAGE (RAW ONLY)
- **************************************************************/
-const ACCOUNT_COLOR_STORAGE_KEY = "accountColorOverrides";
-
-function loadColorOverrides() {
-  try {
-    const raw = localStorage.getItem(ACCOUNT_COLOR_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
-  } catch {
-    return {};
-  }
-}
-
-function saveColorOverrides(map) {
-  localStorage.setItem(ACCOUNT_COLOR_STORAGE_KEY, JSON.stringify(map));
-}
-
-let accountColorOverrides = loadColorOverrides();
-
-/**************************************************************
  * ✅ GENERATED ACCOUNT COLOR MAP
  **************************************************************/
 let accountColorMap = {};
+
+function normalizeAccountKey(key, provider, email) {
+  if (key) return key;
+
+  const p = (provider || "local").toLowerCase();
+  const e = (email || "local").toLowerCase().trim();
+
+  return `${p}:${e}`;
+}
+
+function hydrateAccountColorMap(accounts = []) {
+  const nextMap = {};
+
+  accounts.forEach((account, index) => {
+    const provider = normalizeProvider(account?.provider || "other");
+    const key = normalizeAccountKey(
+      account?.account_key,
+      provider,
+      account?.account_email || account?.email || "local"
+    );
+
+    const backendColor = (account?.color || "").trim();
+    nextMap[key] = backendColor || getAccountColor(provider, index);
+  });
+
+  accountColorMap = nextMap;
+  window.accountColorMap = accountColorMap;
+  return accountColorMap;
+}
 
 /**************************************************************
  * ✅ LIGHTEN ENGINE (LOW-LEVEL)
@@ -114,10 +123,6 @@ function getSoftColor(hex) {
  **************************************************************/
 function getColorByKey(key, provider) {
   if (!key) return "#999";
-
-  if (accountColorOverrides[key]) {
-    return accountColorOverrides[key];
-  }
 
   if (accountColorMap[key]) {
     return accountColorMap[key];
@@ -180,15 +185,6 @@ function getBestTextColor(bgHex) {
 /**************************************************************
  * ✅ ACCOUNT KEY HELPERS
  **************************************************************/
-function normalizeAccountKey(key, provider, email) {
-  if (key) return key;
-
-  const p = (provider || "local").toLowerCase();
-  const e = (email || "local").toLowerCase().trim();
-
-  return `${p}:${e}`;
-}
-
 function isLocalEvent(key) {
   return key === "local:local";
 }
@@ -206,9 +202,8 @@ function getSoftAccountColor(key, provider) {
  * ✅ SAVE HELPER (USED BY PICKER)
  **************************************************************/
 function setAccountColor(key, rawColor) {
-  accountColorOverrides[key] = rawColor;
   accountColorMap[key] = rawColor;
-  saveColorOverrides(accountColorOverrides);
+  window.accountColorMap = accountColorMap;
 }
 
 
@@ -219,3 +214,5 @@ window.getColorByKey = getColorByKey;
 window.getBestTextColor = getBestTextColor;
 window.getSoftColor = getSoftColor;
 window.getSoftAccountColor = getSoftAccountColor;
+window.hydrateAccountColorMap = hydrateAccountColorMap;
+window.setAccountColor = setAccountColor;

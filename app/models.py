@@ -116,6 +116,7 @@ class OAuthAccount(Base):
     # ✅ ACCOUNT FLAGS
     is_primary = Column(Boolean, default=False, index=True)
     sync_enabled = Column(Boolean, default=True)
+    color = Column(String, nullable=True)
 
     # ✅ SYNC TRACKING
     last_sync = Column(DateTime(timezone=True), nullable=True)

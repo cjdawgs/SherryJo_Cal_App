@@ -606,13 +606,7 @@ function resolveEventColor(event) {
  * ✅ FINAL COLOR RESOLVER (OVERRIDE → FALLBACK)
  **************************************************************/
 function getFinalAccountColor(key, provider, index) {
-
-  // ✅ SAFE CHECK (more robust than truthy)
-  if (Object.prototype.hasOwnProperty.call(accountColorOverrides, key)) {
-    return accountColorOverrides[key];
-  }
-
-  return getAccountColor(provider, index);
+  return getColorByKey(key, provider);
 }
 
 // ✅ SAFE DATE PARSER (FULLY FIXED)
@@ -1031,6 +1025,56 @@ function refreshEvents() {
   smartRefresh({ reason: "accountsUpdated", force: true });
 }
 
+const colorPersistTimers = new Map();
+
+async function persistAccountColor(accountId, key, color) {
+  const normalizedColor = (color || "").toLowerCase().trim();
+  if (!normalizedColor) return;
+
+  if (!accountId) {
+    setAccountColor(key, normalizedColor);
+    return;
+  }
+
+  const res = await apiFetch(`/accounts/${accountId}/color`, {
+    method: "PUT",
+    body: { color: normalizedColor }
+  });
+
+  if (!res || !res.ok) {
+    console.error("❌ Failed to persist account color", accountId, normalizedColor);
+    return;
+  }
+
+  const payload = await res.json();
+  const savedColor = (payload?.color || normalizedColor).toLowerCase().trim();
+
+  setAccountColor(key, savedColor);
+
+  const localAccount = lastLoadedAccounts.find((acc) => acc.id === accountId);
+  if (localAccount) {
+    localAccount.color = savedColor;
+  }
+
+  console.log("ACCOUNT COLOR:", key, savedColor);
+  window.dispatchEvent(new Event("accountsUpdated"));
+}
+
+function queuePersistAccountColor(accountId, key, color) {
+  if (colorPersistTimers.has(key)) {
+    clearTimeout(colorPersistTimers.get(key));
+  }
+
+  const timerId = setTimeout(() => {
+    persistAccountColor(accountId, key, color).catch((err) => {
+      console.error("❌ Persist account color failed", err);
+    });
+    colorPersistTimers.delete(key);
+  }, 220);
+
+  colorPersistTimers.set(key, timerId);
+}
+
 /**************************************************************
  * ✅ LOAD ACCOUNTS (SEPARATE FROM EVENTS)
  **************************************************************/
@@ -1046,11 +1090,21 @@ async function loadAccounts() {
       return [];
     }
 
-    const data = await res.json();  // ✅ DEFINE HERE
+    const payload = await res.json();
+    const data = Array.isArray(payload) ? payload : (payload.accounts || []);
 
     lastLoadedAccounts = data;
 
+    if (typeof window.hydrateAccountColorMap === "function") {
+      window.hydrateAccountColorMap(data);
+    }
+
     console.log("🔥 RAW ACCOUNT DATA:", data);
+
+    data.forEach((account) => {
+      const key = `${normalizeProvider(account.provider)}:${(account.account_email || "").toLowerCase().trim()}`;
+      console.log("ACCOUNT COLOR:", key, account.color || getColorByKey(key));
+    });
 
     data.forEach(acc => {
       const key = `${acc.provider}:${(acc.account_email || "").toLowerCase().trim()}`;
@@ -1428,14 +1482,21 @@ function renderAccounts(accounts) {
       .toLowerCase()
       .trim();
 
-    return { provider, email };
+    return {
+      id: acc.id,
+      provider,
+      email,
+      color: acc.color || null,
+    };
   });
 
   // ✅ inject local account if any events exist
   // ✅ ALWAYS INCLUDE LOCAL ACCOUNT (FIX)
   normalizedAccounts.push({
+    id: null,
     provider: "local",
-    email: "local"
+    email: "local",
+    color: null,
   });
 
   
@@ -1455,7 +1516,7 @@ function renderAccounts(accounts) {
     providerAccountCounts[provider]++;
   });
 
-  normalizedAccounts.forEach(({ provider, email }) => {
+  normalizedAccounts.forEach(({ id: accountId, provider, email }) => {
 
     if (!providerAccountCounts[provider]) {
       providerAccountCounts[provider] = 0;
@@ -1471,6 +1532,7 @@ function renderAccounts(accounts) {
 
     const key = normalizeKey(provider, email);
     const raw = getColorByKey(key);
+    console.log("RENDER CHIP:", accountId ?? "local", key, raw);
 
     const row = document.createElement("div");
     row.classList.add("chip");
@@ -1810,9 +1872,8 @@ function renderAccounts(accounts) {
           sw.style.border = "1px solid rgba(0,0,0,0.25)";
 
           sw.onclick = () => {
-
-            accountColorOverrides[key] = col;
-            saveColorOverrides(accountColorOverrides);
+            setAccountColor(key, col);
+            queuePersistAccountColor(accountId, key, col);
 
             preview.style.background = col;
             preview.style.color = getBestTextColor(col);
@@ -1861,24 +1922,13 @@ function renderAccounts(accounts) {
           ]
         });
 
-        /*iroPicker.on("color:change", (c) => {
-          
-          const raw = c.hexString;
-          const col = lightenColor(raw, 0.4);   // ✅ soften it
-          const soft = lightenColor(col, 0.4);  // ✅ softness level
-
-          accountColorOverrides[key] = soft;
-          accountColorMap[key] = soft;
-        */
-      
         iroPicker.on("color:change", (c) => {
 
           const raw = c.hexString;
 
           // ✅ SINGLE SOURCE OF TRUTH
-          accountColorOverrides[key] = raw;
-
-          saveColorOverrides(accountColorOverrides);
+          setAccountColor(key, raw);
+          queuePersistAccountColor(accountId, key, raw);
 
           // ✅ UI SOFT COLOR
           const soft = applySoftColor(raw);
@@ -1967,6 +2017,7 @@ function renderAccounts(accounts) {
     else {
       status = accountStatusMap[key] || "unknown";
     }
+    console.log("DOT COLOR SOURCE:", key, raw, "status=", status);
 
     /****************************************************************
      * ✅ APPLY VISUAL STATE TO DOT (CRITICAL FIX)
