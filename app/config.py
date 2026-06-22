@@ -10,6 +10,7 @@ from typing import Any
 import psycopg2
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy import create_engine
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -190,6 +191,7 @@ def can_connect_postgres():
 # --------------------------------------------------
 
 DATABASE_URL_ENV = os.getenv("DATABASE_URL")
+DB_TYPE = os.getenv("DB_TYPE", "auto")
 
 if DATABASE_URL_ENV:
     # ✅ PRIORITY: Use external DB (Supabase / Render / etc.)
@@ -203,7 +205,7 @@ if DATABASE_URL_ENV:
         resolved_db = "sqlite"
     else:
         resolved_db = "unknown"
-
+    
 else:
 
     # --------------------------------------------------
@@ -215,7 +217,7 @@ else:
     #   "sqlite"   → force SQLite
     #   "auto"     → try Postgres, fallback to SQLite
     # --------------------------------------------------
-    DB_TYPE = os.getenv("DB_TYPE", "auto")
+
 
     if DB_TYPE == "postgres":
         if can_connect_postgres():

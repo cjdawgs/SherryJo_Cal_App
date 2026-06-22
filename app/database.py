@@ -15,10 +15,31 @@ if DATABASE_URL.startswith("sqlite"):
 
 
 # Create database engine (works for both SQLite and PostgreSQL)
-engine = create_engine(
-    DATABASE_URL,
-    **engine_kwargs
-)
+from sqlalchemy import create_engine
+
+print("🔌 Attempting DB connection...")
+
+try:
+    engine = create_engine(
+        DATABASE_URL,
+        **engine_kwargs
+    )
+
+    # ✅ Force immediate connection test
+    with engine.connect() as conn:
+        print("✅ Connected to database successfully!")
+
+except Exception as e:
+    print("❌ DB connection failed:", str(e))
+    print("⚠️ Falling back to SQLite...")
+
+    DATABASE_URL = "sqlite:///./app.db"
+
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False}
+    )
+
 
 
 import os
