@@ -31,4 +31,5 @@ email-validator
 python-dateutil
 pytz
 argon2-cffi
+caldav==1.3.9
 
