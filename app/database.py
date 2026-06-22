@@ -22,7 +22,8 @@ print("🔌 Attempting DB connection...")
 try:
     engine = create_engine(
         DATABASE_URL,
-        **engine_kwargs
+        pool_pre_ping=True,
+        connect_args={"sslmode": "require"}
     )
 
     # ✅ Force immediate connection test
