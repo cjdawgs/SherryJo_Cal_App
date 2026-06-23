@@ -5,144 +5,10 @@ import {
   getActiveRangeLabel
 } from "./core.js";
 
-// ✅ apiFetch is needed for eventDrop / eventResize persistence.
-//    api.js exports it AND sets window.apiFetch — importing directly
-//    avoids any module-scope lookup issues.
-import { apiFetch } from "./api.js";
-
-
-/**************************************************************
- * ✅ CONTEXT MENU (right-click on events AND empty date cells)
- * --------------------------------------------------------
- * One shared <div> element, rebuilt dynamically on each open.
- *
- * openContextMenu(x, y, fcEvent)
- *   → Right-click ON an event
- *   → Menu: ➕ Create Event | ✏️ Edit | 🗑 Delete
- *
- * openDateContextMenu(x, y, date)
- *   → Right-click on an EMPTY date cell
- *   → Menu: ➕ Create Event
- *
- * Both close on outside click or Escape.
- **************************************************************/
-function ensureContextMenu() {
-  let menu = document.getElementById("eventContextMenu");
-  if (menu) return menu;
-  menu = document.createElement("div");
-  menu.id = "eventContextMenu";
-  document.body.appendChild(menu);
-  return menu;
-}
-
-function positionContextMenu(menu, x, y) {
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  // Use actual rendered size when available, fall back to estimates
-  const menuW = menu.offsetWidth  || 185;
-  const menuH = menu.offsetHeight || 140;
-  menu.style.left = (x + menuW > vw ? x - menuW : x) + "px";
-  menu.style.top  = (y + menuH > vh ? y - menuH : y) + "px";
-  menu.classList.add("visible");
-}
-
-// ✅ RIGHT-CLICK ON EVENT — Create Event / Edit / Delete
-function openContextMenu(x, y, fcEvent) {
-  const menu = ensureContextMenu();
-
-  // Rebuild menu items fresh (prevents stale onclick closures)
-  menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
-    <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="edit">✏️ Edit</div>
-    <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item danger" data-action="delete">🗑 Delete</div>
-  `;
-
-  positionContextMenu(menu, x, y);
-
-  // ➕ Create Event — opens blank create modal (not pre-filled with this event)
-  menu.querySelector("[data-action='create']").onclick = () => {
-    closeContextMenu();
-    window.openCreateModal?.();
-  };
-
-  // ✏️ Edit — opens edit modal pre-filled with this event
-  menu.querySelector("[data-action='edit']").onclick = () => {
-    closeContextMenu();
-    window.openCreateModal?.(null, fcEvent);
-  };
-
-  // 🗑 Delete — deletes this event after confirmation
-  menu.querySelector("[data-action='delete']").onclick = async () => {
-    closeContextMenu();
-    window.editingEventId = fcEvent.extendedProps?.backendId || Number(fcEvent.id);
-    await window.deleteEvent?.();
-  };
-}
-
-// ✅ RIGHT-CLICK ON EMPTY DATE CELL — Create Event only
-function openDateContextMenu(x, y, date) {
-  const menu = ensureContextMenu();
-
-  menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
-  `;
-
-  positionContextMenu(menu, x, y);
-
-  // Opens create modal pre-filled with the right-clicked date
-  menu.querySelector("[data-action='create']").onclick = () => {
-    closeContextMenu();
-    window.openCreateModal?.(date);
-  };
-}
-
-function closeContextMenu() {
-  const menu = document.getElementById("eventContextMenu");
-  if (menu) menu.classList.remove("visible");
-}
-
-// Close on any outside click or Escape
-document.addEventListener("click", () => closeContextMenu());
-document.addEventListener("keydown", e => {
-  if (e.key === "Escape") closeContextMenu();
-});
-
 /**************************************************************
  * ✅ GLOBAL STATE
  * (do not initialize sessionEventCache here — single source in calendar.js)
  **************************************************************/
-
-// =========================================================
-// ✅ PHASE 3 & 4: SELECTED EVENT STATE
-// ---------------------------------------------------------
-// Single source of truth for event highlighting.
-// All views (month/week/day) read window.selectedEventId.
-// setSelectedEvent() updates the ID and triggers a re-render
-// so eventClassNames can add/remove the 'event-selected' class.
-// =========================================================
-window.selectedEventId = null;
-
-/**
- * setSelectedEvent(id)
- * ----------------------
- * Sets the globally selected event and re-renders the calendar
- * so eventClassNames applies the highlight to the correct event only.
- * Passing null or an already-selected id clears/toggles selection.
- */
-function setSelectedEvent(id) {
-  const strId = id ? String(id) : null;
-  // ✅ Toggle: clicking the same event deselects it
-  window.selectedEventId = window.selectedEventId === strId ? null : strId;
-  console.log("✅ SELECTED EVENT:", window.selectedEventId);
-  if (window.calendar) {
-    // refetchEvents re-reads the in-memory sessionEventCache (fast, no network)
-    // and re-renders all events, triggering eventClassNames for each.
-    window.calendar.refetchEvents();
-  }
-}
-window.setSelectedEvent = setSelectedEvent;
 
 /**************************************************************
  ✅ HIGHLIGHT DAY (FINAL CLEAN VERSION)
@@ -198,6 +64,99 @@ export function renderRangePill() {
   console.log("✅ RANGE PILL RENDER:", el.textContent);
 }
 
+// =========================================================
+// ✅ CONTEXT MENU — right-click on events AND empty date cells
+// =========================================================
+function ensureContextMenu() {
+  let menu = document.getElementById("eventContextMenu");
+  if (menu) return menu;
+  menu = document.createElement("div");
+  menu.id = "eventContextMenu";
+  document.body.appendChild(menu);
+  return menu;
+}
+
+function positionContextMenu(menu, x, y) {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const menuW = menu.offsetWidth  || 185;
+  const menuH = menu.offsetHeight || 140;
+  menu.style.left = (x + menuW > vw ? x - menuW : x) + "px";
+  menu.style.top  = (y + menuH > vh ? y - menuH : y) + "px";
+  menu.classList.add("visible");
+}
+
+function openContextMenu(x, y, fcEvent) {
+  const menu = ensureContextMenu();
+  menu.innerHTML = `
+    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" data-action="edit">✏️ Edit</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item danger" data-action="delete">🗑 Delete</div>
+  `;
+  positionContextMenu(menu, x, y);
+  menu.querySelector("[data-action='create']").onclick = () => {
+    closeContextMenu();
+    window.openCreateModal?.();
+  };
+  menu.querySelector("[data-action='edit']").onclick = () => {
+    closeContextMenu();
+    window.openCreateModal?.(null, fcEvent);
+  };
+  menu.querySelector("[data-action='delete']").onclick = async () => {
+    closeContextMenu();
+    window.editingEventId = fcEvent.extendedProps?.backendId || Number(fcEvent.id);
+    await window.deleteEvent?.();
+  };
+}
+
+function openDateContextMenu(x, y, date) {
+  const menu = ensureContextMenu();
+  menu.innerHTML = `
+    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
+  `;
+  positionContextMenu(menu, x, y);
+  menu.querySelector("[data-action='create']").onclick = () => {
+    closeContextMenu();
+    window.openCreateModal?.(date);
+  };
+}
+
+function closeContextMenu() {
+  const menu = document.getElementById("eventContextMenu");
+  if (menu) menu.classList.remove("visible");
+}
+
+document.addEventListener("click", () => closeContextMenu());
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeContextMenu();
+});
+
+// =========================================================
+// ✅ SELECTED EVENT STATE (single source of truth)
+// Highlight one event at a time across all views.
+// =========================================================
+window.selectedEventId = null;
+
+function setSelectedEvent(id) {
+  const strId = id ? String(id) : null;
+  // Toggle: clicking the same event again clears selection
+  window.selectedEventId = window.selectedEventId === strId ? null : strId;
+  console.log("✅ SELECTED EVENT:", window.selectedEventId);
+  if (window.calendar) {
+    window.calendar.refetchEvents();
+  }
+}
+window.setSelectedEvent = setSelectedEvent;
+
+// =========================================================
+// ✅ VIEW-SWITCH TRACKING — used by datesSet to navigate
+// to selectedDate when the user switches Month/Week/Day.
+// =========================================================
+let _prevViewType = null;
+let _navigatingToSelected = false;
+
 /**
  * ==========================================================
  * ✅ FULLCALENDAR INIT (EXPORTED — SINGLE SOURCE OF TRUTH)
@@ -243,21 +202,24 @@ export function initFullCalendar() {
       timeGridDay: "Day"
     },
 
-    // ✅ PHASE 2: Week view starts on Sunday (firstDay:0) so Sun→Sat range
-    // is always correct when gotoDate() or changeView() is called.
+    // ✅ Week starts Sunday; editable/selectable enable drag+click
     firstDay: 0,
-
-    // =========================================================
-    // ✅ INTERACTIVITY — Drag/drop, resize, click
-    // ---------------------------------------------------------
-    // editable:    allows drag-and-drop repositioning of events
-    // selectable:  allows clicking empty days to create events
-    // =========================================================
     editable:   true,
-    droppable:  false,  // external drag-in disabled (not needed)
+    droppable:  false,
     selectable: true,
 
     eventDisplay: "block",
+
+    // =========================================================
+    // ✅ PHASE 4: EVENT CLASS NAMES — highlight selected event
+    // eventClassNames fires on every render; returns
+    // ['event-selected'] for the matching event only.
+    // =========================================================
+    eventClassNames: function(arg) {
+      return String(arg.event.id) === String(window.selectedEventId)
+        ? ['event-selected']
+        : [];
+    },
 
     events: function(fetchInfo, successCallback) {
       if (!window.sessionEventCache) {
@@ -311,20 +273,6 @@ export function initFullCalendar() {
 
       successCallback(events);
     },
-    // =========================================================
-    // ✅ PHASE 4: EVENT CLASS NAMES — highlight selected event only
-    // ---------------------------------------------------------
-    // eventClassNames fires on every event render (initial + after
-    // refetchEvents). Returns ['event-selected'] for the one event
-    // matching window.selectedEventId, empty array for all others.
-    // The CSS class is defined in style.css (.fc-event.event-selected).
-    // =========================================================
-    eventClassNames: function(arg) {
-      return String(arg.event.id) === String(window.selectedEventId)
-        ? ['event-selected']
-        : [];
-    },
-
     eventDidMount: function(info) {
 
       
@@ -362,10 +310,8 @@ export function initFullCalendar() {
       }
 
       // =========================================================
-      // ✅ PHASE 5: DOUBLE-CLICK — open edit modal
-      // ---------------------------------------------------------
-      // ONLY path that opens the edit modal from a calendar event.
-      // Single-click NEVER opens modal (handled by eventClick below).
+      // ✅ PHASE 5: DOUBLE-CLICK → open edit modal
+      // Single-click NEVER opens modal (handled by eventClick).
       // =========================================================
       info.el.addEventListener('dblclick', (e) => {
         e.stopPropagation();
@@ -376,10 +322,7 @@ export function initFullCalendar() {
       });
 
       // =========================================================
-      // ✅ PHASE 6: RIGHT-CLICK CONTEXT MENU
-      // ---------------------------------------------------------
-      // Second path for edit/delete — right-click opens context menu.
-      // Prevents browser's native context menu via e.preventDefault().
+      // ✅ RIGHT-CLICK CONTEXT MENU on events
       // =========================================================
       info.el.addEventListener("contextmenu", (e) => {
         e.preventDefault();
@@ -389,26 +332,17 @@ export function initFullCalendar() {
     },
 
     // =========================================================
-    // ✅ DATE CLICK — update sidebar panels only.
-    // ---------------------------------------------------------
-    // CRITICAL RULE: clicking a date NEVER changes the main
-    // calendar view (Month/Week/Day). ONLY the toolbar buttons
-    // (Month | Week | Day) may change the calendar view.
-    //
-    // Single click → updates sidebar Day panel + Week panel
-    // Double click → opens create-event modal for that date
-    //
-    // Double-click is detected by timing two rapid dateClick
-    // events on the same dateStr within 300 ms.
+    // ✅ DATE CLICK — update selectedDate + sidebar.
+    // Double-click (two clicks ≤280 ms) opens create modal.
+    // Single click updates selectedDate and sidebars only —
+    // NEVER changes the main calendar view.
     // =========================================================
     dateClick: function(info) {
-      console.log("DATE CLICK:", info.dateStr);
-
       const dateStr = info.dateStr;
+      console.log("DATE CLICK:", dateStr);
 
-      // ✅ Double-click detection on date cells
+      // ✅ Double-click detection
       if (window._dateClickTimer && window._lastClickedDate === dateStr) {
-        // Second click arrived — treat as double-click
         clearTimeout(window._dateClickTimer);
         window._dateClickTimer = null;
         window._lastClickedDate = null;
@@ -419,171 +353,45 @@ export function initFullCalendar() {
         return;
       }
 
-      // ✅ First click — wait to see if a second arrives
+      // ✅ First click — wait to see if second click arrives
       window._lastClickedDate = dateStr;
       window._dateClickTimer = setTimeout(() => {
         window._dateClickTimer = null;
         window._lastClickedDate = null;
 
-        // ✅ Update global selected date (sidebar reads this)
+        // ✅ SINGLE SOURCE OF TRUTH — update global selected date
         window.selectedDate = dateStr;
+        console.log("SELECTED DATE:", window.selectedDate);
 
         // ✅ Highlight the clicked day cell in the calendar grid
         highlightSelectedDay(dateStr);
 
-        // ✅ Refresh sidebar Day panel (red panel)
+        // ✅ Refresh sidebar panels
         window.updateDayDetails?.();
-
-        // ✅ Refresh sidebar Week panel (orange panel) — Sun→Sat of selected date
         window.updateWeekView?.();
+
+        // ✅ Notify all listeners
+        window.dispatchEvent(new Event("selectedDateChanged"));
 
         console.log("DATE SINGLE CLICK → sidebar updated:", dateStr);
       }, 280);
     },
 
     // =========================================================
-    // ✅ PHASE 3: EVENT CLICK (SINGLE) — highlight only, NO modal
-    // ---------------------------------------------------------
-    // CRITICAL RULE: single click NEVER opens the edit modal.
-    //   → Modal opens ONLY on double-click (eventDidMount dblclick)
-    //   → OR via right-click → Edit menu item (contextmenu)
-    // This handler ONLY updates selectedEventId and re-renders.
+    // ✅ EVENT CLICK (SINGLE) — highlight only, NO modal.
+    // Modal opens ONLY on double-click (eventDidMount dblclick)
+    // or via right-click context menu.
     // =========================================================
     eventClick: function(info) {
-      // ✅ Block FullCalendar's default URL navigation / popover
       info.jsEvent.preventDefault();
       info.jsEvent.stopPropagation();
-
-      // ✅ Resolve event ID (prefer extendedProps.backendId for consistency)
       const id = String(
         info.event.extendedProps?.backendId ||
         info.event.id ||
         ""
       );
       console.log("EVENT SELECTED:", id, info.event.title);
-
-      // ✅ Update selection — triggers refetchEvents → eventClassNames re-runs
       setSelectedEvent(id);
-    },
-
-    // =========================================================
-    // ✅ EVENT DROP — drag-and-drop to a new date/time
-    //
-    // Flow:
-    //   1. FullCalendar moves the event optimistically (instant UI)
-    //   2. We PUT the new times to the backend
-    //   3. On failure → info.revert() rolls back the UI
-    //   4. On success → window.sessionEventCache is updated in-place
-    // =========================================================
-    eventDrop: async function(info) {
-      const ev      = info.event;
-      const backendId = ev.extendedProps?.backendId || Number(ev.id);
-
-      console.log("EVENT MOVED:", ev.title, "→", ev.start, backendId);
-
-      if (!backendId) {
-        console.warn("⚠️ Cannot move: event has no backendId");
-        // Only revert non-local events (external/synced ones are read-only)
-        info.revert();
-        return;
-      }
-
-      try {
-        const res = await apiFetch(`/calendar/event/${backendId}`, {
-          method: "PUT",
-          body: {
-            start: ev.start?.toISOString(),
-            end:   ev.end?.toISOString() || null,
-          },
-        });
-
-        if (!res || !res.ok) {
-          console.error("❌ Move failed", res?.status);
-          info.revert();
-          window.showToast?.("❌ Move failed", "error");
-          return;
-        }
-
-        const data = await res.json();
-        console.log("✅ Event move persisted", data);
-
-        // ✅ Update cache in-place so reload reflects new times
-        if (Array.isArray(window.sessionEventCache)) {
-          const idx = window.sessionEventCache.findIndex(
-            e => e.extendedProps?.backendId === backendId ||
-                 String(e.id) === String(ev.id)
-          );
-          if (idx !== -1) {
-            window.sessionEventCache[idx] = {
-              ...window.sessionEventCache[idx],
-              start: new Date(data.event.start || ev.start),
-              end:   data.event.end ? new Date(data.event.end) : null,
-            };
-          }
-        }
-
-        window.showToast?.("✅ Event moved");
-
-      } catch (err) {
-        console.error("❌ Move error:", err);
-        info.revert();
-        window.showToast?.("❌ Move error: " + err.message, "error");
-      }
-    },
-
-    // =========================================================
-    // ✅ EVENT RESIZE — drag the end-handle to a new end time
-    //    Same persistence logic as eventDrop
-    // =========================================================
-    eventResize: async function(info) {
-      const ev        = info.event;
-      const backendId = ev.extendedProps?.backendId || Number(ev.id);
-
-      console.log("EVENT RESIZED:", ev.title, "new end →", ev.end, backendId);
-
-      if (!backendId) {
-        info.revert();
-        return;
-      }
-
-      try {
-        const res = await apiFetch(`/calendar/event/${backendId}`, {
-          method: "PUT",
-          body: {
-            start: ev.start?.toISOString(),
-            end:   ev.end?.toISOString()  || null,
-          },
-        });
-
-        if (!res || !res.ok) {
-          console.error("❌ Resize failed", res?.status);
-          info.revert();
-          window.showToast?.("❌ Resize failed", "error");
-          return;
-        }
-
-        // ✅ Update cache
-        if (Array.isArray(window.sessionEventCache)) {
-          const idx = window.sessionEventCache.findIndex(
-            e => e.extendedProps?.backendId === backendId ||
-                 String(e.id) === String(ev.id)
-          );
-          if (idx !== -1) {
-            window.sessionEventCache[idx] = {
-              ...window.sessionEventCache[idx],
-              start: new Date(ev.start),
-              end:   ev.end ? new Date(ev.end) : null,
-            };
-          }
-        }
-
-        window.showToast?.("✅ Event resized");
-
-      } catch (err) {
-        console.error("❌ Resize error:", err);
-        info.revert();
-        window.showToast?.("❌ Resize error: " + err.message, "error");
-      }
     },
 
     eventsSet: function() {
@@ -594,7 +402,49 @@ export function initFullCalendar() {
       }
     },
 
-    datesSet: function() {
+    datesSet: function(info) {
+      const currentViewType = info.view.type;
+      const cal = window.calendar;
+
+      // =========================================================
+      // ✅ PHASE 5: VIEW-SWITCH FIX
+      // When the user clicks Month/Week/Day toolbar button,
+      // navigate to selectedDate so it never resets to today.
+      // Guard _navigatingToSelected prevents an infinite loop
+      // (gotoDate triggers another datesSet).
+      // =========================================================
+      if (
+        !_navigatingToSelected &&
+        _prevViewType !== null &&
+        _prevViewType !== currentViewType &&
+        window.selectedDate &&
+        cal
+      ) {
+        _prevViewType = currentViewType;
+        _navigatingToSelected = true;
+        console.log("SWITCH VIEW:", currentViewType, window.selectedDate);
+        setTimeout(() => {
+          cal.gotoDate(window.selectedDate);
+          _navigatingToSelected = false;
+          // Re-apply highlight when returning to month view
+          if (currentViewType === "dayGridMonth") {
+            setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
+          }
+        }, 0);
+        return;
+      }
+
+      _prevViewType = currentViewType;
+      _navigatingToSelected = false;
+
+      // ✅ PHASE 4: Re-apply highlight whenever month view renders
+      if (currentViewType === "dayGridMonth" && window.selectedDate) {
+        setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
+      }
+
+      // ✅ Log for debugging
+      console.log("VIEW INIT DATE:", window.selectedDate, "view:", currentViewType);
+
       if (typeof window.updateChipEventCounts === "function") {
         setTimeout(() => {
           window.updateChipEventCounts();
@@ -615,13 +465,9 @@ export function initFullCalendar() {
   window.calendar.render();
 
   // =========================================================
-  // ✅ RIGHT-CLICK ON EMPTY DATE CELLS
-  // ---------------------------------------------------------
+  // ✅ RIGHT-CLICK ON EMPTY DATE CELLS (not on events)
   // Event contextmenu handlers call stopPropagation(), so this
   // calendar-level listener ONLY fires for non-event right-clicks.
-  // Walk up the DOM from the click target to find a [data-date]
-  // attribute (present on month day cells, week/day col headers,
-  // and timeGrid column wrappers). If found, show the date menu.
   // =========================================================
   const calEl = document.getElementById("calendar");
   if (calEl) {
@@ -635,7 +481,7 @@ export function initFullCalendar() {
         }
         node = node.parentElement;
       }
-      if (!dateStr) return; // no date cell found — let browser handle
+      if (!dateStr) return;
       e.preventDefault();
       e.stopPropagation();
       console.log("DATE CONTEXTMENU:", dateStr);
@@ -643,6 +489,7 @@ export function initFullCalendar() {
     });
   }
 
+  // ✅ Initial chip count update
   setTimeout(() => {
     if (typeof window.updateChipEventCounts === "function") {
       window.updateChipEventCounts();

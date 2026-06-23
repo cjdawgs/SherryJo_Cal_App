@@ -112,7 +112,39 @@ def wipe_user_events(
     }
 
 # ==================================================
-# ✅ Post Event (SEPARATE FUNCTION)
+# ✅ SHARED EVENT SERIALIZER (single source of truth)
+# ==================================================
+def serialize_event(event: Event) -> dict:
+    """
+    Returns the canonical JSON shape for a local calendar event.
+    Used by POST, PUT, and any other endpoint that returns an event.
+    Matches the shape expected by frontend normalizedEvent logic.
+    """
+    start_iso = event.start_time.isoformat() if event.start_time else None
+    end_iso   = event.end_time.isoformat()   if event.end_time   else None
+
+    return {
+        "id":           event.id,
+        "title":        event.title or "",
+        "start":        start_iso,
+        "end":          end_iso,
+        "start_time":   start_iso,
+        "end_time":     end_iso,
+        "source":       "local",
+        "account_key":  "local:local",
+        "account":      "local",
+        "account_email":"local",
+        "extendedProps": {
+            "source":       "local",
+            "account_key":  "local:local",
+            "account":      "local",
+            "backendId":    event.id,
+        },
+    }
+
+
+# ==================================================
+# ✅ POST /calendar/event  — CREATE
 # ==================================================
 @router.post("/event")
 async def create_event(
@@ -120,11 +152,21 @@ async def create_event(
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
+    """
+    Create a new local calendar event.
+    Returns the full event object so the frontend can add it to the
+    session cache and render it without a full reload.
+    """
+    from fastapi import HTTPException
+
     data = await request.json()
 
-    title = data.get("title")
-    start_time = to_dt(data.get("start_time"))
-    end_time = to_dt(data.get("end_time"))  
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+
+    start_time = to_dt(data.get("start_time") or data.get("start"))
+    end_time   = to_dt(data.get("end_time")   or data.get("end"))
 
     event = Event(
         title=title,
@@ -137,7 +179,93 @@ async def create_event(
     db.commit()
     db.refresh(event)
 
-    return {"status": "ok", "event_id": event.id}
+    print(f"✅ EVENT CREATED id={event.id} title={event.title}")
+
+    return {
+        "status":   "ok",
+        "event_id": event.id,
+        "event":    serialize_event(event),   # ← full shape for frontend
+    }
+
+
+# ==================================================
+# ✅ PUT /calendar/event/{event_id}  — UPDATE
+# ==================================================
+@router.put("/event/{event_id}")
+async def update_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Update title and/or start/end times for a local event.
+    Used by the edit modal AND by drag-drop / resize in FullCalendar.
+    Only the current user's events are accessible.
+    """
+    from fastapi import HTTPException
+
+    event = db.query(Event).filter(
+        Event.id == event_id,
+        Event.owner_id == current_user.id
+    ).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    data = await request.json()
+
+    # Accept either snake_case (start_time) or camelCase-ish (start) keys
+    if "title" in data and data["title"]:
+        event.title = data["title"].strip()
+
+    new_start = to_dt(data.get("start_time") or data.get("start"))
+    new_end   = to_dt(data.get("end_time")   or data.get("end"))
+
+    if new_start:
+        event.start_time = new_start
+    if new_end:
+        event.end_time = new_end
+
+    db.commit()
+    db.refresh(event)
+
+    print(f"✅ EVENT UPDATED id={event.id} start={event.start_time}")
+
+    return {
+        "status": "ok",
+        "event":  serialize_event(event),
+    }
+
+
+# ==================================================
+# ✅ DELETE /calendar/event/{event_id}  — DELETE
+# ==================================================
+@router.delete("/event/{event_id}")
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    """
+    Permanently delete a local calendar event owned by the current user.
+    """
+    from fastapi import HTTPException
+
+    event = db.query(Event).filter(
+        Event.id == event_id,
+        Event.owner_id == current_user.id
+    ).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    db.delete(event)
+    db.commit()
+
+    print(f"✅ EVENT DELETED id={event_id}")
+
+    return {"status": "ok", "deleted_id": event_id}
 
 # ==================================================
 # ✅ SYNC ENDPOINT (SEPARATE FUNCTION)

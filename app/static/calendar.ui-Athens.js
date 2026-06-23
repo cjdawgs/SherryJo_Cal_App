@@ -1,6 +1,10 @@
 import { getActiveRangeLabel, toDayString } from "./core.js";
 import { connectGoogle, connectMicrosoft, connectApple } from "./account_connections.js";
-import { renderRangePill } from "./calendar.fullcalendar.js";
+import { renderRangePill, highlightSelectedDay } from "./calendar.fullcalendar.js";
+// ✅ apiFetch is the central authenticated fetch helper defined in api.js.
+//    api.js also sets window.apiFetch, but importing directly is cleaner and
+//    avoids the module strict-mode bare-name lookup that causes ReferenceError.
+import { apiFetch } from "./api.js";
 
 /**************************************************************
  * ✅ GLOBAL STATE
@@ -207,12 +211,16 @@ function openCreateModal(date = null, event = null) {
 
   const deleteBtn = document.getElementById("deleteEventBtn");
 
-  // hide by default
-  deleteBtn.style.display = "none";
+  // ✅ Reset: hide delete button for new events
+  if (deleteBtn) deleteBtn.style.display = "none";
 
-  // show only if editing
+  // ✅ Reset editingEventId — also sync to window for cross-module access
+  editingEventId = null;
+  window.editingEventId = null;
+
+  // ✅ show only if editing
   if (event) {
-    deleteBtn.style.display = "inline-block";
+    if (deleteBtn) deleteBtn.style.display = "inline-block";
   }
 
   modal.style.opacity = "0";
@@ -234,10 +242,9 @@ function openCreateModal(date = null, event = null) {
   // ✅ CURRENT TIME
   const now = new Date();
 
-  // ✅ DEFAULT DATE = selectedDate (or today if nothing selected)
+  // ✅ DEFAULT DATE = TODAY
   const todayStr = toDayString(now);
-  const defaultDateStr = window.selectedDate || todayStr;
-  document.getElementById("eventDate").value = defaultDateStr;
+  document.getElementById("eventDate").value = todayStr;
 
   // ✅ NEXT FULL HOUR
   const nextHour = new Date(now);
@@ -262,11 +269,13 @@ function openCreateModal(date = null, event = null) {
   document.getElementById("eventStart").value = formatTime(nextHour);
   document.getElementById("eventEnd").value = formatTime(endHour);
 
-  editingEventId = null;
+  // editingEventId is already cleared above (near deleteBtn reset)
 
   // ✅ If clicking an existing event → EDIT MODE
   if (event) {
     editingEventId = event.extendedProps?.backendId;
+    // ✅ Sync to window so calendar.js deleteEvent reads the same value
+    window.editingEventId = editingEventId;
     console.log("🧠 MODAL EVENT FULL:", event);
     console.log("🧠 backendId:", event.extendedProps?.backendId);
     console.log("🧠 event.id:", event.id);
@@ -317,15 +326,19 @@ function closeCreateModal() {
 
 /**************************************************************
  * ✅ SAVE EVENT (CREATE OR UPDATE)
+ *
+ * FLOW:
+ *   - If window.editingEventId is set  → PUT  /calendar/event/{id}  (edit)
+ *   - Otherwise                         → POST /calendar/event       (create)
+ *
+ * Both paths:
+ *   1. Persist to backend
+ *   2. Update window.sessionEventCache immediately (no full reload)
+ *   3. Re-render sidebar + FullCalendar
  **************************************************************/
-/**************************************************************
-✅ SAVE EVENT — FULLY CORRECT + CLOSED STRUCTURE
----------------------------------------------------------------
-- No missing braces
-- Single source of truth
-- Safe async handling
-**************************************************************/
 async function saveEvent() {
+
+  console.log("SAVE EVENT TRIGGERED", { editingId: window.editingEventId });
 
   if (isSavingEvent) {
     console.warn("🚫 Duplicate save blocked");
@@ -336,17 +349,10 @@ async function saveEvent() {
 
   try {
 
-    const title = document.getElementById("eventTitle").value;
+    const title = document.getElementById("eventTitle").value.trim();
     const date  = document.getElementById("eventDate").value;
     const start = document.getElementById("eventStart").value;
     const end   = document.getElementById("eventEnd").value;
-
-    const localKey = "local:local";
-    const colorInput = document.getElementById("eventColor");
-
-    const color =
-      colorInput?.value ||
-      getColorByKey(localKey, "local");
 
     if (!title || !date) {
       alert("Title and date required");
@@ -362,156 +368,153 @@ async function saveEvent() {
       : null;
 
     const payload = {
-      title: title,
+      title,
       start_time: startISO,
-      end_time: endISO,
-      color: color,
-      source: "local",
-      account_key: localKey
+      end_time:   endISO,
+      source:     "local",
+      account_key: "local:local",
     };
 
-    const res = await apiFetch("/calendar/event", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + localStorage.getItem("token")
-      },
-      body: JSON.stringify(payload)
-    });
+    // ✅ Decide CREATE vs UPDATE
+    const isEdit = Boolean(window.editingEventId);
+    const url    = isEdit
+      ? `/calendar/event/${window.editingEventId}`
+      : "/calendar/event";
+    const method = isEdit ? "PUT" : "POST";
 
-    if (!res.ok) throw new Error("Save failed");
+    console.log(`SAVE EVENT → ${method} ${url}`, payload);
+
+    const res = await apiFetch(url, { method, body: payload });
+
+    if (!res) {
+      throw new Error("No response from server");
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.status);
+      throw new Error(`Save failed (${res.status}): ${errText}`);
+    }
 
     const data = await res.json();
+    console.log("SAVE EVENT RESPONSE:", data);
 
-    /**************************************************************
-    ✅ NORMALIZE EVENT
-    **************************************************************/
+    const ev = data.event;
+    if (!ev) throw new Error("Server response missing event object");
+
+    /***********************************************************
+     * ✅ BUILD NORMALIZED EVENT (matches sessionEventCache shape)
+     ***********************************************************/
     const normalizedEvent = {
-      ...data.event,
-      start: new Date(data.event.start || data.event.start_time),
-      end: data.event.end
-        ? new Date(data.event.end)
-        : (data.event.end_time ? new Date(data.event.end_time) : null),
+      id:    String(ev.id),
+      title: ev.title,
+      start: new Date(ev.start || ev.start_time),
+      end:   ev.end ? new Date(ev.end) : (ev.end_time ? new Date(ev.end_time) : null),
       extendedProps: {
-        ...(data.event.extendedProps || {}),
-        source: data.event.source || "local",
-        account_key: data.event.account_key || "local:local",
-        backendId: data.event.id
-      }
+        ...(ev.extendedProps || {}),
+        source:      ev.source       || "local",
+        account_key: ev.account_key  || "local:local",
+        account:     ev.account      || "local",
+        backendId:   ev.id,
+      },
     };
 
-    /**************************************************************
-    ✅ UPDATE CACHE
-    **************************************************************/
-    sessionEventCache.push(normalizedEvent);
+    /***********************************************************
+     * ✅ UPDATE WINDOW.SESSIONEVENTCACHE (single source of truth)
+     ***********************************************************/
+    if (!Array.isArray(window.sessionEventCache)) {
+      window.sessionEventCache = [];
+    }
 
-    /**************************************************************
-    ✅ CONTROLLED STATE UPDATE
-    **************************************************************/
+    if (isEdit) {
+      // Replace existing entry in-place
+      const idx = window.sessionEventCache.findIndex(
+        e => String(e.id) === String(ev.id) ||
+             e.extendedProps?.backendId === ev.id
+      );
+      if (idx !== -1) {
+        window.sessionEventCache[idx] = normalizedEvent;
+      } else {
+        window.sessionEventCache.push(normalizedEvent);
+      }
+    } else {
+      window.sessionEventCache.push(normalizedEvent);
+    }
+
+    /***********************************************************
+     * ✅ UPDATE SIDEBAR
+     ***********************************************************/
     window.selectedDate = toDayString(normalizedEvent.start);
-
-    /**************************************************************
-    ✅ RENDER PIPELINE
-    **************************************************************/
-    updateDayDetails();
-    updateWeekView();
+    window.updateDayDetails?.();
+    window.updateWeekView?.();
     highlightSelectedDay(window.selectedDate);
 
-    /**************************************************************
-    ✅ FINAL UI ACTIONS
-    **************************************************************/
-    showToast("✅ Event saved");
+    /***********************************************************
+     * ✅ FINAL UI
+     ***********************************************************/
+    window.showToast?.(`✅ Event ${isEdit ? "updated" : "saved"}`);
     closeCreateModal();
 
-    smartRefresh({ reason: "event_saved", force: true });
+    // Force FullCalendar to re-read from the updated cache
+    window.smartRefresh?.({ reason: "event_saved", force: true });
 
   } catch (err) {
     console.error("❌ Save failed:", err);
+    window.showToast?.("❌ Save failed: " + err.message, "error");
+    alert("❌ Save failed: " + err.message);
   } finally {
     isSavingEvent = false;
   }
 }
 
 /**************************************************************
- * ✅ DELETE EVENT (CREATE OR UPDATE)
+ * ✅ DELETE EVENT (calendar.ui.js version)
+ * NOTE: window.deleteEvent is set in calendar.js and is what the
+ *       delete button actually calls.  This version is kept as
+ *       fallback — it delegates to window.deleteEvent if available.
  **************************************************************/
 async function deleteEvent() {
-  if (!editingEventId) {
-    console.warn("🚫 Cannot delete: no backend ID (external or invalid event)");
+  // Prefer the calendar.js version which has apiFetch + smartRefresh in scope
+  if (typeof window.deleteEvent === "function" && window.deleteEvent !== deleteEvent) {
+    return window.deleteEvent();
+  }
+
+  const targetId = window.editingEventId;
+  if (!targetId) {
+    console.warn("🚫 Cannot delete: no editingEventId");
     return;
   }
 
-  const confirmDelete = confirm("Delete this event?");
-  if (!confirmDelete) return;
+  if (!confirm("Delete this event?")) return;
 
-    try {
-
-    /**************************************************************
-     ✅ STEP 2 DEBUG — VERIFY EXACT EVENT BEFORE DELETE
-    **************************************************************/
-    const debugMatch = sessionEventCache.find(e =>
-      e.extendedProps?.backendId === editingEventId
-    );
-
-    /**************************************************************
-     ✅ DELETE FROM BACKEND
-    **************************************************************/
-    const res = await apiFetch(`/calendar/event/${editingEventId}`, {
+  try {
+    const res = await apiFetch(`/calendar/event/${targetId}`, {
       method: "DELETE"
     });
 
-    /**************************************************************
-     ✅ CRITICAL FIX — REMOVE FROM CACHE IMMEDIATELY
-    **************************************************************/
-    sessionEventCache = sessionEventCache.filter(e => {
-      return e.extendedProps?.backendId !== editingEventId;
-    });
-    
-    /**************************************************************
-     ✅ BLOCK BOTH BACKEND + DISPLAY IDS
-    **************************************************************/
-    window.deletedEventIds = window.deletedEventIds || new Set();
-
-    window.deletedEventIds.add(editingEventId); // backendId
-
-    // ALSO block displayId (critical)
-    const displayMatch = sessionEventCache.find(e =>
-      e.extendedProps?.backendId === editingEventId
-    );
-
-    if (displayMatch?.id) {
-      window.deletedEventIds.add(displayMatch.id);
+    if (!res || !res.ok) {
+      console.error("❌ Delete failed", res?.status);
+      window.showToast?.("❌ Delete failed", "error");
+      return;
     }
+
+    // ✅ Remove from cache
+    if (Array.isArray(window.sessionEventCache)) {
+      window.sessionEventCache = window.sessionEventCache.filter(
+        e => e.extendedProps?.backendId !== targetId &&
+             String(e.id) !== String(targetId)
+      );
+    }
+
+    window.deletedEventIds = window.deletedEventIds || new Set();
+    window.deletedEventIds.add(targetId);
+    window.editingEventId = null;
 
     closeCreateModal();
-    smartRefresh({ reason: "event_deleted" });
-
-    /**************************************************************
-     ✅ KEEP YOUR CURRENT SAFETY RELOAD (OK FOR NOW)
-     Comment this code out so we can redesign with Gold Standard
-    **************************************************************/
-    //needsCacheRefresh = true;
-    //await preloadEventCache();  // 🔥 DISABLED (Phase 3)
-
-    /**************************************************************
-    ✅ FORCE FULLCALENDAR HARD RESET (CRITICAL)
-    ✅ Fixes Monthly view ghost events
-    **************************************************************/
-    if (window.calendar) {
-      console.log("🔥 FORCE CALENDAR REFETCH");
-      /**************************************************************
-       ✅ FULLCALENDAR HARD REFRESH (SAFE + CORRECT)
-      **************************************************************/
-      if (window.calendar && typeof window.calendar.refetchEvents === "function") {
-
-        console.log("🔥 FORCE CALENDAR REFETCH");
-
-        window.calendar.refetchEvents();   // ✅ ONLY THIS IS NEEDED
-      }
-    }
+    window.showToast?.("🗑 Event deleted");
+    window.smartRefresh?.({ reason: "event_deleted", force: true });
 
   } catch (err) {
-    console.error("❌ Delete failed:", err);
+    console.error("❌ Delete error:", err);
+    window.showToast?.("❌ Delete error: " + err.message, "error");
   }
 }
 
