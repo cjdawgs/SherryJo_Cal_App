@@ -311,6 +311,7 @@ button.primary {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
+  z-index: 10000;
 }
 
 .modalOverlay.show {
@@ -336,6 +337,7 @@ button.primary {
   transition: all 0.2s ease;
 
   box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+  z-index: 10001;
 }
 
 .modal.show {

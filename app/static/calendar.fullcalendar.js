@@ -310,18 +310,6 @@ export function initFullCalendar() {
       }
 
       // =========================================================
-      // ✅ PHASE 5: DOUBLE-CLICK → open edit modal
-      // Single-click NEVER opens modal (handled by eventClick).
-      // =========================================================
-      info.el.addEventListener('dblclick', (e) => {
-        e.stopPropagation();
-        console.log("EVENT DBLCLICK →", info.event.title, info.event.id);
-        if (typeof window.openCreateModal === "function") {
-          window.openCreateModal(null, info.event);
-        }
-      });
-
-      // =========================================================
       // ✅ RIGHT-CLICK CONTEXT MENU on events
       // =========================================================
       info.el.addEventListener("contextmenu", (e) => {
@@ -378,20 +366,45 @@ export function initFullCalendar() {
     },
 
     // =========================================================
-    // ✅ EVENT CLICK (SINGLE) — highlight only, NO modal.
-    // Modal opens ONLY on double-click (eventDidMount dblclick)
-    // or via right-click context menu.
+    // ✅ EVENT CLICK — single click selects; double-click opens editor.
+    //
+    // Native browser dblclick is unreliable inside FullCalendar
+    // because eventClick calls stopPropagation(), disrupting the
+    // browser's double-click detection sequence.
+    // Solution: same timer-based detection used by dateClick.
+    //
+    //   First click  (≤280 ms gap) → wait for second click
+    //   Second click (≤280 ms gap) → open edit modal
+    //   First click  (>280 ms gap) → select event (highlight)
     // =========================================================
     eventClick: function(info) {
       info.jsEvent.preventDefault();
       info.jsEvent.stopPropagation();
+
       const id = String(
         info.event.extendedProps?.backendId ||
         info.event.id ||
         ""
       );
-      console.log("EVENT SELECTED:", id, info.event.title);
-      setSelectedEvent(id);
+
+      // ✅ Double-click detection
+      if (window._eventClickTimer && window._lastClickedEventId === id) {
+        clearTimeout(window._eventClickTimer);
+        window._eventClickTimer = null;
+        window._lastClickedEventId = null;
+        console.log("EVENT DBLCLICK →", info.event.title, id);
+        window.openCreateModal?.(null, info.event);
+        return;
+      }
+
+      // ✅ First click — wait to see if second arrives
+      window._lastClickedEventId = id;
+      window._eventClickTimer = setTimeout(() => {
+        window._eventClickTimer = null;
+        window._lastClickedEventId = null;
+        console.log("EVENT SELECTED:", id, info.event.title);
+        setSelectedEvent(id);
+      }, 280);
     },
 
     eventsSet: function() {

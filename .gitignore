@@ -24,6 +24,7 @@ app.db
 .DS_Store
 Thumbs.db
 .vscode/
-``-Athens.env 
--Athens.env 
--Athens.env 
+
+# Machine-specific env files (never commit these)
+*-local.env
+*.local.env
