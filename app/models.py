@@ -3,7 +3,7 @@
 # ✅ IMPORTS
 # --------------------------------------------------
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
@@ -202,6 +202,11 @@ class Event(Base):
     owner = relationship("User", back_populates="events")
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
     # ✅ STATUS
     status = Column(String, default="pending")
@@ -227,5 +232,34 @@ class Event(Base):
     # ==================================================
     color = Column(String, nullable=True)
 
+    # ✅ UX metadata for event form enhancements
+    tags = Column(JSON, nullable=True)
+
+    # ✅ Sticky note payload tied to each event
+    # shape: { content, color, createdAt, updatedAt }
+    sticky_note = Column(JSON, nullable=True)
+
+    # ✅ Multi-sticky payload support
+    # shape: [{ content, color, createdAt, updatedAt }, ...]
+    sticky_notes = Column(JSON, nullable=True)
+
     # ✅ MULTI-PROVIDER SUPPORT
     external_ids = Column(JSON, nullable=True)
+
+
+class DateStickyNote(Base):
+    __tablename__ = "date_sticky_notes"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "date", name="uq_date_sticky_owner_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    date = Column(String, index=True, nullable=False)  # YYYY-MM-DD
+    sticky_notes = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )

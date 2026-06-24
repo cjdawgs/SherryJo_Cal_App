@@ -11,7 +11,7 @@ from app.config import DATABASE_URL
 
 # ✅ Import Base + MODELS (IMPORTANT!)
 from app.database import Base
-from app.models import User, Event, Task , Note  # ✅ ensures tables are registered
+from app.models import User, Event, Task , Note, DateStickyNote  # ✅ ensures tables are registered
 
 # --------------------------------------------------
 # Alembic Config

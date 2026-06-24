@@ -153,63 +153,133 @@
 ===================================================== -->
 <div id="modalOverlay" class="modalOverlay"></div>
 
-<div id="createEventModal" class="modal">
-
-  <!-- ✅ TITLE -->
-  <h3>Create Calendar Event</h3>
-
-  <!-- ✅ HELPFUL INSTRUCTIONS -->
-  <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-    Example: "Team Meeting", "Doctor Appointment", or "Call with John at 2pm"
-  </p>
-
-  <!-- ✅ EVENT TITLE -->
-  <input 
-    id="eventTitle" 
-    placeholder="e.g. Team Meeting or Dentist Appointment" 
-    style="display:block; margin-bottom:8px; width:100%;" 
-  />
-
-  <!-- ✅ DATE -->
-  <input 
-    id="eventDate" 
-    type="date" 
-    style="display:block; margin-bottom:8px; width:100%;" 
-  />
-
-  <!-- ✅ TIME ROW -->
-  <div style="display:flex; gap:5px; margin-bottom:10px;">
-    <input 
-      id="eventStart" 
-      type="time" 
-      title="Start time (optional)" 
-      style="flex:1;" 
-    />
-
-    <input 
-      id="eventEnd" 
-      type="time" 
-      title="End time (optional)" 
-      style="flex:1;" 
-    />
-  </div>
-
-  <!-- ✅ ACTION BUTTONS -->
-  <div style="display:flex; justify-content:space-between; align-items:center;">
-
-    <!-- ✅ DELETE BUTTON -->
-    <button id="deleteEventBtn" style="display:none;">
-      🗑 Delete
-    </button>
-
-    <!-- ✅ SAVE / CANCEL -->
-    <div style="display:flex; gap:10px;">
-      <button id="saveEventBtn">Save</button>
-      <button id="cancelEventBtn">Cancel</button>
+<div id="createEventModal" class="modal modalEngine" data-modal-type="event">
+  <div class="modalHeader">
+    <div>
+      <h3 id="modalTitleText">Create Event</h3>
+      <p id="modalSubtitleText" class="modalSubtitle">
+        Structured event editor with schedule, notes, tags, and sticky metadata.
+      </p>
     </div>
-
   </div>
 
+  <div class="modalBody">
+    <section class="modalSection eventOnly">
+      <label class="fieldLabel" for="eventTitle">Title</label>
+      <input id="eventTitle" placeholder="e.g. Team Meeting or Dentist Appointment" />
+    </section>
+
+    <section class="modalSection eventOnly eventGrid2">
+      <div>
+        <label class="fieldLabel" for="eventDate">Date</label>
+        <input id="eventDate" type="date" />
+      </div>
+      <div class="eventGrid2Times">
+        <div>
+          <label class="fieldLabel" for="eventStart">Start</label>
+          <input id="eventStart" type="time" title="Start time (optional)" />
+        </div>
+        <div>
+          <label class="fieldLabel" for="eventEnd">End</label>
+          <input id="eventEnd" type="time" title="End time (optional)" />
+        </div>
+      </div>
+    </section>
+
+    <section class="modalSection eventOnly">
+      <label class="fieldLabel" for="eventDescriptionEditor">Description / Notes</label>
+      <div class="richToolbar" data-editor="eventDescriptionEditor">
+        <select class="rt-font" title="Font">
+          <option value="Arial">Arial</option>
+          <option value="Calibri">Calibri</option>
+          <option value="Times New Roman">Times New Roman</option>
+          <option value="Georgia">Georgia</option>
+        </select>
+        <select class="rt-size" title="Size">
+          <option value="2">10</option>
+          <option value="3" selected>12</option>
+          <option value="4">14</option>
+          <option value="5">18</option>
+        </select>
+        <button type="button" class="rt-btn" data-cmd="bold" title="Bold">B</button>
+        <button type="button" class="rt-btn" data-cmd="italic" title="Italic">I</button>
+        <button type="button" class="rt-btn" data-cmd="underline" title="Underline">U</button>
+        <input type="color" class="rt-color" title="Text Color" value="#1b2740" />
+        <button type="button" class="rt-btn" data-cmd="justifyLeft" title="Align Left">L</button>
+        <button type="button" class="rt-btn" data-cmd="justifyCenter" title="Align Center">C</button>
+        <button type="button" class="rt-btn" data-cmd="justifyRight" title="Align Right">R</button>
+        <button type="button" class="rt-btn" data-cmd="insertUnorderedList" title="Bullet List">•</button>
+        <button type="button" class="rt-btn" data-cmd="insertOrderedList" title="Numbered List">1.</button>
+      </div>
+      <div id="eventDescriptionEditor" class="richEditor" contenteditable="true" data-placeholder="Add context, agenda, or reminders..."></div>
+    </section>
+
+    <section class="modalSection eventOnly eventGrid2">
+      <div>
+        <label class="fieldLabel" for="eventColor">Event Color</label>
+        <input id="eventColor" type="color" value="#4F8EF7" />
+      </div>
+      <div>
+        <label class="fieldLabel" for="eventTags">Tags</label>
+        <input id="eventTags" placeholder="home, family, errands" />
+      </div>
+    </section>
+
+    <section class="modalSection stickySection">
+      <div class="stickyToolbar">
+        <div>
+          <label class="fieldLabel" for="eventStickyColor">Sticky Color</label>
+          <input id="eventStickyColor" type="color" value="#F7E68A" />
+        </div>
+        <button id="addStickyNoteBtn" class="secondaryBtn" type="button">+ Add Sticky</button>
+        <button id="stickyBackToEventBtn" class="secondaryBtn" type="button">Back To Event</button>
+      </div>
+
+      <div id="stickyNotesList" class="stickyNotesList"></div>
+
+      <div id="stickyPaper" class="stickyPaper">
+        <div class="stickyFold"></div>
+        <div class="richToolbar stickyToolbarPanel" data-editor="eventStickyContentEditor">
+          <select class="rt-font" title="Font">
+            <option value="Arial">Arial</option>
+            <option value="Calibri">Calibri</option>
+            <option value="Times New Roman">Times New Roman</option>
+            <option value="Georgia">Georgia</option>
+          </select>
+          <select class="rt-size" title="Size">
+            <option value="2">10</option>
+            <option value="3" selected>12</option>
+            <option value="4">14</option>
+            <option value="5">18</option>
+          </select>
+          <button type="button" class="rt-btn" data-cmd="bold" title="Bold">B</button>
+          <button type="button" class="rt-btn" data-cmd="italic" title="Italic">I</button>
+          <button type="button" class="rt-btn" data-cmd="underline" title="Underline">U</button>
+          <input type="color" class="rt-color" title="Text Color" value="#3a2f14" />
+          <button type="button" class="rt-btn" data-cmd="insertUnorderedList" title="Bullet List">•</button>
+          <button type="button" class="rt-btn" data-cmd="insertOrderedList" title="Numbered List">1.</button>
+        </div>
+        <div id="eventStickyContentEditor" class="richEditor stickyEditor" contenteditable="true" data-placeholder="Write your sticky note here..."></div>
+      </div>
+    </section>
+
+    <section class="modalSection eventOnly metadataSection">
+      <div class="metaRow"><span>Created:</span><strong id="eventMetaCreated">-</strong></div>
+      <div class="metaRow"><span>Updated:</span><strong id="eventMetaUpdated">-</strong></div>
+      <div class="metaRow"><span>Source:</span><strong id="eventMetaSource">local</strong></div>
+    </section>
+  </div>
+
+  <div class="modalActions">
+    <div class="modalActionLeft">
+      <button id="deleteEventBtn" class="dangerBtn" style="display:none;">Delete</button>
+      <button id="openStickyFromEventBtn" class="secondaryBtn" style="display:none;" type="button">Open Sticky</button>
+    </div>
+    <div class="modalActionRight">
+      <button id="cancelEventBtn" class="secondaryBtn" type="button">Cancel</button>
+      <button id="saveEventBtn" class="primaryBtn" type="button">Save Event</button>
+    </div>
+  </div>
 </div>
 
 <!-- ✅ Deprecating with new structure for .js handling 
@@ -220,6 +290,15 @@
     -->
 <script src="/static/calendar.colors.js?v=1"></script>
 <script type="module" src="/static/calendar.js?v=999"></script>
+
+<div id="editorContextMenu" class="editorContextMenu" aria-hidden="true">
+  <button type="button" data-ctx-cmd="bold">Bold</button>
+  <button type="button" data-ctx-cmd="italic">Italic</button>
+  <button type="button" data-ctx-cmd="underline">Underline</button>
+  <button type="button" data-ctx-cmd="insertUnorderedList">Bulleted List</button>
+  <button type="button" data-ctx-cmd="insertOrderedList">Numbered List</button>
+  <button type="button" data-ctx-cmd="removeFormat">Clear Format</button>
+</div>
 
 
 

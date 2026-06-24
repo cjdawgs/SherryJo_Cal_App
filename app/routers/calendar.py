@@ -5,12 +5,12 @@
 from sqlalchemy import func   # ✅ add this import at top if not already there
 import os
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
-from app.models import Event, Note, OAuthAccount
+from app.models import Event, Note, OAuthAccount, DateStickyNote
 from app.deps import get_current_user
 
 from app.services.calendar_service import CalendarService, normalize_provider
@@ -54,6 +54,113 @@ def to_iso(val):
     if not val:
         return None
     return val if isinstance(val, str) else val.isoformat()
+
+
+def normalize_tags(value):
+    if not value:
+        return []
+    if isinstance(value, list):
+        return [str(v).strip() for v in value if str(v).strip()]
+    if isinstance(value, str):
+        return [v.strip() for v in value.split(",") if v.strip()]
+    return []
+
+
+def normalize_sticky_note(payload):
+    if not isinstance(payload, dict):
+        return None
+
+    content = str(payload.get("content") or "").strip()
+    color = str(payload.get("color") or "#F7E68A").strip()
+    created_at = payload.get("createdAt")
+    updated_at = payload.get("updatedAt")
+
+    if not content:
+        return None
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    return {
+        "content": content,
+        "color": color,
+        "createdAt": created_at or now_iso,
+        "updatedAt": updated_at or now_iso
+    }
+
+
+def normalize_sticky_notes(payload):
+    if payload is None:
+        return []
+
+    if isinstance(payload, dict):
+        one = normalize_sticky_note(payload)
+        return [one] if one else []
+
+    if not isinstance(payload, list):
+        return []
+
+    out = []
+    for item in payload:
+        normalized = normalize_sticky_note(item)
+        if normalized:
+            out.append(normalized)
+
+    return out
+
+
+def serialize_date_sticky(item: DateStickyNote):
+    sticky_notes = normalize_sticky_notes(getattr(item, "sticky_notes", None))
+    return {
+        "id": item.id,
+        "date": item.date,
+        "sticky_notes": sticky_notes,
+        "count": len(sticky_notes),
+        "updated_at": to_iso(getattr(item, "updated_at", None)),
+    }
+
+
+def serialize_event(event: Event):
+    account_email = getattr(event, "account_email", None) or "local"
+    source = event.source or "local"
+
+    sticky_notes = normalize_sticky_notes(getattr(event, "sticky_notes", None))
+    if not sticky_notes and event.sticky_note:
+        legacy = normalize_sticky_note(event.sticky_note)
+        if legacy:
+            sticky_notes = [legacy]
+
+    return {
+        "id": event.id,
+        "external_id": event.externalId,
+        "title": event.title,
+        "description": event.description or "",
+        "start": to_iso(event.start_time),
+        "end": to_iso(event.end_time),
+        "start_time": to_iso(event.start_time),
+        "end_time": to_iso(event.end_time),
+        "color": event.color,
+        "tags": event.tags or [],
+        "sticky_note": sticky_notes[0] if sticky_notes else None,
+        "sticky_notes": sticky_notes,
+        "created_at": to_iso(event.created_at),
+        "updated_at": to_iso(getattr(event, "updated_at", None)),
+        "source": source,
+        "account_email": account_email,
+        "account_key": f"{normalize_provider(source)}:{account_email.lower().strip()}",
+        "extendedProps": {
+            "backendId": event.id,
+            "source": normalize_provider(source),
+            "account": account_email,
+            "account_key": f"{normalize_provider(source)}:{account_email.lower().strip()}",
+            "description": event.description or "",
+            "tags": event.tags or [],
+            "eventColor": event.color,
+            "stickyNote": sticky_notes[0] if sticky_notes else None,
+            "stickyNotes": sticky_notes,
+            "createdAt": to_iso(event.created_at),
+            "updatedAt": to_iso(getattr(event, "updated_at", None))
+        }
+    }
 
 
 
@@ -122,22 +229,208 @@ async def create_event(
 ):
     data = await request.json()
 
-    title = data.get("title")
+    title = (data.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+
     start_time = to_dt(data.get("start_time"))
     end_time = to_dt(data.get("end_time"))  
 
+    if not start_time:
+        raise HTTPException(status_code=422, detail="start_time is required")
+
+    sticky_notes = normalize_sticky_notes(
+        data.get("sticky_notes") or data.get("stickyNotes")
+    )
+    if not sticky_notes:
+        sticky_notes = normalize_sticky_notes(data.get("sticky_note") or data.get("stickyNote"))
+    sticky_note = sticky_notes[0] if sticky_notes else None
+
     event = Event(
         title=title,
+        description=(data.get("description") or "").strip(),
         start_time=start_time,
         end_time=end_time,
-        owner_id=current_user.id
+        owner_id=current_user.id,
+        source=data.get("source") or "local",
+        account_email=data.get("account_email") or "local",
+        color=data.get("color"),
+        tags=normalize_tags(data.get("tags")),
+        sticky_note=sticky_note,
+        sticky_notes=sticky_notes
     )
 
     db.add(event)
     db.commit()
     db.refresh(event)
 
-    return {"status": "ok", "event_id": event.id}
+    return {"status": "ok", "event": serialize_event(event)}
+
+
+@router.put("/event/{event_id}")
+async def update_event(
+    event_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    event = db.query(Event).filter(
+        Event.id == event_id,
+        Event.owner_id == current_user.id
+    ).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    data = await request.json()
+
+    if "title" in data:
+        title = (data.get("title") or "").strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="title cannot be empty")
+        event.title = title
+
+    if "description" in data:
+        event.description = (data.get("description") or "").strip()
+
+    if "start_time" in data:
+        start_time = to_dt(data.get("start_time"))
+        if not start_time:
+            raise HTTPException(status_code=422, detail="start_time is invalid")
+        event.start_time = start_time
+
+    if "end_time" in data:
+        event.end_time = to_dt(data.get("end_time"))
+
+    if "color" in data:
+        event.color = data.get("color")
+
+    if "tags" in data:
+        event.tags = normalize_tags(data.get("tags"))
+
+    if "sticky_notes" in data or "stickyNotes" in data or "sticky_note" in data or "stickyNote" in data:
+        sticky_notes = normalize_sticky_notes(
+            data.get("sticky_notes") or data.get("stickyNotes")
+        )
+        if (not sticky_notes) and ("sticky_note" in data or "stickyNote" in data):
+            sticky_notes = normalize_sticky_notes(data.get("sticky_note") or data.get("stickyNote"))
+
+        event.sticky_notes = sticky_notes
+        event.sticky_note = sticky_notes[0] if sticky_notes else None
+
+    event.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(event)
+
+    return {"status": "ok", "event": serialize_event(event)}
+
+
+@router.delete("/event/{event_id}")
+def delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    event = db.query(Event).filter(
+        Event.id == event_id,
+        Event.owner_id == current_user.id
+    ).first()
+
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    db.delete(event)
+    db.commit()
+
+    return {"status": "ok", "deleted": event_id}
+
+
+@router.get("/date-sticky")
+def list_date_sticky_notes(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    rows = db.query(DateStickyNote).filter(
+        DateStickyNote.owner_id == current_user.id
+    ).all()
+
+    return {
+        "status": "ok",
+        "items": [serialize_date_sticky(row) for row in rows]
+    }
+
+
+@router.get("/date-sticky/{date_key}")
+def get_date_sticky_note(
+    date_key: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    row = db.query(DateStickyNote).filter(
+        DateStickyNote.owner_id == current_user.id,
+        DateStickyNote.date == date_key
+    ).first()
+
+    if not row:
+        return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
+
+    return {"status": "ok", "item": serialize_date_sticky(row)}
+
+
+@router.put("/date-sticky/{date_key}")
+async def upsert_date_sticky_note(
+    date_key: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    data = await request.json()
+    sticky_notes = normalize_sticky_notes(data.get("sticky_notes") or data.get("stickyNotes"))
+
+    row = db.query(DateStickyNote).filter(
+        DateStickyNote.owner_id == current_user.id,
+        DateStickyNote.date == date_key
+    ).first()
+
+    if not sticky_notes:
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
+
+    if not row:
+        row = DateStickyNote(
+            owner_id=current_user.id,
+            date=date_key,
+            sticky_notes=sticky_notes,
+        )
+        db.add(row)
+    else:
+        row.sticky_notes = sticky_notes
+        row.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(row)
+    return {"status": "ok", "item": serialize_date_sticky(row)}
+
+
+@router.delete("/date-sticky/{date_key}")
+def delete_date_sticky_note(
+    date_key: str,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    row = db.query(DateStickyNote).filter(
+        DateStickyNote.owner_id == current_user.id,
+        DateStickyNote.date == date_key
+    ).first()
+
+    if row:
+        db.delete(row)
+        db.commit()
+
+    return {"status": "ok", "deleted": date_key}
 
 # ==================================================
 # ✅ SYNC ENDPOINT (SEPARATE FUNCTION)

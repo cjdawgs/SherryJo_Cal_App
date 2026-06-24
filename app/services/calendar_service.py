@@ -351,6 +351,13 @@ class CalendarService:
                 "title": ev.title,
                 "start": ev.start_time.isoformat(),
                 "end": ev.end_time.isoformat() if ev.end_time else None,
+                "description": ev.description or "",
+                "color": ev.color,
+                "tags": ev.tags or [],
+                "sticky_note": ev.sticky_note,
+                "sticky_notes": ev.sticky_notes or [],
+                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                "updated_at": ev.updated_at.isoformat() if getattr(ev, "updated_at", None) else None,
 
                 # ✅ CANONICAL SOURCE
                 "source": ev.source or "local",

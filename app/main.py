@@ -92,6 +92,34 @@ if engine.url.drivername.startswith("sqlite"):
                 conn.commit()
             print("✅ SQLite schema upgrade complete.")
 
+    if "events" in inspector.get_table_names():
+        event_columns = {col["name"] for col in inspector.get_columns("events")}
+        required_event_columns = {
+            "color",
+            "tags",
+            "sticky_note",
+            "sticky_notes",
+            "updated_at"
+        }
+        missing_event_columns = required_event_columns - event_columns
+
+        if missing_event_columns:
+            print(f"⚠️ SQLite events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
+            with engine.connect() as conn:
+                for col in missing_event_columns:
+                    if col == "color":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN color VARCHAR"))
+                    elif col == "tags":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN tags JSON"))
+                    elif col == "sticky_note":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN sticky_note JSON"))
+                    elif col == "sticky_notes":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN sticky_notes JSON"))
+                    elif col == "updated_at":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
+                conn.commit()
+            print("✅ SQLite events schema upgrade complete.")
+
 print("✅ Tables registered:", Base.metadata.tables.keys())
 
 

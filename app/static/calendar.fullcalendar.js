@@ -64,7 +64,111 @@ export function highlightSelectedDay(dateStr) {
   if (!found) {
     console.warn("⚠️ could not find day cell for:", dateStr);
   }
+
+  renderVisibleDateStickyIcons();
 }
+
+function stickyCountFromNotes(notes = [], legacySticky = null) {
+  const list = Array.isArray(notes)
+    ? notes.filter((s) => String(s?.content || "").trim())
+    : [];
+  if (list.length) return list.length;
+  return String(legacySticky?.content || "").trim() ? 1 : 0;
+}
+
+function buildStickyIcon({ count = 1, title = "Open sticky note" } = {}) {
+  const icon = document.createElement("span");
+  icon.className = "stickyEventIcon";
+  icon.title = title;
+  icon.textContent = "🗒";
+
+  if (count > 1) {
+    const badge = document.createElement("span");
+    badge.className = "stickyCountBadge";
+    badge.textContent = String(count);
+    icon.appendChild(badge);
+  }
+
+  return icon;
+}
+
+function renderVisibleDateStickyIcons() {
+  document.querySelectorAll(".dateStickyAnchor").forEach((el) => el.remove());
+
+  const countMap = window.getAllDateStickyCounts?.() || {};
+
+  const addAnchor = (target, dateStr) => {
+    if (!target) return;
+
+    const dateCount = Number(countMap[dateStr] || 0);
+    if (!dateCount) return;
+
+    const holder = document.createElement("span");
+    holder.className = "dateStickyAnchor";
+
+    const icon = buildStickyIcon({
+      count: dateCount,
+      title: window.getDateStickyTooltip?.(dateStr) || `Open date sticky note (${dateCount})`
+    });
+    icon.draggable = true;
+    icon.addEventListener("dragstart", (e) => {
+      setStickyDragPayload({
+        scope: "date",
+        dateKey: dateStr
+      });
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", `date:${dateStr}`);
+      }
+    });
+    icon.addEventListener("dragend", () => clearStickyDragPayload());
+
+    icon.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      window.openDateStickyModal?.(dateStr);
+    });
+
+    icon.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openStickyIconContextMenu(e.clientX, e.clientY, {
+        scope: "date",
+        dateStr,
+        count: dateCount
+      });
+    });
+
+    icon.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openStickyIconContextMenu(e.clientX, e.clientY, {
+        scope: "date",
+        dateStr,
+        count: dateCount
+      });
+    });
+
+    holder.appendChild(icon);
+    target.prepend(holder);
+  };
+
+  document.querySelectorAll(".fc-daygrid-day[data-date]").forEach((cell) => {
+    const dateStr = cell.getAttribute("data-date");
+    if (!dateStr) return;
+    const monthCell = cell.querySelector(".fc-daygrid-day-top") || cell;
+    addAnchor(monthCell, dateStr);
+  });
+
+  document.querySelectorAll(".fc-col-header-cell[data-date]").forEach((headerCell) => {
+    const dateStr = headerCell.getAttribute("data-date");
+    if (!dateStr) return;
+    const colHeader = headerCell.querySelector(".fc-col-header-cell-cushion") || headerCell;
+    addAnchor(colHeader, dateStr);
+  });
+}
+
+window.renderVisibleDateStickyIcons = renderVisibleDateStickyIcons;
 
 /*******************************************************
 ✅ RANGE PILL RENDER ENGINE (GLOBAL — CORRECT PLACEMENT)
@@ -121,6 +225,7 @@ function openContextMenu(x, y, fcEvent) {
     <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item" data-action="edit">✏️ Edit</div>
+    <div class="ctx-menu-item" data-action="sticky">🗒 New Sticky Note</div>
     <div class="ctx-menu-separator"></div>
     <div class="ctx-menu-item danger" data-action="delete">🗑 Delete</div>
   `;
@@ -133,6 +238,10 @@ function openContextMenu(x, y, fcEvent) {
     closeContextMenu();
     window.openCreateModal?.(null, fcEvent);
   };
+  menu.querySelector("[data-action='sticky']").onclick = () => {
+    closeContextMenu();
+    window.openStickyModalForNew?.(fcEvent);
+  };
   menu.querySelector("[data-action='delete']").onclick = async () => {
     closeContextMenu();
     window.editingEventId = fcEvent.extendedProps?.backendId || Number(fcEvent.id);
@@ -140,15 +249,64 @@ function openContextMenu(x, y, fcEvent) {
   };
 }
 
-function openDateContextMenu(x, y, date) {
+function openStickyIconContextMenu(x, y, payload) {
+  const menu = ensureContextMenu();
+  menu.innerHTML = `
+    <div class="ctx-menu-item" data-action="open-sticky">🗒 Open Sticky</div>
+    <div class="ctx-menu-item" data-action="edit-sticky">✏️ Edit Specific Sticky</div>
+    <div class="ctx-menu-item danger" data-action="delete-sticky">🧽 Delete Specific Sticky</div>
+  `;
+  positionContextMenu(menu, x, y);
+
+  menu.querySelector("[data-action='open-sticky']").onclick = () => {
+    closeContextMenu();
+    if (payload.scope === "date") {
+      window.openDateStickyModal?.(payload.dateStr);
+      return;
+    }
+    if (payload.scope === "event") {
+      window.openStickyModal?.(payload.fcEvent);
+    }
+  };
+
+  menu.querySelector("[data-action='delete-sticky']").onclick = async () => {
+    closeContextMenu();
+    if (payload.scope === "date") {
+      window.deleteDateStickyNote?.(payload.dateStr);
+      return;
+    }
+    if (payload.scope === "event") {
+      await window.deleteEventStickyNote?.(payload.fcEvent);
+    }
+  };
+
+  menu.querySelector("[data-action='edit-sticky']").onclick = () => {
+    closeContextMenu();
+    if (payload.scope === "date") {
+      window.editDateStickyNote?.(payload.dateStr);
+      return;
+    }
+    if (payload.scope === "event") {
+      window.editEventStickyNote?.(payload.fcEvent);
+    }
+  };
+}
+
+function openDateContextMenu(x, y, dateStr) {
   const menu = ensureContextMenu();
   menu.innerHTML = `
     <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
+    <div class="ctx-menu-item" data-action="date-sticky">🗒 Date Sticky Note</div>
   `;
   positionContextMenu(menu, x, y);
   menu.querySelector("[data-action='create']").onclick = () => {
     closeContextMenu();
+    const date = new Date(dateStr + "T00:00:00");
     window.openCreateModal?.(date);
+  };
+  menu.querySelector("[data-action='date-sticky']").onclick = () => {
+    closeContextMenu();
+    window.openDateStickyModal?.(dateStr);
   };
 }
 
@@ -185,6 +343,55 @@ window.setSelectedEvent = setSelectedEvent;
 // =========================================================
 let _prevViewType = null;
 let _navigatingToSelected = false;
+let stickyDragPayload = null;
+let highlightedDropEl = null;
+
+function setStickyDragPayload(payload) {
+  stickyDragPayload = payload;
+}
+
+function clearStickyDragPayload() {
+  stickyDragPayload = null;
+  clearDropHighlight();
+}
+
+function getDateFromNode(node, root) {
+  let ptr = node;
+  while (ptr && ptr !== root) {
+    if (ptr.dataset?.date) return ptr.dataset.date;
+    ptr = ptr.parentElement;
+  }
+  return null;
+}
+
+function getDateTargetElement(node, root) {
+  let ptr = node;
+  while (ptr && ptr !== root) {
+    if (ptr.dataset?.date) return ptr;
+    ptr = ptr.parentElement;
+  }
+  return null;
+}
+
+function clearDropHighlight() {
+  if (!highlightedDropEl) return;
+  highlightedDropEl.classList.remove("stickyDropTarget");
+  highlightedDropEl.classList.remove("stickyDropTargetEvent");
+  highlightedDropEl = null;
+}
+
+function setDropHighlight(el, mode) {
+  if (!el) return;
+  if (highlightedDropEl === el) return;
+
+  clearDropHighlight();
+  highlightedDropEl = el;
+  if (mode === "event") {
+    highlightedDropEl.classList.add("stickyDropTargetEvent");
+  } else {
+    highlightedDropEl.classList.add("stickyDropTarget");
+  }
+}
 
 /**
  * ==========================================================
@@ -304,6 +511,8 @@ export function initFullCalendar() {
     },
     eventDidMount: function(info) {
 
+      info.el.dataset.eventId = String(info.event.id || "");
+
       
       const provider = normalizeProvider(info.event.extendedProps?.source);
 
@@ -336,12 +545,76 @@ export function initFullCalendar() {
         inner.style.borderRadius = "6px";
         inner.style.padding = "2px 6px";
         inner.style.fontSize = "11px";
+
+        const stickyList = info.event.extendedProps?.stickyNotes || [];
+        const stickyCount = stickyCountFromNotes(stickyList, info.event.extendedProps?.stickyNote);
+        if (stickyCount > 0) {
+          const icon = buildStickyIcon({
+            count: stickyCount,
+            title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note"
+          });
+          icon.draggable = true;
+          icon.addEventListener("dragstart", (e) => {
+            setStickyDragPayload({
+              scope: "event",
+              fcEventId: String(info.event.id)
+            });
+            if (e.dataTransfer) {
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", `event:${info.event.id}`);
+            }
+          });
+          icon.addEventListener("dragend", () => clearStickyDragPayload());
+          icon.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            window.openStickyModal?.(info.event);
+          });
+
+          icon.addEventListener("dblclick", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openStickyIconContextMenu(e.clientX, e.clientY, {
+              scope: "event",
+              fcEvent: info.event,
+              count: stickyCount
+            });
+          });
+
+          icon.addEventListener("contextmenu", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openStickyIconContextMenu(e.clientX, e.clientY, {
+              scope: "event",
+              fcEvent: info.event,
+              count: stickyCount
+            });
+          });
+
+          inner.appendChild(icon);
+        }
       }
 
       // =========================================================
       // ✅ RIGHT-CLICK CONTEXT MENU on events
       // =========================================================
       info.el.addEventListener("contextmenu", (e) => {
+        const stickyTarget = e.target instanceof Element
+          ? e.target.closest(".stickyEventIcon")
+          : null;
+        if (stickyTarget) {
+          e.preventDefault();
+          e.stopPropagation();
+          openStickyIconContextMenu(e.clientX, e.clientY, {
+            scope: "event",
+            fcEvent: info.event,
+            count: stickyCountFromNotes(
+              info.event.extendedProps?.stickyNotes || [],
+              info.event.extendedProps?.stickyNote
+            )
+          });
+          return;
+        }
         e.preventDefault();
         e.stopPropagation();
         openContextMenu(e.clientX, e.clientY, info.event);
@@ -422,7 +695,7 @@ export function initFullCalendar() {
         window._eventClickTimer = null;
         window._lastClickedEventId = null;
         console.log("EVENT DBLCLICK →", info.event.title, id);
-        window.openCreateModal?.(null, info.event);
+        window.openStickyModalForNew?.(info.event);
         return;
       }
 
@@ -481,6 +754,7 @@ export function initFullCalendar() {
       if (window.selectedDate) {
         setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
       }
+      setTimeout(() => renderVisibleDateStickyIcons(), 70);
 
       // ✅ Log for debugging
       console.log("VIEW INIT DATE:", window.selectedDate, "view:", currentViewType);
@@ -498,6 +772,7 @@ export function initFullCalendar() {
           window.updateChipEventCounts();
         }, 0);
       }
+      setTimeout(() => renderVisibleDateStickyIcons(), 80);
     }
 
   });
@@ -511,6 +786,67 @@ export function initFullCalendar() {
   // =========================================================
   const calEl = document.getElementById("calendar");
   if (calEl) {
+    calEl.addEventListener("dragover", (e) => {
+      if (!stickyDragPayload) return;
+
+      const dateStr = getDateFromNode(e.target, calEl);
+      const dateTargetEl = getDateTargetElement(e.target, calEl);
+      const eventNode = e.target instanceof Element ? e.target.closest(".fc-event") : null;
+
+      const canDropEventToDate = stickyDragPayload.scope === "event" && !!dateStr;
+      const canDropDateToEvent = stickyDragPayload.scope === "date" && !!eventNode;
+
+      if (canDropEventToDate || canDropDateToEvent) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+
+        if (canDropDateToEvent && eventNode) {
+          setDropHighlight(eventNode, "event");
+        } else if (canDropEventToDate && dateTargetEl) {
+          setDropHighlight(dateTargetEl, "date");
+        }
+      } else {
+        clearDropHighlight();
+      }
+    });
+
+    calEl.addEventListener("dragleave", (e) => {
+      if (!stickyDragPayload) return;
+      const related = e.relatedTarget;
+      if (related instanceof Node && calEl.contains(related)) return;
+      clearDropHighlight();
+    });
+
+    calEl.addEventListener("drop", async (e) => {
+      if (!stickyDragPayload || !window.calendar) return;
+
+      const dateStr = getDateFromNode(e.target, calEl);
+      const eventNode = e.target instanceof Element ? e.target.closest(".fc-event") : null;
+      const droppedEventId = eventNode?.dataset?.eventId || null;
+
+      if (stickyDragPayload.scope === "event" && dateStr) {
+        e.preventDefault();
+        const sourceEvent = window.calendar.getEventById(stickyDragPayload.fcEventId);
+        if (sourceEvent) {
+          await window.moveEventStickyToDate?.(sourceEvent, dateStr);
+        }
+        clearStickyDragPayload();
+        return;
+      }
+
+      if (stickyDragPayload.scope === "date" && droppedEventId) {
+        e.preventDefault();
+        const targetEvent = window.calendar.getEventById(String(droppedEventId));
+        if (targetEvent) {
+          await window.moveDateStickyToEvent?.(stickyDragPayload.dateKey, targetEvent);
+        }
+        clearStickyDragPayload();
+        return;
+      }
+
+      clearDropHighlight();
+    });
+
     calEl.addEventListener("contextmenu", (e) => {
       let dateStr = null;
       let node = e.target;
@@ -525,7 +861,7 @@ export function initFullCalendar() {
       e.preventDefault();
       e.stopPropagation();
       console.log("DATE CONTEXTMENU:", dateStr);
-      openDateContextMenu(e.clientX, e.clientY, new Date(dateStr + "T00:00:00"));
+      openDateContextMenu(e.clientX, e.clientY, dateStr);
     });
   }
 

@@ -5,6 +5,7 @@ import {
 } from "./calendar.fullcalendar.js";
 
 import {
+  initDateStickyStore,
   applyRangeTooltips,
   bindUIEvents,
   openCreateModal
@@ -20,6 +21,8 @@ import { apiFetch, requireAuth, getAuthToken } from "./api.js";
 
 console.log("🔥 JS FILE LOADED");
 console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));
+
+window.highlightSelectedDay = highlightSelectedDay;
 
 if (!document.getElementById("chip-spinner-style")) {
   const style = document.createElement("style");
@@ -650,6 +653,132 @@ function stripHtml(html) {
   return div.textContent || "";
 }
 
+function getEventStickyCount(ev) {
+  const stickyList = ev?.extendedProps?.stickyNotes || [];
+  const listCount = Array.isArray(stickyList)
+    ? stickyList.filter((s) => String(s?.content || "").trim()).length
+    : 0;
+  if (listCount > 0) return listCount;
+  return String(ev?.extendedProps?.stickyNote?.content || "").trim() ? 1 : 0;
+}
+
+function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete } = {}) {
+  const icon = document.createElement("span");
+  icon.className = "stickyEventIcon";
+  icon.textContent = "🗒";
+  icon.title = title;
+
+  if (count > 1) {
+    const badge = document.createElement("span");
+    badge.className = "stickyCountBadge";
+    badge.textContent = String(count);
+    icon.appendChild(badge);
+  }
+
+  if (typeof onOpen === "function") {
+    icon.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onOpen();
+    });
+
+    icon.addEventListener("dblclick", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof onDelete === "function") {
+        openSidebarStickyMenu(e.clientX, e.clientY, onOpen, onDelete, onEdit);
+        return;
+      }
+      onOpen();
+    });
+  }
+
+  if (typeof onDelete === "function") {
+    icon.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openSidebarStickyMenu(e.clientX, e.clientY, onOpen, onDelete, onEdit);
+    });
+  }
+
+  return icon;
+}
+
+function openSidebarStickyMenu(x, y, onOpen, onDelete, onEdit) {
+  let menu = document.getElementById("eventContextMenu");
+  if (!menu) {
+    menu = document.createElement("div");
+    menu.id = "eventContextMenu";
+    document.body.appendChild(menu);
+  }
+
+  menu.innerHTML = `
+    <div class="ctx-menu-item" data-action="open-sticky">🗒 Open Sticky</div>
+    <div class="ctx-menu-item" data-action="edit-sticky">✏️ Edit Specific Sticky</div>
+    <div class="ctx-menu-item danger" data-action="delete-sticky">🧽 Delete Specific Sticky</div>
+  `;
+
+  const menuW = menu.offsetWidth || 185;
+  const menuH = menu.offsetHeight || 120;
+  const left = Math.min(x, window.innerWidth - menuW - 8);
+  const top = Math.min(y, window.innerHeight - menuH - 8);
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  menu.classList.add("visible");
+
+  menu.querySelector("[data-action='open-sticky']")?.addEventListener("click", () => {
+    menu.classList.remove("visible");
+    if (typeof onOpen === "function") onOpen();
+  });
+
+  menu.querySelector("[data-action='delete-sticky']")?.addEventListener("click", () => {
+    menu.classList.remove("visible");
+    if (typeof onDelete === "function") onDelete();
+  });
+
+  menu.querySelector("[data-action='edit-sticky']")?.addEventListener("click", () => {
+    menu.classList.remove("visible");
+    if (typeof onEdit === "function") {
+      onEdit();
+      return;
+    }
+    if (typeof onOpen === "function") onOpen();
+  });
+}
+
+function renderDateStickyHeaderIcon(dateKey, mode = "day") {
+  const count = Number(window.getDateStickyCount?.(dateKey) || 0);
+  if (!count) return null;
+
+  return createStickyIconElement({
+    count,
+    title: window.getDateStickyTooltip?.(dateKey)
+      || (count > 1 ? `Open date sticky notes (${count})` : "Open date sticky note"),
+    onOpen: () => window.openDateStickyModal?.(dateKey),
+    onDelete: () => window.deleteDateStickyNote?.(dateKey),
+    onEdit: () => window.editDateStickyNote?.(dateKey)
+  });
+}
+
+function setSelectedDayTitleWithSticky(titleEl, selectedDateObj, dateKey) {
+  if (!titleEl || !selectedDateObj) return;
+
+  titleEl.textContent = "";
+  titleEl.style.display = "flex";
+  titleEl.style.alignItems = "center";
+  titleEl.style.justifyContent = "flex-start";
+  titleEl.style.gap = "6px";
+
+  const icon = renderDateStickyHeaderIcon(dateKey, "day");
+  if (icon) {
+    titleEl.appendChild(icon);
+  }
+
+  const text = document.createElement("span");
+  text.textContent = selectedDateObj.toDateString();
+  titleEl.appendChild(text);
+}
+
 /**************************************************************
  * ✅ CACHE RANGE TOOLTIP (SINGLE SOURCE OF TRUTH)
  * - Uses PRELOADED backend range
@@ -893,6 +1022,12 @@ async function init() {
   if (!requireAuth()) return;
   await loadAccounts();
   renderAccountsSafe();
+
+  try {
+    await initDateStickyStore();
+  } catch (err) {
+    console.warn("⚠️ Date sticky store init failed:", err);
+  }
 
   // ✅ Expose openCreateModal for use by FullCalendar eventClick / dateClick
   //    (those callbacks live in calendar.fullcalendar.js which is a separate module)
@@ -1371,13 +1506,21 @@ async function preloadEventCache() {
       title: ev.title || "Untitled",
       start: safeStart,
       end: safeEnd || null,
+      color: ev.color || null,
 
       extendedProps: {
         backendId,      // ✅ THIS IS THE KEY FIX
         source: provider,
         account,
         account_key,
-        notes: ev.notes || []
+        notes: ev.notes || [],
+        description: ev.description || "",
+        tags: ev.tags || [],
+        eventColor: ev.color || null,
+        stickyNote: (ev.sticky_notes && ev.sticky_notes[0]) || ev.sticky_note || null,
+        stickyNotes: ev.sticky_notes || (ev.sticky_note ? [ev.sticky_note] : []),
+        createdAt: ev.created_at || null,
+        updatedAt: ev.updated_at || null
       }
     };
 
@@ -1632,413 +1775,16 @@ function renderAccounts(accounts) {
 
 
     /**************************************************************
-     * ✅ REPLACE NATIVE PICKER WITH GRID PICKER (SURGICAL)
+     * ✅ UNIFORM PICKER MODULE
+     * Use same native color input workflow as Event/Sticky modal
      **************************************************************/
-    const pickerWrap = document.createElement("div");
-
-    /**************************************************************
-     * ✅ Color Picker INITIAL STATE — ALWAYS HIDDEN
-     **************************************************************/
-    pickerWrap.style.display = "none";
-    pickerWrap.style.position = "fixed";
-    pickerWrap.style.background = "#fff";
-    pickerWrap.style.padding = "8px";
-    pickerWrap.style.border = "1px solid #ccc";
-    pickerWrap.style.borderRadius = "8px";
-    pickerWrap.style.zIndex = "9999";
-    pickerWrap.style.boxShadow = "0 8px 20px rgba(0,0,0,0.2)";
-
-    /**************************************************************
-     * ✅ IRO COLOR PICKER (ADVANCED)
-     **************************************************************/
-    let iroPicker = null;
-
-    //🔥 ADD RANDOM PALETTE GENERATOR
-    function generateDynamicPalette() {
-
-      const baseTypes = ["red", "green", "blue"];
-      const type = baseTypes[Math.floor(Math.random() * baseTypes.length)];
-
-      let colors = [];
-
-      for (let i = 0; i < 24; i++) {
-
-        let r = 0, g = 0, b = 0;
-        
-        /*   Your Dynamic palette now behaves like your others:
-          Row 1 → base tones
-          Row 2 → brighter / lighter
-          Row 3 → deeper / more saturated ✅
-        */
-        const row = Math.floor(i / 8); // ✅ 0,1,2 → rows
-
-        if (type === "red") {
-          r = 180 + Math.random() * 75;
-          g = 60 + Math.random() * 80;
-          b = 60 + Math.random() * 80;
-        }
-        else if (type === "green") {
-          r = 60 + Math.random() * 80;
-          g = 180 + Math.random() * 75;
-          b = 60 + Math.random() * 80;
-        }
-        else { // blue
-          r = 60 + Math.random() * 80;
-          g = 60 + Math.random() * 80;
-          b = 180 + Math.random() * 75;
-        }
-
-        // ✅ ADJUST BY ROW (THIS IS THE MAGIC)
-        if (row === 1) {
-          // lighter
-          r += 30; g += 30; b += 30;
-        }
-        if (row === 2) {
-          // stronger / richer
-          r *= 0.85; g *= 0.85; b *= 0.85;
-        }
-
-
-        const col = "#" + [r, g, b]
-          .map(x => Math.floor(x).toString(16).padStart(2, "0"))
-          .join("");
-
-        colors.push(col);
-      }
-
-      return colors;
-    }
-
-    
-    function initIroPicker() {
-
-      pickerWrap.innerHTML = "";
-      /**************************************************************
-       * ✅ CURRENT COLOR PREVIEW (TOP BAR)
-       **************************************************************/
-      const preview = document.createElement("div");
-      preview.style.height = "20px";
-      preview.style.marginBottom = "6px";
-      preview.style.borderRadius = "4px";
-      const previewColor = raw;
-
-      preview.style.background = previewColor;
-
-      /**************************************************************
-       * ✅ CONTRAST TEXT (PREVIEW PANEL)
-       **************************************************************/
-      preview.style.color = getBestTextColor(previewColor);
-
-      /**************************************************************
-       * ✅ CENTER TEXT (PRO UX TOUCH)
-       **************************************************************/
-      preview.style.display = "flex";
-      preview.style.alignItems = "center";
-      preview.style.justifyContent = "center";
-      preview.style.fontSize = "11px";
-      preview.textContent = "Preview";
-
-
-      // ✅ ADD TO UI FIRST (TOP)
-      pickerWrap.appendChild(preview);
-
-
-      /**************************************************************
-       * ✅ TAB BAR
-       **************************************************************/
-      const tabBar = document.createElement("div");
-      tabBar.style.display = "flex";
-      tabBar.style.gap = "8px";
-      tabBar.style.marginBottom = "6px";
-
-      const standardTab = document.createElement("button");
-      standardTab.textContent = "Standard";
-
-      const customTab = document.createElement("button");
-      customTab.textContent = "Custom";
-
-      [standardTab, customTab].forEach(btn => {
-        btn.style.padding = "4px 6px";
-        btn.style.cursor = "pointer";
-        btn.style.border = "1px solid #ccc";
-        btn.style.borderRadius = "4px";
-        btn.style.background = "#f5f5f5";
-      });
-
-      tabBar.appendChild(standardTab);
-      tabBar.appendChild(customTab);
-
-      /**************************************************************
-       * ✅ CONTENT AREAS
-       **************************************************************/
-      const standardView = document.createElement("div");
-
-      /**************************************************************
-       * ✅ PALETTE SELECTOR
-       **************************************************************/
-      const paletteBar = document.createElement("div");
-      paletteBar.style.display = "flex";
-      paletteBar.style.gap = "6px";
-      paletteBar.style.marginBottom = "6px";
-
-      const softBtn = document.createElement("button");
-      softBtn.textContent = "Soft";
-
-      const greyBtn = document.createElement("button");
-      greyBtn.textContent = "Greys";
-
-      const neutralBtn = document.createElement("button");
-      neutralBtn.textContent = "Neutral";
-
-      const dynamicBtn = document.createElement("button");
-      dynamicBtn.textContent = "Dynamic";
-
-      [softBtn, neutralBtn, dynamicBtn, greyBtn].forEach(btn => {
-        btn.style.cursor = "pointer";
-        btn.style.border = "1px solid #ccc";
-        btn.style.borderRadius = "4px";
-        btn.style.padding = "3px 6px";
-      });
-
-      paletteBar.appendChild(softBtn);
-      paletteBar.appendChild(greyBtn);
-      paletteBar.appendChild(neutralBtn);
-      paletteBar.appendChild(dynamicBtn);
-
-      /**************************************************************
-       * ✅ PALETTE BUTTON HOOKS
-       **************************************************************/
-      softBtn.onclick = () => renderPalette(palettes.soft);
-      greyBtn.onclick = () => renderPalette(palettes.greyscale);
-      neutralBtn.onclick = () => renderPalette(palettes.neutral);
-
-      dynamicBtn.onclick = () => {
-        palettes.dynamic = generateDynamicPalette();  // ✅ refresh
-        renderPalette(palettes.dynamic);
-      };
-
-      pickerWrap.appendChild(paletteBar);
-
-      const customView = document.createElement("div");
-
-      customView.style.display = "none";
-
-      /**************************************************************
-       * ✅ PALETTES (3 MODES)
-       **************************************************************/
-
-      const palettes = {
-
-        
-          /**************************************************************
-           * ✅ GREYSCALE PALETTE (24 PERFECTLY SPACED SHADES)
-          **************************************************************/
-          greyscale: [
-            // ✅ ROW 1 — Dark (strong anchors)
-            "#111111", "#1a1a1a", "#222222", "#2b2b2b",
-            "#333333", "#3d3d3d", "#474747", "#525252",
-
-            // ✅ ROW 2 — Mid (balanced UI grays)
-            "#5c5c5c", "#666666", "#707070", "#7a7a7a",
-            "#858585", "#8f8f8f", "#999999", "#a3a3a3",
-
-            // ✅ ROW 3 — Light (soft UI tones)
-            "#adadad", "#b8b8b8", "#c2c2c2", "#cccccc",
-            "#d6d6d6", "#e0e0e0", "#ebebeb", "#f5f5f5"
-          ],
-          soft: [
-            // ✅ ROW 1 — base soft
-            "#d66a6a", "#e09a5f", "#e5d26f",
-            "#76c893", "#6fa8dc", "#8e7cc3",
-            "#c27ba0", "#6ccccc",
-
-            // ✅ ROW 2 — lighter / pastel
-            "#e8a1a1", "#edb784", "#f0e19c",
-            "#9edbb0", "#9ec5f5", "#b4a7d6",
-            "#d9a8bf", "#9adede",
-
-            // ✅ ROW 3 — RICH / BRIGHT (THIS IS WHAT YOU WANT)
-            "#dc2626", // 🔴 strong red (matches your outlined red)
-            "#f97316", // bold orange
-            "#facc15", // vivid yellow
-            "#22c55e", // rich green
-            "#2563eb", // 🔵 ROYAL BLUE (your target)
-            "#7c3aed", // vibrant purple
-            "#db2777", // vivid pink
-            "#0ea5e9"  // bright cyan-blue
-          ],
-          neutral: [
-            // ✅ ROW 1 — deep earth (foundation)
-            "#3b2f2f", // dark brown
-            "#4a3f35", // coffee
-            "#5c4a3d", // clay
-            "#6a5c4f", // stone
-            "#7c6a58", // driftwood
-            "#8b7765", // sand brown
-            "#9c8a73", // warm taupe
-            "#a99a85", // dry grass
-
-            // ✅ ROW 2 — mid earth (balanced tones)
-            "#5a4632", // rich soil
-            "#6b5138", // bark
-            "#7a5c3d", // leather
-            "#8a6a45", // camel
-            "#9b7b54", // warm tan
-            "#ac8d64", // desert sand
-            "#bfa176", // wheat
-            "#d2b78a", // light ochre
-
-            
-            // ✅ ROW 3 — lighter / warm neutrals (UI friendly)
-            "#7a6a58", 
-            "#8c7b66", 
-            "#9e8d74", 
-            "#b0a083", 
-            "#c3b59b", 
-            "#d6cbb4", 
-            "#e3d8c6", 
-            "#f0e6d6"
-          ],
-          dynamic: generateDynamicPalette()
-      };
-
-      //RENDER FUNCTION (CRITICAL)
-      function renderPalette(colors) {
-
-        standardView.innerHTML = "";
-
-        colors.forEach(col => {
-
-          const sw = document.createElement("div");
-
-          sw.style.width = "18px";
-          sw.style.height = "18px";
-          sw.style.background = col;
-          sw.style.cursor = "pointer";
-          sw.style.border = "1px solid rgba(0,0,0,0.25)";
-
-          sw.onclick = () => {
-            // 1. Push new color into the single-source-of-truth map FIRST
-            setAccountColor(key, col);
-            // 2. Queue backend persist (debounced 220 ms)
-            queuePersistAccountColor(accountId, key, col);
-
-            // 3. Update picker preview bar
-            preview.style.background = col;
-            preview.style.color = getBestTextColor(col);
-
-            // 4. applyChipStyle is now the ONLY place that touches
-            //    chip background + color dot + badge — all from getColorByKey(key).
-            //    Since setAccountColor ran first, getColorByKey returns `col`.
-            applyChipStyle(row, key, true);   // ✅ dot + badge + bg all update here
-
-            // 5. Sync all other chips in case filters changed
-            updateChipSelectionUI();
-
-            console.log("RENDER CHIP:", accountId ?? "local", key, col);
-
-            // 6. Refresh calendar event colors
-            const cal = window.calendar;
-            if (cal) {
-              cal.refetchEvents();
-            } else {
-              console.warn("⚠️ calendar not ready at palette click");
-            }
-
-            updateWeekView();
-          };
-
-          standardView.appendChild(sw);
-
-        });
-      }
-
-      standardView.style.display = "grid";
-      standardView.style.gridTemplateColumns = "repeat(8, 18px)";
-      standardView.style.gap = "4px";
-
-      /**************************************************************
-       * ✅ CUSTOM (IRO PICKER)
-       **************************************************************/
-      let iroPicker = null;
-
-      function initCustomPicker() {
-        if (iroPicker) return;
-
-        iroPicker = new iro.ColorPicker(customView, {
-          width: 150,
-          color: getColorByKey(key),
-          layout: [
-            { component: iro.ui.Wheel },
-            { component: iro.ui.Slider },
-          ]
-        });
-
-        iroPicker.on("color:change", (c) => {
-
-          const picked = c.hexString;
-
-          // 1. Push into single-source-of-truth map FIRST so
-          //    every downstream call sees the new value immediately.
-          setAccountColor(key, picked);
-          queuePersistAccountColor(accountId, key, picked);
-
-          // 2. Update picker preview bar (uses soft tint for visual polish)
-          const soft = applySoftColor(picked);
-          preview.style.background = soft;
-          preview.style.color = getBestTextColor(soft);
-
-          // 3. applyChipStyle now updates chip bg + color dot + badge
-          //    all from getColorByKey(key) = picked  →  single source.
-          applyChipStyle(row, key, true);
-          updateChipSelectionUI();
-
-          console.log("RENDER CHIP:", accountId ?? "local", key, picked);
-
-          if (window.calendar) {
-            window.calendar.refetchEvents();
-          }
-
-          updateWeekView();
-        });
-      }
-
-      /**************************************************************
-       * ✅ TAB SWITCHING
-       **************************************************************/
-      standardTab.onclick = () => {
-        standardView.style.display = "grid";
-        customView.style.display = "none";
-
-        // ✅ ACTIVE TAB STYLE
-        standardTab.style.background = "#fff";
-        customTab.style.background = "#ddd";
-      };
-      customTab.onclick = () => {
-        standardView.style.display = "none";
-        customView.style.display = "block";
-
-        // ✅ ACTIVE TAB STYLE
-        customTab.style.background = "#fff";
-        standardTab.style.background = "#ddd";
-
-        initCustomPicker();
-      };
-
-      /**************************************************************
-       * ✅ BUILD DOM
-       **************************************************************/
-      pickerWrap.appendChild(tabBar);
-      pickerWrap.appendChild(standardView);
-      pickerWrap.appendChild(customView);
-
-      
-      /**************************************************************
-       * ✅ DEFAULT PALETTE (INITIAL VIEW)
-       **************************************************************/
-      renderPalette(palettes.soft);
-
-    }
+    const accountColorInput = document.createElement("input");
+    accountColorInput.type = "color";
+    accountColorInput.value = raw;
+    accountColorInput.className = "account-color-input";
+    accountColorInput.style.position = "absolute";
+    accountColorInput.style.opacity = "0";
+    accountColorInput.style.pointerEvents = "none";
 
     /**************************************************************
      * ✅ ADD TO ROW (EXACT SAME POSITION AS OLD PICKER)
@@ -2074,6 +1820,7 @@ function renderAccounts(accounts) {
 
     // ALWAYS reset first
     colorDot.classList.remove("syncing-dot");
+    colorDot.title = "Click to change account color (uses system color picker)";
 
     /**************************************************************
      * ✅ RESET FIRST (CRITICAL — PREVENTS STALE UI)
@@ -2119,54 +1866,25 @@ function renderAccounts(accounts) {
       }
 
       /**************************************************************
-       * ✅ TOGGLE PICKER (FIXED + IRO INIT)
+       * ✅ OPEN UNIFORM NATIVE PICKER
        **************************************************************/
-      const isOpen = pickerWrap.style.display !== "none";
+      accountColorInput.click();
+    });
 
-      document.querySelectorAll(".color-picker-pop").forEach(el => {
-        el.style.display = "none";
-      });
+    accountColorInput.addEventListener("input", () => {
+      const picked = accountColorInput.value;
 
-      if (isOpen) {
-        pickerWrap.style.display = "none";
-        iroPicker = null; // ✅ reset instance
-          return;
+      setAccountColor(key, picked);
+      queuePersistAccountColor(accountId, key, picked);
 
+      applyChipStyle(row, key, true);
+      updateChipSelectionUI();
+
+      if (window.calendar) {
+        window.calendar.refetchEvents();
       }
 
-      /**************************************************************
-       * ✅ SHOW PICKER
-       **************************************************************/
-      pickerWrap.style.display = "block";
-
-      /**************************************************************
-       * ✅ ⚡ INITIALIZE IRO HERE (THIS IS STEP 4)
-       **************************************************************/
-      initIroPicker();
-
-
-      const rect = colorDot.getBoundingClientRect();
-
-      let top = rect.bottom + 6;
-      let left = rect.left;
-
-      if (left + 160 > window.innerWidth) {
-        left = window.innerWidth - 160 - 8;
-      }
-
-      if (top + 120 > window.innerHeight) {
-        top = rect.top - 120;
-      }
-
-      pickerWrap.style.top = `${top}px`;
-      pickerWrap.style.left = `${left}px`;
-
-      pickerWrap.classList.add("color-picker-pop");
-
-      pickerWrap.style.opacity = "1";
-      pickerWrap.style.visibility = "visible";
-
-      console.log("✅ DOT CLICK → PICKER OPENED:", key);
+      updateWeekView();
     });
 
     /**************************************************************
@@ -2195,52 +1913,6 @@ function renderAccounts(accounts) {
     
     colorDot.style.outline = `1px solid ${getBestTextColor(raw)}`;
 
-    /**************************************************************
-     * ✅ HIDDEN PALETTE (POPUP STYLE)
-     **************************************************************/
-    /**************************************************************
-     * ✅ FIX: FORCE PROPER POSITIONING (CRITICAL)
-     **************************************************************/
-    pickerWrap.style.position = "fixed";
-    /**************************************************************
-     * ✅ GOLD STANDARD: UI SURFACE (NEUTRAL PANEL)
-     * ------------------------------------------------------------
-     * DO NOT USE dynamic contrast here
-     * This is a stable UI layer (like modals / menus)
-     *
-     * WHY:
-     * - prevents visual instability
-     * - ensures consistent UX
-     * - mirrors pro apps (Notion, Google, Apple)
-     **************************************************************/
-    /**************************************************************
-     * ✅ SMART NEUTRAL SURFACE (SUBTLE BRAND TINT)
-     * ------------------------------------------------------------
-     * Uses a VERY light tint of the account color
-     * Keeps UI consistent but adds personality
-     **************************************************************/
-    const baseColor = raw;
-
-    // ✅ super-light tint (barely visible)
-    const panelBg = lightenColor(baseColor, 0.92);
-
-    pickerWrap.style.background = panelBg;
-
-    /**************************************************************
-     * ✅ GUARANTEED READABILITY
-     **************************************************************/
-    pickerWrap.style.color = getBestTextColor(panelBg);
-
-    /**************************************************************
-     * ✅ OPTIONAL: subtle elevation polish
-     **************************************************************/
-    pickerWrap.style.color = "#111";  // ✅ fixed readable text baseline
-    pickerWrap.style.padding = "8px";
-    pickerWrap.style.border = "1px solid #ccc";
-    pickerWrap.style.borderRadius = "8px";
-    pickerWrap.style.zIndex = "9999";
-    pickerWrap.style.boxShadow = "0 8px 20px rgba(0,0,0,0.2)";
-
     colorDot.onmouseenter = () => {
       colorDot.style.transform = "scale(1.2)";
     };
@@ -2253,7 +1925,7 @@ function renderAccounts(accounts) {
      * ✅ APPEND BOTH
      **************************************************************/
     row.appendChild(colorDot);
-    document.body.appendChild(pickerWrap);
+    row.appendChild(accountColorInput);
 
     /**************************************************************
      * ✅ CHIP STATE ENGINE (SYNC / SUCCESS / ERROR)
@@ -2335,7 +2007,7 @@ function renderAccounts(accounts) {
     row.onclick = (e) => {
 
       // ✅ DO NOT trigger when using color picker
-      if (e.target.closest(".color-picker-pop") ||
+      if (e.target.closest(".account-color-input") ||
           e.target.closest(".color-dot")) {
         return;
       }
@@ -2420,6 +2092,7 @@ function updateDayDetails() {
 
   const start = new Date(selected);
   start.setHours(0, 0, 0, 0);
+  const dateKey = toDayString(selected);
 
   const end = new Date(start);
   end.setDate(start.getDate() + 1);
@@ -2445,7 +2118,7 @@ function updateDayDetails() {
     empty.style.padding = "6px 4px";
     empty.textContent = "No events";
     listEl.appendChild(empty);
-    if (titleEl) titleEl.textContent = selected.toDateString();
+    setSelectedDayTitleWithSticky(titleEl, selected, dateKey);
     return;
   }
 
@@ -2488,18 +2161,32 @@ function updateDayDetails() {
     const titleSpan = document.createElement("span");
     titleSpan.textContent      = ev.title;
     titleSpan.style.fontSize   = "11px";
+    titleSpan.style.flex       = "1";
+    titleSpan.style.minWidth   = "0";
     titleSpan.style.overflow   = "hidden";
     titleSpan.style.textOverflow = "ellipsis";
     titleSpan.style.whiteSpace = "nowrap";
 
     div.appendChild(timeSpan);
     div.appendChild(titleSpan);
+
+    const stickyCount = getEventStickyCount(ev);
+    if (stickyCount > 0) {
+      const stickyBtn = createStickyIconElement({
+        count: stickyCount,
+        title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note",
+        onOpen: () => window.openStickyModal?.(ev),
+        onDelete: () => window.deleteEventStickyNote?.(ev),
+        onEdit: () => window.editEventStickyNote?.(ev)
+      });
+      stickyBtn.style.flexShrink = "0";
+      div.appendChild(stickyBtn);
+    }
+
     listEl.appendChild(div);
   });
 
-  if (titleEl) {
-    titleEl.textContent = selected.toDateString();
-  }
+  setSelectedDayTitleWithSticky(titleEl, selected, dateKey);
 }
 
 window.updateDayDetails = updateDayDetails;
@@ -2532,9 +2219,21 @@ function updateWeekView() {
     day.setDate(start.getDate() + i);
 
     const header = document.createElement("div");
-    header.textContent = day.toDateString();
+    const dayKey = toDayString(day);
     header.style.fontWeight = "600";
     header.style.marginTop = "8px";
+    header.style.display = "flex";
+    header.style.alignItems = "center";
+    header.style.gap = "6px";
+
+    const dateStickyIcon = renderDateStickyHeaderIcon(dayKey, "week");
+    if (dateStickyIcon) {
+      header.appendChild(dateStickyIcon);
+    }
+
+    const headerText = document.createElement("span");
+    headerText.textContent = day.toDateString();
+    header.appendChild(headerText);
 
     weekEl.appendChild(header);
 
@@ -2550,13 +2249,37 @@ function updateWeekView() {
       const raw = getColorByKey(key);
       const soft = applySoftColor(raw)
       const div = document.createElement("div");
-
-      div.textContent = ev.title;
       div.style.padding = "4px";
       div.style.marginBottom = "4px";
       div.style.borderLeft = `4px solid ${raw}`;
       div.style.background = soft;
       div.style.borderRadius = "6px";
+      div.style.display = "flex";
+      div.style.alignItems = "center";
+      div.style.gap = "6px";
+
+      const titleSpan = document.createElement("span");
+      titleSpan.textContent = ev.title;
+      titleSpan.style.flex = "1";
+      titleSpan.style.minWidth = "0";
+      titleSpan.style.overflow = "hidden";
+      titleSpan.style.textOverflow = "ellipsis";
+      titleSpan.style.whiteSpace = "nowrap";
+
+      div.appendChild(titleSpan);
+
+      const stickyCount = getEventStickyCount(ev);
+      if (stickyCount > 0) {
+        const stickyBtn = createStickyIconElement({
+          count: stickyCount,
+          title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note",
+          onOpen: () => window.openStickyModal?.(ev),
+          onDelete: () => window.deleteEventStickyNote?.(ev),
+          onEdit: () => window.editEventStickyNote?.(ev)
+        });
+        stickyBtn.style.flexShrink = "0";
+        div.appendChild(stickyBtn);
+      }
 
       weekEl.appendChild(div);
     });
@@ -2769,29 +2492,24 @@ async function saveNoteEditor() {
   smartRefresh({ reason: "event_saved" });
 }
 
-//ADD ONE GLOBAL CLEAN VERSION (OUTSIDE LOOP, TOP LEVEL ONCE)
-document.addEventListener("click", (e) => {
-
-  // ✅ allow picker interactions
-  if (
-    e.target.closest(".color-picker-pop") ||
-    e.target.closest(".color-dot")
-  ) {
-    return;
-  }
-
-  document.querySelectorAll(".color-picker-pop").forEach(el => {
-    el.style.display = "none";
-  });
-
-});
-
-
-
 /**************************************************************
  * ✅ KEYBOARD SHORTCUTS
  **************************************************************/
 document.addEventListener("keydown", (e) => {
+
+  const target = e.target;
+  const isTypingTarget =
+    target instanceof HTMLElement &&
+    (
+      target.matches("input, textarea, select") ||
+      target.isContentEditable ||
+      !!target.closest("[contenteditable='true']")
+    );
+
+  // Do not trigger app-wide shortcuts while typing/editing text.
+  if (isTypingTarget || e.ctrlKey || e.metaKey || e.altKey) {
+    return;
+  }
 
   // ✅ ESC = CLOSE MODAL
   if (e.key === "Escape") {
@@ -2799,7 +2517,7 @@ document.addEventListener("keydown", (e) => {
   }
 
   // ✅ N = CREATE NEW EVENT
-  if (e.key.toLowerCase() === "n") {
+  if (e.key.toLowerCase() === "n" && !window.isModalOpen) {
     openCreateModal();
   }
 
