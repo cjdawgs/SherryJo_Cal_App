@@ -11,28 +11,57 @@ import {
  **************************************************************/
 
 /**************************************************************
- ✅ HIGHLIGHT DAY (FINAL CLEAN VERSION)
+ ✅ HIGHLIGHT SELECTED DAY — ALL VIEWS
+ Month  : .fc-daygrid-day[data-date]
+ Week   : .fc-col-header-cell[data-date] + .fc-timegrid-col[data-date]
+ Day    : .fc-col-header-cell[data-date] + .fc-timegrid-col[data-date]
 **************************************************************/
 export function highlightSelectedDay(dateStr) {
+  if (!dateStr) return;
 
-  // ✅ clear previous highlights (MONTH VIEW ONLY)
+  const HIGHLIGHT = "rgba(66,133,244,0.35)";
+
+  // ✅ Clear previous highlights across ALL view types
   document.querySelectorAll(".fc-daygrid-day").forEach(d => {
     d.style.background = "";
   });
+  document.querySelectorAll(".fc-timegrid-col").forEach(d => {
+    d.style.background = "";
+  });
+  document.querySelectorAll(".fc-col-header-cell").forEach(d => {
+    d.style.background = "";
+  });
 
-  // ✅ find correct day cell
+  let found = false;
+
+  // ✅ Month view — day grid cell
   const dayCell = document.querySelector(
     `.fc-daygrid-day[data-date="${dateStr}"]`
   );
-
-  // ✅ apply highlight if found
   if (dayCell) {
-    dayCell.style.setProperty(
-      "background-color",
-      "rgba(66,133,244,0.35)",
-      "important"
-    );
-  } else {
+    dayCell.style.setProperty("background-color", HIGHLIGHT, "important");
+    found = true;
+  }
+
+  // ✅ Week / Day view — column header (day name + date number row)
+  const colHeader = document.querySelector(
+    `.fc-col-header-cell[data-date="${dateStr}"]`
+  );
+  if (colHeader) {
+    colHeader.style.setProperty("background-color", HIGHLIGHT, "important");
+    found = true;
+  }
+
+  // ✅ Week / Day view — time grid column background
+  const timeCol = document.querySelector(
+    `.fc-timegrid-col[data-date="${dateStr}"]`
+  );
+  if (timeCol) {
+    timeCol.style.setProperty("background-color", HIGHLIGHT, "important");
+    found = true;
+  }
+
+  if (!found) {
     console.warn("⚠️ could not find day cell for:", dateStr);
   }
 }
@@ -439,10 +468,8 @@ export function initFullCalendar() {
         setTimeout(() => {
           cal.gotoDate(window.selectedDate);
           _navigatingToSelected = false;
-          // Re-apply highlight when returning to month view
-          if (currentViewType === "dayGridMonth") {
-            setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
-          }
+          // Re-apply highlight in ALL views after navigation
+          setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
         }, 0);
         return;
       }
@@ -450,8 +477,8 @@ export function initFullCalendar() {
       _prevViewType = currentViewType;
       _navigatingToSelected = false;
 
-      // ✅ PHASE 4: Re-apply highlight whenever month view renders
-      if (currentViewType === "dayGridMonth" && window.selectedDate) {
+      // ✅ Re-apply highlight on every render, across ALL view types
+      if (window.selectedDate) {
         setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
       }
 
