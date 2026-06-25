@@ -422,6 +422,85 @@ function setDropHighlight(el, mode) {
   }
 }
 
+const CALENDAR_LAYOUT_PROFILES = {
+  mobile: {
+    defaultView: "timeGridDay",
+    eventMaxStack: 2,
+    dayMaxEvents: 2,
+    slotDuration: "00:30:00",
+    toolbarRight: "today prev,next timeGridDay,timeGridWeek,dayGridMonth"
+  },
+  tablet: {
+    defaultView: "timeGridWeek",
+    eventMaxStack: 4,
+    dayMaxEvents: 4,
+    slotDuration: "00:30:00",
+    toolbarRight: "today prev,next timeGridWeek,timeGridDay,dayGridMonth"
+  },
+  desktop: {
+    defaultView: "dayGridMonth",
+    eventMaxStack: 6,
+    dayMaxEvents: 6,
+    slotDuration: "00:30:00",
+    toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
+  },
+  large: {
+    defaultView: "dayGridMonth",
+    eventMaxStack: 10,
+    dayMaxEvents: 10,
+    slotDuration: "00:15:00",
+    toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
+  }
+};
+
+function getCalendarProfile(mode) {
+  return CALENDAR_LAYOUT_PROFILES[mode] || CALENDAR_LAYOUT_PROFILES.desktop;
+}
+
+function getCalendarHeightForMode(mode) {
+  const viewportHeight = Math.max(540, window.innerHeight || 700);
+
+  if (mode === "mobile") {
+    return Math.max(520, viewportHeight - 190);
+  }
+  if (mode === "tablet") {
+    return Math.max(620, viewportHeight - 185);
+  }
+  if (mode === "large") {
+    return Math.max(900, viewportHeight - 165);
+  }
+  return Math.max(700, viewportHeight - 170);
+}
+
+export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
+  const cal = window.calendar;
+  if (!cal) return;
+
+  const profile = getCalendarProfile(mode);
+
+  cal.setOption("headerToolbar", {
+    left: "title",
+    center: "rangeGroup",
+    right: profile.toolbarRight
+  });
+  cal.setOption("eventMaxStack", profile.eventMaxStack);
+  cal.setOption("dayMaxEvents", profile.dayMaxEvents);
+  cal.setOption("slotDuration", profile.slotDuration);
+  cal.setOption("height", getCalendarHeightForMode(mode));
+  cal.setOption("contentHeight", "auto");
+
+  if (switchView && cal.view?.type !== profile.defaultView) {
+    cal.changeView(profile.defaultView);
+    if (window.selectedDate) {
+      cal.gotoDate(window.selectedDate);
+    }
+  }
+
+  setTimeout(() => renderVisibleDateStickyIcons(), 70);
+}
+
+window.applyCalendarLayoutMode = applyCalendarLayoutMode;
+
 /**
  * ==========================================================
  * ✅ FULLCALENDAR INIT (EXPORTED — SINGLE SOURCE OF TRUTH)
@@ -445,14 +524,24 @@ export function initFullCalendar() {
     window.selectedDate = toDayString(today);
   }
 
+  const initialLayoutMode = window.layoutMode || "desktop";
+  const initialProfile = getCalendarProfile(initialLayoutMode);
+
   window.calendar = new FullCalendar.Calendar(el, {
 
     /* ✅ UNIFIED HEADER ROW */
     headerToolbar: {
       left: "title",
       center: "rangeGroup",
-      right: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
+      right: initialProfile.toolbarRight
     },
+
+    initialView: initialProfile.defaultView,
+    eventMaxStack: initialProfile.eventMaxStack,
+    dayMaxEvents: initialProfile.dayMaxEvents,
+    slotDuration: initialProfile.slotDuration,
+    height: getCalendarHeightForMode(initialLayoutMode),
+    contentHeight: "auto",
 
     customButtons: {
       rangeGroup: {
@@ -925,6 +1014,7 @@ export function initFullCalendar() {
   });
 
   window.calendar.render();
+  applyCalendarLayoutMode(initialLayoutMode, { switchView: false });
 
   // =========================================================
   // ✅ RIGHT-CLICK ON EMPTY DATE CELLS (not on events)

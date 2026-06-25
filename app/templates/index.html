@@ -31,7 +31,12 @@
 <header class="topbar">
   <div class="topbar-inner">
 
-    <div class="appTitle">SherryJo Calendar</div>
+    <div class="appTitleRow">
+      <button id="sidebarToggleBtn" class="sidebarToggleBtn" type="button" aria-controls="sidebarDrawer" aria-expanded="false" aria-label="Toggle sidebar">
+        ☰
+      </button>
+      <div class="appTitle">SherryJo Calendar</div>
+    </div>
 
       <div class="authContainer">
             <div id="syncBanner" style="
@@ -134,7 +139,12 @@
   </div>
 
   <!-- ✅ RIGHT SIDEBAR -->
-  <div class="leftSidebar">
+  <aside id="sidebarDrawer" class="leftSidebar" aria-label="Calendar sidebar">
+
+    <div class="sidebarDrawerHeader">
+      <h4>Details</h4>
+      <button id="sidebarCloseBtn" class="sidebarCloseBtn" type="button" aria-label="Close sidebar">Close</button>
+    </div>
 
     <!-- ✅ DAY DETAILS -->
     <div class="card">
@@ -160,9 +170,11 @@
       <ul id="taskList"></ul>
     </div>
 
-  </div>
+  </aside>
 
 </main>
+
+<div id="sidebarDrawerBackdrop" class="sidebarDrawerBackdrop" aria-hidden="true"></div>
 
 
 <!-- =====================================================

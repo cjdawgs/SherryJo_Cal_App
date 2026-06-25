@@ -1,5 +1,6 @@
 import {
   initFullCalendar,
+  applyCalendarLayoutMode,
   renderRangePill,
   highlightSelectedDay
 } from "/static/calendar.fullcalendar.js";
@@ -43,6 +44,114 @@ if (!document.getElementById("chip-spinner-style")) {
 
 function getCalendar() {
   return window.calendar || null;
+}
+
+const LAYOUT_BREAKPOINTS = {
+  mobileMax: 640,
+  tabletMax: 1024,
+  desktopMax: 1920
+};
+
+window.layoutMode = window.layoutMode || "desktop";
+window.sidebarCollapsed = window.sidebarCollapsed ?? false;
+window.sidebarDrawerOpen = window.sidebarDrawerOpen ?? false;
+
+function detectLayoutMode(width = window.innerWidth) {
+  if (width <= LAYOUT_BREAKPOINTS.mobileMax) return "mobile";
+  if (width <= LAYOUT_BREAKPOINTS.tabletMax) return "tablet";
+  if (width <= LAYOUT_BREAKPOINTS.desktopMax) return "desktop";
+  return "large";
+}
+
+function setSidebarDrawerOpen(isOpen) {
+  window.sidebarDrawerOpen = !!isOpen;
+
+  const toggleBtn = document.getElementById("sidebarToggleBtn");
+  const backdrop = document.getElementById("sidebarDrawerBackdrop");
+
+  document.body.classList.toggle("sidebar-drawer-open", window.sidebarDrawerOpen);
+
+  if (toggleBtn) {
+    toggleBtn.setAttribute("aria-expanded", window.sidebarDrawerOpen ? "true" : "false");
+  }
+
+  if (backdrop) {
+    backdrop.setAttribute("aria-hidden", window.sidebarDrawerOpen ? "false" : "true");
+  }
+}
+
+function applyLayoutMode({ forceViewSwitch = false } = {}) {
+  const nextMode = detectLayoutMode(window.innerWidth);
+  const modeChanged = window.layoutMode !== nextMode;
+
+  window.layoutMode = nextMode;
+  document.body.dataset.layoutMode = nextMode;
+
+  document.body.classList.toggle("sidebar-collapsed", nextMode === "tablet" && window.sidebarCollapsed);
+
+  if (nextMode !== "mobile") {
+    setSidebarDrawerOpen(false);
+  }
+
+  const shouldSwitchView = forceViewSwitch || modeChanged;
+  applyCalendarLayoutMode(nextMode, { switchView: shouldSwitchView });
+}
+
+function bindResponsiveSidebarControls() {
+  const toggleBtn = document.getElementById("sidebarToggleBtn");
+  const closeBtn = document.getElementById("sidebarCloseBtn");
+  const backdrop = document.getElementById("sidebarDrawerBackdrop");
+
+  if (!toggleBtn || toggleBtn.dataset.bound === "1") {
+    return;
+  }
+
+  toggleBtn.dataset.bound = "1";
+
+  toggleBtn.addEventListener("click", () => {
+    if (window.layoutMode === "mobile") {
+      setSidebarDrawerOpen(!window.sidebarDrawerOpen);
+      return;
+    }
+
+    if (window.layoutMode === "tablet") {
+      window.sidebarCollapsed = !window.sidebarCollapsed;
+      document.body.classList.toggle("sidebar-collapsed", window.sidebarCollapsed);
+    }
+  });
+
+  closeBtn?.addEventListener("click", () => {
+    setSidebarDrawerOpen(false);
+  });
+
+  backdrop?.addEventListener("click", () => {
+    setSidebarDrawerOpen(false);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && window.sidebarDrawerOpen) {
+      setSidebarDrawerOpen(false);
+    }
+  });
+}
+
+function initializeResponsiveLayout() {
+  bindResponsiveSidebarControls();
+  applyLayoutMode({ forceViewSwitch: true });
+
+  let resizeTimer = null;
+  window.addEventListener("resize", () => {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => {
+      applyLayoutMode({ forceViewSwitch: false });
+    }, 140);
+  });
+
+  document.getElementById("calendar")?.addEventListener("click", () => {
+    if (window.layoutMode === "mobile" && window.sidebarDrawerOpen) {
+      setSidebarDrawerOpen(false);
+    }
+  });
 }
 
 /**************************************************************
@@ -1069,6 +1178,7 @@ async function init() {
   
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
+  initializeResponsiveLayout();
   renderRangePill(); // ✅ ensure initial render
 
   const reconnectSyncRequest = consumePendingReconnectSync();
