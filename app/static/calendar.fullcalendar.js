@@ -812,11 +812,14 @@ export function initFullCalendar() {
       const newEnd = event.end;
 
       try {
-        // Build payload with new times
+        // Build payload with ISO 8601 datetime strings (like buildEventPayload does)
+        const dateStr = newStart ? newStart.toISOString().split("T")[0] : prevStart.toISOString().split("T")[0];
+        const startTimeStr = newStart ? newStart.toTimeString().slice(0, 5) : "00:00";
+        const endTimeStr = newEnd ? newEnd.toTimeString().slice(0, 5) : "00:00";
+
         const payload = {
-          date: newStart ? newStart.toISOString().split("T")[0] : prevStart.toISOString().split("T")[0],
-          start_time: newStart ? newStart.toTimeString().slice(0, 5) : "",
-          end_time: newEnd ? newEnd.toTimeString().slice(0, 5) : ""
+          start_time: new Date(`${dateStr}T${startTimeStr}`).toISOString(),
+          end_time: new Date(`${dateStr}T${endTimeStr}`).toISOString()
         };
         console.log(`[eventChange] Moving ${event.title} to payload:`, payload);
 
@@ -842,10 +845,12 @@ export function initFullCalendar() {
           },
           undo: async () => {
             // Restore to previous date/time
+            const prevDateStr = prevStart ? prevStart.toISOString().split("T")[0] : dateStr;
+            const prevStartTimeStr = prevStart ? prevStart.toTimeString().slice(0, 5) : "00:00";
+            const prevEndTimeStr = prevEnd ? prevEnd.toTimeString().slice(0, 5) : "00:00";
             const restorePayload = {
-              date: prevStart ? prevStart.toISOString().split("T")[0] : payload.date,
-              start_time: prevStart ? prevStart.toTimeString().slice(0, 5) : "",
-              end_time: prevEnd ? prevEnd.toTimeString().slice(0, 5) : ""
+              start_time: new Date(`${prevDateStr}T${prevStartTimeStr}`).toISOString(),
+              end_time: new Date(`${prevDateStr}T${prevEndTimeStr}`).toISOString()
             };
             console.log(`[eventChange.undo] Restoring to:`, restorePayload);
             const res = await apiFetch(`/calendar/event/${eventId}`, {
