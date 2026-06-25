@@ -928,6 +928,24 @@ button.primary {
   cursor: pointer;
 }
 
+.stickyChooserItem.stickyChooserSelectable {
+  grid-template-columns: 18px 24px 1fr;
+}
+
+.stickyChooserItem.selected {
+  border-color: #7ca3df;
+  background: #eaf2ff;
+}
+
+.stickyChooserSelectMarker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d4b9f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .stickyChooserItem:hover {
   background: #edf4ff;
 }

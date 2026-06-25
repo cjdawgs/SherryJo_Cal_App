@@ -662,11 +662,21 @@ function getEventStickyCount(ev) {
   return String(ev?.extendedProps?.stickyNote?.content || "").trim() ? 1 : 0;
 }
 
-function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete } = {}) {
+function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete, dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
   icon.textContent = "🗒";
   icon.title = title;
+
+  if (dragPayload) {
+    icon.draggable = true;
+    icon.addEventListener("dragstart", (e) => {
+      window.beginStickyDrag?.(dragPayload, e);
+    });
+    icon.addEventListener("dragend", () => {
+      window.clearStickyDragPayload?.();
+    });
+  }
 
   if (count > 1) {
     const badge = document.createElement("span");
@@ -756,7 +766,11 @@ function renderDateStickyHeaderIcon(dateKey, mode = "day") {
       || (count > 1 ? `Open date sticky notes (${count})` : "Open date sticky note"),
     onOpen: () => window.openDateStickyModal?.(dateKey),
     onDelete: () => window.deleteDateStickyNote?.(dateKey),
-    onEdit: () => window.editDateStickyNote?.(dateKey)
+    onEdit: () => window.editDateStickyNote?.(dateKey),
+    dragPayload: {
+      scope: "date",
+      dateKey
+    }
   });
 }
 
@@ -2177,7 +2191,11 @@ function updateDayDetails() {
         title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note",
         onOpen: () => window.openStickyModal?.(ev),
         onDelete: () => window.deleteEventStickyNote?.(ev),
-        onEdit: () => window.editEventStickyNote?.(ev)
+        onEdit: () => window.editEventStickyNote?.(ev),
+        dragPayload: {
+          scope: "event",
+          fcEventId: String(ev?.id || ev?.extendedProps?.backendId || "")
+        }
       });
       stickyBtn.style.flexShrink = "0";
       div.appendChild(stickyBtn);
@@ -2275,7 +2293,11 @@ function updateWeekView() {
           title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note",
           onOpen: () => window.openStickyModal?.(ev),
           onDelete: () => window.deleteEventStickyNote?.(ev),
-          onEdit: () => window.editEventStickyNote?.(ev)
+          onEdit: () => window.editEventStickyNote?.(ev),
+          dragPayload: {
+            scope: "event",
+            fcEventId: String(ev?.id || ev?.extendedProps?.backendId || "")
+          }
         });
         stickyBtn.style.flexShrink = "0";
         div.appendChild(stickyBtn);

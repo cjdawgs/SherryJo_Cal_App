@@ -112,14 +112,10 @@ function renderVisibleDateStickyIcons() {
     });
     icon.draggable = true;
     icon.addEventListener("dragstart", (e) => {
-      setStickyDragPayload({
+      beginStickyDrag({
         scope: "date",
         dateKey: dateStr
-      });
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", `date:${dateStr}`);
-      }
+      }, e);
     });
     icon.addEventListener("dragend", () => clearStickyDragPayload());
 
@@ -355,6 +351,23 @@ function clearStickyDragPayload() {
   clearDropHighlight();
 }
 
+function beginStickyDrag(payload, e) {
+  if (!payload) return;
+  setStickyDragPayload(payload);
+
+  if (e?.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    const marker = payload.scope === "date"
+      ? `date:${payload.dateKey || ""}`
+      : `event:${payload.fcEventId || payload.eventId || ""}`;
+    e.dataTransfer.setData("text/plain", marker);
+    e.dataTransfer.setData("application/x-sherryjo-sticky", JSON.stringify(payload));
+  }
+}
+
+window.beginStickyDrag = beginStickyDrag;
+window.clearStickyDragPayload = clearStickyDragPayload;
+
 function getDateFromNode(node, root) {
   let ptr = node;
   while (ptr && ptr !== root) {
@@ -555,14 +568,10 @@ export function initFullCalendar() {
           });
           icon.draggable = true;
           icon.addEventListener("dragstart", (e) => {
-            setStickyDragPayload({
+            beginStickyDrag({
               scope: "event",
               fcEventId: String(info.event.id)
-            });
-            if (e.dataTransfer) {
-              e.dataTransfer.effectAllowed = "move";
-              e.dataTransfer.setData("text/plain", `event:${info.event.id}`);
-            }
+            }, e);
           });
           icon.addEventListener("dragend", () => clearStickyDragPayload());
           icon.addEventListener("click", (e) => {

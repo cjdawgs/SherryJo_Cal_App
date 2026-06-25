@@ -407,6 +407,16 @@ function renderStickyTabs() {
     });
     wrap.appendChild(btn);
   });
+
+  refreshStickyActionButtons();
+}
+
+function refreshStickyActionButtons() {
+  const deleteStickyBtn = document.getElementById("deleteStickyBtn");
+  if (!deleteStickyBtn) return;
+
+  const canDeleteSticky = modalState.type === "sticky" && modalState.stickyNotes.length > 0;
+  deleteStickyBtn.style.display = canDeleteSticky ? "inline-flex" : "none";
 }
 
 function saveCurrentStickyIntoState() {
@@ -466,6 +476,7 @@ function setModalType(type) {
   const subtitle = document.getElementById("modalSubtitleText");
   const saveBtn = document.getElementById("saveEventBtn");
   const deleteBtn = document.getElementById("deleteEventBtn");
+  const deleteStickyBtn = document.getElementById("deleteStickyBtn");
   const toStickyBtn = document.getElementById("openStickyFromEventBtn");
   const toEventBtn = document.getElementById("stickyBackToEventBtn");
 
@@ -483,6 +494,10 @@ function setModalType(type) {
   }
   if (saveBtn) saveBtn.textContent = modalState.type === "sticky" ? "Save Sticky" : "Save Event";
   if (deleteBtn) deleteBtn.style.display = modalState.type === "event" && modalState.eventId ? "inline-flex" : "none";
+  if (deleteStickyBtn) {
+    const canDeleteSticky = modalState.type === "sticky" && modalState.stickyNotes.length > 0;
+    deleteStickyBtn.style.display = canDeleteSticky ? "inline-flex" : "none";
+  }
   if (toStickyBtn) toStickyBtn.style.display = modalState.type === "event" && modalState.eventId ? "inline-flex" : "none";
   if (toEventBtn) toEventBtn.style.display = modalState.type === "sticky" && modalState.stickyScope === "event" && modalState.eventId ? "inline-flex" : "none";
 }
@@ -857,6 +872,10 @@ function bindUIEvents() {
     openCreateModal(null, modalState.eventRef);
   });
 
+  document.getElementById("deleteStickyBtn")?.addEventListener("click", async () => {
+    await deleteSelectedStickyInModal();
+  });
+
   document.getElementById("eventStickyColor")?.addEventListener("input", (e) => {
     setStickyPaperColor(e.target.value);
     saveCurrentStickyIntoState();
@@ -1112,31 +1131,168 @@ async function chooseStickyMoveSelection(notes, sourceLabel = "source") {
     return { mode: "single", indices: [0] };
   }
 
-  const choice = await openStickyChooserModal({
-    title: `Move sticky notes from ${sourceLabel}`,
-    subtitle: "Choose move mode",
-    items: [],
-    actions: [
-      { label: "Choose One", value: "one", variant: "primary" },
-      { label: "Move All", value: "all", variant: "danger" },
-      { label: "Cancel", value: null, variant: "secondary" }
-    ]
+  const indices = await chooseStickyIndices(notes, sourceLabel);
+  if (!indices || !indices.length) {
+    return { mode: "cancel", indices: [] };
+  }
+
+  if (indices.length === notes.length) {
+    return { mode: "all", indices };
+  }
+  if (indices.length === 1) {
+    return { mode: "single", indices };
+  }
+  return { mode: "subset", indices };
+}
+
+async function chooseStickyIndices(notes, sourceLabel = "source") {
+  if (!Array.isArray(notes) || !notes.length) return [];
+  if (notes.length === 1) return [0];
+
+  return new Promise((resolve) => {
+    const modal = ensureStickyChooserModal();
+    const titleEl = document.getElementById("stickyChooserTitle");
+    const subtitleEl = document.getElementById("stickyChooserSubtitle");
+    const listEl = document.getElementById("stickyChooserList");
+    const actionsEl = document.getElementById("stickyChooserActions");
+
+    if (!titleEl || !subtitleEl || !listEl || !actionsEl) {
+      resolve([]);
+      return;
+    }
+
+    titleEl.textContent = `Select sticky notes from ${sourceLabel}`;
+    subtitleEl.textContent = "Choose any combination to move (for example 2 of 3)";
+    listEl.innerHTML = "";
+    actionsEl.innerHTML = "";
+
+    const selected = new Set(notes.map((_, idx) => idx));
+    const itemButtons = [];
+
+    const renderItemState = (btn, idx) => {
+      const isSelected = selected.has(idx);
+      btn.classList.toggle("selected", isSelected);
+      btn.setAttribute("aria-pressed", isSelected ? "true" : "false");
+      const marker = btn.querySelector(".stickyChooserSelectMarker");
+      if (marker) marker.textContent = isSelected ? "☑" : "☐";
+    };
+
+    notes.forEach((n, idx) => {
+      const preview = String(n.content || "").replace(/\s+/g, " ").trim();
+      const text = preview.length > 90 ? `${preview.slice(0, 90)}...` : preview;
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "stickyChooserItem stickyChooserSelectable selected";
+      btn.innerHTML = `
+        <span class="stickyChooserSelectMarker">☑</span>
+        <span class="stickyChooserIndex">${idx + 1}</span>
+        <span>${text || "(empty)"}</span>
+      `;
+      btn.addEventListener("click", () => {
+        if (selected.has(idx)) {
+          selected.delete(idx);
+        } else {
+          selected.add(idx);
+        }
+        renderItemState(btn, idx);
+      });
+
+      listEl.appendChild(btn);
+      itemButtons.push(btn);
+    });
+
+    const choose = (indices) => {
+      closeStickyChooserModal();
+      resolve(indices);
+    };
+
+    const mkAction = (label, handler, variant = "secondary") => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `stickyChooserAction ${variant}`;
+      btn.textContent = label;
+      btn.addEventListener("click", handler);
+      actionsEl.appendChild(btn);
+      return btn;
+    };
+
+    const selectAllBtn = mkAction("Select All", () => {
+      notes.forEach((_, idx) => selected.add(idx));
+      itemButtons.forEach((btn, idx) => renderItemState(btn, idx));
+    });
+
+    const moveSelectedBtn = mkAction("Move Selected", () => {
+      const indices = Array.from(selected).sort((a, b) => a - b);
+      choose(indices);
+    }, "primary");
+
+    const moveAllBtn = mkAction("Move All", () => {
+      choose(notes.map((_, idx) => idx));
+    }, "danger");
+
+    const cancelBtn = mkAction("Cancel", () => choose([]), "secondary");
+
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) choose([]);
+    }, { once: true });
+
+    const focusable = [
+      ...itemButtons,
+      selectAllBtn,
+      moveSelectedBtn,
+      moveAllBtn,
+      cancelBtn
+    ].filter(Boolean);
+
+    let activeIdx = 0;
+    const focusAt = (idx) => {
+      if (!focusable.length) return;
+      activeIdx = ((idx % focusable.length) + focusable.length) % focusable.length;
+      focusable[activeIdx].focus();
+    };
+
+    if (modal._keyHandler) {
+      document.removeEventListener("keydown", modal._keyHandler, true);
+      modal._keyHandler = null;
+    }
+
+    modal._keyHandler = (e) => {
+      if (!modal.classList.contains("show")) return;
+      if (!["ArrowDown", "ArrowUp", "Enter", "Escape", " "].includes(e.key)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (e.key === "Escape") {
+        choose([]);
+        return;
+      }
+
+      if (!focusable.length) {
+        if (e.key === "Enter") choose([]);
+        return;
+      }
+
+      if (e.key === "ArrowDown") {
+        focusAt(activeIdx + 1);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        focusAt(activeIdx - 1);
+        return;
+      }
+
+      if (e.key === "Enter" || e.key === " ") {
+        focusable[activeIdx].click();
+      }
+    };
+
+    document.addEventListener("keydown", modal._keyHandler, true);
+
+    modal.classList.add("show");
+    if (focusable.length) focusAt(0);
   });
-
-  if (choice == null) {
-    return { mode: "cancel", indices: [] };
-  }
-
-  if (choice === "all") {
-    return { mode: "all", indices: notes.map((_, idx) => idx) };
-  }
-
-  const idx = await chooseStickyIndex(notes, "move");
-  if (idx == null) {
-    return { mode: "cancel", indices: [] };
-  }
-
-  return { mode: "single", indices: [idx] };
 }
 
 window.editEventStickyNote = async (eventRef) => {
@@ -1279,6 +1435,63 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
     return false;
   }
 };
+
+async function deleteSelectedStickyInModal() {
+  if (modalState.type !== "sticky") return;
+
+  saveCurrentStickyIntoState();
+  const notes = [...modalState.stickyNotes];
+  if (!notes.length) {
+    window.showToast?.("No sticky notes to delete", "error");
+    return;
+  }
+
+  const idx = Math.max(0, Math.min(modalState.stickyIndex, notes.length - 1));
+  const remaining = notes.filter((_, i) => i !== idx);
+
+  if (modalState.stickyScope === "date") {
+    const ok = await setDateStickyNotes(modalState.dateStickyKey, remaining);
+    if (!ok) return;
+
+    modalState.stickyNotes = remaining;
+    modalState.stickyIndex = Math.max(0, Math.min(idx, remaining.length - 1));
+    hydrateStickyEditorFromState();
+    refreshStickyVisuals();
+    window.showToast?.("🗒 Date sticky note deleted");
+    return;
+  }
+
+  if (!modalState.eventId) {
+    window.showToast?.("Sticky delete failed: missing event id", "error");
+    return;
+  }
+
+  try {
+    const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sticky_notes: remaining,
+        sticky_note: remaining[0] || null
+      })
+    });
+    if (!res || !res.ok) throw new Error("delete sticky failed");
+
+    const data = await res.json();
+    const nextEvent = normalizeEventForCache(data.event, modalState.eventRef);
+    modalState.eventRef = nextEvent;
+    modalState.stickyNotes = parseStickyNotes(nextEvent);
+    modalState.stickyIndex = Math.max(0, Math.min(idx, modalState.stickyNotes.length - 1));
+    upsertCacheEvent(nextEvent);
+
+    hydrateStickyEditorFromState();
+    refreshStickyVisuals();
+    window.showToast?.("🗒 Sticky note deleted");
+  } catch (err) {
+    console.error("❌ Sticky delete failed", err);
+    window.showToast?.("❌ Sticky delete failed", "error");
+  }
+}
 
 window.deleteEventStickyNote = async (eventRef) => {
   if (!eventRef) return;
