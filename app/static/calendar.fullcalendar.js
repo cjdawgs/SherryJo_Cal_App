@@ -869,29 +869,27 @@ export function initFullCalendar() {
                 throw new Error(`Restore failed: ${res?.status} ${errorText}`);
               }
               const data = await res.json();
-              console.log(`[eventChange.undo] Undo successful, updating FullCalendar event`);
               
-              // CRITICAL: Update FullCalendar's event object directly so it shows the change immediately
-              try {
-                const fcEvent = window.calendar?.getEventById(eventId) || window.calendar?.getEventById(String(eventId));
-                if (fcEvent) {
-                  console.log(`[eventChange.undo] Found FullCalendar event, updating times:`, {
-                    oldStart: fcEvent.start,
-                    newStart: prevStart,
-                    oldEnd: fcEvent.end,
-                    newEnd: prevEnd
-                  });
-                  fcEvent.setProp("start", prevStart);
-                  fcEvent.setProp("end", prevEnd);
-                  console.log(`[eventChange.undo] FullCalendar event updated`);
-                } else {
-                  console.warn(`[eventChange.undo] Could not find FullCalendar event by id=${eventId}, will rely on smartRefresh`);
-                }
-              } catch (fcErr) {
-                console.error(`[eventChange.undo] Error updating FullCalendar event:`, fcErr.message);
+              // Update the event cache with restored times BEFORE smartRefresh runs,
+              // so when FullCalendar re-renders it shows the correct position
+              const restoredEvent = window.normalizeEventForCache(data?.event || data);
+              window.upsertCacheEvent(restoredEvent);
+              console.log(`[eventChange.undo] Cache updated with restored event`);
+
+              // Also update FullCalendar's event object directly using setDates()
+              // Search all events since getEventById uses FullCalendar's own id, not backendId
+              const allFcEvents = window.calendar?.getEvents() || [];
+              const fcEvent = allFcEvents.find(e =>
+                String(e.extendedProps?.backendId) === String(eventId) ||
+                String(e.id) === String(eventId)
+              );
+              if (fcEvent) {
+                console.log(`[eventChange.undo] Found FullCalendar event, calling setDates()`);
+                fcEvent.setDates(prevStart, prevEnd || prevStart);
+              } else {
+                console.warn(`[eventChange.undo] FullCalendar event not found, relying on smartRefresh`);
               }
-              
-              // Refresh the calendar to ensure consistency
+
               window.smartRefresh?.({ reason: "event_restored", force: true });
               return data;
             } catch (undoErr) {
