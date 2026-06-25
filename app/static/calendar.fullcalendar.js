@@ -76,11 +76,22 @@ function stickyCountFromNotes(notes = [], legacySticky = null) {
   return String(legacySticky?.content || "").trim() ? 1 : 0;
 }
 
-function buildStickyIcon({ count = 1, title = "Open sticky note" } = {}) {
+function buildStickyIcon({ count = 1, title = "Open sticky note", dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
   icon.title = title;
   icon.textContent = "🗒";
+  icon.style.cursor = "grab";
+  icon.style.userSelect = "none";
+  icon.style.webkitUserDrag = "element";
+
+  if (dragPayload) {
+    icon.draggable = true;
+    icon.addEventListener("dragstart", (e) => {
+      beginStickyDrag(dragPayload, e);
+    });
+    icon.addEventListener("dragend", () => clearStickyDragPayload());
+  }
 
   // Prevent day/event click handlers from stealing sticky icon interactions.
   ["pointerdown", "mousedown", "touchstart"].forEach((evtName) => {
@@ -121,16 +132,12 @@ function renderVisibleDateStickyIcons() {
 
     const icon = buildStickyIcon({
       count: dateCount,
-      title: window.getDateStickyTooltip?.(dateStr) || `Open date sticky note (${dateCount})`
-    });
-    icon.draggable = true;
-    icon.addEventListener("dragstart", (e) => {
-      beginStickyDrag({
+      title: window.getDateStickyTooltip?.(dateStr) || `Open date sticky note (${dateCount})`,
+      dragPayload: {
         scope: "date",
         dateKey: dateStr
-      }, e);
+      }
     });
-    icon.addEventListener("dragend", () => clearStickyDragPayload());
 
     icon.addEventListener("click", (e) => {
       e.preventDefault();
@@ -577,16 +584,12 @@ export function initFullCalendar() {
         if (stickyCount > 0) {
           const icon = buildStickyIcon({
             count: stickyCount,
-            title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note"
-          });
-          icon.draggable = true;
-          icon.addEventListener("dragstart", (e) => {
-            beginStickyDrag({
+            title: stickyCount > 1 ? `Open sticky notes (${stickyCount})` : "Open sticky note",
+            dragPayload: {
               scope: "event",
               fcEventId: String(info.event.id)
-            }, e);
+            }
           });
-          icon.addEventListener("dragend", () => clearStickyDragPayload());
           icon.addEventListener("click", (e) => {
             e.preventDefault();
             e.stopPropagation();

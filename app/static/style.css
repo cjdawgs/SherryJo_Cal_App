@@ -687,6 +687,9 @@ button.primary {
   cursor: grab;
   background: #f6e08c;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  user-select: none;
+  -webkit-user-drag: element;
+  touch-action: none;
 }
 
 .stickyEventIcon:active {
