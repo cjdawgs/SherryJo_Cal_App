@@ -148,21 +148,7 @@ function renderVisibleDateStickyIcons() {
     icon.addEventListener("dblclick", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      openStickyIconContextMenu(e.clientX, e.clientY, {
-        scope: "date",
-        dateStr,
-        count: dateCount
-      });
-    });
-
-    icon.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      openStickyIconContextMenu(e.clientX, e.clientY, {
-        scope: "date",
-        dateStr,
-        count: dateCount
-      });
+      window.editDateStickyNote?.(dateStr);
     });
 
     holder.appendChild(icon);
@@ -599,11 +585,7 @@ export function initFullCalendar() {
           icon.addEventListener("dblclick", (e) => {
             e.preventDefault();
             e.stopPropagation();
-            openStickyIconContextMenu(e.clientX, e.clientY, {
-              scope: "event",
-              fcEvent: info.event,
-              count: stickyCount
-            });
+            window.editEventStickyNote?.(info.event);
           });
 
           icon.addEventListener("contextmenu", (e) => {

@@ -742,7 +742,9 @@ async function saveStickyOnly() {
   }
 
   if (!modalState.eventId) {
-    window.showToast?.("Create the event first, then add sticky note", "error");
+    saveCurrentStickyIntoState();
+    renderStickyTabs();
+    window.showToast?.("📝 Sticky note added to the event draft");
     return;
   }
 
@@ -866,7 +868,9 @@ function bindUIEvents() {
 
   document.getElementById("openStickyFromEventBtn")?.addEventListener("click", () => {
     openStickyModal(modalState.eventRef);
-  });
+      saveCurrentStickyIntoState();
+      renderStickyTabs();
+      window.showToast?.("📝 Sticky note added to the event draft");
 
   document.getElementById("stickyBackToEventBtn")?.addEventListener("click", () => {
     openCreateModal(null, modalState.eventRef);

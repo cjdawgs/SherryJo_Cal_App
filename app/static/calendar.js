@@ -695,8 +695,8 @@ function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen
     icon.addEventListener("dblclick", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (typeof onDelete === "function") {
-        openSidebarStickyMenu(e.clientX, e.clientY, onOpen, onDelete, onEdit);
+      if (typeof onEdit === "function") {
+        onEdit();
         return;
       }
       onOpen();
