@@ -71,12 +71,42 @@ def main():
         payload={},
     )
 
-    if status not in (200, 201):
+    if status not in (200, 201, 202):
         fail(f"Failed to trigger deploy: HTTP {status} | {deploy_resp}")
 
     deploy_id = deploy_resp.get("id")
     if not deploy_id:
-        fail(f"Deploy was triggered but no deploy ID returned: {deploy_resp}")
+        # Some Render API paths return 202 with an empty body.
+        # Fallback: query latest deploy and use its id.
+        list_status, list_resp = _http_json(
+            "GET",
+            f"{RENDER_API_BASE}/services/{service_id}/deploys?limit=1",
+            token,
+        )
+
+        if list_status != 200:
+            fail(
+                "Deploy was triggered but no deploy ID returned, and latest deploy lookup failed: "
+                f"HTTP {list_status} | {list_resp}"
+            )
+
+        if isinstance(list_resp, list) and list_resp:
+            first = list_resp[0]
+            if isinstance(first, dict):
+                deploy_id = first.get("id")
+                if not deploy_id and isinstance(first.get("deploy"), dict):
+                    deploy_id = first["deploy"].get("id")
+        elif isinstance(list_resp, dict):
+            items = list_resp.get("items") or list_resp.get("data") or []
+            if isinstance(items, list) and items:
+                first = items[0]
+                if isinstance(first, dict):
+                    deploy_id = first.get("id")
+                    if not deploy_id and isinstance(first.get("deploy"), dict):
+                        deploy_id = first["deploy"].get("id")
+
+    if not deploy_id:
+        fail(f"Deploy was triggered but no deploy ID could be resolved. Trigger response: {deploy_resp}")
 
     print(f"Deploy triggered: {deploy_id}")
     print("Polling deploy status...")
