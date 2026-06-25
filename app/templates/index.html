@@ -55,70 +55,75 @@
         ⏳ Syncing calendar...
       </div>
 
-      <!-- ✅ CONNECTED ACCOUNTS -->
-      <div id="accounts" class="accounts hidden"></div>
-      
-      <!-- ✅ COLOR LEGEND -->
-      <div id="calendarLegend" class="calendarLegend"></div>
+      <section class="controlBand" aria-label="Calendar controls">
+        <div class="controlBandPrimary">
+          <!-- ✅ CONNECTED ACCOUNTS -->
+          <div id="accounts" class="accounts hidden"></div>
 
-      <!-- ✅ ACTION BUTTONS -->
-      <div class="actionButtons">
+          <!-- ✅ COLOR LEGEND -->
+          <div id="calendarLegend" class="calendarLegend"></div>
+        </div>
 
-        <!-- ✅ UPDATED BUTTON (clearer + tooltip) -->
-        
-        <button id="createBtn"
-          title="Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'">
-          ➕ Create Event
-        </button>
+        <div class="controlBandActions">
+          <!-- ✅ ACTION BUTTONS -->
+          <div class="actionButtons">
 
-        <!-- 
-        <button id="addTaskBtn">Add</button> 
-        <button id="saveEventBtn">Save</button>
-        <button id="cancelEventBtn">Cancel</button>
-        -->
+            <!-- ✅ UPDATED BUTTON (clearer + tooltip) -->
+            <button id="createBtn"
+              title="Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'">
+              ➕ Create Event
+            </button>
 
-        <!-- ✅ ACCOUNTS BUTTON (SUBTLE ENTRY POINT) -->
-        <button id="accountsBtn" title="Manage connected accounts"
-          style="
-            margin-left:6px;
-            font-size:14px;
-            padding:4px 8px;
-            opacity:0.7;
-            cursor:pointer;
-          ">
-          ⚙
-        </button>
+            <!--
+            <button id="addTaskBtn">Add</button>
+            <button id="saveEventBtn">Save</button>
+            <button id="cancelEventBtn">Cancel</button>
+            -->
 
-        <!-- ✅ SYNC (SUBTLE ICON) -->
-        <button id="syncBtn" title="Sync calendars">
-          <svg width="14" height="14" viewBox="0 0 24 24">
-            <path fill="currentColor"
-              d="M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.75-6.97z"/>
-          </svg>
-        </button>
+            <!-- ✅ ACCOUNTS BUTTON (SUBTLE ENTRY POINT) -->
+            <button id="accountsBtn" title="Manage connected accounts"
+              style="
+                margin-left:6px;
+                font-size:14px;
+                padding:4px 8px;
+                opacity:0.7;
+                cursor:pointer;
+              ">
+              ⚙
+            </button>
 
-        <!-- ✅ UNDO/REDO BUTTONS -->
-        <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>
-          <svg width="14" height="14" viewBox="0 0 24 24">
-            <path fill="currentColor" d="M12.5 8c-1.65 0-3.19.67-4.28 1.86L2.7 9.21 5 15h6.44L8.96 11.3c.75-.75 1.78-1.2 2.92-1.2 2.28 0 4.11 1.86 4.11 4.14 0 2.27-1.83 4.14-4.11 4.14-1.14 0-2.17-.45-2.92-1.2H6.52c.95 1.56 2.7 2.6 4.69 2.6 3.04 0 5.5-2.45 5.5-5.5S15.54 8 12.5 8z"/>
-          </svg>
-        </button>
+            <!-- ✅ SYNC (SUBTLE ICON) -->
+            <button id="syncBtn" title="Sync calendars">
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="currentColor"
+                  d="M17.65 6.35A7.95 7.95 0 0012 4V1L7 6l5 5V7a5 5 0 11-5 5H5a7 7 0 107.75-6.97z"/>
+              </svg>
+            </button>
 
-        <button id="redoBtn" title="Redo (Ctrl+Y)" disabled>
-          <svg width="14" height="14" viewBox="0 0 24 24">
-            <path fill="currentColor" d="M18.4 10.6C17.31 9.33 15.77 8.5 14 8.5c-1.14 0-2.17.45-2.92 1.2H8.56L11 7v-6H5l2.3 2.26c1.09-1.19 2.63-1.94 4.3-1.94 1.65 0 3.19.67 4.28 1.86l2.12-2.13c.39-.38 1.02-.38 1.41 0 .39.39.39 1.02 0 1.41l-2.5 2.5z M14 20.14c-2.28 0-4.11-1.86-4.11-4.14 0-2.28 1.83-4.14 4.11-4.14 1.14 0 2.17.45 2.92 1.2h2.52c-.95-1.56-2.7-2.6-4.69-2.6-3.04 0-5.5 2.45-5.5 5.5s2.46 5.5 5.5 5.5c1.65 0 3.19-.67 4.28-1.86l2.12 2.13c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41l-2.5-2.5c-.75.75-1.78 1.2-2.92 1.2z"/>
-          </svg>
-        </button>
+            <!-- ✅ UNDO/REDO BUTTONS -->
+            <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M12.5 8c-1.65 0-3.19.67-4.28 1.86L2.7 9.21 5 15h6.44L8.96 11.3c.75-.75 1.78-1.2 2.92-1.2 2.28 0 4.11 1.86 4.11 4.14 0 2.27-1.83 4.14-4.11 4.14-1.14 0-2.17-.45-2.92-1.2H6.52c.95 1.56 2.7 2.6 4.69 2.6 3.04 0 5.5-2.45 5.5-5.5S15.54 8 12.5 8z"/>
+              </svg>
+            </button>
 
-        <!-- ✅ LOGOUT (SUBTLE ICON) -->
-        <button id="logoutBtn" title="Logout">
-          <svg width="14" height="14" viewBox="0 0 24 24">
-            <path fill="currentColor"
-              d="M16 17l5-5-5-5v3H9v4h7v3zM4 19h8v2H4a2 2 0 01-2-2V5a2 2 0 012-2h8v2H4v14z"/>
-          </svg>
-        </button>
+            <button id="redoBtn" title="Redo (Ctrl+Y)" disabled>
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M18.4 10.6C17.31 9.33 15.77 8.5 14 8.5c-1.14 0-2.17.45-2.92 1.2H8.56L11 7v-6H5l2.3 2.26c1.09-1.19 2.63-1.94 4.3-1.94 1.65 0 3.19.67 4.28 1.86l2.12-2.13c.39-.38 1.02-.38 1.41 0 .39.39.39 1.02 0 1.41l-2.5 2.5z M14 20.14c-2.28 0-4.11-1.86-4.11-4.14 0-2.28 1.83-4.14 4.11-4.14 1.14 0 2.17.45 2.92 1.2h2.52c-.95-1.56-2.7-2.6-4.69-2.6-3.04 0-5.5 2.45-5.5 5.5s2.46 5.5 5.5 5.5c1.65 0 3.19-.67 4.28-1.86l2.12 2.13c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41l-2.5-2.5c-.75.75-1.78 1.2-2.92 1.2z"/>
+              </svg>
+            </button>
 
-      </div>
+            <!-- ✅ LOGOUT (SUBTLE ICON) -->
+            <button id="logoutBtn" title="Logout">
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="currentColor"
+                  d="M16 17l5-5-5-5v3H9v4h7v3zM4 19h8v2H4a2 2 0 01-2-2V5a2 2 0 012-2h8v2H4v14z"/>
+              </svg>
+            </button>
+
+          </div>
+        </div>
+      </section>
 
     </div>
 

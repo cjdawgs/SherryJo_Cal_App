@@ -38,9 +38,13 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   width: 100%;
   max-width: var(--topbar-max-width);
+}
+
+.authContainer {
+  width: 100%;
 }
 
 .appTitleRow {
@@ -55,6 +59,25 @@ body {
   font-size: calc(26px * var(--app-font-scale));
   font-weight: bold;
   text-align: center;
+}
+
+.controlBand {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.controlBandPrimary {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.controlBandActions {
+  min-width: 0;
 }
 
 .sidebarToggleBtn,
@@ -72,8 +95,8 @@ body {
 
 .accounts {
   display: flex;
-  flex-wrap: nowrap;
-  justify-content: center;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   align-items: center;
   gap: 8px;
 
@@ -119,11 +142,16 @@ body {
 ✅ ACTION BUTTONS
 ===================================================== */
 .actionButtons {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(42px, auto);
+  justify-content: end;
   gap: 4px;
   margin: 0;
+}
+
+.actionButtons > button {
+  min-height: 38px;
 }
 
 button {
@@ -1102,8 +1130,55 @@ Large: > 1920
   }
 
   .appTitle {
-    font-size: 22px;
+    font-size: 17px;
+    font-weight: 600;
+    opacity: 0.82;
     text-align: left;
+  }
+
+  .controlBand {
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 6px;
+    max-height: 16vh;
+    min-height: 96px;
+    overflow: hidden;
+  }
+
+  .controlBandPrimary,
+  .controlBandActions {
+    min-height: 0;
+  }
+
+  .controlBandPrimary {
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .controlBandActions {
+    overflow: hidden;
+  }
+
+  .accounts {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 100%;
+    padding-right: 2px;
+  }
+
+  .accounts .chip {
+    width: 100%;
+    max-width: 100%;
+    justify-content: space-between;
+  }
+
+  #calendarLegend {
+    font-size: 11px;
+    opacity: 0.85;
   }
 
   .sidebarToggleBtn,
@@ -1122,9 +1197,10 @@ Large: > 1920
 
   .actionButtons {
     width: 100%;
-    justify-content: stretch;
-    flex-direction: column;
-    gap: 6px;
+    grid-auto-flow: row;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    align-content: start;
   }
 
   .actionButtons > button,
@@ -1198,6 +1274,25 @@ Large: > 1920
     --calendar-min-height: 640px;
   }
 
+  .controlBand {
+    grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+    gap: 10px;
+  }
+
+  .accounts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: hidden;
+    overflow-y: auto;
+    max-height: 132px;
+  }
+
+  .actionButtons {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, minmax(56px, 1fr));
+    justify-content: stretch;
+  }
+
   .layout {
     grid-template-columns: minmax(0, 1fr) minmax(250px, 36vw);
   }
@@ -1255,6 +1350,11 @@ Large: > 1920
   .topbar-inner,
   .authContainer {
     gap: 8px;
+  }
+
+  .controlBand {
+    grid-template-columns: minmax(0, 1fr) minmax(420px, 40%);
+    gap: 12px;
   }
 
   .actionButtons button {

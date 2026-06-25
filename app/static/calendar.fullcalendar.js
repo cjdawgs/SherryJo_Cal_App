@@ -357,6 +357,9 @@ let _prevViewType = null;
 let _navigatingToSelected = false;
 let stickyDragPayload = null;
 let highlightedDropEl = null;
+let mobileShowAllDays = false;
+let lastAppliedHiddenDaysKey = "";
+let lastAppliedTimeWindowKey = "";
 
 function setStickyDragPayload(payload) {
   stickyDragPayload = payload;
@@ -424,17 +427,27 @@ function setDropHighlight(el, mode) {
 
 const CALENDAR_LAYOUT_PROFILES = {
   mobile: {
-    defaultView: "timeGridDay",
+    defaultView: "timeGridWeek",
     eventMaxStack: 2,
     dayMaxEvents: 2,
     slotDuration: "00:30:00",
-    toolbarRight: "today prev,next timeGridDay,timeGridWeek,dayGridMonth"
+    slotLabelInterval: "02:00:00",
+    slotMinTime: "06:00:00",
+    slotMaxTime: "18:00:00",
+    allDaySlot: false,
+    expandRows: false,
+    toolbarRight: "today prev,next mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   tablet: {
     defaultView: "timeGridWeek",
     eventMaxStack: 4,
     dayMaxEvents: 4,
     slotDuration: "00:30:00",
+    slotLabelInterval: "01:00:00",
+    slotMinTime: "06:00:00",
+    slotMaxTime: "22:00:00",
+    allDaySlot: true,
+    expandRows: true,
     toolbarRight: "today prev,next timeGridWeek,timeGridDay,dayGridMonth"
   },
   desktop: {
@@ -442,6 +455,11 @@ const CALENDAR_LAYOUT_PROFILES = {
     eventMaxStack: 6,
     dayMaxEvents: 6,
     slotDuration: "00:30:00",
+    slotLabelInterval: "01:00:00",
+    slotMinTime: "00:00:00",
+    slotMaxTime: "24:00:00",
+    allDaySlot: true,
+    expandRows: true,
     toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
   },
   large: {
@@ -449,6 +467,11 @@ const CALENDAR_LAYOUT_PROFILES = {
     eventMaxStack: 10,
     dayMaxEvents: 10,
     slotDuration: "00:15:00",
+    slotLabelInterval: "01:00:00",
+    slotMinTime: "00:00:00",
+    slotMaxTime: "24:00:00",
+    allDaySlot: true,
+    expandRows: true,
     toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
   }
 };
@@ -472,6 +495,105 @@ function getCalendarHeightForMode(mode) {
   return Math.max(700, viewportHeight - 170);
 }
 
+function toHourToken(hourValue) {
+  return `${String(Math.max(0, Math.min(24, hourValue))).padStart(2, "0")}:00:00`;
+}
+
+function updateMobileDaysToggleLabel() {
+  const btn = document.querySelector(".fc-mobileDaysToggle-button");
+  if (!btn) return;
+  btn.textContent = mobileShowAllDays ? "Focused Days" : "All Days";
+}
+
+function getViewEventsInRange(rangeStart, rangeEnd) {
+  const cache = window.sessionEventCache || [];
+  return cache.filter((ev) => {
+    const start = ev?.start ? new Date(ev.start) : null;
+    const end = ev?.end ? new Date(ev.end) : start;
+    if (!start || Number.isNaN(start.getTime())) return false;
+    if (!end || Number.isNaN(end.getTime())) return false;
+    return start < rangeEnd && end >= rangeStart;
+  });
+}
+
+function applyMobileWeekCompression() {
+  const cal = window.calendar;
+  if (!cal) return;
+
+  if (window.layoutMode !== "mobile") {
+    const emptyKey = "[]";
+    if (lastAppliedHiddenDaysKey !== emptyKey) {
+      cal.setOption("hiddenDays", []);
+      lastAppliedHiddenDaysKey = emptyKey;
+    }
+    return;
+  }
+
+  const view = cal.view;
+  if (!view || view.type !== "timeGridWeek") return;
+
+  const rangeStart = view.activeStart ? new Date(view.activeStart) : null;
+  const rangeEnd = view.activeEnd ? new Date(view.activeEnd) : null;
+  if (!rangeStart || !rangeEnd) return;
+
+  const visibleEvents = getViewEventsInRange(rangeStart, rangeEnd);
+
+  let minHour = 6;
+  let maxHour = 18;
+
+  if (visibleEvents.length) {
+    let earliest = 24;
+    let latest = 0;
+
+    visibleEvents.forEach((ev) => {
+      const s = new Date(ev.start);
+      const e = ev.end ? new Date(ev.end) : s;
+      earliest = Math.min(earliest, s.getHours());
+      latest = Math.max(latest, e.getHours() + (e.getMinutes() > 0 ? 1 : 0));
+    });
+
+    minHour = Math.max(6, earliest - 1);
+    maxHour = Math.min(22, latest + 1);
+    if (maxHour - minHour < 8) {
+      maxHour = Math.min(22, minHour + 8);
+    }
+  }
+
+  const minToken = toHourToken(minHour);
+  const maxToken = toHourToken(maxHour);
+  const timeWindowKey = `${minToken}|${maxToken}`;
+
+  if (lastAppliedTimeWindowKey !== timeWindowKey) {
+    cal.setOption("slotMinTime", minToken);
+    cal.setOption("slotMaxTime", maxToken);
+    lastAppliedTimeWindowKey = timeWindowKey;
+  }
+
+  const activeDows = new Set();
+  visibleEvents.forEach((ev) => {
+    const start = new Date(ev.start);
+    if (!Number.isNaN(start.getTime())) {
+      activeDows.add(start.getDay());
+    }
+  });
+
+  let hiddenDays = [];
+  if (!mobileShowAllDays) {
+    hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => !activeDows.has(dow));
+    if (hiddenDays.length >= 6) {
+      hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => dow !== new Date(window.selectedDate || Date.now()).getDay());
+    }
+  }
+
+  const hiddenKey = JSON.stringify(hiddenDays);
+  if (lastAppliedHiddenDaysKey !== hiddenKey) {
+    cal.setOption("hiddenDays", hiddenDays);
+    lastAppliedHiddenDaysKey = hiddenKey;
+  }
+
+  setTimeout(updateMobileDaysToggleLabel, 0);
+}
+
 export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   const cal = window.calendar;
   if (!cal) return;
@@ -486,8 +608,20 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   cal.setOption("eventMaxStack", profile.eventMaxStack);
   cal.setOption("dayMaxEvents", profile.dayMaxEvents);
   cal.setOption("slotDuration", profile.slotDuration);
+  cal.setOption("slotLabelInterval", profile.slotLabelInterval);
+  cal.setOption("slotMinTime", profile.slotMinTime);
+  cal.setOption("slotMaxTime", profile.slotMaxTime);
+  cal.setOption("allDaySlot", profile.allDaySlot);
+  cal.setOption("expandRows", profile.expandRows);
   cal.setOption("height", getCalendarHeightForMode(mode));
   cal.setOption("contentHeight", "auto");
+
+  if (mode !== "mobile") {
+    mobileShowAllDays = false;
+    lastAppliedHiddenDaysKey = "";
+    lastAppliedTimeWindowKey = "";
+    cal.setOption("hiddenDays", []);
+  }
 
   if (switchView && cal.view?.type !== profile.defaultView) {
     cal.changeView(profile.defaultView);
@@ -496,6 +630,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
     }
   }
 
+  applyMobileWeekCompression();
   setTimeout(() => renderVisibleDateStickyIcons(), 70);
 }
 
@@ -540,12 +675,26 @@ export function initFullCalendar() {
     eventMaxStack: initialProfile.eventMaxStack,
     dayMaxEvents: initialProfile.dayMaxEvents,
     slotDuration: initialProfile.slotDuration,
+    slotLabelInterval: initialProfile.slotLabelInterval,
+    slotMinTime: initialProfile.slotMinTime,
+    slotMaxTime: initialProfile.slotMaxTime,
+    allDaySlot: initialProfile.allDaySlot,
+    expandRows: initialProfile.expandRows,
     height: getCalendarHeightForMode(initialLayoutMode),
     contentHeight: "auto",
 
     customButtons: {
       rangeGroup: {
         text: ""   // placeholder
+      },
+      mobileDaysToggle: {
+        text: "All Days",
+        click: () => {
+          mobileShowAllDays = !mobileShowAllDays;
+          lastAppliedHiddenDaysKey = "";
+          applyMobileWeekCompression();
+          updateMobileDaysToggleLabel();
+        }
       }
     },
 
@@ -821,6 +970,7 @@ export function initFullCalendar() {
           window.updateChipEventCounts();
         }, 0);
       }
+      applyMobileWeekCompression();
     },
 
     datesSet: function(info) {
@@ -861,6 +1011,7 @@ export function initFullCalendar() {
         setTimeout(() => highlightSelectedDay(window.selectedDate), 50);
       }
       setTimeout(() => renderVisibleDateStickyIcons(), 70);
+      applyMobileWeekCompression();
 
       // ✅ Log for debugging
       console.log("VIEW INIT DATE:", window.selectedDate, "view:", currentViewType);
@@ -1015,6 +1166,7 @@ export function initFullCalendar() {
 
   window.calendar.render();
   applyCalendarLayoutMode(initialLayoutMode, { switchView: false });
+  updateMobileDaysToggleLabel();
 
   // =========================================================
   // ✅ RIGHT-CLICK ON EMPTY DATE CELLS (not on events)
