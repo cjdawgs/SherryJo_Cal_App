@@ -109,6 +109,57 @@ from app import models  # DO NOT REMOVE
 # ✅ Create tables (safe for dev; in prod you'd use migrations)
 Base.metadata.create_all(bind=engine)
 
+# ✅ Ensure PostgreSQL schema is up to date for optional columns used by current code.
+if engine.url.drivername.startswith("postgresql"):
+    inspector = inspect(engine)
+
+    if "oauth_accounts" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("oauth_accounts")}
+        required_columns = {
+            "last_sync_success",
+            "last_sync_failure",
+            "last_error",
+            "status",
+            "token_expires_at",
+            "updated_at",
+            "color"
+        }
+        missing = required_columns - columns
+        if missing:
+            print(f"⚠️ PostgreSQL oauth_accounts schema missing columns: {missing}. Applying ALTER TABLE fixes.")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_sync_success TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_sync_failure TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_error VARCHAR"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'ok'"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS color VARCHAR"))
+                conn.commit()
+            print("✅ PostgreSQL oauth_accounts schema upgrade complete.")
+
+    if "events" in inspector.get_table_names():
+        event_columns = {col["name"] for col in inspector.get_columns("events")}
+        required_event_columns = {
+            "color",
+            "tags",
+            "sticky_note",
+            "sticky_notes",
+            "updated_at"
+        }
+        missing_event_columns = required_event_columns - event_columns
+
+        if missing_event_columns:
+            print(f"⚠️ PostgreSQL events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS color VARCHAR"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS tags JSONB"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_note JSONB"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_notes JSONB"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+                conn.commit()
+            print("✅ PostgreSQL events schema upgrade complete.")
+
 # ✅ Ensure local SQLite schema is up to date for optional columns
 if engine.url.drivername.startswith("sqlite"):
     inspector = inspect(engine)
