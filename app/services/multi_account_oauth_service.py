@@ -227,21 +227,52 @@ class MultiAccountOAuthService:
 
     @staticmethod
     def get_user_accounts(db: Session, user_id: int, provider: str = None):
-        query = db.query(OAuthAccount).filter(
-            OAuthAccount.user_id == user_id
-        )
+        try:
+            query = db.query(OAuthAccount).filter(
+                OAuthAccount.user_id == user_id
+            )
 
-        if provider:
-            query = query.filter(OAuthAccount.provider == provider)
+            if provider:
+                query = query.filter(OAuthAccount.provider == provider)
 
-        return query.all()
+            return query.all()
+        except Exception as e:
+            # Recover from aborted transaction state (e.g. Postgres InFailedSqlTransaction)
+            # and retry once for read-only account lookups.
+            print("⚠️ get_user_accounts failed, attempting rollback+retry:", e)
+            try:
+                db.rollback()
+            except Exception as rb_err:
+                print("⚠️ get_user_accounts rollback failed:", rb_err)
+                raise
+
+            query = db.query(OAuthAccount).filter(
+                OAuthAccount.user_id == user_id
+            )
+            if provider:
+                query = query.filter(OAuthAccount.provider == provider)
+
+            return query.all()
 
     @staticmethod
     def get_all_sync_enabled_accounts(db: Session, user_id: int):
-        return db.query(OAuthAccount).filter(
-            OAuthAccount.user_id == user_id,
-            OAuthAccount.sync_enabled == True
-        ).all()
+        try:
+            return db.query(OAuthAccount).filter(
+                OAuthAccount.user_id == user_id,
+                OAuthAccount.sync_enabled == True
+            ).all()
+        except Exception as e:
+            print("⚠️ get_all_sync_enabled_accounts failed, attempting rollback+retry:", e)
+            try:
+                db.rollback()
+            except Exception as rb_err:
+                print("⚠️ get_all_sync_enabled_accounts rollback failed:", rb_err)
+                raise
+
+            return db.query(OAuthAccount).filter(
+                OAuthAccount.user_id == user_id,
+                OAuthAccount.sync_enabled == True
+            ).all()
 
     @staticmethod
     def get_primary_account(db: Session, user_id: int, provider: str):

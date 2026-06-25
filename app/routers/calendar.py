@@ -491,6 +491,17 @@ def sync_calendar(
             print("🧪 [SYNC] DB COUNT AT START:", db.query(Event).count())
         except Exception as count_err:
             print("⚠️ [SYNC] DB count check failed:", count_err)
+            try:
+                db.rollback()
+                print("🧯 [SYNC] Session rollback after count failure")
+            except Exception as rb_err:
+                print("⚠️ [SYNC] Rollback after count failure failed:", rb_err)
+
+        # Ensure sync starts from a clean transactional state.
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
         result = calendar_service.sync_all(db, current_user)
 
@@ -536,6 +547,11 @@ def get_unified_calendar(
         print("🧪 [UNIFIED] DB ROW COUNT:", db.query(Event).count())
     except Exception as e:
         print("⚠️ [UNIFIED] DB row count check failed:", e)
+        try:
+            db.rollback()
+            print("🧯 [UNIFIED] Session rollback after row-count failure")
+        except Exception as rb_err:
+            print("⚠️ [UNIFIED] Rollback after row-count failure failed:", rb_err)
 
     # ==================================================
     # ✅ SUPPORT FULLCALENDAR RANGE (WITH SAFE PARSING)
