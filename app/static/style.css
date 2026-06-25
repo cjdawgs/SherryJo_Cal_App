@@ -1306,9 +1306,14 @@ Large: > 1920
     text-align: right;
     justify-self: end;
     max-width: 140px;
-    white-space: nowrap;
+    white-space: normal;
     overflow: hidden;
-    text-overflow: ellipsis;
+    text-overflow: clip;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1;
+    max-height: 2em;
   }
 
   .fc .fc-button {
