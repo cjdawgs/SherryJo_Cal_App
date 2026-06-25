@@ -1,6 +1,6 @@
-import { getActiveRangeLabel, toDayString } from "./core.js";
-import { connectGoogle, connectMicrosoft, connectApple } from "./account_connections.js";
-import { renderRangePill } from "./calendar.fullcalendar.js";
+import { getActiveRangeLabel, toDayString } from "/static/core.js";
+import { connectGoogle, connectMicrosoft, connectApple } from "/static/account_connections.js";
+import { renderRangePill } from "/static/calendar.fullcalendar.js";
 
 window.isModalOpen = false;
 

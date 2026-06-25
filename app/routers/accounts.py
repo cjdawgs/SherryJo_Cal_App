@@ -28,6 +28,7 @@ from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     resolve_account_status
 )
+from app.services.asset_urls import asset_import_map_json, asset_url
 
 
 # ============================================================
@@ -46,6 +47,15 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(
     directory=os.path.join(BASE_DIR, "templates")
 )
+templates.env.globals.update(
+    asset_url=asset_url,
+    asset_import_map_json=asset_import_map_json,
+)
+
+
+ACCOUNTS_ASSET_IMPORTS = {
+    "/static/api.js": "api.js",
+}
 
 
 
@@ -545,5 +555,8 @@ def accounts_ui(request: Request):
     return templates.TemplateResponse(
         request,              # ✅ correct order (THIS FIXES YOUR ERROR)
         "accounts.html",      # ✅ template name
-        {"request": request}  # ✅ context
+        {
+            "request": request,
+            "asset_imports": ACCOUNTS_ASSET_IMPORTS,
+        }  # ✅ context
     )

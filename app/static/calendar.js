@@ -2,7 +2,7 @@ import {
   initFullCalendar,
   renderRangePill,
   highlightSelectedDay
-} from "./calendar.fullcalendar.js";
+} from "/static/calendar.fullcalendar.js";
 
 import {
   initDateStickyStore,
@@ -17,7 +17,7 @@ import {
   getActiveRangeLabel
 } from "./core.js";
 
-import { apiFetch, requireAuth, getAuthToken } from "./api.js";
+import { apiFetch, requireAuth, getAuthToken } from "/static/api.js";
 
 console.log("🔥 JS FILE LOADED");
 console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));

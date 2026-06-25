@@ -12,7 +12,11 @@
   --> 
 
   <!-- ✅ LOAD CSS FIRST -->
-  <link rel="stylesheet" href="/static/style.css?v=4">
+  <link rel="stylesheet" href="{{ asset_url('style.css') }}">
+
+  <script type="importmap">
+    {{ asset_import_map_json(asset_imports)|safe }}
+  </script>
 
   <!-- ✅ FULLCALENDAR -->
   <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
@@ -289,8 +293,8 @@
     <script src="/static/calendar.fullcalendar.js?v=124"></script>
     <script src="/static/calendar.colors.js?v=1"></script>
     -->
-<script src="/static/calendar.colors.js?v=1"></script>
-<script type="module" src="/static/calendar.js?v=1000"></script>
+<script src="{{ asset_url('calendar.colors.js') }}"></script>
+<script type="module" src="{{ asset_url('calendar.js') }}"></script>
 
 <div id="editorContextMenu" class="editorContextMenu" aria-hidden="true">
   <button type="button" data-ctx-cmd="bold">Bold</button>

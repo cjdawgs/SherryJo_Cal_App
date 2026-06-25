@@ -13,6 +13,7 @@ from sqlalchemy import inspect, text
 from datetime import datetime, timezone
 
 from app.database import engine, Base
+from app.services.asset_urls import asset_import_map_json, asset_url
 
 # ✅ Import ALL routers from your central router registry
 from app.routers import all_routers
@@ -233,6 +234,20 @@ print("✅ Tables registered:", Base.metadata.tables.keys())
 
 # ✅ Loads HTML templates from /app/templates
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals.update(
+    asset_url=asset_url,
+    asset_import_map_json=asset_import_map_json,
+)
+
+
+INDEX_ASSET_IMPORTS = {
+    "/static/api.js": "api.js",
+    "/static/account_connections.js": "account_connections.js",
+    "/static/calendar.fullcalendar.js": "calendar.fullcalendar.js",
+    "/static/calendar.ui.js": "calendar.ui.js",
+    "/static/calendar.js": "calendar.js",
+    "/static/core.js": "core.js",
+}
 
 
 # ==================================================
@@ -292,7 +307,10 @@ def home(request: Request):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"request": request}
+        {
+            "request": request,
+            "asset_imports": INDEX_ASSET_IMPORTS,
+        }
     )
 
 
@@ -302,7 +320,10 @@ def calendar_ui(request: Request):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"request": request}
+        {
+            "request": request,
+            "asset_imports": INDEX_ASSET_IMPORTS,
+        }
     )
 
 

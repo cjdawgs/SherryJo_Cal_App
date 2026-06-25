@@ -3,7 +3,11 @@
 <html>
 <head>
     <title>Account Manager</title>
-    <link rel="stylesheet" href="/static/accounts.css" />
+    <link rel="stylesheet" href="{{ asset_url('accounts.css') }}" />
+
+    <script type="importmap">
+      {{ asset_import_map_json(asset_imports)|safe }}
+    </script>
 </head>
 
 <body data-onboarding="0">
@@ -138,7 +142,7 @@
 <!-- ERRORS -->
 <div id="error" class="error"></div>
 
-<script type="module" src="/static/accounts.js"></script>
+<script type="module" src="{{ asset_url('accounts.js') }}"></script>
 
 </body>
 </html>

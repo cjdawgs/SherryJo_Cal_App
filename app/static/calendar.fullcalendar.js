@@ -3,7 +3,7 @@
 import {
   toDayString,
   getActiveRangeLabel
-} from "./core.js";
+} from "/static/core.js";
 
 /**************************************************************
  * ✅ GLOBAL STATE
