@@ -732,11 +732,13 @@ button.primary {
   margin-right: 4px;
   position: relative;
   z-index: 5;
+  pointer-events: auto;
 }
 
 .fc-daygrid-day-top .dateStickyAnchor .stickyEventIcon,
 .fc-col-header-cell .dateStickyAnchor .stickyEventIcon {
   margin-left: 0;
+  pointer-events: auto;
 }
 
 .fc-daygrid-day-top,

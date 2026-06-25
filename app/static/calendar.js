@@ -1898,6 +1898,7 @@ function renderAccounts(accounts) {
         window.calendar.refetchEvents();
       }
 
+      updateDayDetails();
       updateWeekView();
     });
 

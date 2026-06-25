@@ -82,6 +82,13 @@ function buildStickyIcon({ count = 1, title = "Open sticky note" } = {}) {
   icon.title = title;
   icon.textContent = "🗒";
 
+  // Prevent day/event click handlers from stealing sticky icon interactions.
+  ["pointerdown", "mousedown", "touchstart"].forEach((evtName) => {
+    icon.addEventListener(evtName, (e) => {
+      e.stopPropagation();
+    }, { passive: true });
+  });
+
   if (count > 1) {
     const badge = document.createElement("span");
     badge.className = "stickyCountBadge";
@@ -105,6 +112,12 @@ function renderVisibleDateStickyIcons() {
 
     const holder = document.createElement("span");
     holder.className = "dateStickyAnchor";
+
+    ["pointerdown", "mousedown", "touchstart", "click", "dblclick", "contextmenu"].forEach((evtName) => {
+      holder.addEventListener(evtName, (e) => {
+        e.stopPropagation();
+      }, true);
+    });
 
     const icon = buildStickyIcon({
       count: dateCount,
