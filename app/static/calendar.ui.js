@@ -868,9 +868,7 @@ function bindUIEvents() {
 
   document.getElementById("openStickyFromEventBtn")?.addEventListener("click", () => {
     openStickyModal(modalState.eventRef);
-      saveCurrentStickyIntoState();
-      renderStickyTabs();
-      window.showToast?.("📝 Sticky note added to the event draft");
+  });
 
   document.getElementById("stickyBackToEventBtn")?.addEventListener("click", () => {
     openCreateModal(null, modalState.eventRef);
