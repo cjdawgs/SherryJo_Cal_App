@@ -824,6 +824,8 @@ export function initFullCalendar() {
         console.log(`[eventChange] Moving ${event.title} to payload:`, payload);
 
         // Create undo/redo command
+        // CRITICAL: Capture info for later use in undo (can't rely on event state changing)
+        const capturedInfo = info;
         const command = {
           label: "Move event",
           execute: async () => {
@@ -833,17 +835,17 @@ export function initFullCalendar() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
-            console.log(`[eventChange.execute] Response:`, res, "status:", res?.status, "ok:", res?.ok);
+            console.log(`[eventChange.execute] Response:`, res?.status, "ok:", res?.ok);
             if (!res || !res.ok) {
               const errorText = await res?.text?.() || "Unknown error";
               console.error(`[eventChange.execute] API error: ${res?.status} ${errorText}`);
               throw new Error(`API returned ${res?.status}: ${errorText}`);
             }
             const data = await res.json();
-            console.log(`[eventChange.execute] Response data:`, data);
             return data;
           },
           undo: async () => {
+            console.log(`[eventChange.undo] Starting undo for eventId=${eventId}`);
             // Restore to previous date/time
             const prevDateStr = prevStart ? prevStart.toISOString().split("T")[0] : dateStr;
             const prevStartTimeStr = prevStart ? prevStart.toTimeString().slice(0, 5) : "00:00";
@@ -853,24 +855,36 @@ export function initFullCalendar() {
               end_time: new Date(`${prevDateStr}T${prevEndTimeStr}`).toISOString()
             };
             console.log(`[eventChange.undo] Restoring to:`, restorePayload);
-            const res = await apiFetch(`/calendar/event/${eventId}`, {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(restorePayload)
-            });
-            if (!res || !res.ok) {
-              const errorText = await res?.text?.() || "Unknown error";
-              throw new Error(`Restore failed: ${res?.status} ${errorText}`);
+            
+            try {
+              const res = await apiFetch(`/calendar/event/${eventId}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(restorePayload)
+              });
+              console.log(`[eventChange.undo] API response:`, res?.status, "ok:", res?.ok);
+              if (!res || !res.ok) {
+                const errorText = await res?.text?.() || "Unknown error";
+                console.error(`[eventChange.undo] API error: ${res?.status} ${errorText}`);
+                throw new Error(`Restore failed: ${res?.status} ${errorText}`);
+              }
+              const data = await res.json();
+              console.log(`[eventChange.undo] Undo successful, refreshing calendar`);
+              
+              // Refresh the calendar to show the restored state
+              window.smartRefresh?.({ reason: "event_restored", force: true });
+              return data;
+            } catch (undoErr) {
+              console.error(`[eventChange.undo] FAILED:`, undoErr.message);
+              throw undoErr;
             }
-            return res.json();
           }
         };
 
         // Execute and register
         const data = await command.execute();
-        console.log(`[eventChange] data object:`, data, "event prop:", data?.event);
+        console.log(`[eventChange] Execution successful, registering with undo/redo manager`);
         const nextEvent = window.normalizeEventForCache(data?.event || data);
-        console.log(`[eventChange] normalizeEventForCache result:`, nextEvent);
         window.upsertCacheEvent(nextEvent);
 
         // Add to undo/redo history

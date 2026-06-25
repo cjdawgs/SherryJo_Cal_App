@@ -22,12 +22,20 @@ export class UndoRedoManager {
    * Use this when the command execution returns a value needed before adding to history
    */
   async registerExecuted(command) {
-    if (this.isExecuting) return;
-    if (!command) return;
+    console.log(`[UndoRedoManager.registerExecuted] Called with command:`, command?.label);
+    if (this.isExecuting) {
+      console.warn(`[UndoRedoManager.registerExecuted] Skipped - already executing`);
+      return;
+    }
+    if (!command) {
+      console.warn(`[UndoRedoManager.registerExecuted] No command provided`);
+      return;
+    }
 
     this.isExecuting = true;
     try {
       this.undoStack.push(command);
+      console.log(`[UndoRedoManager.registerExecuted] Command added to undoStack. Size: ${this.undoStack.length}`);
 
       // Limit history size
       if (this.undoStack.length > this.maxHistory) {
@@ -37,6 +45,7 @@ export class UndoRedoManager {
       // Clear redo stack on new action
       this.redoStack = [];
       this.notifyListeners();
+      console.log(`[UndoRedoManager.registerExecuted] Listeners notified, undoStack size: ${this.undoStack.length}`);
     } catch (err) {
       console.error("❌ Command registration failed:", err);
       throw err;
@@ -75,13 +84,21 @@ export class UndoRedoManager {
    * Undo the last action
    */
   async undo() {
-    if (this.isExecuting || this.undoStack.length === 0) return false;
+    console.log(`[UndoRedoManager.undo] Called. Stack size: ${this.undoStack.length}, isExecuting: ${this.isExecuting}`);
+    if (this.isExecuting || this.undoStack.length === 0) {
+      console.warn(`[UndoRedoManager.undo] Skipped - isExecuting=${this.isExecuting}, stackSize=${this.undoStack.length}`);
+      return false;
+    }
 
     this.isExecuting = true;
     try {
       const command = this.undoStack.pop();
+      console.log(`[UndoRedoManager.undo] Executing undo for command:`, command.label);
       if (command.undo) {
         await command.undo();
+        console.log(`[UndoRedoManager.undo] Undo function completed successfully`);
+      } else {
+        console.warn(`[UndoRedoManager.undo] Command has no undo function!`);
       }
       this.redoStack.push(command);
       this.notifyListeners();
