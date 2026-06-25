@@ -124,13 +124,10 @@ function renderVisibleDateStickyIcons() {
     const holder = document.createElement("span");
     holder.className = "dateStickyAnchor";
 
-    // Only block click/dblclick/contextmenu bubbling at holder level —
-    // do NOT block pointerdown/mousedown so the native drag can start.
-    ["click", "dblclick", "contextmenu"].forEach((evtName) => {
-      holder.addEventListener(evtName, (e) => {
-        e.stopPropagation();
-      }, true);
-    });
+    // ✅ Do NOT add any event listeners to the holder.
+    // The icon handles click/dblclick/contextmenu via its own listeners,
+    // which will stopPropagation() and preventDefault() as needed.
+    // This allows both normal events AND drag-start to work correctly.
 
     const icon = buildStickyIcon({
       count: dateCount,
