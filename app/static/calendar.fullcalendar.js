@@ -799,7 +799,11 @@ export function initFullCalendar() {
     eventChange: async function(info) {
       const event = info.event;
       const eventId = String(event.extendedProps?.backendId || event.id || "");
-      if (!eventId) return;
+      console.log(`[eventChange] eventId=${eventId}, title=${event.title}, extProps keys:`, Object.keys(event.extendedProps || {}));
+      if (!eventId) {
+        console.warn("[eventChange] No eventId found, aborting");
+        return;
+      }
 
       // Capture previous state
       const prevStart = info.oldEvent.start;
@@ -814,18 +818,27 @@ export function initFullCalendar() {
           start_time: newStart ? newStart.toTimeString().slice(0, 5) : "",
           end_time: newEnd ? newEnd.toTimeString().slice(0, 5) : ""
         };
+        console.log(`[eventChange] Moving ${event.title} to payload:`, payload);
 
         // Create undo/redo command
         const command = {
           label: "Move event",
           execute: async () => {
+            console.log(`[eventChange.execute] Sending PUT /calendar/event/${eventId} with:`, payload);
             const res = await apiFetch(`/calendar/event/${eventId}`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload)
             });
-            if (!res || !res.ok) throw new Error("Move failed");
-            return res.json();
+            console.log(`[eventChange.execute] Response:`, res, "status:", res?.status, "ok:", res?.ok);
+            if (!res || !res.ok) {
+              const errorText = await res?.text?.() || "Unknown error";
+              console.error(`[eventChange.execute] API error: ${res?.status} ${errorText}`);
+              throw new Error(`API returned ${res?.status}: ${errorText}`);
+            }
+            const data = await res.json();
+            console.log(`[eventChange.execute] Response data:`, data);
+            return data;
           },
           undo: async () => {
             // Restore to previous date/time
@@ -834,19 +847,25 @@ export function initFullCalendar() {
               start_time: prevStart ? prevStart.toTimeString().slice(0, 5) : "",
               end_time: prevEnd ? prevEnd.toTimeString().slice(0, 5) : ""
             };
+            console.log(`[eventChange.undo] Restoring to:`, restorePayload);
             const res = await apiFetch(`/calendar/event/${eventId}`, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(restorePayload)
             });
-            if (!res || !res.ok) throw new Error("Restore failed");
+            if (!res || !res.ok) {
+              const errorText = await res?.text?.() || "Unknown error";
+              throw new Error(`Restore failed: ${res?.status} ${errorText}`);
+            }
             return res.json();
           }
         };
 
         // Execute and register
         const data = await command.execute();
-        const nextEvent = window.normalizeEventForCache(data.event);
+        console.log(`[eventChange] data object:`, data, "event prop:", data?.event);
+        const nextEvent = window.normalizeEventForCache(data?.event || data);
+        console.log(`[eventChange] normalizeEventForCache result:`, nextEvent);
         window.upsertCacheEvent(nextEvent);
 
         // Add to undo/redo history
@@ -861,8 +880,8 @@ export function initFullCalendar() {
           window.updateUndoRedoButtonStates();
         }
       } catch (err) {
-        console.error("❌ Move failed:", err);
-        window.showToast?.("❌ Move failed", "error");
+        console.error("❌ Move failed:", err.message, err.stack);
+        window.showToast?.(`❌ Move failed: ${err.message}`, "error");
         // Revert the change visually
         info.revert();
       }
