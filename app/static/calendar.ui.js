@@ -1,6 +1,13 @@
 import { getActiveRangeLabel, toDayString } from "/static/core.js";
 import { connectGoogle, connectMicrosoft, connectApple } from "/static/account_connections.js";
 import { renderRangePill } from "/static/calendar.fullcalendar.js";
+import {
+  createEventSaveCommand,
+  createEventDeleteCommand,
+  createStickySaveCommand,
+  createStickyDeleteCommand,
+  createDateStickySaveCommand
+} from "/static/undo_redo.js";
 
 window.isModalOpen = false;
 
@@ -733,11 +740,51 @@ async function saveStickyOnly() {
   if (modalState.stickyScope === "date") {
     saveCurrentStickyIntoState();
     const sticky_notes = modalState.stickyNotes.filter((n) => String(n.content || "").trim());
-    const ok = await setDateStickyNotes(modalState.dateStickyKey, sticky_notes);
-    if (!ok) return;
-    closeCreateModal();
-    refreshStickyVisuals();
-    window.showToast?.("📝 Date sticky note saved");
+    const dateKey = modalState.dateStickyKey;
+    const previousStickies = dateStickyMap[dateKey] ? JSON.parse(JSON.stringify(dateStickyMap[dateKey])) : [];
+
+    isSavingSticky = true;
+    try {
+      // Create undo/redo command for date sticky
+      const command = {
+        label: "Save date sticky note",
+        execute: async () => {
+          const res = await apiFetch(`/calendar/date-sticky/${encodeURIComponent(dateKey)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes })
+          });
+          if (!res || !res.ok) throw new Error("Save failed");
+          return res.json();
+        },
+        undo: async () => {
+          const res = await apiFetch(`/calendar/date-sticky/${encodeURIComponent(dateKey)}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes: previousStickies })
+          });
+          if (!res || !res.ok) throw new Error("Restore failed");
+          return res.json();
+        }
+      };
+
+      await command.execute();
+      dateStickyMap[dateKey] = sticky_notes;
+      persistLocalDateStickyMap();
+
+      // Register to undo/redo history (already executed)
+      await window.undoRedoManager.registerExecuted(command);
+
+      closeCreateModal();
+      refreshStickyVisuals();
+      window.showToast?.("📝 Date sticky note saved");
+      updateUndoRedoButtonStates();
+    } catch (err) {
+      console.error("❌ Date sticky save failed", err);
+      window.showToast?.("❌ Date sticky save failed", "error");
+    } finally {
+      isSavingSticky = false;
+    }
     return;
   }
 
@@ -751,26 +798,47 @@ async function saveStickyOnly() {
   saveCurrentStickyIntoState();
   const sticky_notes = modalState.stickyNotes.filter((n) => String(n.content || "").trim());
   const sticky_note = sticky_notes[0] || null;
+  const previousStickies = modalState.eventRef?.extendedProps?.sticky_notes ? JSON.parse(JSON.stringify(modalState.eventRef.extendedProps.sticky_notes)) : [];
 
   isSavingSticky = true;
   try {
-    const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sticky_note, sticky_notes })
-    });
-    if (!res || !res.ok) throw new Error("Sticky save failed");
+    // Create undo/redo command for event sticky
+    const command = {
+      label: "Save sticky note",
+      execute: async () => {
+        const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sticky_note, sticky_notes })
+        });
+        if (!res || !res.ok) throw new Error("Sticky save failed");
+        return res.json();
+      },
+      undo: async () => {
+        const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sticky_notes: previousStickies })
+        });
+        if (!res || !res.ok) throw new Error("Restore failed");
+        return res.json();
+      }
+    };
 
-    const data = await res.json();
+    const data = await command.execute();
     const nextEvent = normalizeEventForCache(data.event, modalState.eventRef);
     modalState.eventRef = nextEvent;
     upsertCacheEvent(nextEvent);
+
+    // Register to undo/redo history (already executed)
+    await window.undoRedoManager.registerExecuted(command);
 
     window.updateDayDetails?.();
     window.updateWeekView?.();
     closeCreateModal();
     window.showToast?.("📝 Sticky note saved");
     window.smartRefresh?.({ reason: "sticky_saved", force: true });
+    updateUndoRedoButtonStates();
   } catch (err) {
     console.error("❌ Sticky save failed", err);
     window.showToast?.("❌ Sticky save failed", "error");
@@ -789,20 +857,55 @@ async function saveEvent() {
   const payload = buildEventPayload();
   if (!payload) return;
 
+  const isEdit = !!modalState.eventId;
+  const previousEvent = isEdit ? JSON.parse(JSON.stringify(modalState.eventRef)) : null;
+
   isSavingEvent = true;
   try {
-    const isEdit = !!modalState.eventId;
-    const res = await apiFetch(isEdit ? `/calendar/event/${modalState.eventId}` : "/calendar/event", {
-      method: isEdit ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!res || !res.ok) throw new Error("Save failed");
+    // Create undo/redo command
+    const command = {
+      label: isEdit ? "Edit event" : "Create event",
+      execute: async () => {
+        const res = await apiFetch(isEdit ? `/calendar/event/${modalState.eventId}` : "/calendar/event", {
+          method: isEdit ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!res || !res.ok) throw new Error("Save failed");
+        return res.json();
+      },
+      undo: async () => {
+        if (!isEdit && modalState.eventId) {
+          // Undo create = delete
+          const res = await apiFetch(`/calendar/event/${modalState.eventId}`, { method: "DELETE" });
+          if (!res || !res.ok) throw new Error("Delete failed");
+        } else if (previousEvent && isEdit && modalState.eventId) {
+          // Undo edit = restore previous state
+          const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(previousEvent)
+          });
+          if (!res || !res.ok) throw new Error("Restore failed");
+          return res.json();
+        }
+      }
+    };
 
-    const data = await res.json();
+    // Execute command first to get the server response
+    const data = await command.execute();
     const nextEvent = normalizeEventForCache(data.event, modalState.eventRef);
     modalState.eventRef = nextEvent;
     modalState.eventId = nextEvent.extendedProps?.backendId || modalState.eventId;
+    
+    // Update command with new event ID for undo operations
+    if (!isEdit) {
+      command.undo_eventId = modalState.eventId;
+    }
+
+    // Register to undo/redo history (already executed)
+    await window.undoRedoManager.registerExecuted(command);
+
     upsertCacheEvent(nextEvent);
 
     if (nextEvent.start) {
@@ -815,6 +918,7 @@ async function saveEvent() {
     closeCreateModal();
     window.showToast?.("✅ Event saved");
     window.smartRefresh?.({ reason: "event_saved", force: true });
+    updateUndoRedoButtonStates();
   } catch (err) {
     console.error("❌ Save failed", err);
     window.showToast?.("❌ Save failed", "error");
@@ -828,20 +932,80 @@ async function deleteEvent() {
   if (!eventId) return;
   if (!confirm("Delete this event?")) return;
 
+  // Capture the event before deletion for undo
+  const eventToDelete = window.sessionEventCache?.find((ev) => {
+    return String(ev?.extendedProps?.backendId) === String(eventId) || String(ev?.id) === String(eventId);
+  });
+  
+  const previousEvent = eventToDelete ? JSON.parse(JSON.stringify(eventToDelete)) : null;
+
   try {
-    const res = await apiFetch(`/calendar/event/${eventId}`, { method: "DELETE" });
-    if (!res || !res.ok) throw new Error("Delete failed");
+    // Create undo/redo command
+    const command = {
+      label: "Delete event",
+      execute: async () => {
+        const res = await apiFetch(`/calendar/event/${eventId}`, { method: "DELETE" });
+        if (!res || !res.ok) throw new Error("Delete failed");
+      },
+      undo: async () => {
+        if (previousEvent) {
+          // Extract the title, dates, times, and notes from previous event
+          const restorePayload = {
+            title: previousEvent.title || "",
+            date: previousEvent.start ? toDayString(previousEvent.start) : new Date().toISOString().split("T")[0],
+            start_time: previousEvent.start ? new Date(previousEvent.start).toTimeString().slice(0, 5) : "",
+            end_time: previousEvent.end ? new Date(previousEvent.end).toTimeString().slice(0, 5) : "",
+            description: previousEvent.extendedProps?.description || "",
+            tags: previousEvent.extendedProps?.tags || "",
+            sticky_notes: previousEvent.extendedProps?.sticky_notes || []
+          };
+
+          const res = await apiFetch("/calendar/event", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(restorePayload)
+          });
+          if (!res || !res.ok) throw new Error("Restore failed");
+          return res.json();
+        }
+      }
+    };
+
+    // Execute delete
+    await command.execute();
 
     window.sessionEventCache = (window.sessionEventCache || []).filter((ev) => {
       return String(ev?.extendedProps?.backendId) !== String(eventId) && String(ev?.id) !== String(eventId);
     });
 
+    // Register to undo/redo history (already executed)
+    await window.undoRedoManager.registerExecuted(command);
+
     closeCreateModal();
     window.showToast?.("🗑 Event deleted");
     window.smartRefresh?.({ reason: "event_deleted", force: true });
+    updateUndoRedoButtonStates();
   } catch (err) {
     console.error("❌ Delete failed", err);
     window.showToast?.("❌ Delete failed", "error");
+  }
+}
+
+/**
+ * Update undo/redo button states based on manager state
+ */
+function updateUndoRedoButtonStates() {
+  const state = window.undoRedoManager.getState();
+  const undoBtn = document.getElementById("undoBtn");
+  const redoBtn = document.getElementById("redoBtn");
+
+  if (undoBtn) {
+    undoBtn.disabled = !state.canUndo;
+    undoBtn.title = `${state.undoLabel} (Ctrl+Z)`;
+  }
+  if (redoBtn) {
+    redoBtn.disabled = !state.canRedo;
+    redoBtn.title = `${state.redoLabel} (Ctrl+Y)`;
   }
 }
 
@@ -946,6 +1110,20 @@ function bindUIEvents() {
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     if (typeof window.logout === "function") window.logout();
   });
+
+  // ✅ UNDO/REDO BUTTON LISTENERS
+  document.getElementById("undoBtn")?.addEventListener("click", async () => {
+    await window.undoRedoManager.undo();
+    updateUndoRedoButtonStates();
+  });
+
+  document.getElementById("redoBtn")?.addEventListener("click", async () => {
+    await window.undoRedoManager.redo();
+    updateUndoRedoButtonStates();
+  });
+
+  // Listen for undo/redo state changes
+  window.undoRedoManager.onChange(updateUndoRedoButtonStates);
 
   initRichEditorSystem();
 }

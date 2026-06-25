@@ -247,6 +247,7 @@ INDEX_ASSET_IMPORTS = {
     "/static/calendar.ui.js": "calendar.ui.js",
     "/static/calendar.js": "calendar.js",
     "/static/core.js": "core.js",
+    "/static/undo_redo.js": "undo_redo.js",
 }
 
 

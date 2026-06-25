@@ -18,9 +18,13 @@ import {
 } from "/static/core.js";
 
 import { apiFetch, requireAuth, getAuthToken } from "/static/api.js";
+import { setupUndoRedoKeyboard } from "/static/undo_redo.js";
 
 console.log("🔥 JS FILE LOADED");
 console.log("🔐 TOKEN AT LOAD:", localStorage.getItem("token"));
+
+// Initialize undo/redo keyboard shortcuts
+setupUndoRedoKeyboard();
 
 window.highlightSelectedDay = highlightSelectedDay;
 
