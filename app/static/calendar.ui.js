@@ -1132,6 +1132,8 @@ window.initDateStickyStore = initDateStickyStore;
 window.openStickyModal = openStickyModal;
 window.openStickyModalForNew = openStickyModalForNew;
 window.openDateStickyModal = openDateStickyModal;
+window.normalizeEventForCache = normalizeEventForCache;
+window.upsertCacheEvent = upsertCacheEvent;
 
 window.getDateStickyNotes = (dateKey) => getDateStickyNotes(dateKey);
 window.getDateStickyCount = (dateKey) => getDateStickyCount(dateKey);
@@ -1520,6 +1522,11 @@ window.moveEventStickyToDate = async (eventRef, targetDateKey) => {
   const remainingEventNotes = eventNotes.filter((_, idx) => !indexSet.has(idx));
   const targetDateNotes = getDateStickyNotes(targetDateKey);
   const nowIso = new Date().toISOString();
+  
+  // Capture state before move for undo
+  const previousEventNotes = JSON.parse(JSON.stringify(eventNotes));
+  const previousDateNotes = JSON.parse(JSON.stringify(targetDateNotes));
+  
   movedItems.forEach((moved) => {
     targetDateNotes.push({
       ...moved,
@@ -1528,26 +1535,55 @@ window.moveEventStickyToDate = async (eventRef, targetDateKey) => {
   });
 
   try {
-    const res = await apiFetch(`/calendar/event/${backendId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sticky_notes: remainingEventNotes,
-        sticky_note: remainingEventNotes[0] || null
-      })
-    });
-    if (!res || !res.ok) throw new Error("event sticky update failed");
+    // Create undo/redo command
+    const command = {
+      label: "Move sticky to date",
+      execute: async () => {
+        const res = await apiFetch(`/calendar/event/${backendId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sticky_notes: remainingEventNotes,
+            sticky_note: remainingEventNotes[0] || null
+          })
+        });
+        if (!res || !res.ok) throw new Error("event sticky update failed");
+        return res.json();
+      },
+      undo: async () => {
+        // Restore original sticky notes to event and date
+        const [resEvent, resDate] = await Promise.all([
+          apiFetch(`/calendar/event/${backendId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sticky_notes: previousEventNotes,
+              sticky_note: previousEventNotes[0] || null
+            })
+          }),
+          upsertDateStickyServer(targetDateKey, previousDateNotes)
+        ]);
+        if (!resEvent?.ok) throw new Error("event restore failed");
+        return resEvent.json();
+      }
+    };
 
-    const data = await res.json();
+    // Execute
+    const data = await command.execute();
     const nextEvent = normalizeEventForCache(data.event, eventRef);
     upsertCacheEvent(nextEvent);
 
-    const ok = await setDateStickyNotes(targetDateKey, targetDateNotes);
-    if (!ok) return false;
+    // Update date stickies in memory
+    dateStickyMap[targetDateKey] = targetDateNotes;
+    persistLocalDateStickyMap();
+
+    // Register to undo/redo history
+    await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
     const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "🗒 Sticky moved to date";
     window.showToast?.(label);
+    updateUndoRedoButtonStates();
     return true;
   } catch (err) {
     console.error("❌ move event sticky to date failed", err);
@@ -1578,28 +1614,64 @@ window.moveEventStickyToEvent = async (sourceEventRef, targetEventRef) => {
   const remainingSourceNotes = sourceNotes.filter((_, idx) => !indexSet.has(idx));
   const targetNotes = parseStickyNotes(targetEventRef);
   const nowIso = new Date().toISOString();
+
+  // Capture state before move for undo
+  const previousSourceNotes = JSON.parse(JSON.stringify(sourceNotes));
+  const previousTargetNotes = JSON.parse(JSON.stringify(targetNotes));
+  
   movedItems.forEach((n) => targetNotes.push({ ...n, updatedAt: nowIso }));
 
   try {
-    const [resSource, resTarget] = await Promise.all([
-      apiFetch(`/calendar/event/${sourceId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sticky_notes: remainingSourceNotes, sticky_note: remainingSourceNotes[0] || null })
-      }),
-      apiFetch(`/calendar/event/${targetId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sticky_notes: targetNotes, sticky_note: targetNotes[0] || null })
-      })
-    ]);
-    if (!resSource?.ok || !resTarget?.ok) throw new Error("move failed");
-    const [dSrc, dTgt] = await Promise.all([resSource.json(), resTarget.json()]);
+    // Create undo/redo command
+    const command = {
+      label: "Move sticky to event",
+      execute: async () => {
+        const [resSource, resTarget] = await Promise.all([
+          apiFetch(`/calendar/event/${sourceId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes: remainingSourceNotes, sticky_note: remainingSourceNotes[0] || null })
+          }),
+          apiFetch(`/calendar/event/${targetId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes: targetNotes, sticky_note: targetNotes[0] || null })
+          })
+        ]);
+        if (!resSource?.ok || !resTarget?.ok) throw new Error("move failed");
+        return Promise.all([resSource.json(), resTarget.json()]);
+      },
+      undo: async () => {
+        // Restore previous sticky notes to both events
+        const [resSource, resTarget] = await Promise.all([
+          apiFetch(`/calendar/event/${sourceId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes: previousSourceNotes, sticky_note: previousSourceNotes[0] || null })
+          }),
+          apiFetch(`/calendar/event/${targetId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sticky_notes: previousTargetNotes, sticky_note: previousTargetNotes[0] || null })
+          })
+        ]);
+        if (!resSource?.ok || !resTarget?.ok) throw new Error("restore failed");
+        return Promise.all([resSource.json(), resTarget.json()]);
+      }
+    };
+
+    // Execute
+    const [dSrc, dTgt] = await command.execute();
     upsertCacheEvent(normalizeEventForCache(dSrc.event, sourceEventRef));
     upsertCacheEvent(normalizeEventForCache(dTgt.event, targetEventRef));
+
+    // Register to undo/redo history
+    await window.undoRedoManager.registerExecuted(command);
+
     refreshStickyVisuals();
     const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "🗒 Sticky moved to event";
     window.showToast?.(label);
+    updateUndoRedoButtonStates();
     return true;
   } catch (err) {
     console.error("❌ move event sticky to event failed", err);
@@ -1632,6 +1704,11 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
 
   const eventNotes = parseStickyNotes(eventRef);
   const nowIso = new Date().toISOString();
+
+  // Capture state before move for undo
+  const previousDateNotes = JSON.parse(JSON.stringify(dateNotes));
+  const previousEventNotes = JSON.parse(JSON.stringify(eventNotes));
+  
   movedItems.forEach((moved) => {
     eventNotes.push({
       ...moved,
@@ -1640,26 +1717,55 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
   });
 
   try {
-    const res = await apiFetch(`/calendar/event/${backendId}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sticky_notes: eventNotes,
-        sticky_note: eventNotes[0] || null
-      })
-    });
-    if (!res || !res.ok) throw new Error("event sticky update failed");
+    // Create undo/redo command
+    const command = {
+      label: "Move sticky to event",
+      execute: async () => {
+        const res = await apiFetch(`/calendar/event/${backendId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sticky_notes: eventNotes,
+            sticky_note: eventNotes[0] || null
+          })
+        });
+        if (!res || !res.ok) throw new Error("event sticky update failed");
+        return res.json();
+      },
+      undo: async () => {
+        // Restore previous sticky notes to both date and event
+        const [resEvent, resDate] = await Promise.all([
+          apiFetch(`/calendar/event/${backendId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              sticky_notes: previousEventNotes,
+              sticky_note: previousEventNotes[0] || null
+            })
+          }),
+          upsertDateStickyServer(sourceDateKey, previousDateNotes)
+        ]);
+        if (!resEvent?.ok) throw new Error("restore failed");
+        return resEvent.json();
+      }
+    };
 
-    const data = await res.json();
+    // Execute
+    const data = await command.execute();
     const nextEvent = normalizeEventForCache(data.event, eventRef);
     upsertCacheEvent(nextEvent);
 
-    const ok = await setDateStickyNotes(sourceDateKey, remainingDateNotes);
-    if (!ok) return false;
+    // Update date stickies in memory
+    dateStickyMap[sourceDateKey] = remainingDateNotes;
+    persistLocalDateStickyMap();
+
+    // Register to undo/redo history
+    await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
     const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "🗒 Sticky moved to event";
     window.showToast?.(label);
+    updateUndoRedoButtonStates();
     return true;
   } catch (err) {
     console.error("❌ move date sticky to event failed", err);

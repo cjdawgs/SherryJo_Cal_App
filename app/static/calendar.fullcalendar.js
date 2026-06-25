@@ -1,5 +1,6 @@
 //import { getColorByKey, getSoftColor, getBestTextColor } from "./calendar.colors.js";
 
+import { apiFetch } from "/static/api.js";
 import {
   toDayString,
   getActiveRangeLabel
@@ -789,6 +790,82 @@ export function initFullCalendar() {
         }, 0);
       }
       setTimeout(() => renderVisibleDateStickyIcons(), 80);
+    },
+
+    // =========================================================
+    // ✅ DRAG-DROP OR RESIZE EVENT — save changes to backend + undo/redo
+    // Fires when user drags event to new date/time or resizes duration
+    // =========================================================
+    eventChange: async function(info) {
+      const event = info.event;
+      const eventId = String(event.extendedProps?.backendId || event.id || "");
+      if (!eventId) return;
+
+      // Capture previous state
+      const prevStart = info.oldEvent.start;
+      const prevEnd = info.oldEvent.end;
+      const newStart = event.start;
+      const newEnd = event.end;
+
+      try {
+        // Build payload with new times
+        const payload = {
+          date: newStart ? newStart.toISOString().split("T")[0] : prevStart.toISOString().split("T")[0],
+          start_time: newStart ? newStart.toTimeString().slice(0, 5) : "",
+          end_time: newEnd ? newEnd.toTimeString().slice(0, 5) : ""
+        };
+
+        // Create undo/redo command
+        const command = {
+          label: "Move event",
+          execute: async () => {
+            const res = await apiFetch(`/calendar/event/${eventId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            });
+            if (!res || !res.ok) throw new Error("Move failed");
+            return res.json();
+          },
+          undo: async () => {
+            // Restore to previous date/time
+            const restorePayload = {
+              date: prevStart ? prevStart.toISOString().split("T")[0] : payload.date,
+              start_time: prevStart ? prevStart.toTimeString().slice(0, 5) : "",
+              end_time: prevEnd ? prevEnd.toTimeString().slice(0, 5) : ""
+            };
+            const res = await apiFetch(`/calendar/event/${eventId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(restorePayload)
+            });
+            if (!res || !res.ok) throw new Error("Restore failed");
+            return res.json();
+          }
+        };
+
+        // Execute and register
+        const data = await command.execute();
+        const nextEvent = window.normalizeEventForCache(data.event);
+        window.upsertCacheEvent(nextEvent);
+
+        // Add to undo/redo history
+        await window.undoRedoManager.registerExecuted(command);
+
+        window.showToast?.("✅ Event moved");
+        window.updateDayDetails?.();
+        window.updateWeekView?.();
+        window.smartRefresh?.({ reason: "event_moved", force: true });
+
+        if (typeof window.updateUndoRedoButtonStates === "function") {
+          window.updateUndoRedoButtonStates();
+        }
+      } catch (err) {
+        console.error("❌ Move failed:", err);
+        window.showToast?.("❌ Move failed", "error");
+        // Revert the change visually
+        info.revert();
+      }
     }
 
   });
