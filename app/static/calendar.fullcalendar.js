@@ -418,7 +418,7 @@ function setDropHighlight(el, mode) {
 const CALENDAR_LAYOUT_PROFILES = {
   mobile: {
     defaultView: "timeGridWeek",
-    eventMaxStack: 2,
+    eventMaxStack: 1,
     dayMaxEvents: 2,
     slotDuration: "00:30:00",
     slotLabelInterval: "02:00:00",
@@ -426,11 +426,13 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "18:00:00",
     allDaySlot: false,
     expandRows: false,
-    toolbarRight: "today prev,next earlyHoursToggle,lateHoursToggle,mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarLeft: "",
+    toolbarCenter: "today prev,next",
+    toolbarRight: "title earlyHoursToggle,lateHoursToggle,mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   tablet: {
     defaultView: "timeGridWeek",
-    eventMaxStack: 4,
+    eventMaxStack: 2,
     dayMaxEvents: 4,
     slotDuration: "00:30:00",
     slotLabelInterval: "01:00:00",
@@ -438,7 +440,9 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "22:00:00",
     allDaySlot: true,
     expandRows: true,
-    toolbarRight: "today prev,next earlyHoursToggle,lateHoursToggle timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarLeft: "",
+    toolbarCenter: "today prev,next",
+    toolbarRight: "title earlyHoursToggle,lateHoursToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   desktop: {
     defaultView: "dayGridMonth",
@@ -450,6 +454,8 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "24:00:00",
     allDaySlot: true,
     expandRows: true,
+    toolbarLeft: "title",
+    toolbarCenter: "",
     toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
   },
   large: {
@@ -462,6 +468,8 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "24:00:00",
     allDaySlot: true,
     expandRows: true,
+    toolbarLeft: "title",
+    toolbarCenter: "",
     toolbarRight: "today prev,next dayGridMonth,timeGridWeek,timeGridDay"
   }
 };
@@ -492,17 +500,17 @@ function toHourToken(hourValue) {
 function updateMobileDaysToggleLabel() {
   const btn = document.querySelector(".fc-mobileDaysToggle-button");
   if (!btn) return;
-  btn.textContent = mobileShowAllDays ? "Focused Days" : "All Days";
+  btn.textContent = mobileShowAllDays ? "Focus" : "All Days";
 }
 
 function updateMobileHourToggleLabels() {
   const earlyBtn = document.querySelector(".fc-earlyHoursToggle-button");
   if (earlyBtn) {
-    earlyBtn.textContent = mobileShowEarlyHours ? "Early On" : "Early";
+    earlyBtn.textContent = mobileShowEarlyHours ? "6a-" : "6a+";
   }
   const lateBtn = document.querySelector(".fc-lateHoursToggle-button");
   if (lateBtn) {
-    lateBtn.textContent = mobileShowLateHours ? "Late On" : "Late";
+    lateBtn.textContent = mobileShowLateHours ? "6p-" : "6p+";
   }
 }
 
@@ -517,11 +525,57 @@ function getViewEventsInRange(rangeStart, rangeEnd) {
   });
 }
 
+function applyCompactVerticalStack(events) {
+  if (!Array.isArray(events) || !events.length) return events;
+
+  const groups = new Map();
+
+  events.forEach((ev) => {
+    const start = ev?.start ? new Date(ev.start) : null;
+    if (!start || Number.isNaN(start.getTime())) return;
+    const key = start.toISOString().slice(0, 10);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(ev);
+  });
+
+  groups.forEach((list) => {
+    list.sort((a, b) => new Date(a.start) - new Date(b.start));
+    const activeEnds = [];
+
+    list.forEach((ev) => {
+      const start = new Date(ev.start);
+      const end = ev.end ? new Date(ev.end) : new Date(start.getTime() + 30 * 60000);
+
+      for (let i = activeEnds.length - 1; i >= 0; i--) {
+        if (activeEnds[i] <= start) {
+          activeEnds.splice(i, 1);
+        }
+      }
+
+      const overlapDepth = activeEnds.length;
+      if (overlapDepth > 0) {
+        const offsetMin = Math.min(18, overlapDepth * 6);
+        const adjustedStart = new Date(start.getTime() + offsetMin * 60000);
+        const durationMs = Math.max(20 * 60000, end.getTime() - start.getTime());
+        const adjustedEnd = new Date(adjustedStart.getTime() + durationMs);
+
+        ev.start = adjustedStart;
+        ev.end = adjustedEnd;
+      }
+
+      activeEnds.push(ev.end ? new Date(ev.end) : end);
+      activeEnds.sort((a, b) => a - b);
+    });
+  });
+
+  return events;
+}
+
 function applyMobileWeekCompression() {
   const cal = window.calendar;
   if (!cal) return;
 
-  if (window.layoutMode !== "mobile") {
+  if (window.layoutMode !== "mobile" && window.layoutMode !== "tablet") {
     const emptyKey = "[]";
     if (lastAppliedHiddenDaysKey !== emptyKey) {
       cal.setOption("hiddenDays", []);
@@ -531,7 +585,7 @@ function applyMobileWeekCompression() {
   }
 
   const view = cal.view;
-  if (!view || view.type !== "timeGridWeek") return;
+  if (!view || (view.type !== "timeGridWeek" && view.type !== "timeGridDay")) return;
 
   const rangeStart = view.activeStart ? new Date(view.activeStart) : null;
   const rangeEnd = view.activeEnd ? new Date(view.activeEnd) : null;
@@ -539,8 +593,9 @@ function applyMobileWeekCompression() {
 
   const visibleEvents = getViewEventsInRange(rangeStart, rangeEnd);
 
-  let minHour = 6;
-  let maxHour = 18;
+  const isMobileMode = window.layoutMode === "mobile";
+  let minHour = isMobileMode ? 6 : 6;
+  let maxHour = isMobileMode ? 18 : 22;
 
   if (visibleEvents.length) {
     let earliest = 24;
@@ -553,10 +608,10 @@ function applyMobileWeekCompression() {
       latest = Math.max(latest, e.getHours() + (e.getMinutes() > 0 ? 1 : 0));
     });
 
-    minHour = Math.max(6, earliest - 1);
-    maxHour = Math.min(22, latest + 1);
+    minHour = Math.max(isMobileMode ? 6 : 5, earliest - 1);
+    maxHour = Math.min(isMobileMode ? 22 : 24, latest + 1);
     if (maxHour - minHour < 8) {
-      maxHour = Math.min(22, minHour + 8);
+      maxHour = Math.min(isMobileMode ? 22 : 24, minHour + (isMobileMode ? 8 : 10));
     }
   }
 
@@ -586,7 +641,7 @@ function applyMobileWeekCompression() {
   });
 
   let hiddenDays = [];
-  if (!mobileShowAllDays) {
+  if (isMobileMode && !mobileShowAllDays) {
     hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => !activeDows.has(dow));
     if (hiddenDays.length >= 6) {
       hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => dow !== new Date(window.selectedDate || Date.now()).getDay());
@@ -610,8 +665,8 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   const profile = getCalendarProfile(mode);
 
   cal.setOption("headerToolbar", {
-    left: "title",
-    center: "",
+    left: profile.toolbarLeft,
+    center: profile.toolbarCenter,
     right: profile.toolbarRight
   });
   cal.setOption("eventMaxStack", profile.eventMaxStack);
@@ -626,7 +681,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   cal.setOption("height", getCalendarHeightForMode(mode));
   cal.setOption("contentHeight", "auto");
 
-  if (mode !== "mobile") {
+  if (mode !== "mobile" && mode !== "tablet") {
     mobileShowAllDays = false;
     mobileShowEarlyHours = false;
     mobileShowLateHours = false;
@@ -679,8 +734,8 @@ export function initFullCalendar() {
 
     /* ✅ UNIFIED HEADER ROW */
     headerToolbar: {
-      left: "title",
-      center: "",
+      left: initialProfile.toolbarLeft,
+      center: initialProfile.toolbarCenter,
       right: initialProfile.toolbarRight
     },
 
@@ -800,6 +855,12 @@ export function initFullCalendar() {
 
         return evStart <= rangeEnd && evEnd >= rangeStart;
       });
+
+      const compactMode = window.layoutMode === "mobile" || window.layoutMode === "tablet";
+      const currentViewType = window.calendar?.view?.type || "";
+      if (compactMode && (currentViewType === "timeGridWeek" || currentViewType === "timeGridDay")) {
+        applyCompactVerticalStack(events);
+      }
 
       console.log("✅ EVENTS SENT:", events.length);
 

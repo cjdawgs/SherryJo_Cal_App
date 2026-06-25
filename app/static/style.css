@@ -1132,6 +1132,7 @@ Large: > 1920
     --layout-gutter: 8px;
     --calendar-min-height: 560px;
     --topbar-max-width: 100%;
+    --iphone-header-cap: 16.66vh;
   }
 
   body {
@@ -1153,17 +1154,23 @@ Large: > 1920
   }
 
   .appTitle {
-    font-size: 17px;
+    font-size: 13px;
     font-weight: 600;
-    opacity: 0.82;
+    opacity: 0.74;
     text-align: left;
+    line-height: 1.05;
+  }
+
+  .appTitleRow {
+    min-height: 30px;
+    gap: 6px;
   }
 
   .controlBand {
     grid-template-columns: minmax(0, 1fr) 112px;
-    gap: 6px;
-    max-height: 16vh;
-    min-height: 86px;
+    gap: 4px;
+    max-height: 15vh;
+    min-height: 74px;
     overflow: hidden;
   }
 
@@ -1197,9 +1204,9 @@ Large: > 1920
     width: 100%;
     max-width: 100%;
     justify-content: space-between;
-    min-height: 24px;
-    padding: 2px 6px;
-    font-size: 10px;
+    min-height: 18px;
+    padding: 1px 5px;
+    font-size: 9px;
     line-height: 1.15;
   }
 
@@ -1213,13 +1220,15 @@ Large: > 1920
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 44px;
-    min-width: 44px;
-    border-radius: 10px;
+    min-height: 26px;
+    min-width: 26px;
+    border-radius: 7px;
     border: 1px solid #cdd6e6;
     background: #f8fbff;
     color: #1f3558;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 0;
   }
 
   .actionButtons {
@@ -1231,9 +1240,9 @@ Large: > 1920
   }
 
   .actionButtons > button {
-    min-height: 28px;
-    font-size: 11px;
-    padding: 2px 4px;
+    min-height: 21px;
+    font-size: 10px;
+    padding: 1px 3px;
     border-radius: 7px;
   }
 
@@ -1244,29 +1253,70 @@ Large: > 1920
   }
 
   .fc-header-toolbar {
-    max-height: 16vh;
-    min-height: 74px;
+    max-height: calc(var(--iphone-header-cap) - 22px);
+    min-height: 52px;
     overflow: hidden;
     padding: 0 2px !important;
-    gap: 3px;
+    gap: 2px;
     margin-bottom: 2px !important;
+    flex-wrap: nowrap;
+    align-items: flex-start;
   }
 
   .fc-toolbar-title {
-    font-size: 15px;
+    font-size: 11px;
     font-weight: 600;
-    opacity: 0.78;
+    opacity: 0.76;
+    line-height: 1.1;
+    margin: 0;
   }
 
   .fc-toolbar-chunk {
-    gap: 3px;
+    gap: 2px;
+    flex-wrap: nowrap;
+  }
+
+  .fc-toolbar-chunk:nth-child(2) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    min-width: 88px;
+  }
+
+  .fc-toolbar-chunk:nth-child(1) {
+    flex: 0 0 0;
+    min-width: 0;
+    max-width: 0;
+    overflow: hidden;
+  }
+
+  .fc-toolbar-chunk:nth-child(3) {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, auto));
+    grid-auto-flow: row;
+    gap: 2px;
+    align-items: center;
+    justify-content: end;
+    flex: 1 1 auto;
+  }
+
+  .fc-toolbar-chunk:nth-child(3) .fc-toolbar-title {
+    grid-column: 1 / -1;
+    text-align: right;
+    justify-self: end;
+    max-width: 140px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .fc .fc-button {
-    padding: 0.22em 0.46em;
-    font-size: 0.86em;
+    padding: 0.16em 0.34em;
+    font-size: 0.76em;
     line-height: 1.15;
     border-radius: 6px;
+    min-height: 20px;
   }
 
   .fc-timegrid-slot-lane,
@@ -1284,12 +1334,25 @@ Large: > 1920
     font-size: 10px;
   }
 
-  .actionButtons > button,
-  button,
-  .chip,
+  .fc .fc-prev-button,
+  .fc .fc-next-button,
+  .fc .fc-today-button {
+    min-width: 26px;
+  }
+
+  .fc .fc-earlyHoursToggle-button,
+  .fc .fc-lateHoursToggle-button,
+  .fc .fc-mobileDaysToggle-button,
+  .fc .fc-timeGridWeek-button,
+  .fc .fc-timeGridDay-button,
+  .fc .fc-dayGridMonth-button {
+    min-width: 30px;
+  }
+
   input,
-  select {
-    min-height: 44px;
+  select,
+  textarea {
+    min-height: 30px;
   }
 
   .layout {
@@ -1298,7 +1361,15 @@ Large: > 1920
   }
 
   .calendarPanel {
+    display: flex;
+    flex-direction: column;
     padding: 6px;
+  }
+
+  .calendarRangeDisplay {
+    max-height: 20px;
+    min-height: 16px;
+    margin-bottom: 1px;
   }
 
   .leftSidebar {
@@ -1372,9 +1443,9 @@ Large: > 1920
   }
 
   .accounts .chip {
-    min-height: 28px;
-    padding: 3px 7px;
-    font-size: 10px;
+    min-height: 22px;
+    padding: 2px 6px;
+    font-size: 9px;
   }
 
   .actionButtons {
@@ -1385,9 +1456,9 @@ Large: > 1920
   }
 
   .actionButtons > button {
-    min-height: 30px;
-    font-size: 11px;
-    padding: 3px 5px;
+    min-height: 24px;
+    font-size: 10px;
+    padding: 2px 4px;
   }
 
   .calendarRangeDisplay {
@@ -1397,20 +1468,42 @@ Large: > 1920
 
   .fc-header-toolbar {
     max-height: 19vh;
-    min-height: 82px;
+    min-height: 70px;
     overflow: hidden;
-    gap: 4px;
+    gap: 3px;
     margin-bottom: 3px !important;
+    flex-wrap: nowrap;
   }
 
   .fc-toolbar-title {
-    font-size: 16px;
+    font-size: 13px;
     font-weight: 600;
   }
 
+  .fc-toolbar-chunk:nth-child(2) {
+    flex: 0 0 auto;
+    min-width: 112px;
+    justify-content: center;
+  }
+
+  .fc-toolbar-chunk:nth-child(3) {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, auto));
+    grid-auto-flow: row;
+    gap: 3px;
+    align-items: center;
+    justify-content: end;
+  }
+
+  .fc-toolbar-chunk:nth-child(3) .fc-toolbar-title {
+    grid-column: 1 / -1;
+    text-align: right;
+    justify-self: end;
+  }
+
   .fc .fc-button {
-    font-size: 0.88em;
-    padding: 0.24em 0.5em;
+    font-size: 0.8em;
+    padding: 0.18em 0.36em;
   }
 
   .fc .fc-timegrid-event {
