@@ -80,6 +80,26 @@ function setSidebarDrawerOpen(isOpen) {
   }
 }
 
+function applyControlBandDensity(mode) {
+  const createBtn = document.getElementById("createBtn");
+  if (!createBtn) return;
+
+  if (mode === "mobile") {
+    createBtn.textContent = "＋";
+    createBtn.title = "Create Event";
+    return;
+  }
+
+  if (mode === "tablet") {
+    createBtn.textContent = "Create";
+    createBtn.title = "Create Event";
+    return;
+  }
+
+  createBtn.textContent = "➕ Create Event";
+  createBtn.title = "Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'";
+}
+
 function applyLayoutMode({ forceViewSwitch = false } = {}) {
   const nextMode = detectLayoutMode(window.innerWidth);
   const modeChanged = window.layoutMode !== nextMode;
@@ -95,6 +115,7 @@ function applyLayoutMode({ forceViewSwitch = false } = {}) {
 
   const shouldSwitchView = forceViewSwitch || modeChanged;
   applyCalendarLayoutMode(nextMode, { switchView: shouldSwitchView });
+  applyControlBandDensity(nextMode);
 }
 
 function bindResponsiveSidebarControls() {

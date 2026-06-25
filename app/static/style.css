@@ -154,6 +154,24 @@ body {
   min-height: 38px;
 }
 
+.calendarRangeDisplay {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-end;
+  margin: 0 2px 4px 0;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #304562;
+  background: #e8edf5;
+  border-radius: 999px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 button {
   padding: 6px 12px;
   font-size: 13px;
@@ -299,6 +317,11 @@ button.primary {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.fc-timegrid-slot-lane,
+.fc-timegrid-slot-label {
+  min-height: 20px;
 }
 
 
@@ -1140,7 +1163,7 @@ Large: > 1920
     grid-template-columns: minmax(0, 1fr) 112px;
     gap: 6px;
     max-height: 16vh;
-    min-height: 96px;
+    min-height: 86px;
     overflow: hidden;
   }
 
@@ -1163,7 +1186,7 @@ Large: > 1920
     flex-wrap: nowrap;
     align-items: stretch;
     justify-content: flex-start;
-    gap: 6px;
+    gap: 4px;
     overflow-x: hidden;
     overflow-y: auto;
     max-height: 100%;
@@ -1174,6 +1197,10 @@ Large: > 1920
     width: 100%;
     max-width: 100%;
     justify-content: space-between;
+    min-height: 24px;
+    padding: 2px 6px;
+    font-size: 10px;
+    line-height: 1.15;
   }
 
   #calendarLegend {
@@ -1199,8 +1226,62 @@ Large: > 1920
     width: 100%;
     grid-auto-flow: row;
     grid-template-columns: 1fr;
-    gap: 4px;
+    gap: 3px;
     align-content: start;
+  }
+
+  .actionButtons > button {
+    min-height: 28px;
+    font-size: 11px;
+    padding: 2px 4px;
+    border-radius: 7px;
+  }
+
+  .calendarRangeDisplay {
+    margin-bottom: 2px;
+    padding: 2px 7px;
+    font-size: 10px;
+  }
+
+  .fc-header-toolbar {
+    max-height: 16vh;
+    min-height: 74px;
+    overflow: hidden;
+    padding: 0 2px !important;
+    gap: 3px;
+    margin-bottom: 2px !important;
+  }
+
+  .fc-toolbar-title {
+    font-size: 15px;
+    font-weight: 600;
+    opacity: 0.78;
+  }
+
+  .fc-toolbar-chunk {
+    gap: 3px;
+  }
+
+  .fc .fc-button {
+    padding: 0.22em 0.46em;
+    font-size: 0.86em;
+    line-height: 1.15;
+    border-radius: 6px;
+  }
+
+  .fc-timegrid-slot-lane,
+  .fc-timegrid-slot-label {
+    min-height: 16px;
+  }
+
+  .fc .fc-timegrid-event-harness {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .fc .fc-timegrid-event {
+    min-height: 34px;
+    font-size: 10px;
   }
 
   .actionButtons > button,
@@ -1277,6 +1358,8 @@ Large: > 1920
   .controlBand {
     grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
     gap: 10px;
+    max-height: 19vh;
+    overflow: hidden;
   }
 
   .accounts {
@@ -1284,13 +1367,55 @@ Large: > 1920
     grid-template-columns: repeat(2, minmax(0, 1fr));
     overflow-x: hidden;
     overflow-y: auto;
-    max-height: 132px;
+    max-height: 100%;
+    gap: 5px;
+  }
+
+  .accounts .chip {
+    min-height: 28px;
+    padding: 3px 7px;
+    font-size: 10px;
   }
 
   .actionButtons {
     grid-auto-flow: row;
     grid-template-columns: repeat(2, minmax(56px, 1fr));
     justify-content: stretch;
+    gap: 3px;
+  }
+
+  .actionButtons > button {
+    min-height: 30px;
+    font-size: 11px;
+    padding: 3px 5px;
+  }
+
+  .calendarRangeDisplay {
+    font-size: 10px;
+    margin-bottom: 3px;
+  }
+
+  .fc-header-toolbar {
+    max-height: 19vh;
+    min-height: 82px;
+    overflow: hidden;
+    gap: 4px;
+    margin-bottom: 3px !important;
+  }
+
+  .fc-toolbar-title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .fc .fc-button {
+    font-size: 0.88em;
+    padding: 0.24em 0.5em;
+  }
+
+  .fc .fc-timegrid-event {
+    min-height: 36px;
+    font-size: 10px;
   }
 
   .layout {

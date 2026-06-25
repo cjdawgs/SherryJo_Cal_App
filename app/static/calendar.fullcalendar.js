@@ -186,25 +186,13 @@ window.renderVisibleDateStickyIcons = renderVisibleDateStickyIcons;
 ✅ RANGE PILL RENDER ENGINE (GLOBAL — CORRECT PLACEMENT)
 *******************************************************/
 export function renderRangePill() {
-
-  let el = document.getElementById("rangeDisplay");
-
-  if (!el) {
-    // ✅ Retry after header injection completes
-    setTimeout(renderRangePill, 50);
-    return;
-  }
+  const el = document.getElementById("rangeDisplay");
+  if (!el) return;
 
   const days = window.currentRangeDays || 30;
   const range = getActiveRangeLabel(days);
 
-  el.textContent = "📅 " + (range?.label || "NO RANGE");
-
-  el.style.display = "inline-block";
-  el.style.padding = "6px 12px";
-  el.style.margin = "8px 0";
-  el.style.borderRadius = "999px";
-  el.style.background = "#eee";
+  el.textContent = `📅 ${range?.label || "NO RANGE"}`;
 
   console.log("✅ RANGE PILL RENDER:", el.textContent);
 }
@@ -358,6 +346,8 @@ let _navigatingToSelected = false;
 let stickyDragPayload = null;
 let highlightedDropEl = null;
 let mobileShowAllDays = false;
+let mobileShowEarlyHours = false;
+let mobileShowLateHours = false;
 let lastAppliedHiddenDaysKey = "";
 let lastAppliedTimeWindowKey = "";
 
@@ -436,7 +426,7 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "18:00:00",
     allDaySlot: false,
     expandRows: false,
-    toolbarRight: "today prev,next mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarRight: "today prev,next earlyHoursToggle,lateHoursToggle,mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   tablet: {
     defaultView: "timeGridWeek",
@@ -448,7 +438,7 @@ const CALENDAR_LAYOUT_PROFILES = {
     slotMaxTime: "22:00:00",
     allDaySlot: true,
     expandRows: true,
-    toolbarRight: "today prev,next timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarRight: "today prev,next earlyHoursToggle,lateHoursToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   desktop: {
     defaultView: "dayGridMonth",
@@ -505,6 +495,17 @@ function updateMobileDaysToggleLabel() {
   btn.textContent = mobileShowAllDays ? "Focused Days" : "All Days";
 }
 
+function updateMobileHourToggleLabels() {
+  const earlyBtn = document.querySelector(".fc-earlyHoursToggle-button");
+  if (earlyBtn) {
+    earlyBtn.textContent = mobileShowEarlyHours ? "Early On" : "Early";
+  }
+  const lateBtn = document.querySelector(".fc-lateHoursToggle-button");
+  if (lateBtn) {
+    lateBtn.textContent = mobileShowLateHours ? "Late On" : "Late";
+  }
+}
+
 function getViewEventsInRange(rangeStart, rangeEnd) {
   const cache = window.sessionEventCache || [];
   return cache.filter((ev) => {
@@ -559,6 +560,13 @@ function applyMobileWeekCompression() {
     }
   }
 
+  if (mobileShowEarlyHours) {
+    minHour = 0;
+  }
+  if (mobileShowLateHours) {
+    maxHour = 24;
+  }
+
   const minToken = toHourToken(minHour);
   const maxToken = toHourToken(maxHour);
   const timeWindowKey = `${minToken}|${maxToken}`;
@@ -592,6 +600,7 @@ function applyMobileWeekCompression() {
   }
 
   setTimeout(updateMobileDaysToggleLabel, 0);
+  setTimeout(updateMobileHourToggleLabels, 0);
 }
 
 export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
@@ -602,7 +611,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
 
   cal.setOption("headerToolbar", {
     left: "title",
-    center: "rangeGroup",
+    center: "",
     right: profile.toolbarRight
   });
   cal.setOption("eventMaxStack", profile.eventMaxStack);
@@ -613,11 +622,14 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   cal.setOption("slotMaxTime", profile.slotMaxTime);
   cal.setOption("allDaySlot", profile.allDaySlot);
   cal.setOption("expandRows", profile.expandRows);
+  cal.setOption("slotEventOverlap", mode === "desktop" || mode === "large");
   cal.setOption("height", getCalendarHeightForMode(mode));
   cal.setOption("contentHeight", "auto");
 
   if (mode !== "mobile") {
     mobileShowAllDays = false;
+    mobileShowEarlyHours = false;
+    mobileShowLateHours = false;
     lastAppliedHiddenDaysKey = "";
     lastAppliedTimeWindowKey = "";
     cal.setOption("hiddenDays", []);
@@ -631,6 +643,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   }
 
   applyMobileWeekCompression();
+  updateMobileHourToggleLabels();
   setTimeout(() => renderVisibleDateStickyIcons(), 70);
 }
 
@@ -667,7 +680,7 @@ export function initFullCalendar() {
     /* ✅ UNIFIED HEADER ROW */
     headerToolbar: {
       left: "title",
-      center: "rangeGroup",
+      center: "",
       right: initialProfile.toolbarRight
     },
 
@@ -680,13 +693,11 @@ export function initFullCalendar() {
     slotMaxTime: initialProfile.slotMaxTime,
     allDaySlot: initialProfile.allDaySlot,
     expandRows: initialProfile.expandRows,
+    slotEventOverlap: false,
     height: getCalendarHeightForMode(initialLayoutMode),
     contentHeight: "auto",
 
     customButtons: {
-      rangeGroup: {
-        text: ""   // placeholder
-      },
       mobileDaysToggle: {
         text: "All Days",
         click: () => {
@@ -694,6 +705,24 @@ export function initFullCalendar() {
           lastAppliedHiddenDaysKey = "";
           applyMobileWeekCompression();
           updateMobileDaysToggleLabel();
+        }
+      },
+      earlyHoursToggle: {
+        text: "Early",
+        click: () => {
+          mobileShowEarlyHours = !mobileShowEarlyHours;
+          lastAppliedTimeWindowKey = "";
+          applyMobileWeekCompression();
+          updateMobileHourToggleLabels();
+        }
+      },
+      lateHoursToggle: {
+        text: "Late",
+        click: () => {
+          mobileShowLateHours = !mobileShowLateHours;
+          lastAppliedTimeWindowKey = "";
+          applyMobileWeekCompression();
+          updateMobileHourToggleLabels();
         }
       }
     },
@@ -1167,6 +1196,7 @@ export function initFullCalendar() {
   window.calendar.render();
   applyCalendarLayoutMode(initialLayoutMode, { switchView: false });
   updateMobileDaysToggleLabel();
+  updateMobileHourToggleLabels();
 
   // =========================================================
   // ✅ RIGHT-CLICK ON EMPTY DATE CELLS (not on events)
@@ -1276,38 +1306,6 @@ export function initFullCalendar() {
       window.updateChipEventCounts();
     }
   }, 0);
-  /* ======================================================
-  ✅ INJECT RANGE INTO HEADER (SAFE ADDITION)
-  ✅ CENTER RANGE PILL (FINAL LAYOUT)
-  ====================================================== */
-  setTimeout(() => {
 
-    const center = document.querySelector(".fc-toolbar-chunk:nth-child(2)");
-
-    if (!center) {
-      console.warn("❌ center toolbar not found");
-      return;
-    }
-
-    center.innerHTML = `
-      <div style="
-        display:flex;
-        justify-content:center;
-        align-items:center;
-        width:100%;
-      ">
-        <div id="rangeDisplay" style="
-          font-size:12px;
-          padding:6px 12px;
-          border-radius:999px;
-          background:#eee;
-        "></div>
-      </div>
-    `;
-
-    console.log("✅ RANGE PILL CENTERED");
-
-  }, 50);
-  
-    console.log("✅ FullCalendar loaded");
+  console.log("✅ FullCalendar loaded");
 }
