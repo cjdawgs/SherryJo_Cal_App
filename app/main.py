@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
+from datetime import datetime, timezone
 
 from app.database import engine, Base
 
@@ -30,6 +31,58 @@ app = FastAPI(
     title="SherryJo App",
     version="1.0"
 )
+
+
+REQUIRED_TABLES = {
+    "users",
+    "oauth_accounts",
+    "events",
+    "tasks",
+    "notes",
+    "date_sticky_notes",
+}
+
+
+def evaluate_schema_health(db_engine=engine):
+    checked_at = datetime.now(timezone.utc).isoformat()
+    try:
+        inspector = inspect(db_engine)
+        existing_tables = set(inspector.get_table_names())
+        missing_tables = sorted(REQUIRED_TABLES - existing_tables)
+
+        if missing_tables:
+            message = (
+                "Missing required tables. Run database migrations before handling sticky/date routes "
+                "(for example: alembic upgrade head)."
+            )
+            print(f"⚠️ [SCHEMA CHECK] Missing tables: {missing_tables}")
+            print("⚠️ [SCHEMA CHECK] Migration warning:", message)
+            return {
+                "status": "warning",
+                "checked_at": checked_at,
+                "required_tables": sorted(REQUIRED_TABLES),
+                "missing_tables": missing_tables,
+                "message": message,
+            }
+
+        print("✅ [SCHEMA CHECK] All required tables are present.")
+        return {
+            "status": "ok",
+            "checked_at": checked_at,
+            "required_tables": sorted(REQUIRED_TABLES),
+            "missing_tables": [],
+            "message": "Schema check passed",
+        }
+
+    except Exception as e:
+        print("❌ [SCHEMA CHECK] Failed to inspect schema:", str(e))
+        return {
+            "status": "error",
+            "checked_at": checked_at,
+            "required_tables": sorted(REQUIRED_TABLES),
+            "missing_tables": [],
+            "message": f"Schema check failed: {str(e)}",
+        }
 
 
 # ==================================================
@@ -166,7 +219,12 @@ def start_background_jobs():
     - No manual API calls needed
     - System stays in sync with Outlook
     """
-    start_scheduler()
+    app.state.schema_health = evaluate_schema_health()
+
+    try:
+        start_scheduler()
+    except Exception as e:
+        print("⚠️ Scheduler failed to start:", str(e))
 
 
 # ==================================================
@@ -215,7 +273,23 @@ def health_check():
     """
     ✅ Simple health endpoint (used by tests + monitoring)
     """
-    return {"status": "ok", "app": "running"}
+    schema_health = getattr(app.state, "schema_health", None)
+    if schema_health is None:
+        schema_health = evaluate_schema_health()
+        app.state.schema_health = schema_health
+
+    return {
+        "status": "ok",
+        "app": "running",
+        "schema_status": schema_health.get("status", "unknown")
+    }
+
+
+@app.get("/health/schema")
+def schema_health_check(refresh: bool = False):
+    if refresh or not hasattr(app.state, "schema_health"):
+        app.state.schema_health = evaluate_schema_health()
+    return app.state.schema_health
 
 
 # ==================================================

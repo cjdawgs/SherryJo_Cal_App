@@ -2337,7 +2337,20 @@ async function syncNow() {
     const res = await apiFetch("/calendar/sync", { method: "POST" });
     if (!res) return;
 
-    const data = await res.json();
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch (parseErr) {
+      console.error("❌ /calendar/sync returned non-JSON payload:", raw?.slice?.(0, 300));
+      throw new Error(`Sync endpoint returned invalid response (${res.status})`);
+    }
+
+    if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+      const msg = data?.message || `Sync failed (${res.status})`;
+      throw new Error(msg);
+    }
+
     const resultPayload = data.result || data || {};
 
     console.log("✅ Sync result:", data);

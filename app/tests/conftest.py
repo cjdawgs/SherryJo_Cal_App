@@ -82,7 +82,8 @@ def db():
         session.close()
 
         # ✅ ROLLBACK everything
-        transaction.rollback()
+        if transaction.is_active:
+            transaction.rollback()
         connection.close()
 
 

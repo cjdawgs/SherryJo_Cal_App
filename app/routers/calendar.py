@@ -351,14 +351,22 @@ def list_date_sticky_notes(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    rows = db.query(DateStickyNote).filter(
-        DateStickyNote.owner_id == current_user.id
-    ).all()
+    try:
+        rows = db.query(DateStickyNote).filter(
+            DateStickyNote.owner_id == current_user.id
+        ).all()
 
-    return {
-        "status": "ok",
-        "items": [serialize_date_sticky(row) for row in rows]
-    }
+        return {
+            "status": "ok",
+            "items": [serialize_date_sticky(row) for row in rows]
+        }
+    except Exception as e:
+        # Keep frontend stable when migration is not yet applied in production.
+        print("⚠️ [DATE_STICKY] list failed, returning empty set:", e)
+        return {
+            "status": "ok",
+            "items": []
+        }
 
 
 @router.get("/date-sticky/{date_key}")
@@ -367,15 +375,19 @@ def get_date_sticky_note(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    row = db.query(DateStickyNote).filter(
-        DateStickyNote.owner_id == current_user.id,
-        DateStickyNote.date == date_key
-    ).first()
+    try:
+        row = db.query(DateStickyNote).filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date == date_key
+        ).first()
 
-    if not row:
+        if not row:
+            return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
+
+        return {"status": "ok", "item": serialize_date_sticky(row)}
+    except Exception as e:
+        print("⚠️ [DATE_STICKY] get failed, returning empty item:", e)
         return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
-
-    return {"status": "ok", "item": serialize_date_sticky(row)}
 
 
 @router.put("/date-sticky/{date_key}")
@@ -385,34 +397,46 @@ async def upsert_date_sticky_note(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    data = await request.json()
-    sticky_notes = normalize_sticky_notes(data.get("sticky_notes") or data.get("stickyNotes"))
+    try:
+        data = await request.json()
+        sticky_notes = normalize_sticky_notes(data.get("sticky_notes") or data.get("stickyNotes"))
 
-    row = db.query(DateStickyNote).filter(
-        DateStickyNote.owner_id == current_user.id,
-        DateStickyNote.date == date_key
-    ).first()
+        row = db.query(DateStickyNote).filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date == date_key
+        ).first()
 
-    if not sticky_notes:
-        if row:
-            db.delete(row)
-            db.commit()
-        return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
+        if not sticky_notes:
+            if row:
+                db.delete(row)
+                db.commit()
+            return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
 
-    if not row:
-        row = DateStickyNote(
-            owner_id=current_user.id,
-            date=date_key,
-            sticky_notes=sticky_notes,
-        )
-        db.add(row)
-    else:
-        row.sticky_notes = sticky_notes
-        row.updated_at = datetime.now(timezone.utc)
+        if not row:
+            row = DateStickyNote(
+                owner_id=current_user.id,
+                date=date_key,
+                sticky_notes=sticky_notes,
+            )
+            db.add(row)
+        else:
+            row.sticky_notes = sticky_notes
+            row.updated_at = datetime.now(timezone.utc)
 
-    db.commit()
-    db.refresh(row)
-    return {"status": "ok", "item": serialize_date_sticky(row)}
+        db.commit()
+        db.refresh(row)
+        return {"status": "ok", "item": serialize_date_sticky(row)}
+    except Exception as e:
+        print("❌ [DATE_STICKY] upsert failed:", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {
+            "status": "error",
+            "message": "Date sticky persistence unavailable on server",
+            "item": {"date": date_key, "sticky_notes": [], "count": 0}
+        }
 
 
 @router.delete("/date-sticky/{date_key}")
@@ -421,16 +445,24 @@ def delete_date_sticky_note(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    row = db.query(DateStickyNote).filter(
-        DateStickyNote.owner_id == current_user.id,
-        DateStickyNote.date == date_key
-    ).first()
+    try:
+        row = db.query(DateStickyNote).filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date == date_key
+        ).first()
 
-    if row:
-        db.delete(row)
-        db.commit()
+        if row:
+            db.delete(row)
+            db.commit()
 
-    return {"status": "ok", "deleted": date_key}
+        return {"status": "ok", "deleted": date_key}
+    except Exception as e:
+        print("⚠️ [DATE_STICKY] delete failed:", e)
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"status": "ok", "deleted": date_key}
 
 # ==================================================
 # ✅ SYNC ENDPOINT (SEPARATE FUNCTION)
@@ -448,15 +480,18 @@ def sync_calendar(
     - No per-account loops
     """
 
-    print("🔥 FULL SYNC TRIGGERED")
-   
-    db_url = str(getattr(db.bind, "url", "UNKNOWN"))
-    print("🧪 [SYNC] DB FILE:", db_url)
-
-    print("🧪 [SYNC] WORKING DIR:", os.getcwd())
-    print("🧪 [SYNC] DB COUNT AT START:", db.query(Event).count())
-
     try:
+        print("🔥 FULL SYNC TRIGGERED")
+
+        db_url = str(getattr(db.bind, "url", "UNKNOWN"))
+        print("🧪 [SYNC] DB FILE:", db_url)
+        print("🧪 [SYNC] WORKING DIR:", os.getcwd())
+
+        try:
+            print("🧪 [SYNC] DB COUNT AT START:", db.query(Event).count())
+        except Exception as count_err:
+            print("⚠️ [SYNC] DB count check failed:", count_err)
+
         result = calendar_service.sync_all(db, current_user)
 
         print("🔥 SYNC RESULT:", result)
@@ -468,6 +503,10 @@ def sync_calendar(
 
     except Exception as e:
         print("❌ SYNC FAILED:", str(e))
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
         return {
             "status": "error",
