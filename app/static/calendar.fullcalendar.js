@@ -792,11 +792,15 @@ export function initFullCalendar() {
       setTimeout(() => renderVisibleDateStickyIcons(), 80);
     },
 
-    // =========================================================
     // ✅ DRAG-DROP OR RESIZE EVENT — save changes to backend + undo/redo
     // Fires when user drags event to new date/time or resizes duration
-    // =========================================================
+    // CRITICAL: Skip this callback if we're programmatically updating via setDates() in undo/redo
     eventChange: async function(info) {
+      if (window.skipEventChange) {
+        console.log(`[eventChange] Skipped due to skipEventChange flag`);
+        return;
+      }
+
       const event = info.event;
       const eventId = String(event.extendedProps?.backendId || event.id || "");
       console.log(`[eventChange] eventId=${eventId}, title=${event.title}, extProps keys:`, Object.keys(event.extendedProps || {}));
@@ -823,9 +827,25 @@ export function initFullCalendar() {
         };
         console.log(`[eventChange] Moving ${event.title} to payload:`, payload);
 
-        // Create undo/redo command
-        // CRITICAL: Capture info for later use in undo (can't rely on event state changing)
-        const capturedInfo = info;
+        // Helper: find FC event by backendId and move it visually
+        const updateFcEventVisual = (targetStart, targetEnd) => {
+          const allFcEvents = window.calendar?.getEvents() || [];
+          const fcEvent = allFcEvents.find(e =>
+            String(e.extendedProps?.backendId) === String(eventId) ||
+            String(e.id) === String(eventId)
+          );
+          if (fcEvent) {
+            console.log(`[eventChange] Updating FC event ${eventId} visually to:`, targetStart, targetEnd);
+            // Set flag to prevent recursive eventChange callbacks
+            window.skipEventChange = true;
+            fcEvent.setDates(targetStart, targetEnd || targetStart);
+            window.skipEventChange = false;
+          } else {
+            console.warn(`[eventChange] FC event ${eventId} not found, relying on smartRefresh`);
+          }
+        };
+
+        // Create undo/redo command — both execute() and undo() do full visual updates
         const command = {
           label: "Move event",
           execute: async () => {
@@ -842,11 +862,15 @@ export function initFullCalendar() {
               throw new Error(`API returned ${res?.status}: ${errorText}`);
             }
             const data = await res.json();
+            // Update cache + visuals so redo looks right
+            const nextEvent = window.normalizeEventForCache(data?.event || data);
+            window.upsertCacheEvent(nextEvent);
+            updateFcEventVisual(newStart, newEnd);
+            window.smartRefresh?.({ reason: "event_moved", force: true });
             return data;
           },
           undo: async () => {
             console.log(`[eventChange.undo] Starting undo for eventId=${eventId}`);
-            // Restore to previous date/time
             const prevDateStr = prevStart ? prevStart.toISOString().split("T")[0] : dateStr;
             const prevStartTimeStr = prevStart ? prevStart.toTimeString().slice(0, 5) : "00:00";
             const prevEndTimeStr = prevEnd ? prevEnd.toTimeString().slice(0, 5) : "00:00";
@@ -855,63 +879,37 @@ export function initFullCalendar() {
               end_time: new Date(`${prevDateStr}T${prevEndTimeStr}`).toISOString()
             };
             console.log(`[eventChange.undo] Restoring to:`, restorePayload);
-            
-            try {
-              const res = await apiFetch(`/calendar/event/${eventId}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(restorePayload)
-              });
-              console.log(`[eventChange.undo] API response:`, res?.status, "ok:", res?.ok);
-              if (!res || !res.ok) {
-                const errorText = await res?.text?.() || "Unknown error";
-                console.error(`[eventChange.undo] API error: ${res?.status} ${errorText}`);
-                throw new Error(`Restore failed: ${res?.status} ${errorText}`);
-              }
-              const data = await res.json();
-              
-              // Update the event cache with restored times BEFORE smartRefresh runs,
-              // so when FullCalendar re-renders it shows the correct position
-              const restoredEvent = window.normalizeEventForCache(data?.event || data);
-              window.upsertCacheEvent(restoredEvent);
-              console.log(`[eventChange.undo] Cache updated with restored event`);
-
-              // Also update FullCalendar's event object directly using setDates()
-              // Search all events since getEventById uses FullCalendar's own id, not backendId
-              const allFcEvents = window.calendar?.getEvents() || [];
-              const fcEvent = allFcEvents.find(e =>
-                String(e.extendedProps?.backendId) === String(eventId) ||
-                String(e.id) === String(eventId)
-              );
-              if (fcEvent) {
-                console.log(`[eventChange.undo] Found FullCalendar event, calling setDates()`);
-                fcEvent.setDates(prevStart, prevEnd || prevStart);
-              } else {
-                console.warn(`[eventChange.undo] FullCalendar event not found, relying on smartRefresh`);
-              }
-
-              window.smartRefresh?.({ reason: "event_restored", force: true });
-              return data;
-            } catch (undoErr) {
-              console.error(`[eventChange.undo] FAILED:`, undoErr.message);
-              throw undoErr;
+            const res = await apiFetch(`/calendar/event/${eventId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(restorePayload)
+            });
+            console.log(`[eventChange.undo] API response:`, res?.status, "ok:", res?.ok);
+            if (!res || !res.ok) {
+              const errorText = await res?.text?.() || "Unknown error";
+              throw new Error(`Restore failed: ${res?.status} ${errorText}`);
             }
+            const data = await res.json();
+            // Update cache + visuals so undo looks right
+            const restoredEvent = window.normalizeEventForCache(data?.event || data);
+            window.upsertCacheEvent(restoredEvent);
+            updateFcEventVisual(prevStart, prevEnd);
+            window.smartRefresh?.({ reason: "event_restored", force: true });
+            return data;
           }
         };
 
-        // Execute and register
+        // Initial drag: execute already called by FullCalendar — just register the command
+        // (execute() will be called by undo/redo manager on redo)
         const data = await command.execute();
         console.log(`[eventChange] Execution successful, registering with undo/redo manager`);
-        const nextEvent = window.normalizeEventForCache(data?.event || data);
-        window.upsertCacheEvent(nextEvent);
 
-        // Add to undo/redo history
+        // Add to undo/redo history (already executed above)
         await window.undoRedoManager.registerExecuted(command);
 
         window.showToast?.("✅ Event moved");
         window.updateDayDetails?.();
         window.updateWeekView?.();
-        window.smartRefresh?.({ reason: "event_moved", force: true });
 
         if (typeof window.updateUndoRedoButtonStates === "function") {
           window.updateUndoRedoButtonStates();
