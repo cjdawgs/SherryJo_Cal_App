@@ -124,7 +124,9 @@ function renderVisibleDateStickyIcons() {
     const holder = document.createElement("span");
     holder.className = "dateStickyAnchor";
 
-    ["pointerdown", "mousedown", "touchstart", "click", "dblclick", "contextmenu"].forEach((evtName) => {
+    // Only block click/dblclick/contextmenu bubbling at holder level —
+    // do NOT block pointerdown/mousedown so the native drag can start.
+    ["click", "dblclick", "contextmenu"].forEach((evtName) => {
       holder.addEventListener(evtName, (e) => {
         e.stopPropagation();
       }, true);
@@ -149,6 +151,16 @@ function renderVisibleDateStickyIcons() {
       e.preventDefault();
       e.stopPropagation();
       window.editDateStickyNote?.(dateStr);
+    });
+
+    icon.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openStickyIconContextMenu(e.clientX, e.clientY, {
+        scope: "date",
+        dateStr,
+        count: dateCount
+      });
     });
 
     holder.appendChild(icon);
@@ -800,14 +812,16 @@ export function initFullCalendar() {
       const dateTargetEl = getDateTargetElement(e.target, calEl);
       const eventNode = e.target instanceof Element ? e.target.closest(".fc-event") : null;
 
-      const canDropEventToDate = stickyDragPayload.scope === "event" && !!dateStr;
+      // Event takes priority over date when both are available.
+      const canDropEventToEvent = stickyDragPayload.scope === "event" && !!eventNode;
+      const canDropEventToDate = stickyDragPayload.scope === "event" && !eventNode && !!dateStr;
       const canDropDateToEvent = stickyDragPayload.scope === "date" && !!eventNode;
 
-      if (canDropEventToDate || canDropDateToEvent) {
+      if (canDropEventToEvent || canDropEventToDate || canDropDateToEvent) {
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 
-        if (canDropDateToEvent && eventNode) {
+        if ((canDropEventToEvent || canDropDateToEvent) && eventNode) {
           setDropHighlight(eventNode, "event");
         } else if (canDropEventToDate && dateTargetEl) {
           setDropHighlight(dateTargetEl, "date");
@@ -831,7 +845,21 @@ export function initFullCalendar() {
       const eventNode = e.target instanceof Element ? e.target.closest(".fc-event") : null;
       const droppedEventId = eventNode?.dataset?.eventId || null;
 
-      if (stickyDragPayload.scope === "event" && dateStr) {
+      // Event drop takes priority: if dropped on an event card, move sticky to that event.
+      if (stickyDragPayload.scope === "event" && droppedEventId) {
+        e.preventDefault();
+        const sourceEvent = window.calendar.getEventById(stickyDragPayload.fcEventId);
+        const targetEvent = window.calendar.getEventById(String(droppedEventId));
+        if (sourceEvent && targetEvent && sourceEvent.id !== targetEvent.id) {
+          // Move sticky notes from source event to target event.
+          await window.moveEventStickyToEvent?.(sourceEvent, targetEvent);
+        }
+        clearStickyDragPayload();
+        return;
+      }
+
+      // Fallback: event sticky dropped on a date cell (not an event).
+      if (stickyDragPayload.scope === "event" && dateStr && !droppedEventId) {
         e.preventDefault();
         const sourceEvent = window.calendar.getEventById(stickyDragPayload.fcEventId);
         if (sourceEvent) {

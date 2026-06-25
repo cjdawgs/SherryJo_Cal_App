@@ -1378,6 +1378,58 @@ window.moveEventStickyToDate = async (eventRef, targetDateKey) => {
   }
 };
 
+window.moveEventStickyToEvent = async (sourceEventRef, targetEventRef) => {
+  const sourceId = sourceEventRef?.extendedProps?.backendId || sourceEventRef?.id;
+  const targetId = targetEventRef?.extendedProps?.backendId || targetEventRef?.id;
+  if (!sourceId || !targetId) {
+    window.showToast?.("Sticky move failed: missing event id", "error");
+    return false;
+  }
+
+  const sourceNotes = parseStickyNotes(sourceEventRef);
+  if (!sourceNotes.length) {
+    window.showToast?.("No sticky notes to move", "error");
+    return false;
+  }
+
+  const selection = await chooseStickyMoveSelection(sourceNotes, "event");
+  if (selection.mode === "cancel" || selection.mode === "none") return false;
+
+  const indexSet = new Set(selection.indices);
+  const movedItems = sourceNotes.filter((_, idx) => indexSet.has(idx));
+  const remainingSourceNotes = sourceNotes.filter((_, idx) => !indexSet.has(idx));
+  const targetNotes = parseStickyNotes(targetEventRef);
+  const nowIso = new Date().toISOString();
+  movedItems.forEach((n) => targetNotes.push({ ...n, updatedAt: nowIso }));
+
+  try {
+    const [resSource, resTarget] = await Promise.all([
+      apiFetch(`/calendar/event/${sourceId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sticky_notes: remainingSourceNotes, sticky_note: remainingSourceNotes[0] || null })
+      }),
+      apiFetch(`/calendar/event/${targetId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sticky_notes: targetNotes, sticky_note: targetNotes[0] || null })
+      })
+    ]);
+    if (!resSource?.ok || !resTarget?.ok) throw new Error("move failed");
+    const [dSrc, dTgt] = await Promise.all([resSource.json(), resTarget.json()]);
+    upsertCacheEvent(normalizeEventForCache(dSrc.event, sourceEventRef));
+    upsertCacheEvent(normalizeEventForCache(dTgt.event, targetEventRef));
+    refreshStickyVisuals();
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "🗒 Sticky moved to event";
+    window.showToast?.(label);
+    return true;
+  } catch (err) {
+    console.error("❌ move event sticky to event failed", err);
+    window.showToast?.("❌ Sticky move failed", "error");
+    return false;
+  }
+};
+
 window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
   if (!sourceDateKey || !eventRef) return false;
 
