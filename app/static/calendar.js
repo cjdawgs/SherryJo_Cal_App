@@ -9,13 +9,13 @@ import {
   applyRangeTooltips,
   bindUIEvents,
   openCreateModal
-} from "./calendar.ui.js";
+} from "/static/calendar.ui.js";
 
 import {
   toDayString,
   fromDayString,
   getActiveRangeLabel
-} from "./core.js";
+} from "/static/core.js";
 
 import { apiFetch, requireAuth, getAuthToken } from "/static/api.js";
 
