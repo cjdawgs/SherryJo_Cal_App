@@ -869,9 +869,29 @@ export function initFullCalendar() {
                 throw new Error(`Restore failed: ${res?.status} ${errorText}`);
               }
               const data = await res.json();
-              console.log(`[eventChange.undo] Undo successful, refreshing calendar`);
+              console.log(`[eventChange.undo] Undo successful, updating FullCalendar event`);
               
-              // Refresh the calendar to show the restored state
+              // CRITICAL: Update FullCalendar's event object directly so it shows the change immediately
+              try {
+                const fcEvent = window.calendar?.getEventById(eventId) || window.calendar?.getEventById(String(eventId));
+                if (fcEvent) {
+                  console.log(`[eventChange.undo] Found FullCalendar event, updating times:`, {
+                    oldStart: fcEvent.start,
+                    newStart: prevStart,
+                    oldEnd: fcEvent.end,
+                    newEnd: prevEnd
+                  });
+                  fcEvent.setProp("start", prevStart);
+                  fcEvent.setProp("end", prevEnd);
+                  console.log(`[eventChange.undo] FullCalendar event updated`);
+                } else {
+                  console.warn(`[eventChange.undo] Could not find FullCalendar event by id=${eventId}, will rely on smartRefresh`);
+                }
+              } catch (fcErr) {
+                console.error(`[eventChange.undo] Error updating FullCalendar event:`, fcErr.message);
+              }
+              
+              // Refresh the calendar to ensure consistency
               window.smartRefresh?.({ reason: "event_restored", force: true });
               return data;
             } catch (undoErr) {
