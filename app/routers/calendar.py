@@ -487,72 +487,85 @@ def get_unified_calendar(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-
     now = datetime.now(timezone.utc)
-    
+
     db_url = str(getattr(db.bind, "url", "UNKNOWN"))
     print("🧪 [SYNC] DB FILE:", db_url)
-
     print("🧪 [UNIFIED] WORKING DIR:", os.getcwd())
-    print("🧪 [UNIFIED] DB ROW COUNT:", db.query(Event).count())
-    
+
+    try:
+        print("🧪 [UNIFIED] DB ROW COUNT:", db.query(Event).count())
+    except Exception as e:
+        print("⚠️ [UNIFIED] DB row count check failed:", e)
 
     # ==================================================
-    # ✅ NEW: SUPPORT FULLCALENDAR RANGE
+    # ✅ SUPPORT FULLCALENDAR RANGE (WITH SAFE PARSING)
     # ==================================================
-    if start and end:
+    def _parse_iso(val: str):
+        if not val:
+            return None
         try:
-            start_date = datetime.fromisoformat(start).astimezone(timezone.utc)
-            end_date = datetime.fromisoformat(end).astimezone(timezone.utc)
+            parsed = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            return parsed.astimezone(timezone.utc)
+        except Exception:
+            return None
 
+    start_date = None
+    end_date = None
+
+    if start and end:
+        start_date = _parse_iso(start)
+        end_date = _parse_iso(end)
+        if start_date and end_date:
             print(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
+        else:
+            print("❌ Invalid start/end, falling back")
 
-        except Exception as e:
-            print("❌ Invalid start/end, falling back:", e)
-
-            start_date = now - timedelta(days=range_days)
-            end_date = now + timedelta(days=range_days)
-
-    else:
+    if not start_date or not end_date:
         start_date = now - timedelta(days=range_days)
         end_date = now + timedelta(days=range_days)
-
         print(f"✅ RANGE WINDOW: ±{range_days} days")
 
-
-    # ------------------------------------------
-    # ✅ NEW FAST READ PATH (PHASE 3.2)
-    # ------------------------------------------
-    # ✅ FAST READ PATH
-    events = calendar_service.get_events_from_db(
-        db,
-        current_user,
-        start_date,
-        end_date
-    )
-
+    events = []
     account_event_totals = {}
-    for ev in events:
-        key = ev.get("account_key")
-        if not key:
-            continue
-        account_event_totals[key] = account_event_totals.get(key, 0) + 1
-
-    print(f"⚡ FAST DB EVENTS: {len(events)}")
-
-    # ✅ ACCOUNT STATUS
-    accounts = MultiAccountOAuthService.get_user_accounts(
-        db, current_user.id
-    )
-
     account_status = {}
 
-    for acc in accounts:
-        provider = normalize_provider(acc.provider)
+    try:
+        # ✅ FAST READ PATH
+        events = calendar_service.get_events_from_db(
+            db,
+            current_user,
+            start_date,
+            end_date
+        )
 
-        key = f"{provider}:{(acc.account_email or '').lower().strip()}"
+        for ev in events:
+            key = ev.get("account_key")
+            if not key:
+                continue
+            account_event_totals[key] = account_event_totals.get(key, 0) + 1
 
-        account_status[key] = resolve_account_status(acc)
+        print(f"⚡ FAST DB EVENTS: {len(events)}")
+
+    except Exception as e:
+        print("❌ [UNIFIED] events fetch failed:", e)
+        events = []
+        account_event_totals = {}
+
+    try:
+        accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
+
+        for acc in accounts:
+            try:
+                provider = normalize_provider(acc.provider)
+                key = f"{provider}:{(acc.account_email or '').lower().strip()}"
+                account_status[key] = resolve_account_status(acc)
+            except Exception as inner:
+                print("⚠️ [UNIFIED] account status failed:", inner)
+
+    except Exception as e:
+        print("❌ [UNIFIED] account status block failed:", e)
+        account_status = {}
 
     return {
         "events": events,
