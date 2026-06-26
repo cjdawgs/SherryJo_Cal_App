@@ -85,6 +85,32 @@ class GraphClient:
 
         return {"value": events}
 
+    def get_events(self, db=None, user=None, start=None, end=None):
+        """
+        Backward-compatible wrapper used by legacy tests/callers.
+        """
+        token = getattr(user, "ms_access_token", None) if user is not None else None
+        if not token:
+            return {"value": []}
+        return self.get_events_with_token(token, start=start, end=end)
+
+    def get_tasks(self, db=None, user=None):
+        """
+        Backward-compatible task fetch for Microsoft To Do tests.
+        """
+        token = getattr(user, "ms_access_token", None) if user is not None else None
+        if not token:
+            return {"value": []}
+
+        url = f"{GRAPH_BASE_URL}/me/todo/tasks"
+        response = requests.get(url, headers={"Authorization": f"Bearer {token}"})
+        if response.status_code != 200:
+            return {"value": []}
+        data = response.json() or {}
+        if "value" not in data:
+            data["value"] = []
+        return data
+
     # ==================================================
     # ✅ UPDATE EVENT
     # ==================================================

@@ -4,6 +4,7 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
@@ -22,6 +23,15 @@ def test_supabase_e2e_sticky_routes_and_sync_contract():
 
     connect_args = {"sslmode": "require"} if db_url.startswith("postgresql") else {}
     engine = create_engine(db_url, pool_pre_ping=True, connect_args=connect_args)
+
+    # External infra can be intermittently unavailable; treat that as skipped optional test.
+    try:
+        with engine.connect() as conn:
+            conn.exec_driver_sql("SELECT 1")
+    except OperationalError as exc:
+        engine.dispose()
+        pytest.skip(f"Supabase E2E skipped: database unreachable ({exc.__class__.__name__})")
+
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override_get_db():

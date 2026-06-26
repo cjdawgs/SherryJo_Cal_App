@@ -1,5 +1,6 @@
 
 from datetime import datetime, timezone
+import hashlib
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 import requests
@@ -165,6 +166,60 @@ class CalendarService:
             return val.get("dateTime") or val.get("date")
         return val
 
+    def _normalize_time(self, value):
+        """
+        Legacy helper kept for test/backward compatibility.
+        """
+        if value is None:
+            return ""
+
+        text = str(value).strip()
+        if not text:
+            return ""
+
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+
+        try:
+            dt = datetime.fromisoformat(text)
+            return dt.strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            # date-only fallback and non-ISO safety
+            return text.replace("T", " ")[:16] if "T" in text else text
+
+    def _fingerprint(self, event: dict) -> str:
+        """
+        Legacy dedupe fingerprint used by historical tests.
+        """
+        title = str((event or {}).get("title") or "").strip().lower()
+        start = self._normalize_time((event or {}).get("start"))
+        end = self._normalize_time((event or {}).get("end"))
+        raw = f"{title}|{start}|{end}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    def _deduplicate(self, events):
+        """
+        Legacy merge behavior: duplicates combine source labels.
+        """
+        by_fp = {}
+        for ev in events or []:
+            fp = self._fingerprint(ev)
+            src = str((ev or {}).get("source") or "").strip().lower()
+            src = "outlook" if src == "microsoft" else src
+
+            if fp not in by_fp:
+                clone = dict(ev)
+                clone["source"] = src
+                by_fp[fp] = clone
+                continue
+
+            existing_sources = [s for s in str(by_fp[fp].get("source") or "").split(",") if s]
+            if src and src not in existing_sources:
+                existing_sources.append(src)
+            by_fp[fp]["source"] = ",".join(existing_sources)
+
+        return list(by_fp.values())
+
     # ==================================================
     # ✅ NORMALIZATION
     # ==================================================
@@ -220,6 +275,7 @@ class CalendarService:
                 raw_provider = ""
 
             provider = normalize_provider(raw_provider)
+            source_label = "outlook" if provider == "microsoft" else provider
 
             # ✅ DEBUG (REMOVE LATER)
             #print("🧪 PROVIDER NORMALIZED →", provider)
@@ -272,7 +328,7 @@ class CalendarService:
                     end.isoformat() if isinstance(end, datetime) else end
                 ),
                 # ==================================================
-                "source": provider,
+                "source": source_label,
                 "provider": provider,
                 # ✅ REQUIRED BY FRONTEND
                 "account_email": account_email,

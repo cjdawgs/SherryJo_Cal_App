@@ -157,6 +157,37 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/")
+def create_or_update_event_legacy(payload: dict, db: Session = Depends(get_db)):
+    """
+    Legacy compatibility endpoint for tests/clients posting to /events/.
+    Delegates to the unified update-event logic and returns event fields.
+    """
+    result = update_event(payload=payload, db=db)
+
+    event_id = result.get("id") or payload.get("id")
+    event_obj = None
+    if event_id:
+        event_obj = db.query(Event).filter(Event.id == int(event_id)).first()
+
+    if event_obj is None:
+        return {
+            "id": event_id,
+            "title": payload.get("title"),
+            "description": payload.get("description"),
+            "start_time": payload.get("start_time"),
+            "end_time": payload.get("end_time")
+        }
+
+    return {
+        "id": event_obj.id,
+        "title": event_obj.title,
+        "description": event_obj.description,
+        "start_time": event_obj.start_time.isoformat() if event_obj.start_time else None,
+        "end_time": event_obj.end_time.isoformat() if event_obj.end_time else None
+    }
+
+
 ## ==================================================
 ## ✅ NOTES (CREATE / UPDATE / POSITION)
 ## ==================================================
