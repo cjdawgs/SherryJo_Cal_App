@@ -221,13 +221,16 @@ function positionContextMenu(menu, x, y) {
 
 function openContextMenu(x, y, fcEvent) {
   const menu = ensureContextMenu();
+  const precisionLabel = getDragPrecisionModeLabel();
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
+    <div class="ctx-menu-item" data-action="create" title="Create Event">➕ Create Event</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="edit">✏️ Edit</div>
-    <div class="ctx-menu-item" data-action="sticky">🗒 New Sticky Note</div>
+    <div class="ctx-menu-item" data-action="edit" title="Edit">✏️ Edit</div>
+    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">🗒 New Sticky Note</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item danger" data-action="delete">🗑 Delete</div>
+    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">🎯 Precision Drag: ${precisionLabel}</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item danger" data-action="delete" title="Delete">🗑 Delete</div>
   `;
   positionContextMenu(menu, x, y);
   menu.querySelector("[data-action='create']").onclick = () => {
@@ -241,6 +244,10 @@ function openContextMenu(x, y, fcEvent) {
   menu.querySelector("[data-action='sticky']").onclick = () => {
     closeContextMenu();
     window.openStickyModalForNew?.(fcEvent);
+  };
+  menu.querySelector("[data-action='toggle-precision']").onclick = () => {
+    closeContextMenu();
+    setDragPrecisionMode(!window.dragPrecisionMode);
   };
   menu.querySelector("[data-action='delete']").onclick = async () => {
     closeContextMenu();
@@ -292,21 +299,90 @@ function openStickyIconContextMenu(x, y, payload) {
   };
 }
 
+function getFirstEventOnDate(dateStr) {
+  const cal = window.calendar;
+  if (!cal || !dateStr) return null;
+
+  const dayStart = new Date(`${dateStr}T00:00:00`);
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+
+  const list = cal.getEvents().filter((ev) => {
+    const start = ev.start ? new Date(ev.start) : null;
+    const end = ev.end ? new Date(ev.end) : start;
+    if (!start || !end) return false;
+    return start < dayEnd && end >= dayStart;
+  });
+
+  list.sort((a, b) => {
+    const aMs = a.start ? new Date(a.start).getTime() : 0;
+    const bMs = b.start ? new Date(b.start).getTime() : 0;
+    return aMs - bMs;
+  });
+
+  return list[0] || null;
+}
+
 function openDateContextMenu(x, y, dateStr) {
+  const firstEvent = getFirstEventOnDate(dateStr);
+  const hasDateSticky = Number(window.getDateStickyCount?.(dateStr) || 0) > 0;
+  const precisionLabel = getDragPrecisionModeLabel();
+
   const menu = ensureContextMenu();
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create">➕ Create Event</div>
-    <div class="ctx-menu-item" data-action="date-sticky">🗒 Date Sticky Note</div>
+    <div class="ctx-menu-item" data-action="create" title="Create Event">➕ Create Event</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" data-action="edit" title="Edit">✏️ Edit</div>
+    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">🗒 New Sticky Note</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">🎯 Precision Drag: ${precisionLabel}</div>
+    <div class="ctx-menu-separator"></div>
+    <div class="ctx-menu-item danger" data-action="delete" title="Delete">🗑 Delete</div>
   `;
   positionContextMenu(menu, x, y);
+
   menu.querySelector("[data-action='create']").onclick = () => {
     closeContextMenu();
     const date = new Date(dateStr + "T00:00:00");
     window.openCreateModal?.(date);
   };
-  menu.querySelector("[data-action='date-sticky']").onclick = () => {
+
+  menu.querySelector("[data-action='edit']").onclick = () => {
     closeContextMenu();
+    if (firstEvent) {
+      window.openCreateModal?.(null, firstEvent);
+      return;
+    }
+    const date = new Date(dateStr + "T00:00:00");
+    window.openCreateModal?.(date);
+  };
+
+  menu.querySelector("[data-action='sticky']").onclick = () => {
+    closeContextMenu();
+    if (firstEvent) {
+      window.openStickyModalForNew?.(firstEvent);
+      return;
+    }
     window.openDateStickyModal?.(dateStr);
+  };
+
+  menu.querySelector("[data-action='toggle-precision']").onclick = () => {
+    closeContextMenu();
+    setDragPrecisionMode(!window.dragPrecisionMode);
+  };
+
+  menu.querySelector("[data-action='delete']").onclick = async () => {
+    closeContextMenu();
+    if (firstEvent) {
+      window.editingEventId = firstEvent.extendedProps?.backendId || Number(firstEvent.id);
+      await window.deleteEvent?.();
+      return;
+    }
+    if (hasDateSticky) {
+      await window.deleteDateStickyNote?.(dateStr);
+      return;
+    }
+    window.showToast?.("No event or sticky note in this block", "error");
   };
 }
 
@@ -328,14 +404,25 @@ window.selectedEventId = null;
 
 function setSelectedEvent(id) {
   const strId = id ? String(id) : null;
-  // Toggle: clicking the same event again clears selection
-  window.selectedEventId = window.selectedEventId === strId ? null : strId;
+  window.selectedEventId = strId;
   console.log("✅ SELECTED EVENT:", window.selectedEventId);
   if (window.calendar) {
     window.calendar.refetchEvents();
   }
 }
 window.setSelectedEvent = setSelectedEvent;
+
+function setSelectedDateFromInteraction(dateLike) {
+  const d = dateLike instanceof Date ? dateLike : new Date(dateLike);
+  if (Number.isNaN(d.getTime())) return;
+
+  const dateStr = toDayString(d);
+  window.selectedDate = dateStr;
+  highlightSelectedDay(dateStr);
+  window.updateDayDetails?.();
+  window.updateWeekView?.();
+  window.dispatchEvent(new Event("selectedDateChanged"));
+}
 
 // =========================================================
 // ✅ VIEW-SWITCH TRACKING — used by datesSet to navigate
@@ -345,11 +432,172 @@ let _prevViewType = null;
 let _navigatingToSelected = false;
 let stickyDragPayload = null;
 let highlightedDropEl = null;
-let mobileShowAllDays = false;
+let mobileShowAllDays = true;
 let mobileShowEarlyHours = false;
 let mobileShowLateHours = false;
 let lastAppliedHiddenDaysKey = "";
 let lastAppliedTimeWindowKey = "";
+const DRAG_PRECISION_STORAGE_KEY = "sj_drag_precision_mode_v1";
+
+function loadDragPrecisionMode() {
+  try {
+    const raw = localStorage.getItem(DRAG_PRECISION_STORAGE_KEY);
+    if (raw === null) {
+      window.dragPrecisionMode = true;
+      return;
+    }
+    window.dragPrecisionMode = raw !== "0";
+  } catch {
+    window.dragPrecisionMode = true;
+  }
+}
+
+function setDragPrecisionMode(enabled) {
+  window.dragPrecisionMode = !!enabled;
+  try {
+    localStorage.setItem(DRAG_PRECISION_STORAGE_KEY, window.dragPrecisionMode ? "1" : "0");
+  } catch {
+    // ignore localStorage failures
+  }
+  window.showToast?.(`Precision drag ${window.dragPrecisionMode ? "ON" : "OFF"}`);
+}
+
+function getDragPrecisionModeLabel() {
+  return window.dragPrecisionMode ? "ON" : "OFF";
+}
+
+const WEEK_HEADER_COLOR_STORAGE_KEY = "sj_week_header_color_v1";
+const DEFAULT_WEEK_HEADER_COLOR = "#12c7b5";
+
+function normalizeHexColor(value) {
+  const v = String(value || "").trim();
+  if (!/^#[0-9a-fA-F]{6}$/.test(v)) return null;
+  return v.toLowerCase();
+}
+
+function applyWeekHeaderColor(color) {
+  const next = normalizeHexColor(color) || DEFAULT_WEEK_HEADER_COLOR;
+  document.documentElement.style.setProperty("--week-header-color", next);
+  window.weekHeaderColor = next;
+}
+
+function loadWeekHeaderColor() {
+  try {
+    const stored = localStorage.getItem(WEEK_HEADER_COLOR_STORAGE_KEY);
+    applyWeekHeaderColor(stored || DEFAULT_WEEK_HEADER_COLOR);
+  } catch {
+    applyWeekHeaderColor(DEFAULT_WEEK_HEADER_COLOR);
+  }
+}
+
+function openWeekHeaderColorPicker() {
+  let picker = document.getElementById("weekHeaderColorPicker");
+  if (!picker) {
+    picker = document.createElement("input");
+    picker.id = "weekHeaderColorPicker";
+    picker.type = "color";
+    picker.style.position = "fixed";
+    picker.style.left = "-9999px";
+    picker.style.top = "-9999px";
+    picker.style.opacity = "0";
+    picker.style.pointerEvents = "none";
+    picker.addEventListener("input", (e) => {
+      const next = e.target?.value || DEFAULT_WEEK_HEADER_COLOR;
+      applyWeekHeaderColor(next);
+      try {
+        localStorage.setItem(WEEK_HEADER_COLOR_STORAGE_KEY, window.weekHeaderColor || next);
+      } catch {
+        // ignore localStorage errors
+      }
+    });
+    document.body.appendChild(picker);
+  }
+
+  picker.value = normalizeHexColor(window.weekHeaderColor) || DEFAULT_WEEK_HEADER_COLOR;
+  picker.click();
+}
+
+function toDateTimeLocalValue(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseDateTimeLocalValue(value, fallback) {
+  if (!value) return fallback instanceof Date ? fallback : null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return fallback instanceof Date ? fallback : null;
+  return parsed;
+}
+
+function ensureDragPrecisionModal() {
+  let overlay = document.getElementById("dragPrecisionOverlay");
+  if (overlay) return overlay;
+
+  overlay = document.createElement("div");
+  overlay.id = "dragPrecisionOverlay";
+  overlay.style.cssText = "position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.35);z-index:1000002;";
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:10px;padding:14px;min-width:320px;max-width:94vw;box-shadow:0 16px 40px rgba(0,0,0,0.25)">
+      <h4 style="margin:0 0 8px 0;color:#1e293b">Confirm Event Drop</h4>
+      <p id="dragPrecisionMessage" style="margin:0 0 10px 0;color:#475569;font-size:13px"></p>
+      <label style="display:block;font-size:12px;color:#334155;margin-bottom:3px">Start</label>
+      <input id="dragPrecisionStart" type="datetime-local" style="width:100%;margin-bottom:8px;padding:6px;border:1px solid #cbd5e1;border-radius:6px" />
+      <label style="display:block;font-size:12px;color:#334155;margin-bottom:3px">End</label>
+      <input id="dragPrecisionEnd" type="datetime-local" style="width:100%;margin-bottom:12px;padding:6px;border:1px solid #cbd5e1;border-radius:6px" />
+      <div style="display:flex;justify-content:flex-end;gap:8px">
+        <button id="dragPrecisionCancel" type="button" style="padding:6px 10px;border:1px solid #cbd5e1;border-radius:6px;background:#f8fafc;cursor:pointer">Cancel</button>
+        <button id="dragPrecisionConfirm" type="button" style="padding:6px 10px;border:0;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Apply</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function confirmEventMoveWithPrecision({ title, start, end }) {
+  return new Promise((resolve) => {
+    const overlay = ensureDragPrecisionModal();
+    const msgEl = overlay.querySelector("#dragPrecisionMessage");
+    const startInput = overlay.querySelector("#dragPrecisionStart");
+    const endInput = overlay.querySelector("#dragPrecisionEnd");
+    const cancelBtn = overlay.querySelector("#dragPrecisionCancel");
+    const confirmBtn = overlay.querySelector("#dragPrecisionConfirm");
+
+    if (!startInput || !endInput || !cancelBtn || !confirmBtn) {
+      resolve({ confirmed: false, start, end });
+      return;
+    }
+
+    if (msgEl) {
+      msgEl.textContent = `${title || "Event"} - review or type exact date/time before saving.`;
+    }
+    startInput.value = toDateTimeLocalValue(start);
+    endInput.value = toDateTimeLocalValue(end || start);
+    overlay.style.display = "flex";
+
+    const close = (result) => {
+      overlay.style.display = "none";
+      cancelBtn.onclick = null;
+      confirmBtn.onclick = null;
+      resolve(result);
+    };
+
+    cancelBtn.onclick = () => close({ confirmed: false, start, end });
+    confirmBtn.onclick = () => {
+      const nextStart = parseDateTimeLocalValue(startInput.value, start) || start;
+      let nextEnd = parseDateTimeLocalValue(endInput.value, end || start) || end || start;
+      if (nextStart && nextEnd && nextEnd <= nextStart) {
+        nextEnd = new Date(nextStart.getTime() + 30 * 60000);
+      }
+      close({ confirmed: true, start: nextStart, end: nextEnd });
+    };
+  });
+}
+
+loadDragPrecisionMode();
+loadWeekHeaderColor();
 
 function setStickyDragPayload(payload) {
   stickyDragPayload = payload;
@@ -418,31 +666,31 @@ function setDropHighlight(el, mode) {
 const CALENDAR_LAYOUT_PROFILES = {
   mobile: {
     defaultView: "timeGridWeek",
-    eventMaxStack: 1,
-    dayMaxEvents: 2,
+    eventMaxStack: 8,
+    dayMaxEvents: 6,
     slotDuration: "00:30:00",
     slotLabelInterval: "02:00:00",
     slotMinTime: "06:00:00",
     slotMaxTime: "18:00:00",
     allDaySlot: false,
     expandRows: false,
-    toolbarLeft: "",
-    toolbarCenter: "today prev,next",
-    toolbarRight: "title earlyHoursToggle,lateHoursToggle,mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarLeft: "today prev,next",
+    toolbarCenter: "title",
+    toolbarRight: "earlyHoursToggle,lateHoursToggle,mobileDaysToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   tablet: {
     defaultView: "timeGridWeek",
-    eventMaxStack: 2,
-    dayMaxEvents: 4,
+    eventMaxStack: 10,
+    dayMaxEvents: 8,
     slotDuration: "00:30:00",
     slotLabelInterval: "01:00:00",
     slotMinTime: "06:00:00",
     slotMaxTime: "22:00:00",
     allDaySlot: true,
     expandRows: true,
-    toolbarLeft: "",
-    toolbarCenter: "today prev,next",
-    toolbarRight: "title earlyHoursToggle,lateHoursToggle timeGridWeek,timeGridDay,dayGridMonth"
+    toolbarLeft: "today prev,next",
+    toolbarCenter: "title",
+    toolbarRight: "earlyHoursToggle,lateHoursToggle timeGridWeek,timeGridDay,dayGridMonth"
   },
   desktop: {
     defaultView: "dayGridMonth",
@@ -497,6 +745,142 @@ function toHourToken(hourValue) {
   return `${String(Math.max(0, Math.min(24, hourValue))).padStart(2, "0")}:00:00`;
 }
 
+function stripLeadingTimeRange(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return "";
+  const stripped = raw
+    // e.g. "8:00 - 10:00 Title"
+    .replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*[-–—]\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*/i, "")
+    // e.g. "8:00 10:00 Title" or "8:0010:00 Title"
+    .replace(/^\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s+|\s*[-–—]?\s*)\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*/i, "")
+    .trim();
+  return stripped || raw;
+}
+
+function formatCompactTimeRange(eventObj) {
+  const start = eventObj?.start instanceof Date ? eventObj.start : null;
+  if (!start || Number.isNaN(start.getTime())) return "";
+
+  const end = eventObj?.end instanceof Date ? eventObj.end : null;
+  const formatClock = (d) => {
+    const h24 = d.getHours();
+    const h12 = h24 % 12 || 12;
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${h12}:${mm}`;
+  };
+
+  const startLabel = formatClock(start);
+  if (!end || Number.isNaN(end.getTime())) return startLabel;
+
+  // For FullCalendar end-exclusive minute-equivalent ranges, still show clean range.
+  const endLabel = formatClock(end);
+  return `${startLabel} ${endLabel}`;
+}
+
+function getCalendarDayDiff(start, end) {
+  if (!(start instanceof Date) || !(end instanceof Date)) return 0;
+  const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+  const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+  return Math.max(0, Math.round((e.getTime() - s.getTime()) / 86400000));
+}
+
+function classifyEventPriority(fcEvent, durationMs = 0) {
+  const start = fcEvent?.start ? new Date(fcEvent.start) : null;
+  const end = fcEvent?.end ? new Date(fcEvent.end) : start;
+  const durHours = durationMs / 3600000;
+  const allDay = !!fcEvent?.allDay;
+  const titleLen = String(fcEvent?.title || "").trim().length;
+  const detailLen = String(fcEvent?.extendedProps?.description || "").trim().length;
+  const dayDiff = getCalendarDayDiff(start, end || start);
+  const isMultiDaySpanning = dayDiff >= 1;
+
+  // Numeric priority formula (lower = lower visual layer priority).
+  // 0: multi-day spanning
+  // 1: all-day informational blocks
+  // 2: short timed events (<= 1h)
+  // 3: timed events > 1h and < 2h
+  // 4: timed events >= 2h (must get 3-4 grid blocks)
+  let score = 2;
+  if (isMultiDaySpanning) {
+    score = 0;
+  } else if (allDay) {
+    score = 1;
+  } else if (durHours >= 2) {
+    score = 4;
+  } else if (durHours > 1) {
+    score = 3;
+  } else {
+    score = 2;
+  }
+
+  const lane = score < 2 ? "back" : "front";
+
+  // Display width guidance (1, 2, 3-4 grid blocks).
+  let spanBlocks = 1;
+  if (score >= 4) {
+    spanBlocks = (titleLen + detailLen) >= 54 ? 4 : 3;
+  } else if (score >= 3) {
+    spanBlocks = 2;
+  }
+
+  return { score, lane, spanBlocks };
+}
+
+function formatCompactWeekTitle(start, endExclusive) {
+  if (!(start instanceof Date) || !(endExclusive instanceof Date)) return "";
+  const end = new Date(endExclusive);
+  end.setDate(end.getDate() - 1);
+
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  const m1 = start.toLocaleDateString(undefined, { month: "short" });
+  const m2 = end.toLocaleDateString(undefined, { month: "short" });
+  const y = end.getFullYear();
+
+  if (sameMonth) return `${m1} ${start.getDate()} - ${end.getDate()}, ${y}`;
+  return `${m1} ${start.getDate()} - ${m2} ${end.getDate()}, ${y}`;
+}
+
+function applyCompactToolbarTitle() {
+  const cal = window.calendar;
+  if (!cal) return;
+
+  const mode = window.layoutMode;
+  if (mode !== "mobile" && mode !== "tablet") return;
+
+  const titleEl = document.querySelector(".fc-toolbar-title");
+  if (!titleEl) return;
+
+  const view = cal.view;
+  const viewType = view?.type || "";
+  let text = titleEl.textContent || "";
+
+  if (viewType === "timeGridWeek") {
+    text = formatCompactWeekTitle(new Date(view.currentStart), new Date(view.currentEnd));
+  } else if (viewType === "dayGridMonth") {
+    text = new Date(view.currentStart).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  } else if (viewType === "timeGridDay") {
+    const d = new Date(view.currentStart);
+    text = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  titleEl.textContent = text;
+  titleEl.style.whiteSpace = "nowrap";
+  titleEl.style.textOverflow = "clip";
+  titleEl.style.overflow = "visible";
+
+  const baseSize = mode === "mobile" ? 11 : 12;
+  let fontSize = baseSize;
+  titleEl.style.fontSize = `${fontSize}px`;
+
+  const parent = titleEl.parentElement;
+  const maxWidth = Math.max(72, parent?.clientWidth || 180);
+
+  while (titleEl.scrollWidth > maxWidth && fontSize > 8) {
+    fontSize -= 0.5;
+    titleEl.style.fontSize = `${fontSize}px`;
+  }
+}
+
 function updateMobileDaysToggleLabel() {
   const btn = document.querySelector(".fc-mobileDaysToggle-button");
   if (!btn) return;
@@ -539,11 +923,37 @@ function applyMobileWeekCompression() {
   }
 
   const view = cal.view;
-  if (!view || (view.type !== "timeGridWeek" && view.type !== "timeGridDay")) return;
+  if (!view || (view.type !== "timeGridWeek" && view.type !== "timeGridDay")) {
+    const emptyKey = "[]";
+    if (lastAppliedHiddenDaysKey !== emptyKey) {
+      cal.setOption("hiddenDays", []);
+      lastAppliedHiddenDaysKey = emptyKey;
+    }
+
+    const profile = getCalendarProfile(window.layoutMode || "desktop");
+    const defaultWindowKey = `${profile.slotMinTime}|${profile.slotMaxTime}`;
+    if (lastAppliedTimeWindowKey !== defaultWindowKey) {
+      cal.setOption("slotMinTime", profile.slotMinTime);
+      cal.setOption("slotMaxTime", profile.slotMaxTime);
+      lastAppliedTimeWindowKey = defaultWindowKey;
+    }
+
+    setTimeout(updateMobileDaysToggleLabel, 0);
+    setTimeout(updateMobileHourToggleLabels, 0);
+    return;
+  }
 
   const rangeStart = view.activeStart ? new Date(view.activeStart) : null;
   const rangeEnd = view.activeEnd ? new Date(view.activeEnd) : null;
   if (!rangeStart || !rangeEnd) return;
+
+  if (view.type === "timeGridDay") {
+    const hiddenKey = "[]";
+    if (lastAppliedHiddenDaysKey !== hiddenKey) {
+      cal.setOption("hiddenDays", []);
+      lastAppliedHiddenDaysKey = hiddenKey;
+    }
+  }
 
   const visibleEvents = getViewEventsInRange(rangeStart, rangeEnd);
 
@@ -595,7 +1005,7 @@ function applyMobileWeekCompression() {
   });
 
   let hiddenDays = [];
-  if (isMobileMode && !mobileShowAllDays) {
+  if (view.type === "timeGridWeek" && isMobileMode && !mobileShowAllDays) {
     hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => !activeDows.has(dow));
     if (hiddenDays.length >= 6) {
       hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => dow !== new Date(window.selectedDate || Date.now()).getDay());
@@ -631,7 +1041,8 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   cal.setOption("slotMaxTime", profile.slotMaxTime);
   cal.setOption("allDaySlot", profile.allDaySlot);
   cal.setOption("expandRows", profile.expandRows);
-  cal.setOption("slotEventOverlap", mode === "mobile" || mode === "tablet");
+  const useOverlap = mode === "mobile" || mode === "tablet";
+  cal.setOption("slotEventOverlap", useOverlap);
   cal.setOption("height", getCalendarHeightForMode(mode));
   cal.setOption("contentHeight", "auto");
 
@@ -653,6 +1064,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
 
   applyMobileWeekCompression();
   updateMobileHourToggleLabels();
+  setTimeout(() => applyCompactToolbarTitle(), 0);
   setTimeout(() => renderVisibleDateStickyIcons(), 70);
 }
 
@@ -683,6 +1095,7 @@ export function initFullCalendar() {
 
   const initialLayoutMode = window.layoutMode || "desktop";
   const initialProfile = getCalendarProfile(initialLayoutMode);
+  const initialUseOverlap = initialLayoutMode === "mobile" || initialLayoutMode === "tablet";
 
   window.calendar = new FullCalendar.Calendar(el, {
 
@@ -702,7 +1115,7 @@ export function initFullCalendar() {
     slotMaxTime: initialProfile.slotMaxTime,
     allDaySlot: initialProfile.allDaySlot,
     expandRows: initialProfile.expandRows,
-    slotEventOverlap: false,
+    slotEventOverlap: initialUseOverlap,
     height: getCalendarHeightForMode(initialLayoutMode),
     contentHeight: "auto",
 
@@ -748,6 +1161,9 @@ export function initFullCalendar() {
     editable:   true,
     droppable:  false,
     selectable: true,
+    snapDuration: "00:05:00",
+    dragRevertDuration: 180,
+    eventDragMinDistance: 8,
 
     eventDisplay: "block",
 
@@ -836,6 +1252,59 @@ export function initFullCalendar() {
       const soft =
         (window.applySoftColor && window.applySoftColor(raw)) || raw;
 
+      info.el.style.setProperty("--event-accent", raw);
+
+      const mode = window.layoutMode;
+      const viewType = window.calendar?.view?.type || "";
+      const evStart = info.event.start ? new Date(info.event.start) : null;
+      const evEnd = info.event.end ? new Date(info.event.end) : evStart;
+      const durationMs = evStart && evEnd ? Math.max(0, evEnd.getTime() - evStart.getTime()) : 0;
+      const isLongEvent = durationMs >= 90 * 60000;
+      const isSmallWeekView = (mode === "mobile" || mode === "tablet") && (viewType === "timeGridWeek" || viewType === "timeGridDay");
+      const priority = classifyEventPriority(info.event, durationMs);
+      const isBackLayer = priority.lane === "back";
+      const spanBlocks = priority.spanBlocks;
+
+      if (isSmallWeekView && isLongEvent && !isBackLayer) {
+        info.el.classList.add("fc-event-long-mobile");
+      }
+
+      const isWeekLikeView = viewType === "timeGridWeek" || viewType === "timeGridDay";
+      if (isWeekLikeView) {
+        const stickyCount = stickyCountFromNotes(info.event.extendedProps?.stickyNotes || [], info.event.extendedProps?.stickyNote);
+
+        info.el.classList.remove("fc-event-priority-front", "fc-event-priority-back", "fc-event-priority-sticky", "fc-event-priority-active");
+        if (isBackLayer) {
+          info.el.classList.add("fc-event-priority-back");
+          info.el.style.zIndex = "2";
+        } else if (stickyCount > 0) {
+          info.el.classList.add("fc-event-priority-sticky", "fc-event-priority-front");
+          info.el.style.zIndex = String(priority.score >= 4 ? 18 : priority.score >= 3 ? 14 : 10);
+        } else {
+          info.el.classList.add("fc-event-priority-front");
+          info.el.style.zIndex = String(priority.score >= 4 ? 16 : priority.score >= 3 ? 12 : 8);
+        }
+
+        if (String(info.event.id) === String(window.selectedEventId)) {
+          info.el.classList.add("fc-event-priority-active");
+          info.el.style.zIndex = "30";
+        }
+
+        const harness = info.el.closest(".fc-timegrid-event-harness");
+        if (harness) {
+          harness.classList.remove("fc-harness-priority-front", "fc-harness-priority-back", "fc-harness-priority-active");
+          if (isBackLayer) {
+            harness.classList.add("fc-harness-priority-back");
+          } else {
+            harness.classList.add("fc-harness-priority-front");
+          }
+
+          if (String(info.event.id) === String(window.selectedEventId)) {
+            harness.classList.add("fc-harness-priority-active");
+          }
+        }
+      }
+
       // ✅ KILL fullcalendar default wrapper styles
       info.el.style.background = "transparent";
       info.el.style.border = "none";
@@ -848,8 +1317,103 @@ export function initFullCalendar() {
         inner.style.boxShadow = "inset 0 0 0 9999px " + soft;
         inner.style.borderLeft = `4px solid ${raw}`;
         inner.style.borderRadius = "6px";
-        inner.style.padding = "2px 6px";
+        inner.style.padding = "0 4px";
         inner.style.fontSize = "11px";
+        inner.style.color = "#111827";
+        if (isSmallWeekView) {
+          const compactWidthPx = Math.max(180, info.el.clientWidth || 0);
+          const visibleSource = getBestCompactEventText(info.event);
+          const brief = summarizeText(visibleSource || "Untitled", compactWidthPx <= 220 ? 30 : 36);
+          const titleNode = info.el.querySelector(".fc-event-title");
+          const titleContainerNode = info.el.querySelector(".fc-event-title-container");
+          const timeNode = info.el.querySelector(".fc-event-time");
+          const frameNode = inner.querySelector(".fc-event-main-frame") || inner;
+          let compactTimeNode = frameNode.querySelector(".fc-compact-event-time");
+
+          // Remove legacy custom compact title nodes from previous renders.
+          frameNode.querySelectorAll(".fc-compact-event-title").forEach((n) => n.remove());
+
+          // Keep all compact content clipped inside the event shell.
+          info.el.style.setProperty("overflow", "hidden", "important");
+          frameNode.style.display = "flex";
+          frameNode.style.flexDirection = "column";
+          frameNode.style.alignItems = "stretch";
+          frameNode.style.justifyContent = "flex-start";
+          frameNode.style.alignContent = "flex-start";
+          frameNode.style.flexWrap = "nowrap";
+          frameNode.style.rowGap = "0";
+          frameNode.style.gap = "0";
+          frameNode.style.width = "100%";
+          frameNode.style.minWidth = "0";
+          frameNode.style.overflow = "hidden";
+
+          if (!compactTimeNode) {
+            compactTimeNode = document.createElement("span");
+            compactTimeNode.className = "fc-compact-event-time";
+            frameNode.insertBefore(compactTimeNode, frameNode.firstChild || null);
+          }
+
+          if (compactTimeNode) {
+            compactTimeNode.style.display = "block";
+            compactTimeNode.style.fontWeight = "500";
+            compactTimeNode.style.color = "#111827";
+            compactTimeNode.style.whiteSpace = "nowrap";
+            compactTimeNode.style.writingMode = "horizontal-tb";
+            compactTimeNode.style.textOrientation = "mixed";
+            compactTimeNode.style.fontSize = "10px";
+            compactTimeNode.style.lineHeight = "1.0";
+            compactTimeNode.style.width = "100%";
+            compactTimeNode.style.minWidth = "0";
+            compactTimeNode.style.alignSelf = "stretch";
+            compactTimeNode.style.margin = "0";
+            const compactRange = formatCompactTimeRange(info.event);
+            compactTimeNode.textContent = compactRange || "";
+          }
+
+          if (titleNode) {
+            titleNode.style.color = "#111827";
+            titleNode.textContent = brief;
+            titleNode.style.display = "block";
+            titleNode.style.width = "100%";
+            titleNode.style.minWidth = "0";
+            titleNode.style.whiteSpace = "nowrap";
+            titleNode.style.overflow = "hidden";
+            titleNode.style.textOverflow = "ellipsis";
+            titleNode.style.wordBreak = "normal";
+            titleNode.style.overflowWrap = "normal";
+            titleNode.style.writingMode = "horizontal-tb";
+            titleNode.style.textOrientation = "mixed";
+            titleNode.style.lineHeight = "1.0";
+            titleNode.style.fontWeight = "500";
+            titleNode.style.fontSize = "10px";
+            titleNode.style.margin = "0";
+            titleNode.style.marginTop = "-1px";
+          }
+
+          if (titleContainerNode) {
+            titleContainerNode.style.display = "block";
+            titleContainerNode.style.height = "auto";
+            titleContainerNode.style.minHeight = "0";
+            titleContainerNode.style.margin = "0";
+            titleContainerNode.style.padding = "0";
+            titleContainerNode.style.flex = "0 0 auto";
+            titleContainerNode.style.overflow = "hidden";
+          }
+
+          if (timeNode) {
+            timeNode.style.display = "none";
+            timeNode.textContent = "";
+          }
+
+          const effectiveSpan = Math.max(2, spanBlocks);
+          const spanPct = effectiveSpan >= 4 ? "400%" : effectiveSpan === 3 ? "300%" : "200%";
+          info.el.style.setProperty("width", spanPct, "important");
+          info.el.style.setProperty("max-width", effectiveSpan >= 4 ? "420px" : effectiveSpan === 3 ? "340px" : "260px", "important");
+          info.el.style.setProperty("opacity", "1", "important");
+          inner.style.opacity = "1";
+          inner.style.color = "#111827";
+          inner.style.fontWeight = "500";
+        }
 
         const stickyList = info.event.extendedProps?.stickyNotes || [];
         const stickyCount = stickyCountFromNotes(stickyList, info.event.extendedProps?.stickyNote);
@@ -912,6 +1476,8 @@ export function initFullCalendar() {
         e.stopPropagation();
         openContextMenu(e.clientX, e.clientY, info.event);
       });
+
+      info.el.title = getEventSummary(info.event);
     },
 
     // =========================================================
@@ -943,18 +1509,9 @@ export function initFullCalendar() {
         window._lastClickedDate = null;
 
         // ✅ SINGLE SOURCE OF TRUTH — update global selected date
-        window.selectedDate = dateStr;
-        console.log("SELECTED DATE:", window.selectedDate);
-
-        // ✅ Highlight the clicked day cell in the calendar grid
-        highlightSelectedDay(dateStr);
-
-        // ✅ Refresh sidebar panels
-        window.updateDayDetails?.();
-        window.updateWeekView?.();
-
-        // ✅ Notify all listeners
-        window.dispatchEvent(new Event("selectedDateChanged"));
+        setSelectedDateFromInteraction(info.date);
+        // Date click is also an interaction that clears explicit event focus.
+        setSelectedEvent(null);
 
         console.log("DATE SINGLE CLICK → sidebar updated:", dateStr);
       }, 280);
@@ -988,7 +1545,7 @@ export function initFullCalendar() {
         window._eventClickTimer = null;
         window._lastClickedEventId = null;
         console.log("EVENT DBLCLICK →", info.event.title, id);
-        window.openStickyModalForNew?.(info.event);
+        window.openCreateModal?.(null, info.event);
         return;
       }
 
@@ -998,6 +1555,7 @@ export function initFullCalendar() {
         window._eventClickTimer = null;
         window._lastClickedEventId = null;
         console.log("EVENT SELECTED:", id, info.event.title);
+        setSelectedDateFromInteraction(info.event.start || info.event.extendedProps?.start || info.event.startStr);
         setSelectedEvent(id);
       }, 280);
     },
@@ -1009,11 +1567,24 @@ export function initFullCalendar() {
         }, 0);
       }
       applyMobileWeekCompression();
+      setTimeout(() => applyGridHoverSummaries(), 40);
+      setTimeout(() => applyMobileStartHourOutlines(), 55);
+      setTimeout(() => applyCompactToolbarTitle(), 0);
     },
 
     datesSet: function(info) {
       const currentViewType = info.view.type;
       const cal = window.calendar;
+      const previousViewType = _prevViewType;
+
+      if (
+        window.layoutMode === "mobile" &&
+        previousViewType !== currentViewType &&
+        currentViewType === "timeGridWeek"
+      ) {
+        mobileShowAllDays = true;
+        lastAppliedHiddenDaysKey = "";
+      }
 
       // =========================================================
       // ✅ PHASE 5: VIEW-SWITCH FIX
@@ -1024,8 +1595,8 @@ export function initFullCalendar() {
       // =========================================================
       if (
         !_navigatingToSelected &&
-        _prevViewType !== null &&
-        _prevViewType !== currentViewType &&
+        previousViewType !== null &&
+        previousViewType !== currentViewType &&
         window.selectedDate &&
         cal
       ) {
@@ -1050,6 +1621,9 @@ export function initFullCalendar() {
       }
       setTimeout(() => renderVisibleDateStickyIcons(), 70);
       applyMobileWeekCompression();
+      setTimeout(() => applyGridHoverSummaries(), 40);
+      setTimeout(() => applyMobileStartHourOutlines(), 55);
+      setTimeout(() => applyCompactToolbarTitle(), 0);
 
       // ✅ Log for debugging
       console.log("VIEW INIT DATE:", window.selectedDate, "view:", currentViewType);
@@ -1068,6 +1642,9 @@ export function initFullCalendar() {
         }, 0);
       }
       setTimeout(() => renderVisibleDateStickyIcons(), 80);
+      setTimeout(() => applyGridHoverSummaries(), 60);
+      setTimeout(() => applyMobileStartHourOutlines(), 70);
+      setTimeout(() => applyCompactToolbarTitle(), 0);
     },
 
     // ✅ DRAG-DROP OR RESIZE EVENT — save changes to backend + undo/redo
@@ -1092,12 +1669,41 @@ export function initFullCalendar() {
       const prevEnd = info.oldEvent.end;
       const newStart = event.start;
       const newEnd = event.end;
+      let effectiveStart = newStart;
+      let effectiveEnd = newEnd;
+
+      if (window.dragPrecisionMode !== false) {
+        const confirmation = await confirmEventMoveWithPrecision({
+          title: event.title,
+          start: newStart,
+          end: newEnd || newStart
+        });
+
+        if (!confirmation.confirmed) {
+          info.revert();
+          window.showToast?.("Move cancelled", "error");
+          return;
+        }
+
+        effectiveStart = confirmation.start;
+        effectiveEnd = confirmation.end;
+
+        const changedByUser =
+          (effectiveStart?.getTime?.() || 0) !== (newStart?.getTime?.() || 0) ||
+          (effectiveEnd?.getTime?.() || 0) !== (newEnd?.getTime?.() || 0);
+
+        if (changedByUser) {
+          window.skipEventChange = true;
+          event.setDates(effectiveStart, effectiveEnd || effectiveStart);
+          window.skipEventChange = false;
+        }
+      }
 
       try {
         // Build payload with ISO 8601 datetime strings (like buildEventPayload does)
-        const dateStr = newStart ? newStart.toISOString().split("T")[0] : prevStart.toISOString().split("T")[0];
-        const startTimeStr = newStart ? newStart.toTimeString().slice(0, 5) : "00:00";
-        const endTimeStr = newEnd ? newEnd.toTimeString().slice(0, 5) : "00:00";
+        const dateStr = effectiveStart ? effectiveStart.toISOString().split("T")[0] : prevStart.toISOString().split("T")[0];
+        const startTimeStr = effectiveStart ? effectiveStart.toTimeString().slice(0, 5) : "00:00";
+        const endTimeStr = effectiveEnd ? effectiveEnd.toTimeString().slice(0, 5) : "00:00";
 
         const payload = {
           start_time: new Date(`${dateStr}T${startTimeStr}`).toISOString(),
@@ -1143,7 +1749,7 @@ export function initFullCalendar() {
             // Update cache + visuals so redo looks right
             const nextEvent = window.normalizeEventForCache(data?.event || data);
             window.upsertCacheEvent(nextEvent);
-            updateFcEventVisual(newStart, newEnd);
+            updateFcEventVisual(effectiveStart, effectiveEnd);
             window.smartRefresh?.({ reason: "event_moved", force: true });
             return data;
           },
@@ -1225,14 +1831,15 @@ export function initFullCalendar() {
       const canDropEventToEvent = stickyDragPayload.scope === "event" && !!eventNode;
       const canDropEventToDate = stickyDragPayload.scope === "event" && !eventNode && !!dateStr;
       const canDropDateToEvent = stickyDragPayload.scope === "date" && !!eventNode;
+      const canDropDateToDate = stickyDragPayload.scope === "date" && !eventNode && !!dateStr;
 
-      if (canDropEventToEvent || canDropEventToDate || canDropDateToEvent) {
+      if (canDropEventToEvent || canDropEventToDate || canDropDateToEvent || canDropDateToDate) {
         e.preventDefault();
         if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
 
         if ((canDropEventToEvent || canDropDateToEvent) && eventNode) {
           setDropHighlight(eventNode, "event");
-        } else if (canDropEventToDate && dateTargetEl) {
+        } else if ((canDropEventToDate || canDropDateToDate) && dateTargetEl) {
           setDropHighlight(dateTargetEl, "date");
         }
       } else {
@@ -1288,10 +1895,27 @@ export function initFullCalendar() {
         return;
       }
 
+      if (stickyDragPayload.scope === "date" && dateStr && !droppedEventId) {
+        e.preventDefault();
+        await window.moveDateStickyToDate?.(stickyDragPayload.dateKey, dateStr);
+        clearStickyDragPayload();
+        return;
+      }
+
       clearDropHighlight();
     });
 
     calEl.addEventListener("contextmenu", (e) => {
+      const headerTarget = e.target instanceof Element
+        ? e.target.closest(".fc-header-toolbar, .fc-toolbar-title")
+        : null;
+      if (headerTarget) {
+        e.preventDefault();
+        e.stopPropagation();
+        openWeekHeaderColorPicker();
+        return;
+      }
+
       let dateStr = null;
       let node = e.target;
       while (node && node !== calEl) {
@@ -1301,9 +1925,14 @@ export function initFullCalendar() {
         }
         node = node.parentElement;
       }
-      if (!dateStr) return;
+
       e.preventDefault();
       e.stopPropagation();
+
+      if (!dateStr) {
+        dateStr = window.selectedDate || toDayString(window.calendar?.getDate?.() || new Date());
+      }
+
       console.log("DATE CONTEXTMENU:", dateStr);
       openDateContextMenu(e.clientX, e.clientY, dateStr);
     });
@@ -1317,4 +1946,110 @@ export function initFullCalendar() {
   }, 0);
 
   console.log("✅ FullCalendar loaded");
+}
+
+function summarizeText(text, maxLen = 72) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxLen) return normalized;
+  return `${normalized.slice(0, maxLen)}...`;
+}
+
+function getBestCompactEventText(ev) {
+  if (!ev) return "";
+
+  const candidates = [];
+  const addCandidate = (value) => {
+    const normalized = stripLeadingTimeRange(String(value || "")).replace(/\s+/g, " ").trim();
+    if (normalized) candidates.push(normalized);
+  };
+
+  addCandidate(ev.title || "");
+  addCandidate(ev.extendedProps?.description || "");
+
+  const stickyNotes = ev.extendedProps?.stickyNotes || [];
+  const firstSticky = Array.isArray(stickyNotes)
+    ? stickyNotes.find((s) => String(s?.content || "").trim())
+    : null;
+  addCandidate(firstSticky?.content || ev.extendedProps?.stickyNote?.content || "");
+
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0] || "";
+}
+
+function getEventSummary(ev) {
+  if (!ev) return "";
+  const title = summarizeText(ev.title || "Untitled");
+
+  const stickyNotes = ev.extendedProps?.stickyNotes || [];
+  const firstSticky = Array.isArray(stickyNotes)
+    ? stickyNotes.find((s) => String(s?.content || "").trim())
+    : null;
+  const legacySticky = ev.extendedProps?.stickyNote;
+  const stickyText = summarizeText(firstSticky?.content || legacySticky?.content || "", 60);
+
+  return stickyText ? `${title}\n🗒 ${stickyText}` : title;
+}
+
+function applyGridHoverSummaries() {
+  const cache = Array.isArray(window.sessionEventCache) ? window.sessionEventCache : [];
+  if (!cache.length) return;
+
+  const byDate = new Map();
+  cache.forEach((ev) => {
+    const start = ev?.start ? new Date(ev.start) : null;
+    if (!start || Number.isNaN(start.getTime())) return;
+    const dateKey = start.toISOString().slice(0, 10);
+    if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+    byDate.get(dateKey).push(ev);
+  });
+
+  const applyTitle = (selector) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      const dateKey = el.getAttribute("data-date");
+      if (!dateKey) return;
+      const list = byDate.get(dateKey) || [];
+      if (!list.length) {
+        el.title = "Create event or sticky note";
+        return;
+      }
+
+      const first = list[0];
+      const extra = list.length - 1;
+      const firstSummary = summarizeText(first?.title || "Untitled", 54);
+      const sticky = first?.extendedProps?.stickyNotes?.[0]?.content
+        || first?.extendedProps?.stickyNote?.content
+        || "";
+      const stickySummary = summarizeText(sticky, 52);
+      const countLine = extra > 0 ? `\n+${extra} more` : "";
+      const stickyLine = stickySummary ? `\n🗒 ${stickySummary}` : "";
+      el.title = `${firstSummary}${stickyLine}${countLine}`;
+    });
+  };
+
+  applyTitle(".fc-timegrid-col[data-date]");
+  applyTitle(".fc-daygrid-day[data-date]");
+}
+
+function applyMobileStartHourOutlines() {
+  document.querySelectorAll(".fc-timegrid-slot-lane.mobileStartHourSlot").forEach((el) => {
+    el.classList.remove("mobileStartHourSlot");
+  });
+
+  const cal = window.calendar;
+  const mode = window.layoutMode;
+  const viewType = cal?.view?.type || "";
+  if (!cal || (mode !== "mobile" && mode !== "tablet")) return;
+  if (viewType !== "timeGridWeek" && viewType !== "timeGridDay") return;
+
+  const seen = new Set();
+  cal.getEvents().forEach((ev) => {
+    const start = ev?.start ? new Date(ev.start) : null;
+    if (!start || Number.isNaN(start.getTime())) return;
+    const token = `${String(start.getHours()).padStart(2, "0")}:00:00`;
+    if (seen.has(token)) return;
+    seen.add(token);
+    const lane = document.querySelector(`.fc-timegrid-slot-lane[data-time="${token}"]`);
+    lane?.classList.add("mobileStartHourSlot");
+  });
 }

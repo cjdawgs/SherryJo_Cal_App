@@ -1774,6 +1774,78 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
   }
 };
 
+window.moveDateStickyToDate = async (sourceDateKey, targetDateKey) => {
+  if (!sourceDateKey || !targetDateKey) return false;
+  if (sourceDateKey === targetDateKey) return false;
+
+  const sourceNotes = getDateStickyNotes(sourceDateKey);
+  if (!sourceNotes.length) {
+    window.showToast?.("No date sticky notes to move", "error");
+    return false;
+  }
+
+  const selection = await chooseStickyMoveSelection(sourceNotes, "date");
+  if (selection.mode === "cancel" || selection.mode === "none") return false;
+
+  const indexSet = new Set(selection.indices);
+  const movedItems = sourceNotes.filter((_, idx) => indexSet.has(idx));
+  const remainingSourceNotes = sourceNotes.filter((_, idx) => !indexSet.has(idx));
+  const targetNotes = getDateStickyNotes(targetDateKey);
+  const nowIso = new Date().toISOString();
+
+  const previousSourceNotes = JSON.parse(JSON.stringify(sourceNotes));
+  const previousTargetNotes = JSON.parse(JSON.stringify(targetNotes));
+
+  movedItems.forEach((moved) => {
+    targetNotes.push({
+      ...moved,
+      updatedAt: nowIso
+    });
+  });
+
+  try {
+    const command = {
+      label: "Move date sticky",
+      execute: async () => {
+        await Promise.all([
+          upsertDateStickyServer(sourceDateKey, remainingSourceNotes),
+          upsertDateStickyServer(targetDateKey, targetNotes)
+        ]);
+        return true;
+      },
+      undo: async () => {
+        await Promise.all([
+          upsertDateStickyServer(sourceDateKey, previousSourceNotes),
+          upsertDateStickyServer(targetDateKey, previousTargetNotes)
+        ]);
+        return true;
+      }
+    };
+
+    await command.execute();
+
+    if (remainingSourceNotes.length) {
+      dateStickyMap[sourceDateKey] = remainingSourceNotes;
+    } else {
+      delete dateStickyMap[sourceDateKey];
+    }
+    dateStickyMap[targetDateKey] = targetNotes;
+    persistLocalDateStickyMap();
+
+    await window.undoRedoManager.registerExecuted(command);
+
+    refreshStickyVisuals();
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "🗒 Sticky moved to date";
+    window.showToast?.(label);
+    updateUndoRedoButtonStates();
+    return true;
+  } catch (err) {
+    console.error("❌ move date sticky to date failed", err);
+    window.showToast?.("❌ Sticky move failed", "error");
+    return false;
+  }
+};
+
 async function deleteSelectedStickyInModal() {
   if (modalState.type !== "sticky") return;
 

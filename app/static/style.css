@@ -20,6 +20,7 @@ body {
   --calendar-min-height: 700px;
   --topbar-max-width: 96%;
   --app-font-scale: 1;
+  --week-header-color: #12c7b5;
 }
 
 
@@ -39,8 +40,8 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  width: 100%;
   max-width: var(--topbar-max-width);
+  width: 100%;
 }
 
 .authContainer {
@@ -48,8 +49,8 @@ body {
 }
 
 .appTitleRow {
-  width: 100%;
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
@@ -62,9 +63,9 @@ body {
 }
 
 .controlBand {
-  width: 100%;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  grid-template-columns: clamp(122px, 18vw, 180px) minmax(0, 1fr);
   gap: 8px;
   align-items: stretch;
 }
@@ -72,11 +73,12 @@ body {
 .controlBandPrimary {
   display: grid;
   grid-template-rows: auto auto;
-  gap: 4px;
+  order: 2;
   min-width: 0;
 }
 
 .controlBandActions {
+  order: 1;
   min-width: 0;
 }
 
@@ -117,7 +119,8 @@ body {
   border-radius: 999px;
 
   background: #f1f3f4;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 600;
   white-space: nowrap;
 
   transition: transform 0.12s ease, background 0.15s ease;
@@ -143,15 +146,22 @@ body {
 ===================================================== */
 .actionButtons {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(42px, auto);
-  justify-content: end;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  justify-content: start;
   gap: 4px;
   margin: 0;
+  width: 100%;
 }
 
 .actionButtons > button {
-  min-height: 38px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 4px 6px;
+}
+
+.actionButtons > button svg {
+  width: 16px;
+  height: 16px;
 }
 
 .calendarRangeDisplay {
@@ -159,9 +169,9 @@ body {
   align-items: center;
   gap: 4px;
   align-self: flex-start;
-  margin: 0 0 4px 0;
-  padding: 3px 8px;
-  font-size: 11px;
+  margin: -2px 0 2px 0;
+  padding: 2px 7px;
+  font-size: 10px;
   font-weight: 600;
   color: #304562;
   background: #e8edf5;
@@ -284,7 +294,7 @@ button.primary {
 /* ✅ SINGLE SOURCE OF HEADER LAYOUT */
 .fc-toolbar {
   margin: 0;
-  padding: 2px 6px;
+  padding: 1px 5px;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -941,6 +951,72 @@ button.primary {
   filter: brightness(1.15);
 }
 
+.fc-event.fc-event-priority-back {
+  z-index: 2 !important;
+  opacity: 0.62;
+}
+
+.fc-event.fc-event-priority-front {
+  z-index: 7 !important;
+  opacity: 1 !important;
+}
+
+.fc-event.fc-event-priority-sticky {
+  z-index: 9 !important;
+}
+
+.fc-event.fc-event-priority-active {
+  z-index: 30 !important;
+}
+
+.fc .fc-timegrid-event-harness.fc-harness-priority-front {
+  z-index: 16 !important;
+  opacity: 1 !important;
+}
+
+.fc .fc-timegrid-event-harness.fc-harness-priority-back {
+  z-index: 3 !important;
+  opacity: 0.68;
+}
+
+.fc-event.fc-event-priority-front .fc-event-main {
+  opacity: 1 !important;
+  color: #1f2937 !important;
+  text-shadow: none;
+}
+
+.fc .fc-event-main,
+.fc .fc-event-time,
+.fc .fc-event-title {
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  white-space: nowrap;
+}
+
+.fc .fc-event-title,
+.fc .fc-event-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
+
+.fc .fc-compact-event-title {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  writing-mode: horizontal-tb !important;
+  text-orientation: mixed !important;
+  color: #111827 !important;
+}
+
+.fc .fc-timegrid-event-harness.fc-harness-priority-active {
+  z-index: 30 !important;
+}
+
 /* =====================================================
 ? RIGHT-CLICK CONTEXT MENU
 ===================================================== */
@@ -998,17 +1074,17 @@ button.primary {
   align-items: center;
   justify-content: center;
   background: rgba(15, 23, 42, 0.35);
-  z-index: 1100000;
+    right: 6% !important;
 }
 
 .stickyChooserModal.show {
-  display: flex;
+    left: 92% !important;
 }
 
 .stickyChooserDialog {
   width: min(520px, 92vw);
   max-height: 78vh;
-  overflow: auto;
+    font-size: 9px;
   background: #ffffff;
   border: 1px solid #d8e0ee;
   border-radius: 12px;
@@ -1018,21 +1094,22 @@ button.primary {
 
 .stickyChooserTitle {
   font-size: 15px;
+    opacity: 0.84;
   font-weight: 700;
   color: #1e2e4a;
 }
 
-.stickyChooserSubtitle {
+    right: 7% !important;
   margin-top: 4px;
   margin-bottom: 10px;
   font-size: 12px;
-  color: #5a6c8b;
+    left: 93% !important;
 }
 
 .stickyChooserList {
   display: grid;
   gap: 6px;
-}
+    font-size: 9px;
 
 .stickyChooserItem {
   display: grid;
@@ -1042,6 +1119,15 @@ button.primary {
   border: 1px solid #d8e1ef;
   border-radius: 8px;
   padding: 8px 10px;
+    opacity: 0.86;
+    }
+
+    .fc .fc-daygrid-event .fc-event-time,
+    .fc .fc-daygrid-event .fc-event-title {
+    font-size: 9px !important;
+    line-height: 1.1;
+    font-weight: 400 !important;
+    }
   background: #f8fbff;
   color: #243a5e;
   text-align: left;
@@ -1169,7 +1255,7 @@ Large: > 1920
   }
 
   .controlBand {
-    grid-template-columns: minmax(0, 1fr) 112px;
+    grid-template-columns: 92px minmax(0, 1fr);
     gap: 4px;
     max-height: 15vh;
     min-height: 74px;
@@ -1208,7 +1294,8 @@ Large: > 1920
     justify-content: space-between;
     min-height: 18px;
     padding: 1px 5px;
-    font-size: 9px;
+    font-size: 11px;
+    font-weight: 600;
     line-height: 1.15;
   }
 
@@ -1238,40 +1325,50 @@ Large: > 1920
   .actionButtons {
     width: 100%;
     grid-auto-flow: row;
-    grid-template-columns: 1fr;
-    gap: 3px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2px;
     align-content: start;
   }
 
   .actionButtons > button {
-    min-height: 21px;
+    min-height: 19px;
     font-size: 10px;
     padding: 1px 3px;
     border-radius: 7px;
   }
 
+  .actionButtons > button svg {
+    width: 14px;
+    height: 14px;
+  }
+
   .calendarRangeDisplay {
-    margin-bottom: 1px;
+    margin: -4px 0 1px 0;
     padding: 1px 6px;
     font-size: 9px;
     align-self: flex-start;
   }
 
   .fc-header-toolbar {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--week-header-color) 88%, #ffffff 12%), color-mix(in srgb, var(--week-header-color) 78%, #0f766e 22%));
+    border-radius: 14px;
     max-height: calc(var(--iphone-header-cap) - 22px);
     min-height: 52px;
     overflow: hidden;
-    padding: 0 2px !important;
+    padding: 6px 6px !important;
     gap: 2px;
     margin-bottom: 2px !important;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr) max-content;
     flex-wrap: nowrap;
     align-items: flex-start;
   }
 
   .fc-toolbar-title {
     font-size: 11px;
-    font-weight: 600;
-    opacity: 0.76;
+    font-weight: 700;
+    color: #ffffff;
+    opacity: 1;
     line-height: 1.1;
     margin: 0;
   }
@@ -1285,48 +1382,57 @@ Large: > 1920
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 auto;
-    min-width: 88px;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .fc-toolbar-chunk:nth-child(1) {
-    flex: 0 0 0;
-    min-width: 0;
-    max-width: 0;
-    overflow: hidden;
+    flex: 0 0 auto;
+    min-width: 84px;
+    max-width: none;
+    overflow: visible;
   }
 
   .fc-toolbar-chunk:nth-child(3) {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, auto));
-    grid-auto-flow: row;
+    display: flex;
+    flex-direction: column;
     gap: 2px;
-    align-items: center;
-    justify-content: end;
-    flex: 1 1 auto;
+    align-items: flex-end;
+    justify-content: flex-start;
+    flex: 0 0 auto;
+    min-width: 0;
   }
 
-  .fc-toolbar-chunk:nth-child(3) .fc-toolbar-title {
-    grid-column: 1 / -1;
-    text-align: right;
-    justify-self: end;
-    max-width: 140px;
-    white-space: normal;
-    overflow: hidden;
+  .fc-toolbar-chunk:nth-child(3) > .fc-button-group {
+    display: inline-flex;
+    gap: 2px;
+    margin: 0;
+  }
+
+  .fc-toolbar-chunk:nth-child(2) .fc-toolbar-title {
+    background: color-mix(in srgb, var(--week-header-color) 90%, #ffffff 10%);
+    border-radius: 9px;
+    padding: 4px 10px;
+    color: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    justify-self: center;
+    max-width: 230px;
+    white-space: nowrap;
+    overflow: visible;
     text-overflow: clip;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-height: 1;
-    max-height: 2em;
+    line-height: 1.05;
+    font-size: 10px;
+    display: block;
   }
 
   .fc .fc-button {
-    padding: 0.16em 0.34em;
-    font-size: 0.76em;
+    padding: 0.18em 0.44em;
+    font-size: 0.74em;
     line-height: 1.15;
     border-radius: 6px;
     min-height: 20px;
+    white-space: nowrap;
   }
 
   .fc-timegrid-slot-lane,
@@ -1335,13 +1441,57 @@ Large: > 1920
   }
 
   .fc .fc-timegrid-event-harness {
+    overflow: visible !important;
     margin-left: 0 !important;
     margin-right: 0 !important;
   }
 
+  .fc .fc-timegrid-event-harness.fc-harness-priority-front {
+    left: 1px !important;
+    right: 2% !important;
+  }
+
+  .fc .fc-timegrid-event-harness.fc-harness-priority-back {
+    left: 98.6% !important;
+    right: 1px !important;
+  }
+
+  .fc .fc-timegrid-event-harness.fc-harness-priority-active {
+    left: 1px !important;
+    right: 1px !important;
+  }
+
   .fc .fc-timegrid-event {
     min-height: 34px;
-    font-size: 10px;
+    font-size: 9px;
+    border: 2px solid transparent !important;
+    width: auto;
+    max-width: none;
+  }
+
+  .fc .fc-timegrid-event.fc-event-long-mobile {
+    width: clamp(132px, 44vw, 220px) !important;
+    max-width: none !important;
+    z-index: 5;
+    border-color: color-mix(in srgb, var(--event-accent, var(--week-header-color)) 40%, transparent) !important;
+    box-shadow: none;
+    opacity: 0.84;
+  }
+
+  .fc .fc-event-priority-back .fc-event-main {
+    opacity: 0.54;
+  }
+
+  .fc .fc-daygrid-event .fc-event-time,
+  .fc .fc-daygrid-event .fc-event-title {
+    font-size: 8.6px !important;
+    line-height: 1.05;
+    font-weight: 400 !important;
+  }
+
+  .fc-timegrid-slot-lane.mobileStartHourSlot {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--week-header-color) 82%, #0f172a 18%);
+    background: color-mix(in srgb, var(--week-header-color) 12%, #ffffff 88%);
   }
 
   .fc .fc-prev-button,
@@ -1356,7 +1506,7 @@ Large: > 1920
   .fc .fc-timeGridWeek-button,
   .fc .fc-timeGridDay-button,
   .fc .fc-dayGridMonth-button {
-    min-width: 30px;
+    min-width: 38px;
   }
 
   input,
@@ -1449,7 +1599,7 @@ Large: > 1920
   }
 
   .controlBand {
-    grid-template-columns: minmax(0, 1fr) minmax(220px, 34%);
+    grid-template-columns: minmax(138px, 24%) minmax(0, 1fr);
     gap: 10px;
     max-height: 19vh;
     overflow: hidden;
@@ -1467,20 +1617,26 @@ Large: > 1920
   .accounts .chip {
     min-height: 22px;
     padding: 2px 6px;
-    font-size: 9px;
+    font-size: 11px;
+    font-weight: 600;
   }
 
   .actionButtons {
     grid-auto-flow: row;
     grid-template-columns: repeat(2, minmax(56px, 1fr));
-    justify-content: stretch;
+    justify-content: start;
     gap: 3px;
   }
 
   .actionButtons > button {
-    min-height: 24px;
+    min-height: 22px;
     font-size: 10px;
     padding: 2px 4px;
+  }
+
+  .actionButtons > button svg {
+    width: 15px;
+    height: 15px;
   }
 
   .calendarRangeDisplay {
@@ -1489,38 +1645,69 @@ Large: > 1920
   }
 
   .fc-header-toolbar {
+    background: linear-gradient(135deg, color-mix(in srgb, var(--week-header-color) 88%, #ffffff 12%), color-mix(in srgb, var(--week-header-color) 78%, #0f766e 22%));
+    border-radius: 16px;
     max-height: 19vh;
     min-height: 70px;
     overflow: hidden;
-    gap: 3px;
+    gap: 5px;
+    padding: 7px 8px !important;
     margin-bottom: 3px !important;
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr) max-content;
     flex-wrap: nowrap;
   }
 
   .fc-toolbar-title {
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
+    color: #ffffff;
   }
 
   .fc-toolbar-chunk:nth-child(2) {
-    flex: 0 0 auto;
-    min-width: 112px;
+    flex: 1 1 auto;
+    min-width: 0;
     justify-content: center;
   }
 
   .fc-toolbar-chunk:nth-child(3) {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, auto));
-    grid-auto-flow: row;
+    display: flex;
+    flex-direction: column;
     gap: 3px;
-    align-items: center;
-    justify-content: end;
+    align-items: flex-end;
+    justify-content: flex-start;
+    flex: 0 0 auto;
+    min-width: 0;
   }
 
-  .fc-toolbar-chunk:nth-child(3) .fc-toolbar-title {
-    grid-column: 1 / -1;
-    text-align: right;
-    justify-self: end;
+  .fc-toolbar-chunk:nth-child(3) > .fc-button-group {
+    display: inline-flex;
+    gap: 3px;
+    margin: 0;
+  }
+
+  .fc-toolbar-chunk:nth-child(2) .fc-toolbar-title {
+    background: color-mix(in srgb, var(--week-header-color) 90%, #ffffff 10%);
+    border-radius: 10px;
+    padding: 5px 12px;
+    color: #ffffff;
+    font-weight: 700;
+    text-align: center;
+    justify-self: center;
+    max-width: 360px;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.08;
+    display: block;
+  }
+
+  .fc .fc-button {
+    white-space: nowrap;
+  }
+
+  .fc .fc-dayGridMonth-button {
+    min-width: 52px;
   }
 
   .fc .fc-button {
@@ -1530,7 +1717,54 @@ Large: > 1920
 
   .fc .fc-timegrid-event {
     min-height: 36px;
-    font-size: 10px;
+    font-size: 9px;
+    border: 2px solid transparent !important;
+    width: auto;
+    max-width: none;
+  }
+
+  .fc .fc-timegrid-event-harness {
+    overflow: visible !important;
+  }
+
+  .fc .fc-timegrid-event-harness.fc-harness-priority-front {
+    left: 1px !important;
+    right: 4% !important;
+  }
+
+  .fc .fc-timegrid-event-harness.fc-harness-priority-back {
+    left: 98% !important;
+    right: 1px !important;
+  }
+
+  .fc .fc-timegrid-event-harness.fc-harness-priority-active {
+    left: 1px !important;
+    right: 1px !important;
+  }
+
+  .fc .fc-timegrid-event.fc-event-long-mobile {
+    width: clamp(160px, 36vw, 280px) !important;
+    max-width: none !important;
+    z-index: 5;
+    border-color: color-mix(in srgb, var(--event-accent, var(--week-header-color)) 40%, transparent) !important;
+    box-shadow: none;
+    opacity: 0.86;
+  }
+
+  .fc .fc-event-priority-back .fc-event-main {
+    opacity: 0.56;
+  }
+
+  .fc .fc-daygrid-event .fc-event-time,
+  .fc .fc-daygrid-event .fc-event-title {
+    font-size: 9px !important;
+    line-height: 1.08;
+    font-weight: 400 !important;
+  }
+
+  .fc-timegrid-slot-lane.mobileStartHourSlot {
+    box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--week-header-color) 82%, #0f172a 18%);
+    background: color-mix(in srgb, var(--week-header-color) 10%, #ffffff 90%);
   }
 
   .modal {

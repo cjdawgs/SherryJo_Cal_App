@@ -341,7 +341,7 @@ function updateChipEventCounts() {
       badge.style.padding = "0 5px";
       badge.style.borderRadius = "999px";
       badge.style.fontSize = "9px";
-      badge.style.fontWeight = "600";
+      badge.style.fontWeight = "700";
       badge.style.lineHeight = "1.2";
       badge.style.display = "inline-flex";
       badge.style.alignItems = "center";
@@ -362,7 +362,7 @@ function updateChipEventCounts() {
     badge.title = `${count} events in current view`;
     badge.style.background = soft;
     badge.style.color = text;
-    badge.style.border = `1px solid ${raw}`;
+    badge.style.border = `2px solid ${raw}`;
     badge.style.opacity = count === 0 ? "0.5" : "0.82";
   });
 }
@@ -502,6 +502,31 @@ window.getFilteredEvents = getFilteredEvents;
 function normalizeProvider(provider) {
   const p = (provider || "").toLowerCase();
   return p === "outlook" ? "microsoft" : p;
+}
+
+function isPlaceholderAccountRecord(acc) {
+  if (!acc) return false;
+
+  const provider = normalizeProvider(acc.provider || "");
+  const email = String(acc.account_email || acc.email || "").toLowerCase().trim();
+  const accountLabel = String(acc.account_name || acc.username || acc.name || "").toLowerCase().trim();
+
+  if (accountLabel === "test" || accountLabel.startsWith("test_")) return true;
+
+  if (!email) return false;
+
+  const placeholderEmails = new Set([
+    "test@example.com",
+    "test"
+  ]);
+
+  if (placeholderEmails.has(email)) return true;
+  if (email.endsWith("@example.com")) return true;
+
+  // Guardrail: placeholder Google test accounts should never appear in prod UI.
+  if (provider === "google" && (email === "test" || email.startsWith("test@"))) return true;
+
+  return false;
 }
 
 function normalizeKey(provider, email) {
@@ -1229,8 +1254,7 @@ async function init() {
 }
 
 function showReconnectBanner(accounts) {
-
-  const broken = accounts.filter(a => a.status === "error");
+  const broken = accounts.filter(a => a.status === "error" && !isPlaceholderAccountRecord(a));
 
   const existing = document.getElementById("reconnect-banner");
   if (existing) {
@@ -1239,28 +1263,99 @@ function showReconnectBanner(accounts) {
 
   if (!broken.length) return;
 
-  const firstFixable = broken.find(a => {
+  const fixable = broken.filter((a) => {
     const provider = normalizeProvider(a.provider || "");
     return provider === "google" || provider === "microsoft" || provider === "apple";
   });
 
-  const fixUrl = firstFixable
-    ? buildReconnectUrl(firstFixable.provider, firstFixable.account_email)
-    : "/accounts/ui";
+  const reasonText = (acc) => {
+    const raw = String(acc?.last_error || "").trim();
+    if (!raw) return "Connection expired or provider auth token is no longer valid.";
+    return raw.length > 180 ? `${raw.slice(0, 180)}...` : raw;
+  };
+
+  const providerLabel = (value) => {
+    const normalized = normalizeProvider(value || "");
+    if (normalized === "google") return "Google";
+    if (normalized === "microsoft") return "Microsoft";
+    if (normalized === "apple") return "Apple";
+    return normalized || "Unknown";
+  };
 
   const banner = document.createElement("div");
   banner.id = "reconnect-banner";
 
   banner.style.background = "#fee2e2";
   banner.style.color = "#991b1b";
-  banner.style.padding = "8px";
+  banner.style.border = "1px solid #fecaca";
+  banner.style.borderRadius = "10px";
+  banner.style.padding = "10px";
   banner.style.marginBottom = "8px";
+  banner.style.fontSize = "13px";
 
-  banner.innerHTML = `
-    ⚠ Some accounts need reconnect:
-    ${broken.map(a => a.account_email).join(", ")}
-    <button style="border:1px solid #b91c1c; color:#b91c1c; font-weight:700;" onclick="window.location='${fixUrl}'">Fix</button>
-  `;
+  const header = document.createElement("div");
+  header.style.fontWeight = "700";
+  header.style.marginBottom = "6px";
+  header.textContent = `⚠ ${fixable.length} account(s) need reconnect`;
+  banner.appendChild(header);
+
+  const list = document.createElement("div");
+  list.style.display = "grid";
+  list.style.gap = "6px";
+
+  fixable.forEach((acc) => {
+    const row = document.createElement("div");
+    row.style.background = "#fff";
+    row.style.border = "1px solid #fca5a5";
+    row.style.borderRadius = "8px";
+    row.style.padding = "7px";
+    row.style.display = "grid";
+    row.style.gap = "4px";
+
+    const who = document.createElement("div");
+    who.style.fontWeight = "700";
+    who.textContent = `${providerLabel(acc.provider)}: ${acc.account_email || "(unknown account)"}`;
+
+    const why = document.createElement("div");
+    why.style.fontSize = "12px";
+    why.style.color = "#7f1d1d";
+    why.textContent = `Reason: ${reasonText(acc)}`;
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.gap = "6px";
+
+    const reconnectBtn = document.createElement("button");
+    reconnectBtn.textContent = "Reconnect";
+    reconnectBtn.style.border = "1px solid #b91c1c";
+    reconnectBtn.style.color = "#b91c1c";
+    reconnectBtn.style.fontWeight = "700";
+    reconnectBtn.style.background = "#fff";
+    reconnectBtn.style.borderRadius = "6px";
+    reconnectBtn.style.padding = "4px 8px";
+    reconnectBtn.onclick = () => startReconnect(acc.provider, acc.account_email);
+
+    const detailsBtn = document.createElement("button");
+    detailsBtn.textContent = "Open Accounts";
+    detailsBtn.style.border = "1px solid #fca5a5";
+    detailsBtn.style.color = "#7f1d1d";
+    detailsBtn.style.background = "#fff";
+    detailsBtn.style.borderRadius = "6px";
+    detailsBtn.style.padding = "4px 8px";
+    detailsBtn.onclick = () => {
+      window.location.href = "/accounts/ui";
+    };
+
+    actions.appendChild(reconnectBtn);
+    actions.appendChild(detailsBtn);
+
+    row.appendChild(who);
+    row.appendChild(why);
+    row.appendChild(actions);
+    list.appendChild(row);
+  });
+
+  banner.appendChild(list);
 
   document.body.prepend(banner);
 }
@@ -1386,7 +1481,8 @@ async function loadAccounts() {
     }
 
     const payload = await res.json();
-    const data = Array.isArray(payload) ? payload : (payload.accounts || []);
+    const rawData = Array.isArray(payload) ? payload : (payload.accounts || []);
+    const data = rawData.filter((acc) => !isPlaceholderAccountRecord(acc));
 
     lastLoadedAccounts = data;
 

@@ -15,8 +15,8 @@
     openStickyFromEventBtn: "Open Sticky",
     cancelEventBtn: "Cancel",
     saveEventBtn: "Save",
-    apple-test-btn: "Test",
-    apple-connect-btn: "Connect"
+    "apple-test-btn": "Test",
+    "apple-connect-btn": "Connect"
   };
 
   function toHintFromText(text) {
