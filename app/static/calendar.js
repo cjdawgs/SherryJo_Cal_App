@@ -199,6 +199,40 @@ let editingEventId = null;   // kept for backward-compat within this module
 let editingNoteId = null;
 let providerAccountCounts = {};
 let allAccountKeys = new Set();   // ✅ MASTER ACCOUNT LIST
+
+// ✅ Tracks modifier key state for resilient chip multi-select handling
+// in browsers/devtools modes where click.ctrlKey/metaKey can be unreliable.
+let chipMultiSelectModifierDown = false;
+
+function initChipModifierTracking() {
+  if (window.__chipModifierTrackingBound) return;
+  window.__chipModifierTrackingBound = true;
+
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Control" || e.key === "Meta") {
+      chipMultiSelectModifierDown = true;
+    }
+  });
+
+  window.addEventListener("keyup", (e) => {
+    if (e.key === "Control" || e.key === "Meta") {
+      chipMultiSelectModifierDown = false;
+    }
+  });
+
+  window.addEventListener("blur", () => {
+    chipMultiSelectModifierDown = false;
+  });
+}
+
+function isChipMultiSelectEvent(e) {
+  if (!e) return chipMultiSelectModifierDown;
+  const viaFlags = !!(e.ctrlKey || e.metaKey);
+  const viaModifierState = typeof e.getModifierState === "function"
+    ? !!(e.getModifierState("Control") || e.getModifierState("Meta"))
+    : false;
+  return viaFlags || viaModifierState || chipMultiSelectModifierDown;
+}
 window.selectedDate = null;
 
 let lastLoadedAccounts = [];
@@ -241,6 +275,8 @@ let currentRangeEnd = null;
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
 let currentViewEventCounts = {};
+let chipClickTimer = null;
+let suppressChipClickUntil = 0;
 
 /**************************************************************
  * ✅ SESSION EVENT CACHE (SEC) — GOLD STANDARD
@@ -490,7 +526,7 @@ function getFilteredEvents({ start, end }) {
     if (evStart > rangeEnd) return false;
 
     // ✅ ACCOUNT FILTER ONLY
-    const key = ev.extendedProps?.account_key;
+    const key = getCalendarEventAccountKey(ev);
     if (activeAccountFilters.size && !activeAccountFilters.has(key)) {
       return false;
     }
@@ -601,7 +637,8 @@ window.systemHealth = () => {
  **************************************************************/
 function isDateInActiveRange(date) {
 
-  if (!calendar) return true;
+  const cal = getCalendar();
+  if (!cal) return true;
 
   const { start, end } = getActiveRangeLabel(currentRangeDays);
 
@@ -1173,6 +1210,8 @@ document.addEventListener("DOMContentLoaded", init);
 async function init() {
   console.log("✅ calendar.js loaded");
 
+  initChipModifierTracking();
+
   const calendarEl = document.getElementById("calendar");
   if (!calendarEl) {
     console.warn("Missing #calendar element");
@@ -1224,6 +1263,8 @@ async function init() {
   
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
+  // Keep legacy local reference aligned with the initialized global calendar.
+  calendar = getCalendar();
   initializeResponsiveLayout();
   renderRangePill(); // ✅ ensure initial render
 
@@ -1868,14 +1909,15 @@ To:   ${format(end)}
 Single source of truth for ALL client-side filtering
 ===================================================== */
 function applyClientSideFilters() {
-  if (!calendar) return;
+  const cal = getCalendar();
+  if (!cal) return;
 
   console.log("ACTIVE FILTERS:", [...activeAccountFilters]);
 
   /**************************************************************
    * ✅ JUST REFETCH EVENTS (THEY ARE NOW FILTERED AT SOURCE)
    **************************************************************/
-  window.calendar.refetchEvents();
+  cal.refetchEvents();
 
   setTimeout(() => {
     updateChipEventCounts();
@@ -1971,7 +2013,7 @@ function renderAccounts(accounts) {
     const row = document.createElement("div");
     row.classList.add("chip");
     row.dataset.key = key;
-    row.title = `${email} • Click to filter \n Ctrl+Click for multi-select`;
+    row.title = `${email} • Click: only this account\nCtrl/Cmd+Click: add/remove account\nDouble-click: show all accounts`;
 
     const container = document.createElement("div");
     container.style.display = "flex";
@@ -2249,7 +2291,43 @@ function renderAccounts(accounts) {
         check.remove();
       }, 1200);
     }
-    
+
+    row.ondblclick = (e) => {
+
+      // ✅ DO NOT trigger when using color picker
+      if (e.target.closest(".account-color-input") ||
+          e.target.closest(".color-dot")) {
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (chipClickTimer) {
+        clearTimeout(chipClickTimer);
+        chipClickTimer = null;
+      }
+
+      // Suppress any trailing click event that some browsers emit after dblclick.
+      suppressChipClickUntil = Date.now() + 350;
+
+      // ✅ Double-click resets to ALL chips on
+      const domKeys = new Set(
+        [...document.querySelectorAll("#accounts .chip[data-key]")]
+          .map((node) => node.dataset.key)
+          .filter(Boolean)
+      );
+      activeAccountFilters = new Set([...allAccountKeys, ...domKeys]);
+
+      updateChipSelectionUI();
+      applyClientSideFilters();
+      setTimeout(() => {
+        updateChipEventCounts();
+        window.updateDayDetails?.();
+        window.updateWeekView?.();
+      }, 0);
+    };
+
     row.onclick = (e) => {
 
       // ✅ DO NOT trigger when using color picker
@@ -2258,24 +2336,51 @@ function renderAccounts(accounts) {
         return;
       }
 
-      const isMultiSelect = e.ctrlKey || e.metaKey;
-
-      if (!isMultiSelect) {
-        activeAccountFilters.clear();
-        activeAccountFilters.add(key);
-      } else {
-        if (activeAccountFilters.has(key)) {
-          if (activeAccountFilters.size > 1) {
-            activeAccountFilters.delete(key);
-          }
-        } else {
-          activeAccountFilters.add(key);
-        }
+      if (Date.now() < suppressChipClickUntil) {
+        return;
       }
 
-      updateChipSelectionUI();
-      applyClientSideFilters();
-      updateChipEventCounts();
+      // Ignore multi-click click events; dblclick handler owns reset-all behavior.
+      if (e.detail > 1) {
+        if (chipClickTimer) {
+          clearTimeout(chipClickTimer);
+          chipClickTimer = null;
+        }
+        return;
+      }
+
+      if (chipClickTimer) {
+        clearTimeout(chipClickTimer);
+      }
+
+      chipClickTimer = setTimeout(() => {
+        chipClickTimer = null;
+
+        const isMultiSelect = isChipMultiSelectEvent(e);
+
+        if (!isMultiSelect) {
+          // ✅ Single click = exclusive account filter
+          activeAccountFilters.clear();
+          activeAccountFilters.add(key);
+        } else {
+          // ✅ Ctrl/Cmd click = additive toggle behavior
+          if (activeAccountFilters.has(key)) {
+            if (activeAccountFilters.size > 1) {
+              activeAccountFilters.delete(key);
+            }
+          } else {
+            activeAccountFilters.add(key);
+          }
+        }
+
+        updateChipSelectionUI();
+        applyClientSideFilters();
+        setTimeout(() => {
+          updateChipEventCounts();
+          window.updateDayDetails?.();
+          window.updateWeekView?.();
+        }, 0);
+      }, 220);
     };
 
     el.appendChild(row);
@@ -2347,7 +2452,14 @@ function updateDayDetails() {
   const events = (window.sessionEventCache || []).filter(ev => {
     const evStart = new Date(ev.start);
     const evEnd = ev.end ? new Date(ev.end) : evStart;
-    return evStart < end && evEnd >= start;
+    if (!(evStart < end && evEnd >= start)) return false;
+
+    const key = getCalendarEventAccountKey(ev);
+    if (activeAccountFilters.size && !activeAccountFilters.has(key)) {
+      return false;
+    }
+
+    return true;
   });
 
   // ✅ Sort ascending by start time
@@ -2490,12 +2602,19 @@ function updateWeekView() {
     const events = window.sessionEventCache.filter(ev => {
 
       const evStart = new Date(ev.start);
-      return evStart.toDateString() === day.toDateString();
+      if (evStart.toDateString() !== day.toDateString()) return false;
+
+      const key = getCalendarEventAccountKey(ev);
+      if (activeAccountFilters.size && !activeAccountFilters.has(key)) {
+        return false;
+      }
+
+      return true;
     });
 
     events.forEach(ev => {
 
-      const key = ev?.extendedProps?.account_key || "";
+      const key = getCalendarEventAccountKey(ev);
       const raw = getColorByKey(key);
       const soft = applySoftColor(raw)
       const div = document.createElement("div");
