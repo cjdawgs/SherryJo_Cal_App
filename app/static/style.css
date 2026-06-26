@@ -51,7 +51,7 @@ body {
   width: 100%;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10px;
 }
 
@@ -158,8 +158,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  align-self: flex-end;
-  margin: 0 2px 4px 0;
+  align-self: flex-start;
+  margin: 0 0 4px 0;
   padding: 3px 8px;
   font-size: 11px;
   font-weight: 600;
@@ -443,11 +443,12 @@ button.primary {
   padding: 0;
   border-radius: 16px;
 
-  width: min(900px, 94vw);
-  min-width: 680px;
-  min-height: 480px;
-  max-width: 94vw;
-  max-height: 84vh;
+  width: min(66vw, 980px);
+  height: min(66vh, 760px);
+  min-width: 560px;
+  min-height: 420px;
+  max-width: 96vw;
+  max-height: 92vh;
   overflow: auto;
   resize: both;
 
@@ -1150,20 +1151,21 @@ Large: > 1920
   }
 
   .appTitleRow {
-    justify-content: space-between;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 4px;
   }
 
   .appTitle {
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
-    opacity: 0.74;
+    opacity: 0.7;
     text-align: left;
     line-height: 1.05;
   }
 
   .appTitleRow {
-    min-height: 30px;
-    gap: 6px;
+    min-height: 22px;
   }
 
   .controlBand {
@@ -1220,13 +1222,15 @@ Large: > 1920
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 26px;
-    min-width: 26px;
+    min-height: 20px;
+    min-width: 20px;
+    width: 20px;
+    height: 20px;
     border-radius: 7px;
     border: 1px solid #cdd6e6;
     background: #f8fbff;
     color: #1f3558;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     padding: 0;
   }
@@ -1247,9 +1251,10 @@ Large: > 1920
   }
 
   .calendarRangeDisplay {
-    margin-bottom: 2px;
-    padding: 2px 7px;
-    font-size: 10px;
+    margin-bottom: 1px;
+    padding: 1px 6px;
+    font-size: 9px;
+    align-self: flex-start;
   }
 
   .fc-header-toolbar {
@@ -1372,9 +1377,21 @@ Large: > 1920
   }
 
   .calendarRangeDisplay {
-    max-height: 20px;
-    min-height: 16px;
+    max-height: 18px;
+    min-height: 14px;
     margin-bottom: 1px;
+    padding: 1px 5px;
+    font-size: 9px;
+  }
+
+  .modal {
+    width: 92vw;
+    height: 66vh;
+    min-width: 0;
+    min-height: 0;
+    max-height: 82vh;
+    top: 7%;
+    resize: none;
   }
 
   .leftSidebar {
@@ -1514,6 +1531,13 @@ Large: > 1920
   .fc .fc-timegrid-event {
     min-height: 36px;
     font-size: 10px;
+  }
+
+  .modal {
+    width: min(74vw, 920px);
+    height: min(70vh, 760px);
+    min-width: 500px;
+    min-height: 400px;
   }
 
   .layout {

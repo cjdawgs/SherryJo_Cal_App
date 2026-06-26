@@ -525,52 +525,6 @@ function getViewEventsInRange(rangeStart, rangeEnd) {
   });
 }
 
-function applyCompactVerticalStack(events) {
-  if (!Array.isArray(events) || !events.length) return events;
-
-  const groups = new Map();
-
-  events.forEach((ev) => {
-    const start = ev?.start ? new Date(ev.start) : null;
-    if (!start || Number.isNaN(start.getTime())) return;
-    const key = start.toISOString().slice(0, 10);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(ev);
-  });
-
-  groups.forEach((list) => {
-    list.sort((a, b) => new Date(a.start) - new Date(b.start));
-    const activeEnds = [];
-
-    list.forEach((ev) => {
-      const start = new Date(ev.start);
-      const end = ev.end ? new Date(ev.end) : new Date(start.getTime() + 30 * 60000);
-
-      for (let i = activeEnds.length - 1; i >= 0; i--) {
-        if (activeEnds[i] <= start) {
-          activeEnds.splice(i, 1);
-        }
-      }
-
-      const overlapDepth = activeEnds.length;
-      if (overlapDepth > 0) {
-        const offsetMin = Math.min(18, overlapDepth * 6);
-        const adjustedStart = new Date(start.getTime() + offsetMin * 60000);
-        const durationMs = Math.max(20 * 60000, end.getTime() - start.getTime());
-        const adjustedEnd = new Date(adjustedStart.getTime() + durationMs);
-
-        ev.start = adjustedStart;
-        ev.end = adjustedEnd;
-      }
-
-      activeEnds.push(ev.end ? new Date(ev.end) : end);
-      activeEnds.sort((a, b) => a - b);
-    });
-  });
-
-  return events;
-}
-
 function applyMobileWeekCompression() {
   const cal = window.calendar;
   if (!cal) return;
@@ -677,7 +631,7 @@ export function applyCalendarLayoutMode(mode, { switchView = false } = {}) {
   cal.setOption("slotMaxTime", profile.slotMaxTime);
   cal.setOption("allDaySlot", profile.allDaySlot);
   cal.setOption("expandRows", profile.expandRows);
-  cal.setOption("slotEventOverlap", mode === "desktop" || mode === "large");
+  cal.setOption("slotEventOverlap", mode === "mobile" || mode === "tablet");
   cal.setOption("height", getCalendarHeightForMode(mode));
   cal.setOption("contentHeight", "auto");
 
@@ -855,12 +809,6 @@ export function initFullCalendar() {
 
         return evStart <= rangeEnd && evEnd >= rangeStart;
       });
-
-      const compactMode = window.layoutMode === "mobile" || window.layoutMode === "tablet";
-      const currentViewType = window.calendar?.view?.type || "";
-      if (compactMode && (currentViewType === "timeGridWeek" || currentViewType === "timeGridDay")) {
-        applyCompactVerticalStack(events);
-      }
 
       console.log("✅ EVENTS SENT:", events.length);
 
