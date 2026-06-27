@@ -132,6 +132,7 @@ def log_error(msg: str):
     print(f"[ERROR] {msg}")
 
 class CalendarService:
+    REQUEST_TIMEOUT = (5, 20)
 
     def __init__(self):
         self.graph = GraphClient()
@@ -678,7 +679,8 @@ class CalendarService:
                         res = requests.get(
                             url,
                             headers={"Authorization": f"Bearer {token}"},
-                            params=params
+                            params=params,
+                            timeout=self.REQUEST_TIMEOUT,
                         )
 
                         log_debug(f"MS status: {res.status_code}")

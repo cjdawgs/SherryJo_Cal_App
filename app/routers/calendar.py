@@ -503,13 +503,36 @@ def sync_calendar(
         except Exception:
             pass
 
-        result = calendar_service.sync_all(db, current_user)
+        # Use the user-configured sync window to keep requests bounded and avoid upstream timeouts.
+        sync_accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)
+        configured_days = [
+            int(getattr(acc, "sync_range_days", 30) or 30)
+            for acc in sync_accounts
+        ]
+        window_days = max(1, min(max(configured_days) if configured_days else 30, 365))
+
+        now_utc = datetime.now(timezone.utc)
+        start_date = now_utc - timedelta(days=window_days)
+        end_date = now_utc + timedelta(days=window_days)
+
+        print(f"🧪 [SYNC] USING WINDOW DAYS: {window_days}")
+        print(f"🧪 [SYNC] RANGE: {start_date.isoformat()} -> {end_date.isoformat()}")
+
+        result = calendar_service.sync_all(
+            db,
+            current_user,
+            start_date=start_date,
+            end_date=end_date,
+        )
 
         print("🔥 SYNC RESULT:", result)
 
         return {
             "status": "success",
-            "result": result
+            "result": result,
+            "range_days": window_days,
+            "range_start": start_date.isoformat(),
+            "range_end": end_date.isoformat(),
         }
 
     except Exception as e:

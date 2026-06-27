@@ -40,6 +40,7 @@ class GoogleCalendarService:
         "email",
         "profile",
     ]
+    REQUEST_TIMEOUT = (5, 15)
 
     # ==================================================
     # ✅ BUILD AUTH URL (CRITICAL FIXES INCLUDED)
@@ -189,7 +190,8 @@ class GoogleCalendarService:
         # ✅ STEP 1: GET ALL CALENDARS
         cal_list_resp = requests.get(
             "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-            headers=headers
+            headers=headers,
+            timeout=self.REQUEST_TIMEOUT,
         )
 
         calendars = []
@@ -250,7 +252,8 @@ class GoogleCalendarService:
             response = requests.get(
                     url,
                     headers=headers,
-                    params=params
+                    params=params,
+                    timeout=self.REQUEST_TIMEOUT,
                 )
 
             if response.status_code != 200:
@@ -334,7 +337,8 @@ class GoogleCalendarService:
 
         response = requests.get(
             "https://www.googleapis.com/oauth2/v2/userinfo",
-            headers=headers
+            headers=headers,
+            timeout=self.REQUEST_TIMEOUT,
         )
 
         if response.status_code != 200:
