@@ -189,9 +189,22 @@ export function renderRangePill() {
   const el = document.getElementById("rangeDisplay");
   if (!el) return;
 
+  const cacheRange = window.sessionCacheRange || {};
+  const cacheStart = cacheRange.start ? new Date(cacheRange.start) : null;
+  const cacheEnd = cacheRange.end ? new Date(cacheRange.end) : null;
+
+  if (cacheStart && cacheEnd && !Number.isNaN(cacheStart.getTime()) && !Number.isNaN(cacheEnd.getTime())) {
+    const fmt = (d) => d.toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "short",
+      day: "numeric"
+    });
+    el.textContent = `📦 Loaded Data: ${fmt(cacheStart)} → ${fmt(cacheEnd)}`;
+    return;
+  }
+
   const days = window.currentRangeDays || 30;
   const range = getActiveRangeLabel(days);
-
   el.textContent = `📅 ${range?.label || "NO RANGE"}`;
 
   console.log("✅ RANGE PILL RENDER:", el.textContent);

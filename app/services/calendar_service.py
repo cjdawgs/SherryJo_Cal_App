@@ -849,9 +849,9 @@ class CalendarService:
     # ==================================================
     # ✅ SYNC ENGINE (FIXED + INSIDE CLASS)
     # ==================================================
-    def sync_all(self, db: Session, user):
+    def sync_all(self, db: Session, user, start_date=None, end_date=None):
 
-        result = self.fetch_all_events(db, user)
+        result = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date)
         account_sync_totals = result.get("account_sync_totals", []) if isinstance(result, dict) else []
 
         events = result.get("events", []) if isinstance(result, dict) else []

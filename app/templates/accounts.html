@@ -141,7 +141,73 @@
 </div>
 
 
+<section class="syncPanel" aria-label="Sync management">
+  <div class="syncPanelHeader">
+    <div>
+      <h3>Sync Management</h3>
+      <p>Control the current data window, cadence, and refresh health without admin access.</p>
+    </div>
+    <button id="syncRefreshAllBtn" class="syncPrimaryBtn" onclick="refreshAllSyncStatus()">Refresh Status</button>
+  </div>
 
+  <div class="syncPanelGrid">
+    <label>
+      <span>Current Sync Range (days)</span>
+      <input id="sync-range-days" type="number" min="1" max="3650" value="30" />
+    </label>
+    <label>
+      <span>Frequency (minutes)</span>
+      <input id="sync-frequency-minutes" type="number" min="1" max="1440" value="5" />
+    </label>
+    <label>
+      <span>Selected Account</span>
+      <select id="sync-account-select" multiple size="5"></select>
+      <small class="syncFieldHint">Choose <strong>All Accounts</strong> or use Ctrl/Cmd+Click to pick multiple accounts.</small>
+    </label>
+  </div>
+
+  <div class="syncPanelActions">
+    <button class="syncSecondaryBtn" onclick="saveSyncSettings()">Save Sync Settings</button>
+    <button class="syncPrimaryBtn" onclick="manualRefreshSelectedAccount()">Manual Refresh</button>
+  </div>
+
+  <div class="syncHelpGrid" aria-label="Sync control descriptions">
+    <div class="syncHelpItem">
+      <strong>Current Sync Range (days)</strong>
+      <span>Sets the rolling date window used for scheduled and manual syncs. This controls what is fetched from the provider, not what the calendar UI can display. Smaller values usually sync faster.</span>
+    </div>
+    <div class="syncHelpItem">
+      <strong>Frequency (minutes)</strong>
+      <span>Sets how often the background sync checks this account for updates. Default: 5 minutes.</span>
+    </div>
+    <div class="syncHelpItem">
+      <strong>Selected Account</strong>
+      <span>Chooses which connected account or accounts the settings and manual refresh actions apply to. Use <strong>All Accounts</strong> or Ctrl/Cmd+Click to multi-select individual entries.</span>
+    </div>
+    <div class="syncHelpItem">
+      <strong>Save Sync Settings</strong>
+      <span>Saves the selected range and cadence for the chosen account.</span>
+    </div>
+    <div class="syncHelpItem">
+      <strong>Manual Refresh</strong>
+      <span>Starts an immediate sync for the selected account using its configured date range.</span>
+    </div>
+    <div class="syncHelpItem">
+      <strong>Refresh Status</strong>
+      <span>Reloads the latest sync health, last run details, and scheduler timing.</span>
+    </div>
+  </div>
+
+  <div id="sync-detail-list" class="syncDetailList"></div>
+</section>
+
+<div id="sync-status-bar" class="syncStatusBar" role="status" aria-live="polite">
+  <div class="syncStatusLeft">
+    <strong>Sync status</strong>
+    <span id="sync-status-text">Loading current sync details...</span>
+  </div>
+  <div class="syncStatusRight" id="sync-status-meta"></div>
+</div>
 
 <br>
 

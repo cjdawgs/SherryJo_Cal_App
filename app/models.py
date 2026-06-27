@@ -119,6 +119,11 @@ class OAuthAccount(Base):
     is_service_provider = Column(Boolean, default=False, nullable=False, index=True)
     color = Column(String, nullable=True)
 
+    # ✅ USER-OWNED SYNC SETTINGS
+    sync_frequency_minutes = Column(Integer, default=5, nullable=False)
+    sync_range_days = Column(Integer, default=30, nullable=False)
+    last_manual_refresh_at = Column(DateTime(timezone=True), nullable=True)
+
     # ✅ SYNC TRACKING
     last_sync = Column(DateTime(timezone=True), nullable=True)
     last_sync_success = Column(DateTime(timezone=True), nullable=True)

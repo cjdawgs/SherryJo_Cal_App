@@ -166,6 +166,9 @@ if engine.url.drivername.startswith("postgresql"):
             "updated_at",
             "color",
             "is_service_provider",
+            "sync_frequency_minutes",
+            "sync_range_days",
+            "last_manual_refresh_at",
         }
         missing = required_columns - columns
         if missing:
@@ -179,6 +182,11 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS color VARCHAR"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS is_service_provider BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_frequency_minutes INTEGER DEFAULT 5"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_range_days INTEGER DEFAULT 30"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_manual_refresh_at TIMESTAMPTZ"))
+                conn.execute(text("UPDATE oauth_accounts SET sync_frequency_minutes = 5 WHERE sync_frequency_minutes IS NULL"))
+                conn.execute(text("UPDATE oauth_accounts SET sync_range_days = 30 WHERE sync_range_days IS NULL"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = TRUE WHERE access_token = 'admin-placeholder-token'"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = FALSE WHERE is_service_provider IS NULL"))
                 conn.commit()
@@ -220,6 +228,9 @@ if engine.url.drivername.startswith("sqlite"):
             "updated_at",
             "color",
             "is_service_provider",
+            "sync_frequency_minutes",
+            "sync_range_days",
+            "last_manual_refresh_at",
         }
         missing = required_columns - columns
         if missing:
@@ -242,6 +253,14 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN color VARCHAR"))
                     elif col == "is_service_provider":
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN is_service_provider BOOLEAN DEFAULT 0"))
+                    elif col == "sync_frequency_minutes":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN sync_frequency_minutes INTEGER DEFAULT 5"))
+                    elif col == "sync_range_days":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN sync_range_days INTEGER DEFAULT 30"))
+                    elif col == "last_manual_refresh_at":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN last_manual_refresh_at DATETIME"))
+                conn.execute(text("UPDATE oauth_accounts SET sync_frequency_minutes = 5 WHERE sync_frequency_minutes IS NULL"))
+                conn.execute(text("UPDATE oauth_accounts SET sync_range_days = 30 WHERE sync_range_days IS NULL"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 1 WHERE access_token = 'admin-placeholder-token'"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 0 WHERE is_service_provider IS NULL"))
                 conn.commit()

@@ -100,6 +100,224 @@ body {
   margin-bottom: 10px;
 }
 
+.syncPanel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #d7e0ed;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.syncPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.syncPanelHeader h3 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+  color: #13223d;
+}
+
+.syncPanelHeader p {
+  margin: 0;
+  color: #5a687f;
+  font-size: 13px;
+}
+
+.syncPanelGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.syncPanelGrid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #48556b;
+}
+
+.syncPanelGrid input,
+.syncPanelGrid select {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  font-size: 13px;
+}
+
+.syncPanelGrid select[multiple] {
+  min-height: 132px;
+}
+
+.syncPanelGrid select[multiple] option {
+  padding: 6px 10px;
+}
+
+.syncPanelGrid select[multiple] option:checked {
+  background: #143a66 linear-gradient(0deg, #143a66 0%, #143a66 100%);
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.syncPanelGrid select[multiple] option[value="__all__"] {
+  font-weight: 700;
+  color: #143a66;
+}
+
+.syncPanelGrid select[multiple] option[value="__all__"]:checked {
+  background: #0f766e linear-gradient(0deg, #0f766e 0%, #0f766e 100%);
+  color: #ffffff;
+}
+
+.syncFieldHint {
+  display: block;
+  margin-top: 6px;
+  color: #5a687f;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.syncFieldHint strong {
+  color: #17304d;
+}
+
+.syncPanelActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.syncHelpGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.syncHelpItem {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d9e3ef;
+  background: #f9fbfe;
+}
+
+.syncHelpItem strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #17304d;
+}
+
+.syncHelpItem span {
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #52657f;
+}
+
+.syncPrimaryBtn,
+.syncSecondaryBtn {
+  margin-left: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+
+.syncPrimaryBtn {
+  background: #143a66;
+  border-color: #143a66;
+  color: #fff;
+}
+
+.syncSecondaryBtn {
+  background: #eef4fb;
+  border-color: #c2d1e6;
+}
+
+.syncDetailList {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.syncDetailItem {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #e1e8f2;
+  background: #fff;
+  font-size: 13px;
+  color: #1f2a37;
+}
+
+.syncDetailItem strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.syncStatusBar {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #1f2937;
+  color: #f3f4f6;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.syncStatusLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.syncStatusLeft strong {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #cbd5e1;
+}
+
+.syncStatusLeft span,
+.syncStatusRight {
+  font-size: 13px;
+  color: #f9fafb;
+}
+
+.syncStatusRight {
+  text-align: right;
+  color: #dbeafe;
+}
+
+@media (max-width: 900px) {
+  .syncPanelGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .syncHelpGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .syncPanelHeader,
+  .syncStatusBar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .syncStatusRight {
+    text-align: left;
+  }
+}
+
 .account {
   width: 100%;
   padding: 10px 12px;

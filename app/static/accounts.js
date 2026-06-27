@@ -15,6 +15,208 @@ function setGlobalMessage(message, kind = "error") {
   errorBox.textContent = message || "";
 }
 
+function setSyncStatus(message, meta = "") {
+  const text = document.getElementById("sync-status-text");
+  const metaBox = document.getElementById("sync-status-meta");
+  if (text) text.textContent = message || "";
+  if (metaBox) metaBox.textContent = meta || "";
+}
+
+function renderSyncDetailList(statusPayload = null) {
+  const detailList = document.getElementById("sync-detail-list");
+  const select = document.getElementById("sync-account-select");
+  if (!detailList || !select) return;
+
+  const accounts = Array.isArray(statusPayload?.accounts) ? statusPayload.accounts : [];
+  const previousSelection = [...select.selectedOptions].map((option) => option.value).filter(Boolean);
+  const shouldDefaultAll = previousSelection.length === 0 || previousSelection.includes("__all__");
+  const selectionSet = new Set(shouldDefaultAll ? accounts.map((account) => String(account.id)) : previousSelection);
+
+  select.innerHTML = [`<option value="__all__">All Accounts</option>`].concat(accounts.map((account) => {
+    const label = `${account.provider?.toUpperCase?.() || account.provider} - ${account.account_email || "Unknown"}`;
+    const isSelected = selectionSet.has(String(account.id));
+    return `<option value="${account.id}" ${isSelected ? "selected" : ""}>${isSelected ? "✓ " : ""}${label}</option>`;
+  })).join("");
+
+  if (!accounts.length) {
+    detailList.innerHTML = '<div class="syncDetailItem">No sync-enabled accounts found.</div>';
+    setSyncStatus("No sync-enabled accounts found.", "");
+    return;
+  }
+
+  if (shouldDefaultAll) {
+    [...select.options].forEach((option) => {
+      option.selected = option.value !== "__all__";
+    });
+  }
+
+  const effectiveSelection = [...select.selectedOptions].map((option) => option.value);
+  const selectedIds = effectiveSelection.includes("__all__") || !effectiveSelection.length
+    ? accounts.map((account) => String(account.id))
+    : effectiveSelection;
+
+  const selectedAccounts = accounts.filter((account) => selectedIds.includes(String(account.id)));
+  const chosen = selectedAccounts[0] || accounts[0];
+
+  const scheduler = statusPayload?.scheduler || {};
+  const lines = selectedAccounts.length > 1
+    ? [
+    {
+      title: `Selected accounts (${selectedAccounts.length})`,
+      body: selectedAccounts.map((account) => `${account.provider?.toUpperCase?.() || account.provider} - ${account.account_email || "Unknown"} (${account.status || "unknown"})`).join(" | "),
+    },
+    {
+      title: "Current preferences",
+      body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+    },
+    {
+      title: "Scheduler health",
+      body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+    },
+  ]
+    : [
+    {
+      title: `${chosen.provider?.toUpperCase?.() || chosen.provider} - ${chosen.account_email || "Unknown"}`,
+      body: [
+        `Status: ${chosen.status || "unknown"}`,
+        `Last sync: ${chosen.last_sync_success || chosen.last_sync_failure || chosen.last_sync || "never"}`,
+        `Last error: ${chosen.last_error || "none"}`,
+      ].join(" | "),
+    },
+    {
+      title: "Current preferences",
+      body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+    },
+    {
+      title: "Scheduler health",
+      body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+    },
+  ];
+
+  detailList.innerHTML = lines.map((line) => `<div class="syncDetailItem"><strong>${line.title}</strong><span>${line.body}</span></div>`).join("");
+  setSyncStatus(
+    selectedAccounts.length > 1
+      ? `Selected accounts: ${selectedAccounts.length}`
+      : `Selected account: ${chosen.account_email || "Unknown"}`,
+    `Range ${chosen.sync_range_days || 30} days • Every ${chosen.sync_frequency_minutes || 5} min • ${scheduler.running ? "scheduler running" : "scheduler idle"}`
+  );
+
+  const rangeInput = document.getElementById("sync-range-days");
+  const freqInput = document.getElementById("sync-frequency-minutes");
+  if (rangeInput) rangeInput.value = String(chosen.sync_range_days || 30);
+  if (freqInput) freqInput.value = String(chosen.sync_frequency_minutes || 5);
+}
+
+function getSelectedSyncAccounts() {
+  const select = document.getElementById("sync-account-select");
+  if (!select) return [];
+
+  const selectedValues = [...select.selectedOptions].map((option) => option.value);
+  if (!selectedValues.length || selectedValues.includes("__all__")) {
+    return [...select.options]
+      .filter((option) => option.value !== "__all__")
+      .map((option) => option.value)
+      .filter(Boolean);
+  }
+
+  return selectedValues.filter((value) => value !== "__all__");
+}
+
+function syncAccountSelectionSummary() {
+  const select = document.getElementById("sync-account-select");
+  if (!select) return;
+
+  const selectedCount = [...select.selectedOptions].filter((option) => option.value !== "__all__").length;
+  const hint = select.parentElement?.querySelector(".syncFieldHint");
+  if (hint) {
+    hint.textContent = selectedCount > 0
+      ? `${selectedCount} account${selectedCount === 1 ? "" : "s"} selected. Use All Accounts or Ctrl/Cmd+Click to change the selection.`
+      : "Choose All Accounts or use Ctrl/Cmd+Click to pick multiple accounts.";
+  }
+}
+
+async function fetchSyncStatus() {
+  const res = await api.get("/accounts/sync-status");
+  if (!res || !res.ok) {
+    setSyncStatus("Unable to load sync status.", "");
+    return null;
+  }
+
+  const payload = await res.json();
+  renderSyncDetailList(payload);
+  return payload;
+}
+
+async function refreshAllSyncStatus() {
+  setSyncStatus("Refreshing sync health...", "Please wait");
+  await fetchSyncStatus();
+  await loadAccounts();
+  syncAccountSelectionSummary();
+}
+
+async function saveSyncSettings() {
+  const rangeInput = document.getElementById("sync-range-days");
+  const freqInput = document.getElementById("sync-frequency-minutes");
+  const selectedAccountIds = getSelectedSyncAccounts();
+
+  if (!selectedAccountIds.length) {
+    setGlobalMessage("Select one or more accounts first.");
+    return;
+  }
+
+  const payload = {
+    sync_range_days: Number(rangeInput?.value || 30),
+    sync_frequency_minutes: Number(freqInput?.value || 5),
+  };
+
+  for (const accountId of selectedAccountIds) {
+    const res = await api.put(`/accounts/${accountId}/sync-settings`, payload);
+    if (!res) {
+      setGlobalMessage("Unable to save sync settings.");
+      return;
+    }
+
+    const data = await res.json();
+    if (!res.ok) {
+      setGlobalMessage(data.detail || data.message || "Unable to save sync settings.");
+      return;
+    }
+  }
+
+  setGlobalMessage("Sync settings saved.", "success");
+  await refreshAllSyncStatus();
+}
+
+async function manualRefreshSelectedAccount() {
+  const selectedAccountIds = getSelectedSyncAccounts();
+  if (!selectedAccountIds.length) {
+    setGlobalMessage("Select one or more accounts first.");
+    return;
+  }
+
+  setSyncStatus(
+    selectedAccountIds.length > 1 ? "Manual refresh requested for multiple accounts..." : "Manual refresh requested...",
+    "Syncing your account data now"
+  );
+
+  for (const accountId of selectedAccountIds) {
+    const res = await api.post(`/accounts/${accountId}/refresh-sync`);
+    if (!res) {
+      setGlobalMessage("Manual refresh failed to start.");
+      return;
+    }
+
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      setGlobalMessage(data.message || data.detail || data.error || "Manual refresh failed.");
+      return;
+    }
+  }
+
+  setGlobalMessage("Manual refresh started for the selected accounts.", "success");
+  await refreshAllSyncStatus();
+}
+
 function getHealthStatus(acc) {
   if (acc.status === "ok") return `<span style="color:#16a34a; font-weight:600;">OK</span>`;
   if (acc.status === "error") return `<span style="color:#dc2626; font-weight:600;">Needs Attention</span>`;
@@ -301,6 +503,8 @@ async function loadAccounts() {
   renderProviderAccounts("microsoft", groups.microsoft);
   renderProviderAccounts("apple", groups.apple);
 
+  await fetchSyncStatus();
+
   return accounts;
 }
 
@@ -485,6 +689,8 @@ async function init() {
 
   const accounts = await loadAccounts();
 
+  await fetchSyncStatus();
+
   if (document.body.dataset.onboarding === "1" && Array.isArray(accounts) && accounts.length > 0) {
     window.location.href = "/calendar-ui";
   }
@@ -504,6 +710,9 @@ window.toggleSync = toggleSync;
 window.removeAccount = removeAccount;
 window.retryAccount = retryAccount;
 window.reconnectAccount = reconnectAccount;
+window.refreshAllSyncStatus = refreshAllSyncStatus;
+window.saveSyncSettings = saveSyncSettings;
+window.manualRefreshSelectedAccount = manualRefreshSelectedAccount;
 
 window.testApple = () => testApple(document.getElementById("apple-test-btn"));
 window.connectApple = () => connectApple(document.getElementById("apple-connect-btn"));

@@ -13,12 +13,14 @@ Endpoints for users to:
 Multi-Account OAuth Management Router
 """
 
+from app.services.sync_scheduler import scheduler, get_scheduler_health
+from app.services.calendar_service import CalendarService
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from sqlalchemy.orm import Session
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 
 from app.database import get_db
@@ -55,7 +57,11 @@ templates.env.globals.update(
 
 ACCOUNTS_ASSET_IMPORTS = {
     "/static/api.js": "api.js",
+
+
 }
+
+calendar_service = CalendarService()
 
 
 
@@ -84,6 +90,8 @@ PROVIDER_DEFAULT_COLORS = {
 }
 
 
+
+
 def normalize_provider(provider: str) -> str:
     value = (provider or "").strip().lower()
     if value in {"outlook", "office365", "ms", "msft", "microsoft"}:
@@ -110,6 +118,12 @@ def sanitize_hex_color(value: str) -> str:
 
 class AccountColorUpdateRequest(BaseModel):
     color: str
+
+
+class AccountSyncSettingsUpdateRequest(BaseModel):
+    sync_frequency_minutes: int | None = None
+    sync_range_days: int | None = None
+    sync_enabled: bool | None = None
 
 @router.post("/apple/connect")
 def connect_apple_account(
@@ -373,11 +387,84 @@ def get_my_accounts(
             "last_error": getattr(acc, "last_error", None),
             "status": resolve_account_status(acc),
             "color": acc.color or default_account_color(acc.provider),
+            "sync_frequency_minutes": getattr(acc, "sync_frequency_minutes", 5) or 5,
+            "sync_range_days": getattr(acc, "sync_range_days", 30) or 30,
+            "last_manual_refresh_at": getattr(acc, "last_manual_refresh_at", None).isoformat() if getattr(acc, "last_manual_refresh_at", None) else None,
             "created_at": acc.created_at.isoformat(),
             "updated_at": acc.updated_at.isoformat() if acc.updated_at else None,
         }
         for acc in accounts
     ]
+
+
+@router.put("/{account_id}/sync-settings")
+def update_account_sync_settings(
+    account_id: int,
+    payload: AccountSyncSettingsUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    account = db.query(OAuthAccount).filter(
+        OAuthAccount.id == account_id,
+        OAuthAccount.user_id == current_user.id
+    ).first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if payload.sync_frequency_minutes is not None:
+        account.sync_frequency_minutes = max(1, min(int(payload.sync_frequency_minutes), 1440))
+
+    if payload.sync_range_days is not None:
+        account.sync_range_days = max(1, min(int(payload.sync_range_days), 3650))
+
+    if payload.sync_enabled is not None:
+        account.sync_enabled = bool(payload.sync_enabled)
+
+    db.commit()
+    db.refresh(account)
+
+    return {
+        "id": account.id,
+        "provider": account.provider,
+        "account_email": account.account_email,
+        "sync_enabled": account.sync_enabled,
+        "sync_frequency_minutes": account.sync_frequency_minutes,
+        "sync_range_days": account.sync_range_days,
+    }
+
+
+@router.post("/{account_id}/refresh-sync")
+def refresh_account_sync(
+    account_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    account = db.query(OAuthAccount).filter(
+        OAuthAccount.id == account_id,
+        OAuthAccount.user_id == current_user.id
+    ).first()
+
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    account.last_manual_refresh_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(account)
+
+    window_days = max(1, int(getattr(account, "sync_range_days", 30) or 30))
+    end_date = datetime.now(timezone.utc)
+    start_date = end_date - timedelta(days=window_days)
+
+    sync_result = calendar_service.sync_all(db, current_user, start_date=start_date, end_date=end_date)
+
+    return {
+        "success": True,
+        "message": "Manual refresh started",
+        "account_id": account.id,
+        "last_manual_refresh_at": account.last_manual_refresh_at.isoformat(),
+        "sync_result": sync_result,
+    }
 
 
 @router.put("/{account_id}/color")

@@ -1,7 +1,9 @@
 from datetime import datetime
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -11,6 +13,7 @@ from app.security import hash_password
 
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
+logger = logging.getLogger(__name__)
 
 
 class AdminUserCreateRequest(BaseModel):
@@ -50,29 +53,45 @@ def serialize_user(user: User) -> dict:
 
 
 def _delete_user_related_records(db: Session, user: User) -> dict:
-    account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
+    bind = db.get_bind()
+    existing_tables = set(inspect(bind).get_table_names()) if bind is not None else set()
+
+    account_rows = []
+    if "oauth_accounts" in existing_tables:
+        account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
+
     account_emails = {str(row.account_email or "").lower().strip() for row in account_rows if row.account_email}
 
-    event_query = db.query(Event).filter(Event.owner_id == user.id)
-    if account_emails:
-        event_query = event_query.union(
-            db.query(Event).filter(Event.account_email.in_(list(account_emails)))
-        )
+    event_ids = []
+    if "events" in existing_tables:
+        event_query = db.query(Event).filter(Event.owner_id == user.id)
+        if account_emails:
+            event_query = event_query.union(
+                db.query(Event).filter(Event.account_email.in_(list(account_emails)))
+            )
 
-    event_rows = event_query.all()
-    event_ids = [row.id for row in event_rows]
+        event_rows = event_query.all()
+        event_ids = [row.id for row in event_rows]
 
     notes_deleted = 0
-    if event_ids:
+    if event_ids and "notes" in existing_tables:
         notes_deleted = db.query(Note).filter(Note.event_id.in_(event_ids)).delete(synchronize_session=False)
 
     events_deleted = 0
-    if event_ids:
+    if event_ids and "events" in existing_tables:
         events_deleted = db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
 
-    tasks_deleted = db.query(Task).filter(Task.owner_id == user.id).delete(synchronize_session=False)
-    sticky_deleted = db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).delete(synchronize_session=False)
-    accounts_deleted = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).delete(synchronize_session=False)
+    tasks_deleted = 0
+    if "tasks" in existing_tables:
+        tasks_deleted = db.query(Task).filter(Task.owner_id == user.id).delete(synchronize_session=False)
+
+    sticky_deleted = 0
+    if "date_sticky_notes" in existing_tables:
+        sticky_deleted = db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).delete(synchronize_session=False)
+
+    accounts_deleted = 0
+    if "oauth_accounts" in existing_tables:
+        accounts_deleted = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).delete(synchronize_session=False)
 
     return {
         "accounts_deleted": int(accounts_deleted),
@@ -255,8 +274,13 @@ def admin_purge_user_related_data(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    deleted = _delete_user_related_records(db, user)
-    db.commit()
+    try:
+        deleted = _delete_user_related_records(db, user)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Admin purge-related failed for user_id=%s", user_id)
+        raise HTTPException(status_code=500, detail=f"Purge failed: {exc}")
 
     return {
         "purged": True,

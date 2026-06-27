@@ -322,6 +322,7 @@ let sessionCacheRange = {
   start: null,
   end: null
 };
+window.sessionCacheRange = window.sessionCacheRange || sessionCacheRange;
 let isInitialLoadComplete = false;
 
 /**************************************************************
@@ -1884,6 +1885,7 @@ async function preloadEventCache() {
 
   // ✅ KEEP THIS
   sessionCacheRange = { start, end };
+  window.sessionCacheRange = { start, end };
 
   // ✅ ✅ ✅ ADD DEDUPE RIGHT HERE
   const seen = new Set();
@@ -1934,6 +1936,7 @@ async function preloadEventCache() {
   renderAccountsSafe();
   // ✅ ADD THIS LINE (CRITICAL — ONLY PLACE IT NEEDS TO RUN)
   updateCustomRangeTooltip();
+  renderRangePill();
 
   console.log(
     "LATEST EVENT DATE:",
