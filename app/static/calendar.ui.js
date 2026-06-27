@@ -1015,9 +1015,58 @@ function bindUIEvents() {
     openCreateModal();
   });
 
-  document.getElementById("accountsBtn")?.addEventListener("click", () => {
+  const accountsBtn = document.getElementById("accountsBtn");
+  const gearMenuShell = document.getElementById("gearMenuShell");
+  const manageAccountsMenuBtn = document.getElementById("manageAccountsMenuBtn");
+  const adminMenuBtn = document.getElementById("adminMenuBtn");
+
+  accountsBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    gearMenuShell?.classList.toggle("open");
+    accountsBtn.setAttribute("aria-expanded", gearMenuShell?.classList.contains("open") ? "true" : "false");
+  });
+
+  manageAccountsMenuBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
     window.location.href = "/accounts/ui";
   });
+
+  adminMenuBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
+    window.location.href = "/admin/ui";
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!gearMenuShell) return;
+    if (!gearMenuShell.contains(event.target)) {
+      gearMenuShell.classList.remove("open");
+      accountsBtn?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      gearMenuShell?.classList.remove("open");
+      accountsBtn?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  if (adminMenuBtn) {
+    adminMenuBtn.classList.add("hidden");
+
+    apiFetch("/users/me")
+      .then(async (res) => {
+        if (!res || !res.ok) return;
+        const me = await res.json();
+        if (String(me?.role || "").toLowerCase() === "admin") {
+          adminMenuBtn.classList.remove("hidden");
+        }
+      })
+      .catch((error) => {
+        console.warn("Unable to resolve user role for admin hover menu", error);
+      });
+  }
 
   document.getElementById("googleBtn")?.addEventListener("click", connectGoogle);
   document.getElementById("outlookBtn")?.addEventListener("click", connectMicrosoft);

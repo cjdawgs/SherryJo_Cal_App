@@ -64,15 +64,18 @@ def get_current_user(
 # ADMIN CHECK (NEW ✅ BEST PRACTICE)
 # --------------------------------------------------
 
-def get_current_admin(
+def require_admin(
     current_user: User = Depends(get_current_user),
 ) -> User:
     """
-    ✅ Ensures user has admin role
-    ✅ Centralized RBAC enforcement
+    ✅ Shared admin-only dependency for all management endpoints.
     """
 
     if current_user.role != Roles.ADMIN:
         raise HTTPException(status_code=403, detail="Admin only")
 
     return current_user
+
+
+# Backward-compatible alias for existing imports.
+get_current_admin = require_admin

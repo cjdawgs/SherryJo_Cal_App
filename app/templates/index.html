@@ -36,6 +36,7 @@
         ☰
       </button>
       <div class="appTitle">SherryJo Calendar</div>
+      <span id="devRoleBadge" class="devRoleBadge hidden" title="Development role badge"></span>
     </div>
 
       <div class="authContainer">
@@ -80,17 +81,16 @@
             <button id="cancelEventBtn">Cancel</button>
             -->
 
-            <!-- ✅ ACCOUNTS BUTTON (SUBTLE ENTRY POINT) -->
-            <button id="accountsBtn" title="Manage connected accounts"
-              style="
-                margin-left:6px;
-                font-size:14px;
-                padding:4px 8px;
-                opacity:0.7;
-                cursor:pointer;
-              ">
-              ⚙
-            </button>
+            <!-- ✅ ACCOUNTS / ADMIN HOVER MENU -->
+            <div class="gearMenuShell" id="gearMenuShell">
+              <button id="accountsBtn" title="Open account actions" aria-haspopup="menu" aria-expanded="false">
+                ⚙
+              </button>
+              <div id="accountsHoverMenu" class="accountsHoverMenu" role="menu" aria-label="Account actions">
+                <button id="manageAccountsMenuBtn" type="button" role="menuitem">Manage Accounts</button>
+                <button id="adminMenuBtn" type="button" role="menuitem" class="hidden">Admin Dashboard</button>
+              </div>
+            </div>
 
             <!-- ✅ UNDO/REDO + SYNC (requested order: Undo, Redo, Sync) -->
             <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>
@@ -325,6 +325,7 @@
     -->
 <script src="{{ asset_url('calendar.colors.js') }}"></script>
 <script type="module" src="{{ asset_url('calendar.js') }}"></script>
+<script type="module" src="{{ asset_url('dev_role_badge.js') }}"></script>
 <script src="{{ asset_url('button_hints.js') }}"></script>
 
 <div id="editorContextMenu" class="editorContextMenu" aria-hidden="true">

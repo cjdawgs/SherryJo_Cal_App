@@ -1,7 +1,9 @@
 import pytest
+import jwt
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.google_auth import SECRET_KEY
 
 
 client = TestClient(app)
@@ -101,21 +103,67 @@ def test_google_callback_success(mocker):
 # --------------------------------------------------
 def test_google_callback_failure(mocker):
     """
-    Ensure errors are handled properly
+    Ensure Google callback failures do not produce 500 responses.
     """
 
-    # ✅ BYPASS state validation
     mocker.patch(
-        "app.routers.google_auth.google_callback",
-        wraps=lambda code, state, db: (_ for _ in ()).throw(Exception("OAuth failed"))
+        "app.services.google_calendar_service.GoogleCalendarService.exchange_code",
+        side_effect=Exception("OAuth failed")
     )
 
     response = client.get(
         "/auth/google/callback",
         params={
             "code": "badcode",
-            "state": "teststate"
-        }
+            "state": "1"
+        },
+        follow_redirects=False
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 307
+    assert "/accounts/ui" in response.headers["location"]
+    assert "google_oauth_failed" in response.headers["location"]
+
+
+def test_google_callback_reconnect_fallback_when_userinfo_fails(mocker):
+    """
+    Reconnect should still complete when userinfo endpoint fails,
+    by using reconnect email from state.
+    """
+    expected_email = "sherrychipjohansson@gmail.com"
+    state = jwt.encode(
+        {"user_id": 1, "reconnect": expected_email},
+        SECRET_KEY,
+        algorithm="HS256",
+    )
+
+    mocker.patch(
+        "app.services.google_calendar_service.GoogleCalendarService.exchange_code",
+        return_value={
+            "access_token": "test_token_123",
+            "refresh_token": "refresh_123",
+            "expires_in": 3600,
+        },
+    )
+    mocker.patch(
+        "app.services.google_calendar_service.GoogleCalendarService.get_user_info",
+        side_effect=Exception("userinfo unavailable"),
+    )
+
+    save_mock = mocker.patch(
+        "app.services.multi_account_oauth_service.MultiAccountOAuthService.add_oauth_account",
+        return_value=None,
+    )
+
+    response = client.get(
+        "/auth/google/callback",
+        params={"code": "goodcode", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+    assert "/accounts/ui" in response.headers["location"]
+    assert "connected=google" in response.headers["location"]
+    assert "account=sherrychipjohansson%40gmail.com" in response.headers["location"]
+
+    save_mock.assert_called_once()

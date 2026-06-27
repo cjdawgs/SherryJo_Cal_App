@@ -19,6 +19,9 @@ and updates everyone's calendar 🧸
 # ==================================================
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from contextlib import redirect_stdout
+import io
+import os
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
 from app.models import User   # ✅ VERY IMPORTANT (we loop users)
@@ -30,6 +33,10 @@ from app.models import User   # ✅ VERY IMPORTANT (we loop users)
 
 scheduler = BackgroundScheduler()
 calendar_service = CalendarService()
+
+
+def _verbose_sync_console() -> bool:
+    return str(os.getenv("SYNC_CONSOLE_VERBOSE", "0")).strip().lower() in {"1", "true", "yes", "on"}
 
 
 # ==================================================
@@ -52,22 +59,28 @@ def run_event_sync():
     """
 
     db = SessionLocal()
+    verbose = _verbose_sync_console()
 
     try:
         # ✅ STEP 1: Get all users
         users = db.query(User).all()
 
         if not users:
-            print("[SYNC] No users found")
+            if verbose:
+                print("[SYNC] No users found")
             return
 
         # ✅ STEP 2: Loop each user
         for user in users:
             try:
                 # ✅ THIS IS THE FIX (was sync_events before)
-                result = calendar_service.sync_all(db, user)
-
-                print(f"[SYNC] User {user.id}: {result}")
+                if verbose:
+                    result = calendar_service.sync_all(db, user)
+                    print(f"[SYNC] User {user.id}: {result}")
+                else:
+                    # Quiet mode: suppress noisy provider sync print spam.
+                    with redirect_stdout(io.StringIO()):
+                        calendar_service.sync_all(db, user)
 
             except Exception as user_error:
                 print(f"[SYNC] User {user.id} FAILED: {user_error}")
@@ -100,4 +113,5 @@ def start_scheduler():
 
     scheduler.start()
 
-    print("[SCHEDULER] Background sync started (every 5 min)")
+    if _verbose_sync_console():
+        print("[SCHEDULER] Background sync started (every 5 min)")

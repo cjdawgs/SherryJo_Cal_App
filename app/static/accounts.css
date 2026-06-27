@@ -8,6 +8,48 @@ body {
   overflow-x: hidden;
 }
 
+.accountsTopbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.accountsTopbarLeft,
+.accountsTopbarRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accountsTitle {
+  margin: 0;
+}
+
+.navActionBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #b9c8df;
+  background: #fff;
+  color: #14294a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.returnNavBtn {
+  background: #edf4ff;
+  border-color: #aac4ea;
+}
+
+.adminNavBtn {
+  background: #e8faf3;
+  border-color: #8dd3b8;
+}
+
 .provider-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -132,6 +174,16 @@ button:disabled {
   display: none !important;
 }
 
+.account-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.account-actions button {
+  margin-left: 0;
+}
+
 .inline-spinner {
   display: inline-block;
   width: 12px;
@@ -169,4 +221,31 @@ button:disabled {
   margin: 4px 0;
   font-size: 13px;
   color: #1f3f66;
+}
+
+@media (max-width: 700px) {
+  .accountsTopbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (min-width: 768px) {
+  .account-actions button,
+  .providerBtn,
+  .navActionBtn {
+    font-size: 14px;
+    padding: 8px 12px;
+    min-height: 36px;
+  }
+}
+
+@media (min-width: 1400px) {
+  .account-actions button,
+  .providerBtn,
+  .navActionBtn {
+    font-size: 16px;
+    padding: 10px 16px;
+    min-height: 42px;
+  }
 }

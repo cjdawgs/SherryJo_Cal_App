@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Management</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' d='M0 0h16v16H0z'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', path='admin.css') }}">
+</head>
+<body>
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <h1>Admin Management</h1>
+        <p>Unified management for user login accounts and provider accounts.</p>
+      </div>
+      <div class="admin-actions">
+        <button id="switchUsers" class="tab-btn active" type="button">User Login Accounts</button>
+        <button id="switchProviders" class="tab-btn" type="button">Provider Accounts</button>
+        <button id="goCalendar" class="ghost-btn" type="button">Calendar</button>
+      </div>
+    </header>
+
+    <section class="panel" id="controlPanel">
+      <details open>
+        <summary>Controls</summary>
+        <div class="left-controls">
+          <input id="searchInput" type="search" placeholder="Search current table...">
+          <input id="tableInput" type="text" placeholder="Table name (ex: users)">
+        </div>
+        <div class="right-controls">
+          <button id="selectAllBtn" class="ghost-btn" type="button">Select ALL</button>
+          <button id="exportBtn" class="ghost-btn" type="button">Export CSV</button>
+          <button id="createBtn" type="button">Create</button>
+          <button id="reloadBtn" class="ghost-btn" type="button">Refresh</button>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" id="tableQueryPanel" hidden>
+      <details open>
+        <summary id="tableQueryTitle">Table Query</summary>
+        <div id="tableQueryResult" class="table-wrap"></div>
+      </details>
+    </section>
+
+    <section class="panel" id="systemOverviewPanel">
+      <details open>
+        <summary>System Overview</summary>
+        <div class="overview-meta-row">
+          <span id="overviewLastUpdated" class="muted-line">Last refreshed: loading...</span>
+          <button id="copyOverviewBtn" class="ghost-btn" type="button">Copy System Snapshot</button>
+        </div>
+        <div class="system-grid">
+          <article class="system-card">
+            <h3>Active Database</h3>
+            <p id="dbTypeText">Loading database type...</p>
+            <p id="dbHostText" class="muted-line"></p>
+            <p id="dbNameText" class="muted-line"></p>
+          </article>
+          <article class="system-card">
+            <h3>Available Tables</h3>
+            <p id="tableCountText">Loading tables...</p>
+            <div id="tableList" class="table-pill-list"></div>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel" id="operationsPanel">
+      <details open>
+        <summary>What You Can Do As Admin</summary>
+        <div class="ops-grid">
+          <article class="ops-card">
+            <h3>User Login Accounts</h3>
+            <ul id="userOpsList"></ul>
+          </article>
+          <article class="ops-card">
+            <h3>Provider Accounts Support</h3>
+            <ul id="providerOpsList"></ul>
+          </article>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel">
+      <details id="accountsDetails" open>
+        <summary id="accountsSummary">User Login Accounts</summary>
+        <div id="statusLine" class="status-line"></div>
+        <div id="desktopGrid" class="table-wrap"></div>
+        <div id="mobileCards" class="cards-wrap"></div>
+      </details>
+    </section>
+  </div>
+
+  <dialog id="entityDialog" class="entity-dialog">
+    <form id="entityForm" method="dialog">
+      <h3 id="dialogTitle">Edit</h3>
+      <div id="formFields" class="form-fields"></div>
+      <div class="dialog-actions">
+        <button value="cancel" type="button" id="cancelDialog" class="ghost-btn">Cancel</button>
+        <button value="submit" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="{{ url_for('static', path='admin.js') }}"></script>
+  <script type="module" src="{{ url_for('static', path='dev_role_badge.js') }}"></script>
+</body>
+</html>

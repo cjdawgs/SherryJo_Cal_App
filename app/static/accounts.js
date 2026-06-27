@@ -105,6 +105,39 @@ function goToCalendar() {
   window.location.href = "/calendar-ui";
 }
 
+function goToAdmin() {
+  window.location.href = "/admin/ui";
+}
+
+async function hydrateAdminNavigation() {
+  const adminBtn = document.getElementById("adminPanelBtn");
+  if (!adminBtn) return;
+
+  adminBtn.classList.add("hidden");
+
+  try {
+    const res = await api.get("/users/me");
+    if (res && res.ok) {
+      const me = await res.json();
+      const role = String(me?.role || "").toLowerCase();
+      adminBtn.dataset.userRole = role;
+      if (role === "admin") {
+        adminBtn.classList.remove("hidden");
+      }
+      return;
+    }
+
+    // Fallback guard: if role payload is unavailable, probe an admin-only route.
+    const adminProbe = await api.get("/admin/users");
+    if (adminProbe && adminProbe.ok) {
+      adminBtn.classList.remove("hidden");
+      return;
+    }
+  } catch (error) {
+    console.warn("Unable to determine admin role for accounts nav", error);
+  }
+}
+
 function addGoogle() {
   const token = localStorage.getItem("token") || "";
   if (!token) {
@@ -217,7 +250,7 @@ function renderProviderAccounts(provider, list) {
         ${acc.is_primary ? "⭐" : ""}
         <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
       </div>
-      <div>
+      <div class="account-actions">
         <button data-action="primary">Primary</button>
         <button data-action="toggle">${acc.sync_enabled ? "Disable" : "Enable"}</button>
         <button data-action="remove">Remove</button>
@@ -443,11 +476,14 @@ async function init() {
   handleAppleReconnectParam();
   renderAppleEmailSuggestions();
 
-  const accounts = await loadAccounts();
   if (!localStorage.getItem("token")) {
     window.location.href = "/login";
     return;
   }
+
+  await hydrateAdminNavigation();
+
+  const accounts = await loadAccounts();
 
   if (document.body.dataset.onboarding === "1" && Array.isArray(accounts) && accounts.length > 0) {
     window.location.href = "/calendar-ui";
@@ -459,6 +495,7 @@ window.addEventListener("accountsUpdated", async () => {
 });
 
 window.goToCalendar = goToCalendar;
+window.goToAdmin = goToAdmin;
 window.addGoogle = addGoogle;
 window.addMicrosoft = addMicrosoft;
 window.toggleAppleForm = toggleAppleForm;

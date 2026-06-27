@@ -35,7 +35,10 @@ class GoogleCalendarService:
     TOKEN_URL = "https://oauth2.googleapis.com/token"
 
     SCOPES = [
-        "https://www.googleapis.com/auth/calendar"
+        "https://www.googleapis.com/auth/calendar",
+        "openid",
+        "email",
+        "profile",
     ]
 
     # ==================================================

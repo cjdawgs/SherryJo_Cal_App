@@ -82,22 +82,51 @@ function setSidebarDrawerOpen(isOpen) {
 
 function applyControlBandDensity(mode) {
   const createBtn = document.getElementById("createBtn");
+  const accountsBtn = document.getElementById("accountsBtn");
+  const undoBtn = document.getElementById("undoBtn");
+  const redoBtn = document.getElementById("redoBtn");
+  const syncBtn = document.getElementById("syncBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
+
   if (!createBtn) return;
 
+  const withIconLabel = (btn, label) => {
+    if (!btn) return;
+    if (!btn.dataset.iconHtml) {
+      btn.dataset.iconHtml = btn.innerHTML;
+    }
+    btn.innerHTML = `${btn.dataset.iconHtml}<span class="btnLabel">${label}</span>`;
+  };
+
   if (mode === "mobile") {
-    createBtn.textContent = "＋";
+    createBtn.textContent = "＋ Create";
     createBtn.title = "Create Event";
+    withIconLabel(accountsBtn, "Account Menu");
+    withIconLabel(undoBtn, "Undo");
+    withIconLabel(redoBtn, "Redo");
+    withIconLabel(syncBtn, "Sync");
+    withIconLabel(logoutBtn, "Logout");
     return;
   }
 
   if (mode === "tablet") {
-    createBtn.textContent = "Create";
+    createBtn.textContent = "＋ Create Event";
     createBtn.title = "Create Event";
+    withIconLabel(accountsBtn, "Account Menu");
+    withIconLabel(undoBtn, "Undo");
+    withIconLabel(redoBtn, "Redo");
+    withIconLabel(syncBtn, "Sync");
+    withIconLabel(logoutBtn, "Logout");
     return;
   }
 
   createBtn.textContent = "➕ Create Event";
   createBtn.title = "Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'";
+  withIconLabel(accountsBtn, "Account Menu");
+  withIconLabel(undoBtn, "Undo");
+  withIconLabel(redoBtn, "Redo");
+  withIconLabel(syncBtn, "Sync Now");
+  withIconLabel(logoutBtn, "Logout");
 }
 
 function applyLayoutMode({ forceViewSwitch = false } = {}) {
@@ -1237,6 +1266,7 @@ async function init() {
 
   // ✅ Final validation
   if (!requireAuth()) return;
+  showAdminAccessNoticeIfAny();
   await loadAccounts();
   renderAccountsSafe();
 
@@ -1297,6 +1327,41 @@ async function init() {
     refreshEvents();
   });
 
+}
+
+function showAdminAccessNoticeIfAny() {
+  const message = localStorage.getItem("adminAccessNotice");
+  if (!message) return;
+
+  localStorage.removeItem("adminAccessNotice");
+
+  const existing = document.getElementById("admin-access-banner");
+  if (existing) {
+    existing.remove();
+  }
+
+  const banner = document.createElement("div");
+  banner.id = "admin-access-banner";
+  banner.style.background = "#fff1f2";
+  banner.style.color = "#9f1239";
+  banner.style.border = "1px solid #fecdd3";
+  banner.style.borderRadius = "10px";
+  banner.style.padding = "10px 12px";
+  banner.style.margin = "8px 10px";
+  banner.style.fontSize = "13px";
+  banner.style.fontWeight = "700";
+  banner.textContent = `Admin access required: ${message}`;
+
+  const topbar = document.querySelector(".topbar");
+  if (topbar && topbar.parentNode) {
+    topbar.parentNode.insertBefore(banner, topbar.nextSibling);
+  } else {
+    document.body.prepend(banner);
+  }
+
+  setTimeout(() => {
+    banner.remove();
+  }, 6000);
 }
 
 function showReconnectBanner(accounts) {

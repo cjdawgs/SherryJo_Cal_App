@@ -99,17 +99,71 @@ def google_callback(
     # ==================================================
     # ✅ EXCHANGE AUTH CODE FOR TOKENS
     # ==================================================
-    token_data = service.exchange_code(code, redirect_uri=get_google_redirect_uri(request))
+    try:
+        token_data = service.exchange_code(code, redirect_uri=get_google_redirect_uri(request))
+    except Exception as exc:
+        new_token = create_token(user_id)
+        params = urlencode({
+            "error": "google_oauth_failed",
+            "token": new_token,
+        })
+        print("❌ GOOGLE CALLBACK token exchange failed:", str(exc))
+        return RedirectResponse(f"/accounts/ui?{params}")
 
     access_token = token_data.get("access_token")
     refresh_token = token_data.get("refresh_token")
 
+    if not access_token:
+        new_token = create_token(user_id)
+        params = urlencode({
+            "error": "google_token_missing",
+            "token": new_token,
+        })
+        print("❌ GOOGLE CALLBACK missing access_token in token response")
+        return RedirectResponse(f"/accounts/ui?{params}")
+
     # ==================================================
     # ✅ GET GOOGLE USER INFO
     # ==================================================
-    user_info = service.get_user_info(access_token)
-    email = user_info.get("email")
-    normalized_email = (email or "").strip().lower()
+    user_info = None
+    normalized_email = ""
+    try:
+        user_info = service.get_user_info(access_token)
+        email = user_info.get("email")
+        normalized_email = (email or "").strip().lower()
+    except Exception as exc:
+        print("❌ GOOGLE CALLBACK user info failed:", str(exc))
+
+        # Reconnect safety: if Google userinfo endpoint fails transiently,
+        # allow known reconnect target from state to complete account recovery.
+        if expected_reconnect:
+            normalized_email = expected_reconnect
+
+        # Secondary fallback: derive email from id_token when present.
+        if not normalized_email:
+            id_token = token_data.get("id_token")
+            if id_token:
+                try:
+                    id_payload = jwt.decode(
+                        id_token,
+                        options={
+                            "verify_signature": False,
+                            "verify_exp": False,
+                            "verify_aud": False,
+                        },
+                    )
+                    normalized_email = (id_payload.get("email") or "").strip().lower()
+                except Exception as id_exc:
+                    print("⚠️ GOOGLE CALLBACK id_token decode failed:", str(id_exc))
+
+    if not normalized_email:
+        new_token = create_token(user_id)
+        params = urlencode({
+            "error": "google_email_missing",
+            "token": new_token,
+        })
+        print("❌ GOOGLE CALLBACK missing email in user info payload")
+        return RedirectResponse(f"/accounts/ui?{params}")
 
     if expected_reconnect and normalized_email != expected_reconnect:
         new_token = create_token(user_id)
@@ -121,7 +175,7 @@ def google_callback(
         })
         return RedirectResponse(f"/accounts/ui?{mismatch}")
 
-    print("✅ GOOGLE EMAIL:", email)
+    print("✅ GOOGLE EMAIL:", normalized_email)
 
     # ==================================================
     # ✅ SAVE ACCOUNT (MULTI-ACCOUNT SAFE ✅✅✅)

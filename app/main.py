@@ -3,9 +3,11 @@
 # IMPORTS
 # ==================================================
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,45 @@ from app.routers import all_routers
 
 # ✅ NEW: Import background scheduler
 from app.services.sync_scheduler import start_scheduler
+
+
+def apply_log_noise_filters():
+    """
+    Keep app debug logs readable by muting verbose third-party ICS/CALDAV internals.
+    """
+    noisy_loggers = [
+        "caldav",
+        "vobject",
+        "icalendar",
+        "recurring_ical_events",
+        "urllib3.connectionpool",
+    ]
+
+    for name in noisy_loggers:
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+    class _NoisyIcalFilter(logging.Filter):
+        def filter(self, record):
+            msg = record.getMessage() if record else ""
+            blocked_snippets = (
+                "Ical data was modified to avoid compatibility issues",
+                "Your calendar server breaks the icalendar standard",
+                "error count:",
+            )
+
+            if any(snip in msg for snip in blocked_snippets):
+                return False
+
+            if msg.startswith("--- ") or msg.startswith("+++ ") or msg.startswith("@@ "):
+                return False
+
+            return True
+
+    root_logger = logging.getLogger()
+    root_logger.addFilter(_NoisyIcalFilter())
+
+
+apply_log_noise_filters()
 
 
 
@@ -123,7 +164,8 @@ if engine.url.drivername.startswith("postgresql"):
             "status",
             "token_expires_at",
             "updated_at",
-            "color"
+            "color",
+            "is_service_provider",
         }
         missing = required_columns - columns
         if missing:
@@ -136,6 +178,9 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMPTZ"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS color VARCHAR"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS is_service_provider BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("UPDATE oauth_accounts SET is_service_provider = TRUE WHERE access_token = 'admin-placeholder-token'"))
+                conn.execute(text("UPDATE oauth_accounts SET is_service_provider = FALSE WHERE is_service_provider IS NULL"))
                 conn.commit()
             print("✅ PostgreSQL oauth_accounts schema upgrade complete.")
 
@@ -173,7 +218,8 @@ if engine.url.drivername.startswith("sqlite"):
             "status",
             "token_expires_at",
             "updated_at",
-            "color"
+            "color",
+            "is_service_provider",
         }
         missing = required_columns - columns
         if missing:
@@ -194,6 +240,10 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN updated_at DATETIME"))
                     elif col == "color":
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN color VARCHAR"))
+                    elif col == "is_service_provider":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN is_service_provider BOOLEAN DEFAULT 0"))
+                conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 1 WHERE access_token = 'admin-placeholder-token'"))
+                conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 0 WHERE is_service_provider IS NULL"))
                 conn.commit()
             print("✅ SQLite schema upgrade complete.")
 
@@ -336,6 +386,11 @@ def login_page(request: Request):
         "login.html",
         {"request": request}
     )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 # ==================================================
 # HEALTH CHECK

@@ -37,6 +37,8 @@ from . import (
     oauth,   # ✅ now lives in routers folder
     google_auth,   # ✅ Google OAuth
     accounts,  # ✅ Multi-account OAuth management
+    admin_users,
+    admin_providers,
 )  # noqa: F401
 
 
@@ -56,6 +58,8 @@ from .oauth import router as oauth_router   # ✅ now local import
 from .google_auth import router as google_auth_router
 from .accounts import router as accounts_router  # ✅ Multi-account OAuth
 from .admin import router as admin_router
+from .admin_users import router as admin_users_router
+from .admin_providers import router as admin_providers_router
 
 
 
@@ -67,6 +71,8 @@ all_routers = [
     google_auth_router,   # ✅ Google OAuth
     accounts_router,    # ✅ Multi-account OAuth management
     admin_router,   # ✅ NEW ADMIN MANAGEMENT
+    admin_users_router,
+    admin_providers_router,
 
     users_router,
     events_router,

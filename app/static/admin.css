@@ -1,0 +1,336 @@
+* { box-sizing: border-box; }
+
+:root {
+  --bg: #f3f6f8;
+  --panel: #ffffff;
+  --line: #d5dee8;
+  --ink: #152031;
+  --muted: #54627a;
+  --accent: #0f766e;
+  --accent-ink: #ffffff;
+  --danger: #b42318;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 0% 0%, #d9f5f0 0%, transparent 45%), var(--bg);
+}
+
+.admin-shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 14px 40px;
+}
+
+.admin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.admin-header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.admin-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+}
+
+.admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-title {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.panel > details > summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  color: #18304f;
+  margin-bottom: 8px;
+}
+
+.panel > details[open] > summary {
+  margin-bottom: 10px;
+}
+
+.overview-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.system-grid,
+.ops-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.system-card,
+.ops-card {
+  border: 1px solid #dce6f2;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fbfdff;
+}
+
+.system-card h3,
+.ops-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.muted-line {
+  margin: 4px 0;
+  color: #5b6980;
+  font-size: 13px;
+}
+
+.table-pill-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.table-pill {
+  border: 1px solid #d4dfef;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: #2f425f;
+  background: #f2f7ff;
+}
+
+.ops-card ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.ops-card li {
+  margin-bottom: 6px;
+  color: #2b3d59;
+}
+
+#controlPanel {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+#controlPanel > details {
+  width: 100%;
+}
+
+#controlPanel .left-controls,
+#controlPanel .right-controls {
+  margin-top: 8px;
+}
+
+.left-controls,
+.right-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+input[type="search"],
+input,
+select {
+  border: 1px solid #bfccdc;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+button {
+  border: 1px solid #0c5f58;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button:hover {
+  opacity: 0.92;
+}
+
+.ghost-btn {
+  background: #fff;
+  color: var(--ink);
+  border-color: #c2d0e1;
+}
+
+.tab-btn.active {
+  background: #0b5a54;
+  color: #fff;
+  border-color: #08423e;
+}
+
+.status-line {
+  min-height: 20px;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
+.status-line.error {
+  color: var(--danger);
+}
+
+
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  border-bottom: 1px solid #e6edf5;
+  padding: 10px 8px;
+  text-align: left;
+  font-size: 14px;
+}
+
+th {
+  color: #3d4f68;
+  font-weight: 700;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-danger {
+  background: #fff;
+  color: var(--danger);
+  border-color: #f1b6b1;
+}
+
+.cards-wrap {
+  display: none;
+  gap: 10px;
+  flex-direction: column;
+}
+
+.card {
+  border: 1px solid #e4ecf5;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+}
+
+.card h4 {
+  margin: 0 0 8px;
+}
+
+.card p {
+  margin: 4px 0;
+  color: #3d4f68;
+}
+
+.entity-dialog {
+  border: none;
+  border-radius: 12px;
+  width: min(600px, 92vw);
+  padding: 0;
+}
+
+.entity-dialog::backdrop {
+  background: rgba(17, 24, 39, 0.35);
+}
+
+#entityForm {
+  padding: 14px;
+}
+
+#entityForm h3 {
+  margin-top: 0;
+}
+
+.form-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field.full {
+  grid-column: 1 / -1;
+}
+
+.dialog-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .admin-header {
+    flex-direction: column;
+  }
+
+  #controlPanel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .left-controls,
+  .right-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .table-wrap {
+    display: none;
+  }
+
+  .cards-wrap {
+    display: flex;
+  }
+
+  .form-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .system-grid,
+  .ops-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,84 +1,122 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+import re
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import DATABASE_URL, engine, get_db
+from app.deps import require_admin
 from app.models import User
-from app.deps import get_current_admin  # ✅ IMPORTANT
-from app.security import hash_password
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-# ==================================================
-# ✅ LIST ALL USERS
-# ==================================================
-@router.get("/users")
-def get_all_users(
-    db: Session = Depends(get_db),
-    admin_user: User = Depends(get_current_admin)
-):
-    """
-    ✅ Only admins can see all users
-    """
 
-    users = db.query(User).all()
+def _safe_database_summary(url: str) -> dict:
+    value = str(url or "")
+    parsed = urlparse(value)
 
-    return [
-        {
-            "id": u.id,
-            "email": u.email,
-            "username": u.username,
-            "role": u.role
+    if value.startswith("sqlite:///"):
+        return {
+            "engine": "sqlite",
+            "label": "Local SQLite",
+            "database": value.replace("sqlite:///", ""),
+            "host": "local-file",
         }
-        for u in users
-    ]
+
+    if value.startswith("postgresql"):
+        return {
+            "engine": "postgresql",
+            "label": "PostgreSQL",
+            "database": parsed.path.lstrip("/") or "postgres",
+            "host": parsed.hostname or "unknown",
+        }
+
+    return {
+        "engine": parsed.scheme or "unknown",
+        "label": "Unknown",
+        "database": parsed.path.lstrip("/") or "unknown",
+        "host": parsed.hostname or "unknown",
+    }
 
 
-# ==================================================
-# ✅ MAKE USER ADMIN
-# ==================================================
-@router.put("/users/{user_id}/make-admin")
-def make_admin(
-    user_id: int,
+@router.get("/system/overview")
+def admin_system_overview(
     db: Session = Depends(get_db),
-    admin_user: User = Depends(get_current_admin)
+    admin_user: User = Depends(require_admin),
 ):
-    """
-    ✅ Promote user to admin
-    """
+    inspector = inspect(engine)
+    tables = sorted(inspector.get_table_names())
+    db_info = _safe_database_summary(DATABASE_URL)
 
-    user = db.query(User).filter(User.id == user_id).first()
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "database": db_info,
+        "tables": tables,
+        "table_count": len(tables),
+        "admin_operations": {
+            "users": [
+                "List all users",
+                "Create user login account",
+                "Edit email, username, role",
+                "Reset user password",
+                "Delete user account",
+            ],
+            "providers": [
+                "List all provider accounts",
+                "Create provider account record",
+                "Edit provider profile and status",
+                "Activate/deactivate provider",
+                "Delete provider account",
+            ],
+        },
+    }
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
 
-    user.role = "admin"
-    db.commit()
-
-    return {"message": f"User {user.email} is now admin ✅"}
-
-
-# ==================================================
-# ✅ RESET PASSWORD
-# ==================================================
-@router.put("/users/{user_id}/reset-password")
-def reset_password(
-    user_id: int,
-    new_password: str,
+@router.get("/system/table/{table_name}/rows")
+def admin_table_rows(
+    table_name: str,
     db: Session = Depends(get_db),
-    admin_user: User = Depends(get_current_admin)
+    admin_user: User = Depends(require_admin),
 ):
-    """
-    ✅ Reset user password
-    """
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name or ""):
+        return {"table": table_name, "columns": [], "rows": [], "count": 0, "error": "Invalid table name"}
 
-    user = db.query(User).filter(User.id == user_id).first()
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    if table_name not in existing_tables:
+        return {"table": table_name, "columns": [], "rows": [], "count": 0, "error": "Table not found"}
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    query = text(f'SELECT * FROM "{table_name}"')
+    rows = db.execute(query).mappings().all()
 
-    user.hashed_password = hash_password(new_password)
+    return {
+        "table": table_name,
+        "columns": list(rows[0].keys()) if rows else [col["name"] for col in inspector.get_columns(table_name)],
+        "rows": [dict(row) for row in rows],
+        "count": len(rows),
+    }
 
-    db.commit()
 
-    return {"message": f"Password reset for {user.email} ✅"}
+@router.get("/ui")
+def admin_dashboard_ui(
+    request: Request,
+):
+    return templates.TemplateResponse(
+        request,
+        "admin.html",
+        {"request": request}
+    )
+
+
+@router.get("")
+def admin_root_redirect(
+):
+    return RedirectResponse(url="/admin/ui", status_code=307)

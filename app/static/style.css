@@ -23,6 +23,10 @@ body {
   --week-header-color: #12c7b5;
 }
 
+.hidden {
+  display: none !important;
+}
+
 
 /* =====================================================
 ✅ TOPBAR (HEADER)
@@ -60,6 +64,18 @@ body {
   font-size: calc(26px * var(--app-font-scale));
   font-weight: bold;
   text-align: center;
+}
+
+.devRoleBadge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #3f526f;
+  background: #e8eef7;
+  border: 1px solid #c3d1e6;
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1;
 }
 
 .controlBand {
@@ -159,9 +175,98 @@ body {
   padding: 4px 6px;
 }
 
+.actionButtons > .gearMenuShell {
+  min-width: 0;
+  width: 100%;
+}
+
+.actionButtons > .gearMenuShell > button {
+  min-height: 30px;
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.gearMenuShell {
+  position: relative;
+}
+
+.accountsHoverMenu {
+  position: absolute;
+  top: calc(100% - 1px);
+  right: 0;
+  min-width: 170px;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: #ffffff;
+  border: 1px solid #cfd9ea;
+  border-radius: 8px;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+  z-index: 2000;
+}
+
+.gearMenuShell:hover .accountsHoverMenu,
+.gearMenuShell:focus-within .accountsHoverMenu,
+.gearMenuShell.open .accountsHoverMenu {
+  display: flex;
+}
+
+.accountsHoverMenu button {
+  text-align: left;
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid #d3dce8;
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
 .actionButtons > button svg {
   width: 16px;
   height: 16px;
+}
+
+.actionButtons .btnLabel {
+  display: inline-block;
+  line-height: 1;
+}
+
+#createBtn,
+#accountsBtn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+}
+
+body[data-layout-mode="desktop"] #createBtn,
+body[data-layout-mode="desktop"] #accountsBtn,
+body[data-layout-mode="large"] #createBtn,
+body[data-layout-mode="large"] #accountsBtn {
+  min-height: 76px;
+}
+
+body[data-layout-mode="mobile"] .actionButtons .btnLabel {
+  font-size: 11px;
+}
+
+body[data-layout-mode="mobile"] #createBtn,
+body[data-layout-mode="mobile"] #accountsBtn {
+  min-height: 56px;
+  gap: 2px;
+}
+
+body[data-layout-mode="tablet"] .actionButtons .btnLabel,
+body[data-layout-mode="desktop"] .actionButtons .btnLabel,
+body[data-layout-mode="large"] .actionButtons .btnLabel {
+  font-size: 12px;
 }
 
 .calendarRangeDisplay {
@@ -200,6 +305,38 @@ button.primary {
   background: #2563eb;
   color: white;
   border: none;
+}
+
+@media (min-width: 768px) {
+  .actionButtons > button,
+  .actionButtons > .gearMenuShell > button {
+    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 14px;
+  }
+
+  .actionButtons > button svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  #accountsBtn { font-size: 14px; }
+}
+
+@media (min-width: 1400px) {
+  .actionButtons > button,
+  .actionButtons > .gearMenuShell > button {
+    min-height: 42px;
+    padding: 9px 12px;
+    font-size: 15px;
+  }
+
+  .actionButtons > button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  #accountsBtn { font-size: 15px; }
 }
 
 #syncBtn.is-syncing {

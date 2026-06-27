@@ -17,10 +17,14 @@ CalendarService → ensure_valid_token → API client
 """
 
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, func
 from app.models import OAuthAccount
 import requests
 from datetime import datetime, timedelta, timezone
 from app.config import settings
+
+
+ADMIN_PLACEHOLDER_TOKEN = "admin-placeholder-token"
 
 
 DEFAULT_ACCOUNT_COLORS = {
@@ -47,6 +51,21 @@ def normalize_provider(provider: str) -> str:
 
 def provider_default_color(provider: str) -> str:
     return DEFAULT_ACCOUNT_COLORS.get(normalize_provider(provider), DEFAULT_ACCOUNT_COLORS["other"])
+
+
+def _exclude_service_provider_rows(query):
+    """
+    Exclude admin-managed provider rows from end-user OAuth account flows.
+    Includes a token-based fallback for legacy rows that predate the flag.
+    """
+    return query.filter(
+        or_(
+            OAuthAccount.is_service_provider == False,
+            OAuthAccount.is_service_provider.is_(None),
+        ),
+        OAuthAccount.access_token != ADMIN_PLACEHOLDER_TOKEN,
+        func.lower(OAuthAccount.account_email).notlike("%@example.com"),
+    )
 
 
 # ==================================================
@@ -228,8 +247,10 @@ class MultiAccountOAuthService:
     @staticmethod
     def get_user_accounts(db: Session, user_id: int, provider: str = None):
         try:
-            query = db.query(OAuthAccount).filter(
-                OAuthAccount.user_id == user_id
+            query = _exclude_service_provider_rows(
+                db.query(OAuthAccount).filter(
+                    OAuthAccount.user_id == user_id,
+                )
             )
 
             if provider:
@@ -246,8 +267,10 @@ class MultiAccountOAuthService:
                 print("⚠️ get_user_accounts rollback failed:", rb_err)
                 raise
 
-            query = db.query(OAuthAccount).filter(
-                OAuthAccount.user_id == user_id
+            query = _exclude_service_provider_rows(
+                db.query(OAuthAccount).filter(
+                    OAuthAccount.user_id == user_id,
+                )
             )
             if provider:
                 query = query.filter(OAuthAccount.provider == provider)
@@ -257,9 +280,11 @@ class MultiAccountOAuthService:
     @staticmethod
     def get_all_sync_enabled_accounts(db: Session, user_id: int):
         try:
-            return db.query(OAuthAccount).filter(
-                OAuthAccount.user_id == user_id,
-                OAuthAccount.sync_enabled == True
+            return _exclude_service_provider_rows(
+                db.query(OAuthAccount).filter(
+                    OAuthAccount.user_id == user_id,
+                    OAuthAccount.sync_enabled == True
+                )
             ).all()
         except Exception as e:
             print("⚠️ get_all_sync_enabled_accounts failed, attempting rollback+retry:", e)
@@ -269,9 +294,11 @@ class MultiAccountOAuthService:
                 print("⚠️ get_all_sync_enabled_accounts rollback failed:", rb_err)
                 raise
 
-            return db.query(OAuthAccount).filter(
-                OAuthAccount.user_id == user_id,
-                OAuthAccount.sync_enabled == True
+            return _exclude_service_provider_rows(
+                db.query(OAuthAccount).filter(
+                    OAuthAccount.user_id == user_id,
+                    OAuthAccount.sync_enabled == True
+                )
             ).all()
 
     @staticmethod
