@@ -1188,7 +1188,33 @@ export function initFullCalendar() {
       const rangeStart = new Date(fetchInfo.start);
       const rangeEnd = new Date(fetchInfo.end);
 
-      const events = window.sessionEventCache.map(ev => {
+      const sourceEvents = typeof window.getFilteredEvents === "function"
+        ? window.getFilteredEvents({ start: rangeStart, end: rangeEnd })
+        : window.sessionEventCache;
+
+      const activeFilters = typeof window.getActiveAccountFilters === "function"
+        ? window.getActiveAccountFilters()
+        : new Set();
+
+      const isAccountVisible = (eventLike) => {
+        if (!activeFilters || activeFilters.size === 0) return true;
+
+        const directKey = eventLike?.extendedProps?.account_key;
+        if (directKey) return activeFilters.has(directKey);
+
+        const provider = normalizeProvider(eventLike?.extendedProps?.source || eventLike?.source || "local");
+        const account = (
+          eventLike?.extendedProps?.account ||
+          eventLike?.extendedProps?.account_email ||
+          eventLike?.account ||
+          eventLike?.account_email ||
+          "local"
+        ).toLowerCase().trim();
+
+        return activeFilters.has(`${provider}:${account}`);
+      };
+
+      const events = sourceEvents.map(ev => {
 
         const provider = normalizeProvider(ev.extendedProps?.source);
 
@@ -1219,6 +1245,10 @@ export function initFullCalendar() {
         };
 
       }).filter(ev => {
+
+        if (!isAccountVisible(ev)) {
+          return false;
+        }
 
         const evStart = new Date(ev.start);
         const evEnd = ev.end ? new Date(ev.end) : evStart;

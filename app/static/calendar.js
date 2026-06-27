@@ -275,6 +275,9 @@ let currentRangeEnd = null;
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
 let currentViewEventCounts = {};
+
+// Expose a safe snapshot getter so other modules can enforce account filtering.
+window.getActiveAccountFilters = () => new Set(activeAccountFilters);
 let chipClickTimer = null;
 let suppressChipClickUntil = 0;
 
@@ -324,6 +327,8 @@ function getCalendarEventAccountKey(ev) {
 
   return normalizeKey(provider, account);
 }
+
+window.getCalendarEventAccountKey = getCalendarEventAccountKey;
 
 function computeCurrentViewEventCounts() {
   const cal = getCalendar();
