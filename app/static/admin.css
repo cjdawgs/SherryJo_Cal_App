@@ -154,6 +154,55 @@ body {
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #334862;
+}
+
+.danger-zone-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #efc8c3;
+  border-radius: 8px;
+  background: #fff7f6;
+}
+
+.danger-zone-inline label {
+  font-size: 12px;
+  color: #9f1c16;
+  font-weight: 700;
+}
+
+.danger-zone-inline input {
+  width: 130px;
+}
+
+.danger-btn {
+  border-color: #d92d20;
+  color: #b42318;
+  background: #fff;
+}
+
+.danger-btn:hover {
+  background: #fff1f0;
+}
+
+#tableQueryResult pre {
+  margin: 0;
+  white-space: pre-wrap;
+  background: #f8fbff;
+  border: 1px solid #dbe5f2;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
 }
 
 input[type="search"],
@@ -199,6 +248,11 @@ button:hover {
 
 .status-line.error {
   color: var(--danger);
+}
+
+#controlStatusLine {
+  margin-top: 8px;
+  font-weight: 600;
 }
 
 

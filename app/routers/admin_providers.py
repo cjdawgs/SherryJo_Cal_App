@@ -4,11 +4,11 @@ from sqlalchemy import or_
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import OAuthAccount, User
+from app.models import Event, Note, OAuthAccount, User
 from app.services.multi_account_oauth_service import resolve_account_status
 
 
@@ -39,11 +39,17 @@ class AdminProviderUpdateRequest(BaseModel):
 class AdminProviderStatusRequest(BaseModel):
     status: str = Field(pattern=r"^(active|inactive)$")
 
+class AdminBulkDeleteProvidersRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    delete_related: bool = True
+
 
 def serialize_provider(account: OAuthAccount) -> dict:
     created_at = account.created_at
     if isinstance(created_at, datetime):
         created_at = created_at.isoformat()
+
+    owner_email = account.user.email if getattr(account, "user", None) else None
 
     return {
         "id": account.id,
@@ -61,9 +67,41 @@ def serialize_provider(account: OAuthAccount) -> dict:
             "last_error": account.last_error,
             "color": account.color,
             "user_id": account.user_id,
+            "owner_email": owner_email,
             "is_service_provider": bool(account.is_service_provider),
             "updated_at": account.updated_at.isoformat() if account.updated_at else None,
         },
+    }
+
+def _provider_aliases(provider: str) -> set[str]:
+    p = str(provider or "").strip().lower()
+    if p in {"google", "gmail"}:
+        return {"google", "gmail"}
+    if p in {"microsoft", "outlook", "office365", "ms", "msft"}:
+        return {"microsoft", "outlook", "office365", "ms", "msft"}
+    if p in {"apple", "icloud", "caldav"}:
+        return {"apple", "icloud", "caldav"}
+    return {p}
+
+def _delete_provider_related_records(db: Session, provider: OAuthAccount) -> dict:
+    aliases = _provider_aliases(provider.provider)
+    event_rows = db.query(Event).filter(
+        Event.account_email == provider.account_email,
+        Event.source.in_(list(aliases)),
+    ).all()
+    event_ids = [row.id for row in event_rows]
+
+    notes_deleted = 0
+    if event_ids:
+        notes_deleted = db.query(Note).filter(Note.event_id.in_(event_ids)).delete(synchronize_session=False)
+
+    events_deleted = 0
+    if event_ids:
+        events_deleted = db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
+
+    return {
+        "events_deleted": int(events_deleted),
+        "notes_deleted": int(notes_deleted),
     }
 
 
@@ -72,7 +110,12 @@ def admin_list_providers(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    providers = db.query(OAuthAccount).order_by(OAuthAccount.id.asc()).all()
+    providers = (
+        db.query(OAuthAccount)
+        .options(joinedload(OAuthAccount.user))
+        .order_by(OAuthAccount.id.asc())
+        .all()
+    )
     return [serialize_provider(provider) for provider in providers]
 
 
@@ -141,6 +184,55 @@ def admin_cleanup_provider_placeholders(
     return {
         "updated": updated,
         "message": "Legacy placeholder providers are now classified as service providers.",
+    }
+
+
+@router.get("/{provider_id}/related-data")
+def admin_get_provider_related_data(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider account not found")
+
+    aliases = _provider_aliases(provider.provider)
+    event_count = db.query(Event).filter(
+        Event.account_email == provider.account_email,
+        Event.source.in_(list(aliases)),
+    ).count()
+    notes_count = db.query(Note).join(Event, Note.event_id == Event.id).filter(
+        Event.account_email == provider.account_email,
+        Event.source.in_(list(aliases)),
+    ).count()
+
+    return {
+        "provider": serialize_provider(provider),
+        "related": {
+            "events": int(event_count),
+            "notes": int(notes_count),
+        },
+    }
+
+
+@router.post("/{provider_id}/purge-related")
+def admin_purge_provider_related_data(
+    provider_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
+    if not provider:
+        raise HTTPException(status_code=404, detail="Provider account not found")
+
+    deleted = _delete_provider_related_records(db, provider)
+    db.commit()
+
+    return {
+        "purged": True,
+        "provider_id": provider_id,
+        "deleted": deleted,
     }
 
 
@@ -217,6 +309,49 @@ def admin_delete_provider(
     db.commit()
 
     return {"deleted": True, "id": provider_id}
+
+@router.post("/bulk-delete")
+def admin_bulk_delete_providers(
+    payload: AdminBulkDeleteProvidersRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    target_ids = sorted({int(v) for v in payload.ids if int(v) > 0})
+    if not target_ids:
+        raise HTTPException(status_code=422, detail="No valid provider ids provided")
+
+    rows = db.query(OAuthAccount).filter(OAuthAccount.id.in_(target_ids)).all()
+    rows_by_id = {row.id: row for row in rows}
+
+    deleted_providers = 0
+    skipped = []
+    aggregate = {
+        "events_deleted": 0,
+        "notes_deleted": 0,
+    }
+
+    for provider_id in target_ids:
+        provider = rows_by_id.get(provider_id)
+        if not provider:
+            skipped.append({"id": provider_id, "reason": "not_found"})
+            continue
+
+        if payload.delete_related:
+            deleted = _delete_provider_related_records(db, provider)
+            for key, value in deleted.items():
+                aggregate[key] += int(value)
+
+        db.delete(provider)
+        deleted_providers += 1
+
+    db.commit()
+
+    return {
+        "deleted_providers": deleted_providers,
+        "requested": len(target_ids),
+        "skipped": skipped,
+        "deleted_related": aggregate,
+    }
 
 
 @router.post("/{provider_id}/status")

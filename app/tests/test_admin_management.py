@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime, timezone
 
-from app.models import OAuthAccount
+from app.models import DateStickyNote, Event, Note, OAuthAccount, Task
 
 
 def _register_user(client, role="staff", password="pass12345"):
@@ -185,6 +186,7 @@ def test_admin_providers_crud_and_status_flow(client):
     assert created["status"] == "active"
     assert created["metadata"]["provider"] == "google"
     assert created["metadata"]["user_id"] == owner["id"]
+    assert created["metadata"]["owner_email"] == owner["email"]
     assert created["metadata"]["is_service_provider"] is True
 
     provider_id = created["id"]
@@ -301,3 +303,113 @@ def test_accounts_endpoint_hides_service_provider_rows(client, db):
     assert "real.user@gmail.com" in emails
     assert "test@example.com" not in emails
     assert "dummy.google@example.com" not in emails
+
+
+def test_admin_bulk_delete_users_with_related(client, db):
+    headers = _admin_headers(client)
+    staff = _register_user(client, role="staff")
+
+    account = OAuthAccount(
+        user_id=staff["id"],
+        provider="google",
+        account_email="bulk.user@gmail.com",
+        access_token="token",
+        refresh_token="refresh",
+        sync_enabled=True,
+        is_primary=True,
+        status="ok",
+        is_service_provider=False,
+    )
+    db.add(account)
+    db.commit()
+    db.refresh(account)
+
+    event = Event(
+        title="Bulk Event",
+        description="x",
+        start_time=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 6, 27, 13, 0, tzinfo=timezone.utc),
+        owner_id=staff["id"],
+        source="google",
+        account_email="bulk.user@gmail.com",
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    note = Note(content="n", event_id=event.id)
+    task = Task(title="t", owner_id=staff["id"])
+    sticky = DateStickyNote(owner_id=staff["id"], date="2026-06-27", sticky_notes=[])
+    db.add_all([note, task, sticky])
+    db.commit()
+
+    res = client.post("/admin/users/bulk-delete", headers=headers, json={
+        "ids": [staff["id"]],
+        "delete_related": True,
+    })
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["deleted_users"] == 1
+
+    users_after = client.get("/admin/users", headers=headers).json()
+    assert all(row["id"] != staff["id"] for row in users_after)
+
+
+def test_admin_provider_related_and_bulk_delete(client, db):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+
+    provider_res = client.post("/admin/providers", headers=headers, json={
+        "user_id": owner["id"],
+        "provider": "google",
+        "provider_name": "Bulk Provider",
+        "contact_email": "bulk.provider@gmail.com",
+        "status": "active",
+        "is_primary": False,
+    })
+    assert provider_res.status_code == 200
+    provider_id = provider_res.json()["id"]
+
+    event = Event(
+        title="Provider Event",
+        description="x",
+        start_time=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 6, 27, 13, 0, tzinfo=timezone.utc),
+        owner_id=owner["id"],
+        source="google",
+        account_email="bulk.provider@gmail.com",
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    db.add(Note(content="n", event_id=event.id))
+    db.commit()
+
+    related = client.get(f"/admin/providers/{provider_id}/related-data", headers=headers)
+    assert related.status_code == 200
+    assert related.json()["related"]["events"] >= 1
+
+    res = client.post("/admin/providers/bulk-delete", headers=headers, json={
+        "ids": [provider_id],
+        "delete_related": True,
+    })
+    assert res.status_code == 200
+    assert res.json()["deleted_providers"] == 1
+
+
+def test_admin_orphan_scan_and_delete(client, db):
+    headers = _admin_headers(client)
+
+    orphan_task = Task(title="orphan-task", owner_id=999999)
+    db.add(orphan_task)
+    db.commit()
+    db.refresh(orphan_task)
+
+    scan_res = client.get("/admin/maintenance/orphans", headers=headers)
+    assert scan_res.status_code == 200
+    assert "counts" in scan_res.json()
+    assert scan_res.json()["counts"]["tasks"] >= 1
+
+    del_res = client.post("/admin/maintenance/orphans/delete", headers=headers, json={})
+    assert del_res.status_code == 200
+    assert del_res.json()["deleted"]["tasks"] >= 1

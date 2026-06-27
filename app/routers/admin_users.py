@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import require_admin
-from app.models import Roles, User
+from app.models import DateStickyNote, Event, Note, OAuthAccount, Roles, Task, User
 from app.security import hash_password
 
 
@@ -30,6 +30,11 @@ class AdminPasswordResetRequest(BaseModel):
     new_password: str = Field(min_length=8, max_length=256)
 
 
+class AdminBulkDeleteUsersRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+    delete_related: bool = True
+
+
 def serialize_user(user: User) -> dict:
     created_at = user.created_at
     if isinstance(created_at, datetime):
@@ -41,6 +46,40 @@ def serialize_user(user: User) -> dict:
         "username": user.username,
         "role": user.role,
         "created_at": created_at,
+    }
+
+
+def _delete_user_related_records(db: Session, user: User) -> dict:
+    account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
+    account_emails = {str(row.account_email or "").lower().strip() for row in account_rows if row.account_email}
+
+    event_query = db.query(Event).filter(Event.owner_id == user.id)
+    if account_emails:
+        event_query = event_query.union(
+            db.query(Event).filter(Event.account_email.in_(list(account_emails)))
+        )
+
+    event_rows = event_query.all()
+    event_ids = [row.id for row in event_rows]
+
+    notes_deleted = 0
+    if event_ids:
+        notes_deleted = db.query(Note).filter(Note.event_id.in_(event_ids)).delete(synchronize_session=False)
+
+    events_deleted = 0
+    if event_ids:
+        events_deleted = db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
+
+    tasks_deleted = db.query(Task).filter(Task.owner_id == user.id).delete(synchronize_session=False)
+    sticky_deleted = db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).delete(synchronize_session=False)
+    accounts_deleted = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).delete(synchronize_session=False)
+
+    return {
+        "accounts_deleted": int(accounts_deleted),
+        "events_deleted": int(events_deleted),
+        "notes_deleted": int(notes_deleted),
+        "tasks_deleted": int(tasks_deleted),
+        "sticky_notes_deleted": int(sticky_deleted),
     }
 
 
@@ -167,3 +206,111 @@ def admin_reset_user_password(
     db.refresh(user)
 
     return {"reset": True, "id": user.id}
+
+
+@router.get("/{user_id}/related-data")
+def admin_get_user_related_data(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
+    account_emails = [str(row.account_email or "").lower().strip() for row in account_rows if row.account_email]
+
+    event_count = db.query(Event).filter(Event.owner_id == user.id).count()
+    if account_emails:
+        event_count += db.query(Event).filter(
+            Event.owner_id != user.id,
+            Event.account_email.in_(account_emails),
+        ).count()
+
+    return {
+        "user": serialize_user(user),
+        "related": {
+            "accounts": len(account_rows),
+            "events": int(event_count),
+            "tasks": int(db.query(Task).filter(Task.owner_id == user.id).count()),
+            "sticky_notes": int(db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).count()),
+            "notes": int(
+                db.query(Note)
+                .join(Event, Note.event_id == Event.id)
+                .filter(Event.owner_id == user.id)
+                .count()
+            ),
+        },
+    }
+
+
+@router.post("/{user_id}/purge-related")
+def admin_purge_user_related_data(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    deleted = _delete_user_related_records(db, user)
+    db.commit()
+
+    return {
+        "purged": True,
+        "user_id": user_id,
+        "deleted": deleted,
+    }
+
+
+@router.post("/bulk-delete")
+def admin_bulk_delete_users(
+    payload: AdminBulkDeleteUsersRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    target_ids = sorted({int(v) for v in payload.ids if int(v) > 0})
+    if not target_ids:
+        raise HTTPException(status_code=422, detail="No valid user ids provided")
+
+    users = db.query(User).filter(User.id.in_(target_ids)).all()
+    users_by_id = {u.id: u for u in users}
+
+    deleted_users = 0
+    skipped = []
+    aggregate = {
+        "accounts_deleted": 0,
+        "events_deleted": 0,
+        "notes_deleted": 0,
+        "tasks_deleted": 0,
+        "sticky_notes_deleted": 0,
+    }
+
+    for user_id in target_ids:
+        user = users_by_id.get(user_id)
+        if not user:
+            skipped.append({"id": user_id, "reason": "not_found"})
+            continue
+
+        if user.id == admin_user.id:
+            skipped.append({"id": user_id, "reason": "current_admin_session"})
+            continue
+
+        if payload.delete_related:
+            deleted = _delete_user_related_records(db, user)
+            for key, value in deleted.items():
+                aggregate[key] += int(value)
+
+        db.delete(user)
+        deleted_users += 1
+
+    db.commit()
+
+    return {
+        "deleted_users": deleted_users,
+        "requested": len(target_ids),
+        "skipped": skipped,
+        "deleted_related": aggregate,
+    }

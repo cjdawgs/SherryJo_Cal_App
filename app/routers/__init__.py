@@ -39,6 +39,7 @@ from . import (
     accounts,  # ✅ Multi-account OAuth management
     admin_users,
     admin_providers,
+    admin_maintenance,
 )  # noqa: F401
 
 
@@ -60,6 +61,7 @@ from .accounts import router as accounts_router  # ✅ Multi-account OAuth
 from .admin import router as admin_router
 from .admin_users import router as admin_users_router
 from .admin_providers import router as admin_providers_router
+from .admin_maintenance import router as admin_maintenance_router
 
 
 
@@ -73,6 +75,7 @@ all_routers = [
     admin_router,   # ✅ NEW ADMIN MANAGEMENT
     admin_users_router,
     admin_providers_router,
+    admin_maintenance_router,
 
     users_router,
     events_router,

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Admin Management</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' d='M0 0h16v16H0z'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="{{ url_for('static', path='admin.css') }}">
+  <link rel="stylesheet" href="{{ asset_url('admin.css') }}">
 </head>
 <body>
   <div class="admin-shell">
@@ -29,11 +29,20 @@
           <input id="tableInput" type="text" placeholder="Table name (ex: users)">
         </div>
         <div class="right-controls">
+          <div class="danger-zone-inline">
+            <label for="dangerConfirmInput">Danger confirm:</label>
+            <input id="dangerConfirmInput" type="text" placeholder="Type DELETE" autocomplete="off">
+          </div>
+          <label class="inline-option"><input id="bulkDeleteRelated" type="checkbox" checked> Delete related</label>
+          <button id="bulkDeleteBtn" class="ghost-btn danger-btn" type="button">Bulk Delete Selected</button>
+          <button id="scanOrphansBtn" class="ghost-btn" type="button">Scan Orphans</button>
+          <button id="deleteOrphansBtn" class="ghost-btn danger-btn" type="button">Delete Orphans</button>
           <button id="selectAllBtn" class="ghost-btn" type="button">Select ALL</button>
           <button id="exportBtn" class="ghost-btn" type="button">Export CSV</button>
           <button id="createBtn" type="button">Create</button>
           <button id="reloadBtn" class="ghost-btn" type="button">Refresh</button>
         </div>
+        <div id="controlStatusLine" class="status-line" aria-live="polite"></div>
       </details>
     </section>
 
@@ -104,7 +113,7 @@
     </form>
   </dialog>
 
-  <script type="module" src="{{ url_for('static', path='admin.js') }}"></script>
+  <script type="module" src="{{ asset_url('admin.js') }}"></script>
   <script type="module" src="{{ url_for('static', path='dev_role_badge.js') }}"></script>
 </body>
 </html>

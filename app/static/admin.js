@@ -4,6 +4,7 @@ const state = {
   entity: "users",
   items: [],
   filtered: [],
+  selectedIds: new Set(),
   editing: null,
   overview: null,
   tableQuery: null,
@@ -14,6 +15,11 @@ const el = {
   switchProviders: document.getElementById("switchProviders"),
   createBtn: document.getElementById("createBtn"),
   reloadBtn: document.getElementById("reloadBtn"),
+  bulkDeleteBtn: document.getElementById("bulkDeleteBtn"),
+  bulkDeleteRelated: document.getElementById("bulkDeleteRelated"),
+  dangerConfirmInput: document.getElementById("dangerConfirmInput"),
+  scanOrphansBtn: document.getElementById("scanOrphansBtn"),
+  deleteOrphansBtn: document.getElementById("deleteOrphansBtn"),
   selectAllBtn: document.getElementById("selectAllBtn"),
   exportBtn: document.getElementById("exportBtn"),
   goCalendar: document.getElementById("goCalendar"),
@@ -23,6 +29,7 @@ const el = {
   tableQueryTitle: document.getElementById("tableQueryTitle"),
   tableQueryResult: document.getElementById("tableQueryResult"),
   accountsSummary: document.getElementById("accountsSummary"),
+  controlStatusLine: document.getElementById("controlStatusLine"),
   statusLine: document.getElementById("statusLine"),
   desktopGrid: document.getElementById("desktopGrid"),
   mobileCards: document.getElementById("mobileCards"),
@@ -43,8 +50,11 @@ const el = {
 };
 
 function setStatus(message, isError = false) {
-  el.statusLine.textContent = message || "";
-  el.statusLine.classList.toggle("error", Boolean(isError));
+  [el.controlStatusLine, el.statusLine].forEach((node) => {
+    if (!node) return;
+    node.textContent = message || "";
+    node.classList.toggle("error", Boolean(isError));
+  });
 }
 
 function handleAdminForbidden(res, data = null) {
@@ -155,13 +165,14 @@ function activeConfig() {
 
   return {
     endpoint: "/admin/providers",
-    columns: ["ID", "Provider Name", "Contact", "Status", "Owner", "Actions"],
+    columns: ["ID", "Provider Name", "Contact", "Status", "Owner User ID", "Owner Email", "Actions"],
     row: (item) => [
       item.id,
       item.provider_name || "-",
       item.contact_email || "-",
       item.status || "inactive",
       item.metadata?.user_id ?? "-",
+      item.metadata?.owner_email || "-",
     ],
     cardTitle: (item) => item.provider_name || item.metadata?.provider || "Provider",
     cardBody: (item) => [
@@ -169,8 +180,9 @@ function activeConfig() {
       `Status: ${item.status || "inactive"}`,
       `Provider: ${item.metadata?.provider || "-"}`,
       `Owner User ID: ${item.metadata?.user_id ?? "-"}`,
+      `Owner Email: ${item.metadata?.owner_email || "-"}`,
     ],
-    searchText: (item) => `${item.provider_name} ${item.contact_email} ${item.status} ${item.metadata?.provider}`,
+    searchText: (item) => `${item.provider_name} ${item.contact_email} ${item.status} ${item.metadata?.provider} ${item.metadata?.user_id ?? ""} ${item.metadata?.owner_email || ""}`,
     buildForm: buildProviderForm,
   };
 }
@@ -196,6 +208,11 @@ async function loadData() {
   }
 
   state.items = Array.isArray(data) ? data : [];
+  state.selectedIds.forEach((id) => {
+    if (!state.items.some((item) => Number(item.id) === Number(id))) {
+      state.selectedIds.delete(id);
+    }
+  });
   applySearch();
 
   if (el.accountsSummary) {
@@ -204,6 +221,175 @@ async function loadData() {
   }
 
   setStatus(`Loaded ${state.filtered.length} ${state.entity}.`);
+}
+
+async function showRelatedData(itemId) {
+  const endpoint = state.entity === "users"
+    ? `/admin/users/${itemId}/related-data`
+    : `/admin/providers/${itemId}/related-data`;
+
+  const res = await apiRequest(endpoint, { method: "GET" });
+  if (!res) {
+    setStatus("Related-data request failed", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.detail || "Unable to load related data", true);
+    return;
+  }
+
+  const title = state.entity === "users" ? `Related Data: User ${itemId}` : `Related Data: Provider ${itemId}`;
+  if (el.tableQueryPanel && el.tableQueryTitle && el.tableQueryResult) {
+    el.tableQueryPanel.hidden = false;
+    el.tableQueryTitle.textContent = title;
+    el.tableQueryResult.innerHTML = `<pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+  }
+  setStatus(`Loaded related data for ${state.entity.slice(0, -1)} ${itemId}.`);
+}
+
+async function purgeRelatedData(itemId) {
+  console.debug("[admin] purge-related clicked", { entity: state.entity, itemId });
+  const kind = state.entity === "users" ? "user" : "provider account";
+  const ok = window.confirm(`Purge Events/Notes/Tasks/Sticky records related to this ${kind}? This does not delete the ${kind} record.`);
+  if (!ok) {
+    setStatus("Purge canceled.");
+    return;
+  }
+
+  const endpoint = state.entity === "users"
+    ? `/admin/users/${itemId}/purge-related`
+    : `/admin/providers/${itemId}/purge-related`;
+
+  const res = await apiRequest(endpoint, { method: "POST" });
+  if (!res) {
+    setStatus("Purge request failed", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.detail || "Purge failed", true);
+    return;
+  }
+
+  setStatus(`Purged related data for ${kind} ${itemId}.`);
+  await loadData();
+}
+
+async function bulkDeleteSelected() {
+  console.debug("[admin] bulk-delete clicked", { entity: state.entity, selectedIds: [...state.selectedIds] });
+  syncSelectedIdsFromDom();
+
+  if (!requireDangerConfirmation("bulk delete")) return;
+
+  const ids = [...state.selectedIds];
+  if (!ids.length) {
+    setStatus("Select at least one row to bulk delete.", true);
+    return;
+  }
+
+  const kind = state.entity === "users" ? "users" : "provider accounts";
+  const deleteRelated = Boolean(el.bulkDeleteRelated?.checked);
+  const ok = window.confirm(`Delete ${ids.length} ${kind}?${deleteRelated ? " Related data will also be deleted." : ""}`);
+  if (!ok) {
+    setStatus("Bulk delete canceled.");
+    return;
+  }
+
+  const endpoint = state.entity === "users" ? "/admin/users/bulk-delete" : "/admin/providers/bulk-delete";
+  const payload = { ids, delete_related: deleteRelated };
+
+  const res = await apiRequest(endpoint, { method: "POST", body: JSON.stringify(payload) });
+  if (!res) {
+    setStatus("Bulk delete request failed", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.detail || "Bulk delete failed", true);
+    return;
+  }
+
+  state.selectedIds.clear();
+  await loadData();
+  const deletedCount = Number(data.deleted_users ?? data.deleted_providers ?? 0);
+  const skippedCount = Array.isArray(data.skipped) ? data.skipped.length : 0;
+  setStatus(`Bulk delete complete for ${kind}: deleted ${deletedCount}, skipped ${skippedCount}.`);
+}
+
+async function scanOrphans() {
+  const res = await apiRequest("/admin/maintenance/orphans", { method: "GET" });
+  if (!res) {
+    setStatus("Orphan scan failed", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.detail || "Orphan scan failed", true);
+    return;
+  }
+
+  if (el.tableQueryPanel && el.tableQueryTitle && el.tableQueryResult) {
+    el.tableQueryPanel.hidden = false;
+    el.tableQueryTitle.textContent = "Orphan Scan Results";
+    el.tableQueryResult.innerHTML = `<pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`;
+  }
+
+  setStatus("Orphan scan completed.");
+}
+
+async function deleteOrphans() {
+  console.debug("[admin] delete-orphans clicked");
+  if (!requireDangerConfirmation("deleting orphaned data")) return;
+
+  const ok = window.confirm("Delete all orphaned users/accounts/events/notes/tasks/sticky notes?");
+  if (!ok) {
+    setStatus("Delete orphans canceled.");
+    return;
+  }
+
+  const res = await apiRequest("/admin/maintenance/orphans/delete", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  if (!res) {
+    setStatus("Delete orphans request failed", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    setStatus(data.detail || "Delete orphans failed", true);
+    return;
+  }
+
+  setStatus("Orphan delete completed.");
+  await loadData();
+  await scanOrphans();
 }
 
 function applySearch() {
@@ -222,13 +408,39 @@ function applySearch() {
 function renderTable() {
   const config = activeConfig();
 
-  const header = config.columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
+  const allSelected = state.filtered.length > 0 && state.filtered.every((item) => state.selectedIds.has(Number(item.id)));
+  const header = [`<th><input id="selectAllRows" type="checkbox" ${allSelected ? "checked" : ""} aria-label="Select all rows"></th>`]
+    .concat(config.columns.map((c) => `<th>${escapeHtml(c)}</th>`))
+    .join("");
   const rows = state.filtered.map((item) => {
+    const selected = state.selectedIds.has(Number(item.id));
     const cells = config.row(item).map((v) => `<td>${escapeHtml(v)}</td>`).join("");
-    return `<tr>${cells}<td>${renderRowActions(item)}</td></tr>`;
+    return `<tr><td><input class="row-select" data-select-id="${item.id}" type="checkbox" ${selected ? "checked" : ""}></td>${cells}<td>${renderRowActions(item)}</td></tr>`;
   }).join("");
 
   el.desktopGrid.innerHTML = `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+
+  const selectAllRows = el.desktopGrid.querySelector("#selectAllRows");
+  if (selectAllRows) {
+    selectAllRows.addEventListener("change", () => {
+      if (selectAllRows.checked) {
+        state.filtered.forEach((item) => state.selectedIds.add(Number(item.id)));
+      } else {
+        state.filtered.forEach((item) => state.selectedIds.delete(Number(item.id)));
+      }
+      renderTable();
+      renderCards();
+    });
+  }
+
+  el.desktopGrid.querySelectorAll(".row-select").forEach((box) => {
+    box.addEventListener("change", () => {
+      const id = Number(box.getAttribute("data-select-id"));
+      if (box.checked) state.selectedIds.add(id);
+      else state.selectedIds.delete(id);
+      renderCards();
+    });
+  });
 
   el.desktopGrid.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", onRowActionClick);
@@ -239,10 +451,19 @@ function renderCards() {
   const config = activeConfig();
   const html = state.filtered.map((item) => {
     const body = config.cardBody(item).map((line) => `<p>${escapeHtml(line)}</p>`).join("");
-    return `<div class="card"><h4>${escapeHtml(config.cardTitle(item))}</h4>${body}<div class="row-actions">${renderRowActions(item)}</div></div>`;
+    const checked = state.selectedIds.has(Number(item.id));
+    return `<div class="card"><h4><input class="row-select" data-select-id="${item.id}" type="checkbox" ${checked ? "checked" : ""}> ${escapeHtml(config.cardTitle(item))}</h4>${body}<div class="row-actions">${renderRowActions(item)}</div></div>`;
   }).join("");
 
   el.mobileCards.innerHTML = html;
+  el.mobileCards.querySelectorAll(".row-select").forEach((box) => {
+    box.addEventListener("change", () => {
+      const id = Number(box.getAttribute("data-select-id"));
+      if (box.checked) state.selectedIds.add(id);
+      else state.selectedIds.delete(id);
+      renderTable();
+    });
+  });
   el.mobileCards.querySelectorAll("[data-action]").forEach((btn) => {
     btn.addEventListener("click", onRowActionClick);
   });
@@ -358,8 +579,10 @@ function renderRowActions(item) {
   if (state.entity === "users") {
     return [
       `<button data-action="edit" data-id="${id}" type="button">Edit</button>`,
+      `<button data-action="related" data-id="${id}" type="button">Related</button>`,
+      `<button data-action="purge-related" data-id="${id}" class="ghost-btn" type="button">Purge Related</button>`,
       `<button data-action="reset" data-id="${id}" type="button">Reset Password</button>`,
-      `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete</button>`,
+      `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete Account</button>`,
     ].join("");
   }
 
@@ -367,13 +590,39 @@ function renderRowActions(item) {
 
   return [
     `<button data-action="edit" data-id="${id}" type="button">Edit</button>`,
+    `<button data-action="related" data-id="${id}" type="button">Related</button>`,
+    `<button data-action="purge-related" data-id="${id}" class="ghost-btn" type="button">Purge Related</button>`,
     `<button data-action="${statusAction}" data-id="${id}" type="button">${statusAction === "activate" ? "Activate" : "Deactivate"}</button>`,
-    `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete</button>`,
+    `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete Account</button>`,
   ].join("");
 }
 
 function findItem(id) {
   return state.items.find((item) => Number(item.id) === Number(id));
+}
+
+function requireDangerConfirmation(actionLabel) {
+  const phrase = String(el.dangerConfirmInput?.value || "").trim().toUpperCase();
+  if (phrase !== "DELETE") {
+    const msg = `Type DELETE in Danger confirm before ${actionLabel}.`;
+    setStatus(msg, true);
+    if (el.dangerConfirmInput) {
+      el.dangerConfirmInput.focus();
+      el.dangerConfirmInput.select();
+    }
+    return false;
+  }
+  return true;
+}
+
+function syncSelectedIdsFromDom() {
+  const checked = document.querySelectorAll(".row-select:checked");
+  checked.forEach((box) => {
+    const id = Number(box.getAttribute("data-select-id"));
+    if (Number.isFinite(id) && id > 0) {
+      state.selectedIds.add(id);
+    }
+  });
 }
 
 function openDialog(mode, item = null) {
@@ -518,9 +767,23 @@ async function onRowActionClick(event) {
     return;
   }
 
+  if (action === "related") {
+    await showRelatedData(id);
+    return;
+  }
+
+  if (action === "purge-related") {
+    await purgeRelatedData(id);
+    return;
+  }
+
   if (action === "delete") {
-    const ok = window.confirm(`Delete this ${state.entity === "users" ? "user" : "provider"}?`);
-    if (!ok) return;
+    console.debug("[admin] row-delete clicked", { entity: state.entity, id });
+    const ok = window.confirm(`Delete this ${state.entity === "users" ? "user" : "provider"} account? This does not purge related records.`);
+    if (!ok) {
+      setStatus("Delete canceled.");
+      return;
+    }
 
     const endpoint = state.entity === "users" ? `/admin/users/${id}` : `/admin/providers/${id}`;
     const res = await apiRequest(endpoint, { method: "DELETE" });
@@ -539,6 +802,7 @@ async function onRowActionClick(event) {
       return;
     }
 
+    setStatus("Account deleted.");
     await loadData();
     return;
   }
@@ -600,6 +864,7 @@ async function onRowActionClick(event) {
 
 function setEntity(nextEntity) {
   state.entity = nextEntity;
+  state.selectedIds.clear();
   el.switchUsers.classList.toggle("active", nextEntity === "users");
   el.switchProviders.classList.toggle("active", nextEntity === "providers");
   if (el.accountsSummary) {
@@ -615,6 +880,9 @@ function bindEvents() {
     await loadSystemOverview();
     await loadData();
   });
+  el.bulkDeleteBtn?.addEventListener("click", bulkDeleteSelected);
+  el.scanOrphansBtn?.addEventListener("click", scanOrphans);
+  el.deleteOrphansBtn?.addEventListener("click", deleteOrphans);
   el.selectAllBtn?.addEventListener("click", runSelectAllQuery);
   el.exportBtn?.addEventListener("click", exportCurrentTableQueryCsv);
   el.createBtn.addEventListener("click", () => openDialog("create"));

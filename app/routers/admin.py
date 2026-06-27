@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 from app.database import DATABASE_URL, engine, get_db
 from app.deps import require_admin
 from app.models import User
+from app.services.asset_urls import asset_url
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+templates.env.globals.update(asset_url=asset_url)
 
 
 def _safe_database_summary(url: str) -> dict:
