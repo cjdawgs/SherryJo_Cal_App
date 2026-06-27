@@ -397,6 +397,37 @@ def get_my_accounts(
     ]
 
 
+@router.get("/sync-status")
+def get_sync_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
+
+    account_summaries = [
+        {
+            "id": acc.id,
+            "provider": acc.provider,
+            "account_email": acc.account_email,
+            "sync_enabled": acc.sync_enabled,
+            "status": resolve_account_status(acc),
+            "last_sync": acc.last_sync.isoformat() if acc.last_sync else None,
+            "last_sync_success": getattr(acc, "last_sync_success", None).isoformat() if getattr(acc, "last_sync_success", None) else None,
+            "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
+            "last_error": getattr(acc, "last_error", None),
+            "sync_frequency_minutes": getattr(acc, "sync_frequency_minutes", 5) or 5,
+            "sync_range_days": getattr(acc, "sync_range_days", 30) or 30,
+            "last_manual_refresh_at": getattr(acc, "last_manual_refresh_at", None).isoformat() if getattr(acc, "last_manual_refresh_at", None) else None,
+        }
+        for acc in accounts
+    ]
+
+    return {
+        "scheduler": get_scheduler_health(),
+        "accounts": account_summaries,
+    }
+
+
 @router.put("/{account_id}/sync-settings")
 def update_account_sync_settings(
     account_id: int,
