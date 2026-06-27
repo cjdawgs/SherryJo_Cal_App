@@ -328,7 +328,19 @@ async function bulkDeleteSelected() {
     return;
   }
 
-  const data = await res.json();
+  let data = null;
+  try {
+    const contentType = String(res.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("application/json")) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      data = { detail: text || "Server returned a non-JSON response." };
+    }
+  } catch (_err) {
+    data = { detail: "Unable to parse server response." };
+  }
+
   if (handleAdminForbidden(res, data)) {
     return;
   }

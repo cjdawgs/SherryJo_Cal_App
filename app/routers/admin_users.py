@@ -312,25 +312,49 @@ def admin_bulk_delete_users(
         "sticky_notes_deleted": 0,
     }
 
-    for user_id in target_ids:
-        user = users_by_id.get(user_id)
-        if not user:
-            skipped.append({"id": user_id, "reason": "not_found"})
-            continue
+    try:
+        for user_id in target_ids:
+            user = users_by_id.get(user_id)
+            if not user:
+                skipped.append({"id": user_id, "reason": "not_found"})
+                continue
 
-        if user.id == admin_user.id:
-            skipped.append({"id": user_id, "reason": "current_admin_session"})
-            continue
+            if user.id == admin_user.id:
+                skipped.append({"id": user_id, "reason": "current_admin_session"})
+                continue
 
-        if payload.delete_related:
-            deleted = _delete_user_related_records(db, user)
-            for key, value in deleted.items():
-                aggregate[key] += int(value)
+            try:
+                with db.begin_nested():
+                    deleted = {
+                        "accounts_deleted": 0,
+                        "events_deleted": 0,
+                        "notes_deleted": 0,
+                        "tasks_deleted": 0,
+                        "sticky_notes_deleted": 0,
+                    }
 
-        db.delete(user)
-        deleted_users += 1
+                    if payload.delete_related:
+                        deleted = _delete_user_related_records(db, user)
 
-    db.commit()
+                    db.delete(user)
+
+                for key, value in deleted.items():
+                    aggregate[key] += int(value)
+                deleted_users += 1
+
+            except Exception as user_exc:
+                logger.exception("Admin bulk delete failed for user_id=%s", user_id)
+                skipped.append({
+                    "id": user_id,
+                    "reason": "delete_failed",
+                    "detail": str(user_exc)[:220],
+                })
+
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Admin bulk user delete transaction failed")
+        raise HTTPException(status_code=500, detail=f"Bulk delete failed: {exc}")
 
     return {
         "deleted_users": deleted_users,
