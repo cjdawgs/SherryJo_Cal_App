@@ -17,6 +17,7 @@
       <div class="admin-actions">
         <button id="switchUsers" class="tab-btn active" type="button">User Login Accounts</button>
         <button id="switchProviders" class="tab-btn" type="button">Provider Accounts</button>
+        <button id="enableTVModeBtn" class="ghost-btn" type="button">&#x1F4FA; Enable TV Mode</button>
         <button id="goCalendar" class="ghost-btn" type="button">Calendar</button>
       </div>
     </header>
@@ -115,5 +116,24 @@
 
   <script type="module" src="{{ asset_url('admin.js') }}"></script>
   <script type="module" src="{{ url_for('static', path='dev_role_badge.js') }}"></script>
+
+  <!-- TV Mode Pairing Modal -->
+  <dialog id="tvModeDialog" class="entity-dialog">
+    <form method="dialog">
+      <h3>&#x1F4FA; Enable TV Mode</h3>
+      <p>Show this code on your Apple TV to complete pairing. The code expires in 10 minutes and can only be used once.</p>
+      <div id="tvPairingCodeDisplay" style="font-size:2rem;font-weight:700;letter-spacing:0.15em;text-align:center;padding:1rem 0;font-family:monospace;">
+        —
+      </div>
+      <div id="tvPairingExpiry" style="text-align:center;font-size:0.85rem;opacity:0.7;margin-bottom:1rem;"></div>
+      <div id="tvPairingStatus" class="status-line" aria-live="polite" style="text-align:center;"></div>
+      <div class="dialog-actions">
+        <button value="cancel" type="button" id="closeTVDialog" class="ghost-btn">Close</button>
+        <button type="button" id="regenerateTVCode">New Code</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="{{ url_for('static', path='tv_mode.js') }}"></script>
 </body>
 </html>

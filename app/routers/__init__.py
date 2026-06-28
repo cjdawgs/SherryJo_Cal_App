@@ -40,6 +40,7 @@ from . import (
     admin_users,
     admin_providers,
     admin_maintenance,
+    tv,          # ✅ Apple TV / TV Mode
 )  # noqa: F401
 
 
@@ -62,7 +63,7 @@ from .admin import router as admin_router
 from .admin_users import router as admin_users_router
 from .admin_providers import router as admin_providers_router
 from .admin_maintenance import router as admin_maintenance_router
-
+from .tv import router as tv_router              # ✅ Apple TV / TV Mode
 
 
 # ✅ Central router registry
@@ -85,4 +86,6 @@ all_routers = [
 
     display_router,
     websocket_router,
+
+    tv_router,          # ✅ Apple TV / TV Mode
 ]
