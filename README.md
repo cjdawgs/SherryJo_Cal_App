@@ -80,3 +80,26 @@ What it does:
 - Updates `FileRequirements.txt` before staging so dependency snapshots stay in sync.
 - Lets you choose staging mode: all changes, tracked-only, or manual file list.
 - Skips commit/push when nothing is staged.
+
+## Database Mode Guardrails (Foolproof Setup)
+
+The app supports dynamic DB selection, but now includes fail-safe environment guardrails to prevent accidental fallback when you forget environment settings.
+
+Environment flags:
+- `REQUIRE_DB_KIND`: `postgres` or `sqlite`
+- `DISABLE_SQLITE_FALLBACK`: `1`/`true` to fail fast if primary DB cannot connect
+
+Recommended presets:
+- Local SQLite testing:
+	- `REQUIRE_DB_KIND=sqlite`
+	- `DISABLE_SQLITE_FALLBACK=0`
+	- `DATABASE_URL=sqlite:///./app.db` (or unset `DATABASE_URL` and set `DB_TYPE=sqlite`)
+- Local Supabase/Postgres testing (strict):
+	- `REQUIRE_DB_KIND=postgres`
+	- `DISABLE_SQLITE_FALLBACK=1`
+	- `DATABASE_URL=<your supabase postgres URL>`
+- Staging/Production (strict):
+	- `REQUIRE_DB_KIND=postgres`
+	- `DISABLE_SQLITE_FALLBACK=1`
+
+This ensures staging/prod never silently run against SQLite when Postgres is unreachable.

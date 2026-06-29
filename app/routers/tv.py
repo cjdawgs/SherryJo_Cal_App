@@ -53,7 +53,7 @@ def tv_dashboard(request: Request):
     Authentication is handled client-side: the JS reads a JWT from
     localStorage('tv_token') and uses it for all subsequent API calls.
     """
-    return _templates.TemplateResponse("tv.html", {"request": request})
+    return _templates.TemplateResponse(request, "tv.html", {"request": request})
 
 
 # ─────────────────────────────────────────────────

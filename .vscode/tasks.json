@@ -1,0 +1,2193 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "test-date-sticky-api",
+			"type": "shell",
+			"command": "pytest",
+			"args": [
+				"app/tests/test_date_sticky_api.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-date-sticky-api-pythonpath",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-date-sticky-api-pythonpath-repeat",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-date-sticky-api-after-unified-hardening",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-date-sticky-after-500-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-health-and-sticky-regression-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-health-regression-after-fixture-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-live-supabase-e2e",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-calendar-regression-batch",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_calendar.py app/tests/test_calendar_sync.py app/tests/test_events_tasks.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "detect-current-git-branch",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git rev-parse --abbrev-ref HEAD"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-render-cli",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"render --version"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "lint-render-deploy-script",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -m py_compile scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "render-deploy-and-verify-live",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-short",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-branch-verbose",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git branch -vv"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-deploy-readiness-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/main.py app/routers/calendar.py app/static/calendar.js app/tests/conftest.py app/tests/test_schema_health.py app/tests/test_supabase_e2e_optional.py scripts/render_deploy_and_verify.py && git commit -m \"Harden sticky/sync APIs and add schema health + deploy verification\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-after-commit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-main-to-origin",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "render-redeploy-after-push",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-render-deploy-verify-after-202-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-render-deploy-verify-with-fallback-id",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-render-deploys-api-shape",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "probe-render-single-deploy-shape",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys/dep-d8ugdi3isgbc73bocjfg';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "final-render-deploy-verify",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-post-deploy-script-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "review-script-diff-before-commit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git diff -- scripts/render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-script-only-change",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add scripts/render_deploy_and_verify.py && git commit -m \"Fix Render deploy script for async API responses\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-script-only-commit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-clean-status-after-script-push",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-transaction-recovery-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-before-finalize",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-log-head-before-finalize",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git log --oneline -n 3"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-transaction-recovery-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/routers/calendar.py app/services/multi_account_oauth_service.py app/tests/test_transaction_recovery.py && git commit -m \"Recover from aborted DB transactions during sync/account lookups\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-transaction-recovery-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-and-verify-after-transaction-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-live-supabase-e2e-after-deploy",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-render-auth-smoke-sync",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); sb=s.read().decode(); print('sync',s.status,sb[:220]); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); ub=ur.read().decode(); print('unified',ur.status,ub[:220]); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); db=dr.read().decode(); print('date-sticky',dr.status,db[:220])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-targeted-tests-after-postgres-patch",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_postgres_schema_patch_sql.py app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-postgres-startup-schema-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/main.py app/tests/test_postgres_schema_patch_sql.py && git commit -m \"Auto-repair missing Postgres event/oauth columns at startup\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-postgres-startup-schema-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-and-verify-after-postgres-schema-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-render-auth-smoke-after-schema-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); sb=s.read().decode(); print('sync',s.status,sb[:240]); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); ub=ur.read().decode(); print('unified',ur.status,ub[:240]); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); db=dr.read().decode(); print('date-sticky',dr.status,db[:240])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "final-live-supabase-e2e-validation",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "generate-runbook-docx",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python scripts\\generate_runbook_docx.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "generate-quick-checklist-docx",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python scripts\\generate_quick_checklist_docx.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-regression-before-deploy-sticky-ui",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-live-supabase-e2e-before-deploy-sticky-ui",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-before-sticky-ui-deploy",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-sticky-ui-dnd-enhancements",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js app/static/calendar.js app/static/calendar.ui.js app/static/style.css app/templates/index.html scripts/generate_runbook_docx.py scripts/generate_quick_checklist_docx.py docs/SherryJo_Calendar_Runbook_E2E_Deploy.docx docs/SherryJo_Calendar_Quick_Operator_Checklist.docx && git commit -m \"Enable sticky drag subsets and modal delete-selected action\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-sticky-ui-dnd-enhancements",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "render-deploy-after-sticky-ui-changes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-auth-smoke-after-sticky-ui-deploy",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); sb=s.read().decode(); print('sync',s.status,sb[:220]); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); ub=ur.read().decode(); print('unified',ur.status,ub[:220]); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); db=dr.read().decode(); print('date-sticky',dr.status,db[:220])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-after-deploy",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-regression-after-month-icon-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-live-supabase-e2e-after-month-icon-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-month-icon-and-day-refresh-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.js app/static/calendar.fullcalendar.js app/static/style.css && git commit -m \"Fix month sticky icon interaction and immediate day color refresh\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-month-icon-and-day-refresh-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "render-deploy-after-month-icon-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-auth-smoke-after-month-icon-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); print('sync',s.status); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); print('unified',ur.status); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); print('date-sticky',dr.status)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regression-after-sticky-drag-source-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-sticky-drag-source-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js app/static/style.css && git commit -m \"Improve sticky drag source reliability in calendar views\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-sticky-drag-source-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "render-deploy-after-sticky-drag-source-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-auth-smoke-after-sticky-drag-source-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); print('sync',s.status); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); print('unified',ur.status); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); print('date-sticky',dr.status)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regression-after-sticky-doubleclick-save-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-sticky-doubleclick-save-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.js app/static/calendar.ui.js app/static/calendar.fullcalendar.js && git commit -m \"Restore sticky double-click edit and draft save\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-sticky-doubleclick-save-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-sticky-doubleclick-save-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-auth-smoke-after-doubleclick-save-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); print('sync',s.status); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); print('unified',ur.status); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); print('date-sticky',dr.status)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "node-check-sticky-js",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"node --check app\\static\\calendar.ui.js && node --check app\\static\\calendar.fullcalendar.js && node --check app\\static\\calendar.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-cache-bust-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/templates/index.html && git commit -m \"Bust cached calendar module URL\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-cache-bust-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-cache-bust-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "live-smoke-after-cache-bust",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import json,uuid,urllib.request; base='https://sherryjo-cal-app.onrender.com'; u=uuid.uuid4().hex[:8]; email=f'live_smoke_{u}@example.com'; payload={'username':f'live_smoke_{u}','email':email,'password':'pass123'}; req=urllib.request.Request(base+'/auth/register',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'},method='POST'); reg=urllib.request.urlopen(req,timeout=60); print('register',reg.status); req2=urllib.request.Request(base+'/auth/login',data=json.dumps({'email':email,'password':'pass123'}).encode(),headers={'Content-Type':'application/json'},method='POST'); login=urllib.request.urlopen(req2,timeout=60); tok=json.loads(login.read().decode())['access_token']; print('login',login.status); h={'Authorization':'Bearer '+tok,'Content-Type':'application/json'}; sreq=urllib.request.Request(base+'/calendar/sync',data=b'',headers=h,method='POST'); s=urllib.request.urlopen(sreq,timeout=120); print('sync',s.status); ureq=urllib.request.Request(base+'/calendar/unified',headers={'Authorization':'Bearer '+tok},method='GET'); ur=urllib.request.urlopen(ureq,timeout=120); print('unified',ur.status); dreq=urllib.request.Request(base+'/calendar/date-sticky',headers={'Authorization':'Bearer '+tok},method='GET'); dr=urllib.request.urlopen(dreq,timeout=120); print('date-sticky',dr.status)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-asset-url-helper",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-router-integrity-after-asset-pipeline",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_router_integrity.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-url-helper",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-router-integrity",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_router_integrity.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "broader-template-smoke-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_basic.py app/tests/test_auth.py app/tests/test_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-asset-pipeline-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/main.py app/routers/accounts.py app/services/asset_urls.py app/static/calendar.js app/static/calendar.ui.js app/static/calendar.fullcalendar.js app/templates/index.html app/templates/login.html app/templates/accounts.html app/tests/test_asset_urls.py && git commit -m \"Add hashed asset URLs and import maps\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-asset-pipeline-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-asset-pipeline-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-rendered-asset-urls",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import urllib.request,re; base='https://sherryjo-cal-app.onrender.com';\nfor path in ['/', '/login', '/accounts/ui']:\n    try:\n        html=urllib.request.urlopen(base+path,timeout=60).read().decode('utf-8','ignore')\n        print(path, 'calendar.js?v=' in html or 'accounts.js?v=' in html or 'api.js?v=' in html, 'importmap' in html)\n        m=re.findall(r'/static/[^\\\"\\']+\\?v=[0-9a-f]+', html)\n        print(path, 'sample', m[:5])\n    except Exception as e:\n        print(path, 'ERR', type(e).__name__, e)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "verify-rendered-asset-urls-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"import urllib.request; base='https://sherryjo-cal-app.onrender.com';\nfor path in ['/', '/login']:\n    html=urllib.request.urlopen(base+path,timeout=60).read().decode('utf-8','ignore');\n    print(path, 'importmap' in html, '/static/calendar.js?v=' in html or '/static/api.js?v=' in html or '/static/style.css?v=' in html)\n\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "status-check-after-asset-pipeline",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git status --short"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "latest-commits-after-asset-pipeline",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git log -2 --oneline"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-ui-js-line-955",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); lines=t.splitlines(); print('total lines:', len(lines)); [print(i+1, lines[i]) for i in range(948, min(960, len(lines)))]\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "paren-check-ui-js",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); import re; errs=[i+1 for i,l in enumerate(t.splitlines()) if l.count('(')!=l.count(')')]; print('paren mismatch lines:', errs[:20] if errs else 'none')\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "read-ui-js-740-800",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); lines=t.splitlines(); [print(i+1, repr(lines[i])) for i in range(740, 800)]\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-bom-null-ui-js",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; import ast, re; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); lines=t.splitlines(); suspects=[]; [suspects.append((i+1, lines[i][:80])) for i in range(len(lines)) if chr(0) in lines[i] or '\\x00' in lines[i] or (len(lines[i].strip())>0 and ord(lines[i][0])>127 and i<10)]; print('BOM/null suspects:', suspects[:10]); print('first char ord:', ord(t[0]))\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regression-after-import-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-import-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.js && git commit -m \"Fix remaining relative imports to use /static/ paths for import map\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-import-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-import-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deep-paren-scan",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); lines=t.splitlines(); depth=0; bad=[]; [(bad.append((i+1, depth, l[:80])) if abs(depth)>5 else None, [setattr(type('',(),{}), '_', None) for c in l if (c=='(' and (depth:=depth+1)) or (c==')' and (depth:=depth-1))]) for i,l in enumerate(lines)]; print('max depth issues:', bad[:10])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "backtick-scan",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.ui.js').read_text(encoding='utf-8'); lines=t.splitlines(); depth=0; result=[]; [result.append((i+1, depth, lines[i][:80])) or [depth.__class__ for c in lines[i] if (c=='(' and result.append(None) and False) or True] for i,_ in enumerate(lines)]; print(len(lines), 'lines'); bt=0; [print(i+1,'OPENS:',l.count('('), 'CLOSES:',l.count(')'), 'BT:',l.count('`'), l[:60]) for i,l in enumerate(lines) if l.count('`')%2!=0][:20]\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regression-after-syntax-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py app/tests/test_basic.py app/tests/test_auth.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "js-paren-balance-check",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"\nimport re\nfrom pathlib import Path\n\ndef check_js_parens(path):\n    text = Path(path).read_text(encoding='utf-8')\n    depth = 0\n    in_str1 = in_str2 = in_bt = False\n    prev = ''\n    for i, ch in enumerate(text):\n        if ch == '\\\"' and not in_str1 and not in_bt and prev != '\\\\': in_str2 = not in_str2\n        elif ch == \\\"'\\\" and not in_str2 and not in_bt and prev != '\\\\': in_str1 = not in_str1\n        elif ch == '`' and not in_str1 and not in_str2: in_bt = not in_bt\n        elif not in_str1 and not in_str2 and not in_bt:\n            if ch == '(': depth += 1\n            elif ch == ')': depth -= 1\n        prev = ch\n    return depth\n\njs_files = ['app/static/calendar.ui.js', 'app/static/calendar.js', 'app/static/calendar.fullcalendar.js']\nfor f in js_files:\n    d = check_js_parens(f)\n    print(f, 'unmatched parens:', d)\n\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-js-syntax-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "find-fc-paren-issue",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python -c \"from pathlib import Path; t=Path('app/static/calendar.fullcalendar.js').read_text(encoding='utf-8'); lines=t.splitlines(); depth=0; in_s1=in_s2=in_bt=False; prev=''; report=[]; [(report.append((i+1,depth)) if depth>3 else None) or [None for c in line if (c=='(' and not in_s1 and not in_s2 and not in_bt and (depth:=depth+1) and False) or (c==')' and not in_s1 and not in_s2 and not in_bt and (depth:=depth-1) and False) or (c=='\\\"' and not in_s1 and not in_bt and (in_s2:=not in_s2) and False) or (c==\\\"'\\\" and not in_s2 and not in_bt and (in_s1:=not in_s1) and False) or (c=='`' and not in_s1 and not in_s2 and (in_bt:=not in_bt) and False)] for i,line in enumerate(lines)]; print('net depth at end:', depth); print('high depth lines:', report[:10])\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-paren-finder",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python scripts\\find_paren_issue.py app\\static\\calendar.fullcalendar.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-paren-finder-2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python scripts\\find_paren_issue.py app\\static\\calendar.fullcalendar.js"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-after-scanner-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-syntax-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.ui.js app/tests/test_js_syntax.py scripts/find_paren_issue.py && git commit -m \"Fix unclosed callback in bindUIEvents; add JS syntax tests\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-deploy-syntax-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "redeploy-syntax-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "regression-after-drag-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-drag-sticky-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js app/static/calendar.ui.js && git commit -m \"Fix date sticky right-click, drag blocked, event-to-event sticky move\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-deploy-drag-sticky-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-holder-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-holder-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js && git commit -m \"Remove holder event listeners so icon handlers can run (fix date sticky right-click and dblclick)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-holder-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "redeploy-holder-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-undo-redo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/undo_redo.js app/static/calendar.js app/static/calendar.ui.js app/templates/index.html app/main.py && git commit -m \"Add comprehensive undo/redo system for all UI operations (events, stickies, dates)\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-undo-redo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "redeploy-undo-redo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax-dragdrop",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-dragdrop-undo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js app/static/calendar.ui.js && git commit -m \"Add undo/redo for drag-drop events and sticky note moves\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "deploy-dragdrop",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"python scripts/render_deploy_and_verify.py"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-push-main",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "check-health",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"timeout 30 && curl -s https://sherryjo-cal-app.onrender.com/health | findstr health"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-logging",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js && git commit -m \"Add detailed logging to eventChange for drag-drop debugging\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-push-logging",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-dragdrop-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js && git commit -m \"Fix drag-drop time format to use ISO 8601 datetime strings\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-push-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax-undo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-undo-logging",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js app/static/undo_redo.js && git commit -m \"Add detailed logging to undo/redo drag-drop operations\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-push-undo",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax-update",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-undo-visual",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js && git commit -m \"Fix undo not showing visually - update FullCalendar event directly\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-push-visual",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "test-syntax",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -xvs 2>&1 | tail -5"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-push-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/static/calendar.fullcalendar.js && git commit -m \"Fix undo visual: update cache + use setDates() + iterate events by backendId\" && git push origin main"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "cleanup-legacy-compat-test-sweep",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_calendar.py app/tests/test_graph_client.py app/tests/test_oauth.py app/tests/test_google_auth.py app/tests/test_events_tasks.py app/tests/test_notes.py app/tests/test_admin.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-supabase-e2e-optional-skip-behavior",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "commit-heartburn-compat-cleanup",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git add app/services/graph_client.py app/services/calendar_service.py app/routers/events.py app/routers/auth.py app/routers/oauth.py app/routers/google_auth.py app/tests/test_supabase_e2e_optional.py && git commit -m \"Add legacy compatibility shims and stabilize optional E2E test behavior\""
+			],
+			"isBackground": false
+		},
+		{
+			"label": "push-heartburn-compat-cleanup",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"git push origin main && git branch -vv"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-ui-safety-js-syntax-after-layout-context-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-ui-safety-asset-routes-after-layout-context-fixes",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-ui-regression-batch-before-commit",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-verify-js-syntax-after-grid-parity",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-verify-asset-urls-after-grid-parity",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-verify-regression-after-grid-parity",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-reverify-js-syntax-after-vertical-stack-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-reverify-asset-urls-after-vertical-stack-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "local-reverify-regression-after-vertical-stack-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_transaction_recovery.py app/tests/test_schema_health.py app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-dnd-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-date-sticky-api-after-dnd-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_date_sticky_api.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-dnd-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-precision-drag-update",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-precision-drag-update",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-mobile-week-template-enhancement",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-mobile-week-template-enhancement",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-toolbar-toggle-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-toolbar-toggle-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-header-week-toggle-fix-v2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-header-week-toggle-fix-v2",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-no-ellipsis-priority-layering",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-no-ellipsis-priority-layering",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-reconnect-diagnostics-banner",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-reconnect-diagnostics-banner",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-harness-priority-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-harness-priority-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-priority-and-placeholder-filter-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-priority-and-placeholder-filter-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-ios-footprint-font-pass",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-ios-footprint-font-pass",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-architectural-refactor-pass",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-architectural-refactor-pass",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-priority-formula-and-header-grid",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-priority-formula-and-header-grid",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-toolbar-group-stack-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-toolbar-group-stack-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-topbar-and-layering-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-topbar-and-layering-repair",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-js-syntax-after-priority-overlay-readability-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "retest-asset-urls-after-priority-overlay-readability-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-mobile-priority-visual-protocol-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-final-selection-and-minwidth-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-horizontal-text-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-short-thumbnail-text-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-break-after-time-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-break-after-time-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-compact-stack-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-selective-stack-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-title-only-thumbnail-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-title-thumbnails-cleanup-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "final-title-only-cleanup-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "rerun-title-font-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-card-boundary-clamp-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-fixed-two-line-card-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-explicit-title-node-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-tightened-compact-text-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "run-best-text-source-protocol",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-compact-event-render",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "revalidate-compact-event-render",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-tightened-compact-spacing",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-final-compact-tighten",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-long-event-stack-layout",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_mobile_priority_protocol.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-syntax-after-parser-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_mobile_priority_protocol.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-syntax-and-favicon",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py app/tests/test_mobile_priority_protocol.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-rolled-back-recent-edits",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-compact-boundary-font-match",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-gap-and-font-adjustment",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-native-title-compact",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-time-cleanup-chip-font",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-clean-time-format-and-chip-size",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-custom-compact-time-and-bold-chips",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-bold-chip-count-outline",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-chip-click-behavior-update",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-chip-filter-contract-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_account_chip_click_filters.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-expanded-chip-view-tests",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_account_chip_click_filters.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-runtime-filter-regression-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_account_chip_click_filters.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-ctrl-click-resilience-fix",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_account_chip_click_filters.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "validate-doubleclick-cancels-singleclick",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				"set PYTHONPATH=.&& python -m pytest app/tests/test_account_chip_click_filters.py app/tests/test_js_syntax.py app/tests/test_asset_urls.py -q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "shell: commit-push-guided",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"${workspaceFolder}/scripts/Commit_SherryJo_Calendar_App.ps1"
+			],
+			"isBackground": false,
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			"problemMatcher": []
+		}
+	]
+}
