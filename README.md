@@ -66,3 +66,17 @@ Alternative with pre-existing bearer token:
 ```powershell
 .venv\Scripts\python.exe scripts\deployment_smoke_test.py --base-url https://your-tunnel-id.devtunnels.ms --token YOUR_BEARER_TOKEN
 ```
+
+## Commit And Push Workflow
+
+Use the repository-tracked script when you want a guided commit/push flow:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Commit_SherryJo_Calendar_App.ps1
+```
+
+What it does:
+- Blocks commits when merge/rebase conflicts are unresolved.
+- Updates `FileRequirements.txt` before staging so dependency snapshots stay in sync.
+- Lets you choose staging mode: all changes, tracked-only, or manual file list.
+- Skips commit/push when nothing is staged.

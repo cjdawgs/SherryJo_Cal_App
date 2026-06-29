@@ -23,7 +23,7 @@ app.db
 # OS / IDE
 .DS_Store
 Thumbs.db
-.vscode/
+.vscode/*
 
 # Machine-specific env files (never commit these)
 *-local.env
@@ -46,8 +46,9 @@ venv/
 Thumbs.db
 
 # IDE
-.vscode/
+.vscode/*
 .idea/
+!.vscode/tasks.json
 
 # Test + temp
 .pytest_cache/
