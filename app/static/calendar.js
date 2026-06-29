@@ -2981,3 +2981,25 @@ document.addEventListener("keydown", (e) => {
   }
 
 });
+
+// ─── TV Mode Bridge (strictly additive) ───────────────────────────────────────
+// Watches window.selectedDate and pushes changes to /tv/state so the TV
+// dashboard always reflects the date the web user is viewing.
+// Fire-and-forget: silently swallows all errors — zero impact on web UI.
+;(function _tvStateBridge() {
+  let _lastPushed = null;
+
+  setInterval(async () => {
+    const date  = window.selectedDate;
+    const token = localStorage.getItem('token');
+    if (!date || !token || date === _lastPushed) return;
+    _lastPushed = date;
+    try {
+      await fetch('/tv/state', {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ selectedDate: date }),
+      });
+    } catch (_) { /* intentionally silent */ }
+  }, 2000);
+})();

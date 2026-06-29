@@ -17,11 +17,14 @@ Endpoints:
 """
 
 import logging
+import os
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -34,6 +37,23 @@ from app.services.tv_pairing_service import pairing_store, tv_state_store
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tv", tags=["tv"])
+
+_BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_templates = Jinja2Templates(directory=os.path.join(_BASE_DIR, "templates"))
+
+
+# ─────────────────────────────────────────────────
+# TV DASHBOARD PAGE (no auth — JS handles token)
+# ─────────────────────────────────────────────────
+
+@router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+def tv_dashboard(request: Request):
+    """
+    Serve the Apple TV dashboard shell page.
+    Authentication is handled client-side: the JS reads a JWT from
+    localStorage('tv_token') and uses it for all subsequent API calls.
+    """
+    return _templates.TemplateResponse("tv.html", {"request": request})
 
 
 # ─────────────────────────────────────────────────
