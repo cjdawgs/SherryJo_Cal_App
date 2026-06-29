@@ -28,3 +28,39 @@ Thumbs.db
 # Machine-specific env files (never commit these)
 *-local.env
 *.local.env
+
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+venv/
+.env/
+
+# Logs
+*.log
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Test + temp
+.pytest_cache/
+coverage/
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Node (you have JS too)
+node_modules/
+
+
+
