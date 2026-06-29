@@ -87,9 +87,27 @@ async function generateCode() {
   regenerateBtn.disabled = true;
 
   try {
-    const data = await apiRequest("/tv/generate-code", {
+    const response = await apiRequest("/tv/generate-code", {
       method: "POST",
     });
+
+    if (!response) {
+      setTVStatus("Failed to generate code. Try again.", true);
+      return;
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      const detail = (data && (data.detail || data.message)) || `HTTP ${response.status}`;
+      setTVStatus(`Failed to generate code: ${detail}`, true);
+      return;
+    }
 
     if (!data || !data.pairingCode) {
       setTVStatus("Failed to generate code. Try again.", true);

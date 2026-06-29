@@ -214,6 +214,17 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.commit()
             print("✅ PostgreSQL events schema upgrade complete.")
 
+    if "date_sticky_notes" in inspector.get_table_names():
+        date_sticky_columns = {col["name"] for col in inspector.get_columns("date_sticky_notes")}
+        if "sticky_notes" not in date_sticky_columns:
+            print("⚠️ PostgreSQL date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE date_sticky_notes ADD COLUMN IF NOT EXISTS sticky_notes JSONB"))
+                conn.commit()
+            print("✅ PostgreSQL date_sticky_notes schema upgrade complete.")
+        else:
+            print("✅ PostgreSQL date_sticky_notes.sticky_notes present.")
+
 # ✅ Ensure local SQLite schema is up to date for optional columns
 if engine.url.drivername.startswith("sqlite"):
     inspector = inspect(engine)
@@ -293,6 +304,17 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
                 conn.commit()
             print("✅ SQLite events schema upgrade complete.")
+
+    if "date_sticky_notes" in inspector.get_table_names():
+        date_sticky_columns = {col["name"] for col in inspector.get_columns("date_sticky_notes")}
+        if "sticky_notes" not in date_sticky_columns:
+            print("⚠️ SQLite date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
+            with engine.connect() as conn:
+                conn.execute(text("ALTER TABLE date_sticky_notes ADD COLUMN sticky_notes JSON"))
+                conn.commit()
+            print("✅ SQLite date_sticky_notes schema upgrade complete.")
+        else:
+            print("✅ SQLite date_sticky_notes.sticky_notes present.")
 
 print("✅ Tables registered:", Base.metadata.tables.keys())
 
