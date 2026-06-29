@@ -37,12 +37,14 @@ const SOURCE_COLORS = {
 const state = {
   token:        null,
   selectedDate: null,          // YYYY-MM-DD string from backend
+  focusDate:    null,          // local cursor date used for TV-only selection
   days:         {},            // { [dateStr]: Event[] }
   connection:   'disconnected',// 'connected' | 'reconnecting' | 'disconnected'
   lastUpdated:  null,          // Date object
   errorCount:   0,
   pollHandle:   null,          // setInterval id
   clockHandle:  null,          // setInterval id
+  statePatchInFlight: false,
 };
 
 // ─── Cached DOM refs ──────────────────────────────────────────────────────────
@@ -74,6 +76,7 @@ function init() {
   dom.pairInput.addEventListener('input', handleCodeInput);
   dom.pairInput.addEventListener('keydown', e => { if (e.key === 'Enter') handlePair(); });
   dom.disconnectBtn.addEventListener('click', handleUnpair);
+  window.addEventListener('keydown', handleRemoteKeyDown);
 
   state.token = localStorage.getItem(TOKEN_KEY);
 
@@ -150,6 +153,7 @@ function handleUnpair() {
   stopAll();
   state.token        = null;
   state.selectedDate = null;
+  state.focusDate    = null;
   state.days         = {};
   state.connection   = 'disconnected';
   state.errorCount   = 0;
@@ -197,6 +201,9 @@ async function fetchAndRender() {
     state.errorCount   = 0;
     state.connection   = 'connected';
     state.selectedDate = data.selectedDate || null;
+    if (state.selectedDate) {
+      state.focusDate = state.selectedDate;
+    }
     state.lastUpdated  = new Date();
 
     // Rebuild the date→events lookup from the API response
@@ -222,6 +229,94 @@ function handleTokenExpired() {
   localStorage.removeItem(TOKEN_KEY);
   transitionTo('pair');
   setPairError('Your session has expired. Please pair again.');
+}
+
+// ─── Remote-key controls (TV-only operation) ────────────────────────────────
+
+function getAnchorDateForRemote() {
+  if (state.selectedDate) return state.selectedDate;
+  if (state.focusDate) return state.focusDate;
+  return toISO(new Date());
+}
+
+async function patchTvState(patch) {
+  const res = await fetch('/tv/state', {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${state.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (res.status === 401) {
+    handleTokenExpired();
+    return null;
+  }
+  if (!res.ok) {
+    throw new Error(`State update failed (${res.status})`);
+  }
+
+  return await res.json().catch(() => null);
+}
+
+async function setSelectedDateFromRemote(targetDateStr) {
+  if (!state.token || state.statePatchInFlight) return;
+
+  state.statePatchInFlight = true;
+  try {
+    // Optimistic update so remote taps feel instant.
+    state.selectedDate = targetDateStr;
+    state.focusDate = targetDateStr;
+    renderDashboard();
+
+    const patched = await patchTvState({ selectedDate: targetDateStr });
+    if (patched && patched.selectedDate) {
+      state.selectedDate = patched.selectedDate;
+      state.focusDate = patched.selectedDate;
+      renderDashboard();
+    }
+
+    // Pull fresh events immediately after changing date.
+    await fetchAndRender();
+  } catch (_err) {
+    state.connection = 'reconnecting';
+    renderStatus();
+  } finally {
+    state.statePatchInFlight = false;
+  }
+}
+
+function handleRemoteKeyDown(e) {
+  if (!state.token || dom.screenDash.classList.contains('hidden')) return;
+
+  const key = e.key;
+  const isLeft = key === 'ArrowLeft';
+  const isRight = key === 'ArrowRight';
+  const isSelect = key === 'Enter' || key === ' ' || key === 'Spacebar';
+  const isPlayPause = key === 'MediaPlayPause' || key.toLowerCase() === 'p';
+
+  if (!(isLeft || isRight || isSelect || isPlayPause)) return;
+  e.preventDefault();
+
+  const anchor = parseLocalDate(getAnchorDateForRemote());
+
+  if (isLeft) {
+    const target = toISO(offsetDate(anchor, -1));
+    setSelectedDateFromRemote(target);
+    return;
+  }
+
+  if (isRight) {
+    const target = toISO(offsetDate(anchor, 1));
+    setSelectedDateFromRemote(target);
+    return;
+  }
+
+  if (isSelect || isPlayPause) {
+    const target = toISO(new Date());
+    setSelectedDateFromRemote(target);
+  }
 }
 
 // ─── Dashboard rendering ──────────────────────────────────────────────────────
@@ -258,8 +353,8 @@ function renderColumns() {
           <div class="tv-waiting-icon">📅</div>
           <div class="tv-waiting-title">Waiting for date selection</div>
           <div class="tv-waiting-sub">
-            Open SherryJo Calendar on your device and select a date.<br>
-            It will appear here automatically.
+            Use remote Left/Right to choose date.<br>
+            Press Select or Play/Pause to jump to today.
           </div>
         </div>`;
     }
@@ -375,9 +470,11 @@ function renderStatus() {
   };
   const { cls, icon, label } = cfg[state.connection] || cfg.disconnected;
   dom.statusEl.innerHTML     = `<span class="${cls}">${icon} ${label}</span>`;
-  dom.lastUpdated.textContent = state.lastUpdated
+  const updatedText = state.lastUpdated
     ? `Last updated ${state.lastUpdated.toLocaleTimeString()}`
     : '';
+  const remoteHint = '◀ ▶ change day  •  Select/Play = today';
+  dom.lastUpdated.textContent = `${updatedText}${updatedText ? '  •  ' : ''}${remoteHint}`;
 }
 
 // ─── Clock ────────────────────────────────────────────────────────────────────
