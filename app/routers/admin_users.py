@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import func, inspect, or_
+from sqlalchemy import String, cast, func, inspect, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -72,6 +72,12 @@ def _build_user_event_filters(user_id: int, account_emails: set[str]):
     return filters
 
 
+def _date_sticky_owner_filter(user_id: int):
+    # Production schemas may have owner_id stored as TEXT in legacy environments.
+    # Cast to text to support both integer and text columns safely.
+    return cast(DateStickyNote.owner_id, String) == str(user_id)
+
+
 def _event_has_sticky_payload(sticky_note, sticky_notes) -> bool:
     if isinstance(sticky_note, dict):
         if str(sticky_note.get("content") or "").strip():
@@ -124,7 +130,7 @@ def _delete_user_related_records(db: Session, user: User) -> dict:
 
     sticky_deleted = 0
     if "date_sticky_notes" in existing_tables:
-        sticky_deleted = db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).delete(synchronize_session=False)
+        sticky_deleted = db.query(DateStickyNote).filter(_date_sticky_owner_filter(user.id)).delete(synchronize_session=False)
 
     accounts_deleted = 0
     if "oauth_accounts" in existing_tables:
@@ -296,7 +302,7 @@ def admin_get_user_related_data(
         if _event_has_sticky_payload(row.sticky_note, row.sticky_notes)
     )
 
-    date_sticky_count = int(db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).count())
+    date_sticky_count = int(db.query(DateStickyNote).filter(_date_sticky_owner_filter(user.id)).count())
     sticky_total = date_sticky_count + int(event_sticky_count)
 
     return {
