@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=1920, initial-scale=1.0" />
+  <title>SherryJo — Calendar Kiosk</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────── */
+    :root {
+      --bg:          #0d0d0f;
+      --bg-header:   rgba(13,13,15,0.96);
+      --bg-col:      #131318;
+      --bg-col-sel:  #161625;
+      --bg-card:     #1b1b24;
+      --bg-card-now: rgba(79,140,255,0.09);
+      --border:      rgba(255,255,255,0.07);
+      --border-sel:  rgba(79,140,255,0.28);
+      --text:        #f0f0f5;
+      --text-sec:    rgba(240,240,245,0.52);
+      --text-muted:  rgba(240,240,245,0.28);
+      --accent:      #4f8cff;
+      --green:       #34c759;
+      --orange:      #ff9f0a;
+      --red:         #ff453a;
+      --font:        -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+      --mono:        "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      cursor: none; /* Kiosk — no cursor */
+    }
+    .screen { position: absolute; inset: 0; }
+    .hidden { display: none !important; }
+
+    /* Kiosk: pairing screen is never shown — kept in DOM so JS doesn't error */
+    #screen-pair { display: none !important; }
+
+    /* ── Dashboard screen ──────────────────────────────────────── */
+    #screen-dashboard {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ───────────────────────────────────────────────── */
+    .tv-header {
+      flex: 0 0 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 52px;
+      background: var(--bg-header);
+      border-bottom: 1px solid var(--border);
+    }
+    .tv-logo {
+      font-size: 17px;
+      font-weight: 300;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: var(--text-sec);
+      width: 200px;
+      flex-shrink: 0;
+    }
+    .tv-date-header {
+      font-size: 19px;
+      font-weight: 600;
+      letter-spacing: 2.5px;
+      color: var(--text);
+      text-align: center;
+      flex: 1;
+    }
+    .tv-header-right {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      width: 200px;
+      justify-content: flex-end;
+      flex-shrink: 0;
+    }
+    .tv-clock {
+      font-family: var(--mono);
+      font-size: 20px;
+      color: var(--text-sec);
+      letter-spacing: 1px;
+    }
+    /* Kiosk: hide the unpair button — no interaction expected */
+    .tv-unpair-btn { display: none !important; }
+
+    /* ── Main ─────────────────────────────────────────────────── */
+    .tv-main {
+      flex: 1 1 0;
+      display: flex;
+      align-items: stretch;
+      padding: 28px 52px 20px;
+      gap: 22px;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .tv-waiting {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      text-align: center;
+    }
+    .tv-waiting-icon { font-size: 68px; }
+    .tv-waiting-title { font-size: 32px; font-weight: 600; }
+    .tv-waiting-sub { font-size: 20px; color: var(--text-sec); max-width: 580px; line-height: 1.65; }
+    .tv-reconnecting {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .tv-reconnecting-label {
+      font-size: 30px;
+      font-weight: 600;
+      color: var(--orange);
+      animation: blink 1.5s ease-in-out infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+    /* ── Columns ──────────────────────────────────────────────── */
+    .tv-day-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-col);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+      min-width: 0;
+    }
+    .tv-day-col.tv-day-selected {
+      background: var(--bg-col-sel);
+      border-color: var(--border-sel);
+      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    }
+    .tv-col-accent {
+      height: 3px;
+      background: transparent;
+      flex-shrink: 0;
+    }
+    .tv-day-col.tv-day-selected .tv-col-accent {
+      background: linear-gradient(90deg, transparent 5%, var(--accent) 40%, var(--accent) 60%, transparent 95%);
+    }
+    .tv-day-header {
+      padding: 20px 24px 18px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .tv-day-weekday {
+      font-size: 11px; font-weight: 700;
+      letter-spacing: 3.5px; text-transform: uppercase;
+      color: var(--text-muted); margin-bottom: 4px;
+    }
+    .tv-day-num { font-size: 44px; font-weight: 700; line-height: 1; }
+    .tv-day-col.tv-day-selected .tv-day-num { color: var(--accent); }
+    .tv-day-month { font-size: 15px; color: var(--text-sec); margin-top: 5px; }
+    .tv-selected-pill {
+      display: inline-flex;
+      margin-top: 10px;
+      padding: 3px 11px;
+      background: rgba(79,140,255,0.15);
+      border: 1px solid rgba(79,140,255,0.32);
+      border-radius: 6px;
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 2.5px; text-transform: uppercase;
+      color: var(--accent);
+    }
+    .tv-events-list {
+      flex: 1; overflow-y: auto;
+      padding: 14px;
+      display: flex; flex-direction: column; gap: 10px;
+      scrollbar-width: none;
+    }
+    .tv-events-list::-webkit-scrollbar { display: none; }
+    .tv-no-events {
+      flex: 1; display: flex;
+      align-items: center; justify-content: center;
+      color: var(--text-muted); font-size: 16px; font-style: italic;
+    }
+
+    /* ── Event cards ──────────────────────────────────────────── */
+    .tv-event-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex; overflow: hidden; flex-shrink: 0;
+    }
+    .tv-event-card.ev-now {
+      background: var(--bg-card-now);
+      border-color: rgba(79,140,255,0.28);
+      box-shadow: 0 0 18px rgba(79,140,255,0.07);
+    }
+    .ev-color-bar {
+      width: 4px; flex-shrink: 0;
+      background: var(--ev-color, #6b7280);
+      border-radius: 12px 0 0 12px;
+    }
+    .ev-body { padding: 13px 15px; flex: 1; min-width: 0; }
+    .ev-time-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+    .ev-time { font-family: var(--mono); font-size: 14px; color: var(--text-sec); white-space: nowrap; }
+    .ev-badge {
+      font-size: 9px; font-weight: 800;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 4px; flex-shrink: 0;
+    }
+    .ev-badge-now { background: rgba(79,140,255,0.22); color: var(--accent); border: 1px solid rgba(79,140,255,0.38); }
+    .ev-badge-next { background: rgba(255,159,10,0.15); color: var(--orange); border: 1px solid rgba(255,159,10,0.28); }
+    .ev-title { font-size: 19px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev-desc { font-size: 13px; color: var(--text-muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ev-source { font-size: 10px; font-weight: 600; letter-spacing: 1.8px; text-transform: uppercase; color: var(--text-muted); margin-top: 7px; }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    .tv-footer {
+      flex: 0 0 40px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 52px;
+      background: var(--bg-header);
+      border-top: 1px solid var(--border);
+    }
+    .tv-status { font-size: 13px; display: flex; align-items: center; gap: 5px; }
+    .status-ok   { color: var(--green); }
+    .status-warn { color: var(--orange); }
+    .status-err  { color: var(--red); }
+    .tv-last-updated { font-size: 12px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+
+  <!-- Pairing screen: present so JS doesn't error, but permanently hidden via CSS -->
+  <div id="screen-pair" class="screen"></div>
+
+  <!-- Dashboard screen: shown immediately (no pairing flow for kiosk) -->
+  <div id="screen-dashboard" class="screen">
+
+    <header class="tv-header">
+      <div class="tv-logo">SherryJo</div>
+      <div id="tv-date-header" class="tv-date-header"></div>
+      <div class="tv-header-right">
+        <div id="tv-clock" class="tv-clock"></div>
+        <!-- Unpair button hidden in kiosk mode via CSS -->
+        <button id="disconnect-btn" class="tv-unpair-btn" type="button">Unpair</button>
+      </div>
+    </header>
+
+    <main id="tv-main" class="tv-main"></main>
+
+    <footer class="tv-footer">
+      <div id="tv-status" class="tv-status"></div>
+      <div id="tv-last-updated" class="tv-last-updated"></div>
+    </footer>
+
+  </div>
+
+  <!--
+    Inject the kiosk token as a global before tv_dashboard.js loads.
+    The JS reads window.KIOSK_TOKEN first, skipping the pairing screen entirely.
+  -->
+  <script>window.KIOSK_TOKEN = "{{ kiosk_token }}";</script>
+  <script type="module" src="/static/tv_dashboard.js"></script>
+</body>
+</html>

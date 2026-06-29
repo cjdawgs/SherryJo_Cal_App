@@ -154,3 +154,68 @@ if (tvDialog) {
     clearCountdown();
   });
 }
+
+// ─────────────────────────────────────────────────
+// KIOSK URL FLOW
+// ─────────────────────────────────────────────────
+
+const kioskDialog      = document.getElementById("kioskUrlDialog");
+const kioskUrlDisplay  = document.getElementById("kioskUrlDisplay");
+const kioskUrlStatus   = document.getElementById("kioskUrlStatus");
+const generateKioskBtn = document.getElementById("generateKioskUrlBtn");
+const closeKioskBtn    = document.getElementById("closeKioskDialog");
+const copyKioskBtn     = document.getElementById("copyKioskUrlBtn");
+const regenKioskBtn    = document.getElementById("regenerateKioskBtn");
+
+function setKioskStatus(msg, isError = false) {
+  if (!kioskUrlStatus) return;
+  kioskUrlStatus.textContent = msg || "";
+  kioskUrlStatus.style.color = isError ? "#ff453a" : "#34c759";
+}
+
+async function generateKioskUrl() {
+  if (!kioskUrlDisplay) return;
+  kioskUrlDisplay.value = "Generating…";
+  setKioskStatus("");
+  if (regenKioskBtn) regenKioskBtn.disabled = true;
+
+  try {
+    const data = await apiRequest("POST", "/tv/generate-kiosk-token");
+    if (!data || !data.kiosk_url) throw new Error("No URL returned");
+    kioskUrlDisplay.value = data.kiosk_url;
+    setKioskStatus("✓ URL ready — paste into Kitcast as a single Web Page slide.");
+  } catch (err) {
+    kioskUrlDisplay.value = "";
+    setKioskStatus(`Error: ${err.message || "Unknown error"}`, true);
+  } finally {
+    if (regenKioskBtn) regenKioskBtn.disabled = false;
+  }
+}
+
+if (generateKioskBtn) {
+  generateKioskBtn.addEventListener("click", () => {
+    kioskDialog?.showModal();
+    generateKioskUrl();
+  });
+}
+
+if (closeKioskBtn) {
+  closeKioskBtn.addEventListener("click", () => kioskDialog?.close());
+}
+
+if (copyKioskBtn) {
+  copyKioskBtn.addEventListener("click", async () => {
+    const url = kioskUrlDisplay?.value;
+    if (!url || url === "Generating…") return;
+    try {
+      await navigator.clipboard.writeText(url);
+      setKioskStatus("✓ Copied to clipboard!");
+    } catch {
+      setKioskStatus("Select the URL above and copy manually.", true);
+    }
+  });
+}
+
+if (regenKioskBtn) {
+  regenKioskBtn.addEventListener("click", generateKioskUrl);
+}

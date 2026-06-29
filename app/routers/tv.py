@@ -57,6 +57,68 @@ def tv_dashboard(request: Request):
 
 
 # ─────────────────────────────────────────────────
+# KIOSK PAGE (for digital signage — Kitcast, etc.)
+# ─────────────────────────────────────────────────
+
+@router.get("/kiosk", response_class=HTMLResponse, include_in_schema=False)
+def tv_kiosk(request: Request, token: str, db: Session = Depends(get_db)):
+    """
+    Digital-signage kiosk page.  The JWT is embedded in the URL query string
+    so platforms like Kitcast can display the calendar with zero user interaction.
+
+    Usage:  GET /tv/kiosk?token=<long-lived-jwt>
+
+    The token is validated here on the server; if invalid the endpoint returns 401
+    rather than serving the page (so a bad URL fails early rather than looping).
+    """
+    from app.security import decode_token
+    try:
+        payload = decode_token(token)
+        user_id = payload.get("user_id")
+        if not user_id:
+            raise ValueError("missing user_id")
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("user not found")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired kiosk token. Generate a new one from Admin.")
+
+    return _templates.TemplateResponse(request, "tv_kiosk.html", {
+        "request":     request,
+        "kiosk_token": token,
+    })
+
+
+@router.post("/generate-kiosk-token")
+def generate_kiosk_token(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate a 1-year JWT for use in a digital-signage kiosk URL.
+
+    Returns the token AND the full kiosk URL so the admin can paste it
+    directly into Kitcast / any signage platform.
+    """
+    logger.info("TV_KIOSK_TOKEN_GENERATED user_id=%s", current_user.id)
+
+    # 1 year = 525 960 minutes
+    token = create_token(current_user.id, minutes=525_960)
+
+    # Build the full URL from the incoming request so it works on
+    # localhost, Render, and any custom domain without hard-coding.
+    base = str(request.base_url).rstrip("/")
+    kiosk_url = f"{base}/tv/kiosk?token={token}"
+
+    return {
+        "token":     token,
+        "kiosk_url": kiosk_url,
+        "expires_in": "1 year",
+        "note": "Paste kiosk_url into your signage platform (Kitcast, etc.). No pairing or interaction needed.",
+    }
+
+
+# ─────────────────────────────────────────────────
 # PYDANTIC SCHEMAS
 # ─────────────────────────────────────────────────
 

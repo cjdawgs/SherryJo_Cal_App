@@ -24,6 +24,13 @@ const TOKEN_KEY  = 'tv_token';
 const POLL_MS    = 3000;
 const MAX_ERRORS = 3;
 
+/**
+ * Kiosk mode: set by tv_kiosk.html via window.KIOSK_TOKEN before this module
+ * loads. When truthy the pairing screen is never shown and a 401 triggers a
+ * reconnect retry rather than a logout (kiosk tokens last 1 year).
+ */
+const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
+
 /** Default color per calendar source when event.color is null. */
 const SOURCE_COLORS = {
   google:    '#4285F4',
@@ -78,7 +85,9 @@ function init() {
   dom.disconnectBtn.addEventListener('click', handleUnpair);
   window.addEventListener('keydown', handleRemoteKeyDown);
 
-  state.token = localStorage.getItem(TOKEN_KEY);
+  // Kiosk token (injected via window.KIOSK_TOKEN in tv_kiosk.html) takes
+  // priority; fall back to the interactive-pairing token in localStorage.
+  state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
 
   if (state.token) {
     transitionTo('dashboard');
@@ -190,6 +199,14 @@ async function fetchAndRender() {
     });
 
     if (res.status === 401) {
+      if (IS_KIOSK) {
+        // Kiosk tokens last 1 year. A 401 most likely means the server
+        // restarted. Stay on screen and keep retrying — never redirect.
+        state.errorCount++;
+        state.connection = 'reconnecting';
+        renderStatus();
+        return;
+      }
       handleTokenExpired();
       return;
     }
