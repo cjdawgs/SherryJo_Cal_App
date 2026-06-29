@@ -103,3 +103,19 @@ Recommended presets:
 	- `DISABLE_SQLITE_FALLBACK=1`
 
 This ensures staging/prod never silently run against SQLite when Postgres is unreachable.
+
+## VS Code Run Profiles (Explicit DB Mode)
+
+Use Run and Debug to choose DB mode every time you launch locally.
+
+- Profile: SherryJo: postgres-strict
+	- Uses env file values for DATABASE_URL
+	- Forces Postgres: REQUIRE_DB_KIND=postgres
+	- Disables SQLite fallback: DISABLE_SQLITE_FALLBACK=1
+
+- Profile: SherryJo: sqlite-local
+	- Forces local SQLite: DATABASE_URL=sqlite:///./app.db
+	- Requires SQLite: REQUIRE_DB_KIND=sqlite
+	- Keeps fallback allowed: DISABLE_SQLITE_FALLBACK=0
+
+Launch profiles are defined in .vscode/launch.json.

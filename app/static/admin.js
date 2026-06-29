@@ -8,6 +8,10 @@ const state = {
   editing: null,
   overview: null,
   tableQuery: null,
+  purgeMeta: {
+    users: {},
+    providers: {},
+  },
 };
 
 const el = {
@@ -221,6 +225,158 @@ async function loadData() {
   }
 
   setStatus(`Loaded ${state.filtered.length} ${state.entity}.`);
+  primePurgeMetadata();
+}
+
+function totalRelatedCount(entity, related) {
+  const data = related || {};
+  if (entity === "users") {
+    return Number(data.accounts || 0)
+      + Number(data.events || 0)
+      + Number(data.tasks || 0)
+      + Number(data.sticky_notes || 0)
+      + Number(data.notes || 0);
+  }
+  return Number(data.events || 0) + Number(data.notes || 0);
+}
+
+function normalizeRelatedCounts(entity, related) {
+  const data = related || {};
+  if (entity === "users") {
+    return {
+      accounts: Number(data.accounts || 0),
+      events: Number(data.events || 0),
+      notes: Number(data.notes || 0),
+      sticky_notes: Number(data.sticky_notes || 0),
+      tasks: Number(data.tasks || 0),
+    };
+  }
+
+  return {
+    events: Number(data.events || 0),
+    notes: Number(data.notes || 0),
+  };
+}
+
+function formatPurgeTitle(entity, counts, total) {
+  const parts = [];
+  if (entity === "users") {
+    parts.push(`events: ${counts.events}`);
+    parts.push(`notes: ${counts.notes}`);
+    parts.push(`sticky: ${counts.sticky_notes}`);
+    parts.push(`tasks: ${counts.tasks}`);
+    parts.push(`accounts: ${counts.accounts}`);
+  } else {
+    parts.push(`events: ${counts.events}`);
+    parts.push(`notes: ${counts.notes}`);
+  }
+
+  return `Calendar records found: ${total} (${parts.join(", ")})`;
+}
+
+function buildPurgeLabelHtml(entity, counts, total) {
+  if (total <= 0) {
+    return `<span class="purge-label-text">No Calendar Data</span>`;
+  }
+
+  const badges = [];
+  if (counts.events > 0) badges.push(`<span class="purge-badge">E ${counts.events}</span>`);
+  if (counts.notes > 0) badges.push(`<span class="purge-badge">N ${counts.notes}</span>`);
+  if (entity === "users" && counts.sticky_notes > 0) badges.push(`<span class="purge-badge">S ${counts.sticky_notes}</span>`);
+  if (entity === "users" && counts.tasks > 0) badges.push(`<span class="purge-badge">T ${counts.tasks}</span>`);
+  if (entity === "users" && counts.accounts > 0) badges.push(`<span class="purge-badge">A ${counts.accounts}</span>`);
+
+  return [
+    `<span class="purge-label-text">Purge Data</span>`,
+    `<span class="purge-badges">${badges.join("")}</span>`,
+  ].join("");
+}
+
+async function primePurgeMetadata() {
+  const entity = state.entity;
+  const cache = state.purgeMeta[entity] || {};
+  state.purgeMeta[entity] = cache;
+
+  const pending = [];
+  for (const item of state.items) {
+    const id = Number(item.id);
+    if (!Number.isFinite(id)) continue;
+    if (cache[id] !== undefined) continue;
+    cache[id] = { loading: true, count: null };
+    pending.push(id);
+  }
+
+  if (!pending.length) {
+    return;
+  }
+
+  applySearch();
+
+  await Promise.all(pending.map(async (id) => {
+    try {
+      const endpoint = entity === "users"
+        ? `/admin/users/${id}/related-data`
+        : `/admin/providers/${id}/related-data`;
+
+      const res = await apiRequest(endpoint, { method: "GET" });
+      if (!res) {
+        cache[id] = { loading: false, count: 0 };
+        return;
+      }
+
+      const payload = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const relatedCounts = normalizeRelatedCounts(entity, payload?.related || {});
+        const total = totalRelatedCount(entity, relatedCounts);
+        cache[id] = {
+          loading: false,
+          count: total,
+          related: relatedCounts,
+        };
+      } else {
+        cache[id] = { loading: false, count: 0, related: null };
+      }
+    } catch (_err) {
+      cache[id] = { loading: false, count: 0, related: null };
+    }
+  }));
+
+  if (state.entity === entity) {
+    applySearch();
+  }
+}
+
+function getPurgeMeta(itemId) {
+  const cache = state.purgeMeta[state.entity] || {};
+  return cache[Number(itemId)] || null;
+}
+
+function setRowActionRunning(button, runningLabel) {
+  if (!button) return;
+  if (!button.dataset.baseLabel) {
+    button.dataset.baseLabel = button.textContent || "";
+  }
+  button.disabled = true;
+  button.classList.add("is-running");
+  button.classList.remove("is-done");
+  button.textContent = runningLabel;
+}
+
+function setRowActionDone(button, doneLabel) {
+  if (!button) return;
+  button.disabled = true;
+  button.classList.remove("is-running");
+  button.classList.add("is-done");
+  button.textContent = doneLabel;
+}
+
+function clearRowActionState(button) {
+  if (!button) return;
+  button.classList.remove("is-running", "is-done");
+  button.disabled = false;
+  if (button.dataset.baseLabel) {
+    button.textContent = button.dataset.baseLabel;
+  }
 }
 
 async function showRelatedData(itemId) {
@@ -253,14 +409,16 @@ async function showRelatedData(itemId) {
   setStatus(`Loaded related data for ${state.entity.slice(0, -1)} ${itemId}.`);
 }
 
-async function purgeRelatedData(itemId) {
+async function purgeRelatedData(itemId, sourceButton = null) {
   console.debug("[admin] purge-related clicked", { entity: state.entity, itemId });
-  const kind = state.entity === "users" ? "user" : "provider account";
-  const ok = window.confirm(`Purge Events/Notes/Tasks/Sticky records related to this ${kind}? This does not delete the ${kind} record.`);
+  const kind = state.entity === "users" ? "login account" : "provider account";
+  const ok = window.confirm(`Delete calendar data (events, notes, tasks, sticky notes) for this ${kind}?\n\nThis does NOT delete the ${kind} itself.`);
   if (!ok) {
     setStatus("Purge canceled.");
     return;
   }
+
+  setRowActionRunning(sourceButton, "Deleting Calendar Data…");
 
   const endpoint = state.entity === "users"
     ? `/admin/users/${itemId}/purge-related`
@@ -269,6 +427,7 @@ async function purgeRelatedData(itemId) {
   const res = await apiRequest(endpoint, { method: "POST" });
   if (!res) {
     setStatus("Purge request failed", true);
+    clearRowActionState(sourceButton);
     return;
   }
 
@@ -286,16 +445,25 @@ async function purgeRelatedData(itemId) {
   }
 
   if (handleAdminForbidden(res, data)) {
+    clearRowActionState(sourceButton);
     return;
   }
 
   if (!res.ok) {
+    if (res.status === 404) {
+      setStatus(`${kind} ${itemId} was not found; treating as already purged.`);
+      setRowActionDone(sourceButton, "Already Clear");
+      await loadData();
+      return;
+    }
     const detail = String(data?.detail || "Purge failed").slice(0, 300);
     setStatus(detail, true);
+    clearRowActionState(sourceButton);
     return;
   }
 
-  setStatus(`Purged related data for ${kind} ${itemId}.`);
+  setRowActionDone(sourceButton, "Calendar Data Cleared");
+  setStatus(`Calendar data deleted for ${kind} ${itemId}.`);
   await loadData();
 }
 
@@ -600,14 +768,32 @@ function exportCurrentTableQueryCsv() {
 
 function renderRowActions(item) {
   const id = item.id;
+  const purgeMeta = getPurgeMeta(id);
+  const purgeLoading = Boolean(purgeMeta?.loading);
+  const purgeCount = Number.isFinite(Number(purgeMeta?.count)) ? Number(purgeMeta?.count) : null;
+  const purgeRelated = purgeMeta?.related || normalizeRelatedCounts(state.entity, {});
+  const purgeDisabled = purgeLoading || (purgeCount !== null && purgeCount <= 0);
+
+  const purgeLabelHtml = purgeLoading
+    ? "Checking Calendar Data…"
+    : buildPurgeLabelHtml(state.entity, purgeRelated, Number(purgeCount || 0));
+
+  const purgeTitle = purgeCount !== null && purgeCount >= 0
+    ? formatPurgeTitle(state.entity, purgeRelated, purgeCount)
+    : "Checking for related calendar records";
+
+  const purgeClasses = ["ghost-btn", "btn-purge-related"];
+  if (purgeDisabled) purgeClasses.push("btn-muted");
+
+  const deleteLabel = state.entity === "users" ? "Delete Login Account" : "Delete Provider Account";
 
   if (state.entity === "users") {
     return [
       `<button data-action="edit" data-id="${id}" type="button">Edit</button>`,
       `<button data-action="related" data-id="${id}" type="button">Related</button>`,
-      `<button data-action="purge-related" data-id="${id}" class="ghost-btn" type="button">Purge Related</button>`,
+      `<button data-action="purge-related" data-id="${id}" class="${purgeClasses.join(" ")}" type="button" title="${escapeHtml(purgeTitle)}" ${purgeDisabled ? "disabled" : ""}>${purgeLabelHtml}</button>`,
       `<button data-action="reset" data-id="${id}" type="button">Reset Password</button>`,
-      `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete Account</button>`,
+      `<button data-action="delete" data-id="${id}" class="btn-danger btn-delete-login" type="button">${deleteLabel}</button>`,
     ].join("");
   }
 
@@ -616,9 +802,9 @@ function renderRowActions(item) {
   return [
     `<button data-action="edit" data-id="${id}" type="button">Edit</button>`,
     `<button data-action="related" data-id="${id}" type="button">Related</button>`,
-    `<button data-action="purge-related" data-id="${id}" class="ghost-btn" type="button">Purge Related</button>`,
+    `<button data-action="purge-related" data-id="${id}" class="${purgeClasses.join(" ")}" type="button" title="${escapeHtml(purgeTitle)}" ${purgeDisabled ? "disabled" : ""}>${purgeLabelHtml}</button>`,
     `<button data-action="${statusAction}" data-id="${id}" type="button">${statusAction === "activate" ? "Activate" : "Deactivate"}</button>`,
-    `<button data-action="delete" data-id="${id}" class="btn-danger" type="button">Delete Account</button>`,
+    `<button data-action="delete" data-id="${id}" class="btn-danger btn-delete-login" type="button">${deleteLabel}</button>`,
   ].join("");
 }
 
@@ -781,6 +967,7 @@ async function saveEntity(url, method, payload) {
 }
 
 async function onRowActionClick(event) {
+  const sourceButton = event.currentTarget;
   const action = event.currentTarget.getAttribute("data-action");
   const id = Number(event.currentTarget.getAttribute("data-id"));
   const item = findItem(id);
@@ -798,36 +985,48 @@ async function onRowActionClick(event) {
   }
 
   if (action === "purge-related") {
-    await purgeRelatedData(id);
+    await purgeRelatedData(id, sourceButton);
     return;
   }
 
   if (action === "delete") {
     console.debug("[admin] row-delete clicked", { entity: state.entity, id });
-    const ok = window.confirm(`Delete this ${state.entity === "users" ? "user" : "provider"} account? This does not purge related records.`);
+    const ok = window.confirm(`Delete this ${state.entity === "users" ? "login" : "provider"} account record?\n\nCalendar data is NOT deleted by this button. Use \"Delete Calendar Data\" first if needed.`);
     if (!ok) {
       setStatus("Delete canceled.");
       return;
     }
 
+    setRowActionRunning(sourceButton, "Deleting Account…");
+
     const endpoint = state.entity === "users" ? `/admin/users/${id}` : `/admin/providers/${id}`;
     const res = await apiRequest(endpoint, { method: "DELETE" });
     if (!res) {
       setStatus("Delete request failed", true);
+      clearRowActionState(sourceButton);
       return;
     }
 
     const data = await res.json();
     if (handleAdminForbidden(res, data)) {
+      clearRowActionState(sourceButton);
       return;
     }
 
     if (!res.ok) {
+      if (res.status === 404) {
+        setStatus("Account was already deleted.");
+        setRowActionDone(sourceButton, "Already Deleted");
+        await loadData();
+        return;
+      }
       setStatus(data.detail || "Delete failed", true);
+      clearRowActionState(sourceButton);
       return;
     }
 
-    setStatus("Account deleted.");
+    setRowActionDone(sourceButton, "Account Deleted");
+    setStatus("Login account deleted.");
     await loadData();
     return;
   }

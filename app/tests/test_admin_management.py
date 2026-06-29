@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.models import DateStickyNote, Event, Note, OAuthAccount, Task
+from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, User
 
 
 def _register_user(client, role="staff", password="pass12345"):
@@ -413,3 +413,38 @@ def test_admin_orphan_scan_and_delete(client, db):
     del_res = client.post("/admin/maintenance/orphans/delete", headers=headers, json={})
     assert del_res.status_code == 200
     assert del_res.json()["deleted"]["tasks"] >= 1
+
+
+def test_admin_user_related_data_includes_legacy_email_linked_events(client, db):
+    headers = _admin_headers(client)
+    target = _register_user(client, role="staff")
+
+    target_user = db.query(User).filter(User.id == target["id"]).first()
+    assert target_user is not None
+    target_user.google_email = "legacy.linked@gmail.com"
+
+    holder = _register_user(client, role="staff")
+    linked_event = Event(
+        title="Legacy Linked Event",
+        description="legacy",
+        start_time=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 6, 27, 13, 0, tzinfo=timezone.utc),
+        owner_id=holder["id"],
+        source="google",
+        account_email="legacy.linked@gmail.com",
+        sticky_notes=[{"content": "legacy sticky", "color": "#ffee88"}],
+    )
+    db.add(linked_event)
+    db.commit()
+    db.refresh(linked_event)
+
+    db.add(Note(content="legacy note", event_id=linked_event.id))
+    db.commit()
+
+    related_res = client.get(f"/admin/users/{target['id']}/related-data", headers=headers)
+    assert related_res.status_code == 200
+    related = related_res.json()["related"]
+
+    assert related["events"] >= 1
+    assert related["notes"] >= 1
+    assert related["sticky_notes"] >= 1

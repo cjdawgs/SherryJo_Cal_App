@@ -8,6 +8,9 @@ $LogFile = Join-Path $RepoPath "commit_log.txt"
 
 Set-Location $RepoPath
 
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
 
 # =====================================================
 # LOGGING FUNCTIONS
@@ -85,7 +88,7 @@ if ($hasUnmerged) {
     exit 1
 }
 
-$isRebasing = Test-Path ".git\rebase-merge" -or Test-Path ".git\rebase-apply"
+$isRebasing = (Test-Path ".git\rebase-merge") -or (Test-Path ".git\rebase-apply")
 if ($isRebasing) {
     Write-Line "ERROR: Rebase appears to still be in progress. Run git rebase --continue (or --abort) first."
     git status | ForEach-Object { Write-Line $_ }

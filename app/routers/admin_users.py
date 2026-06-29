@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect, or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -52,6 +52,46 @@ def serialize_user(user: User) -> dict:
     }
 
 
+def _collect_user_account_emails(user: User, account_rows: list[OAuthAccount]) -> set[str]:
+    emails = {
+        str(user.email or "").lower().strip(),
+        str(getattr(user, "google_email", "") or "").lower().strip(),
+        str(getattr(user, "ms_email", "") or "").lower().strip(),
+    }
+
+    for row in account_rows:
+        emails.add(str(row.account_email or "").lower().strip())
+
+    return {email for email in emails if email}
+
+
+def _build_user_event_filters(user_id: int, account_emails: set[str]):
+    filters = [Event.owner_id == user_id]
+    if account_emails:
+        filters.append(func.lower(Event.account_email).in_(list(account_emails)))
+    return filters
+
+
+def _event_has_sticky_payload(sticky_note, sticky_notes) -> bool:
+    if isinstance(sticky_note, dict):
+        if str(sticky_note.get("content") or "").strip():
+            return True
+    elif sticky_note not in (None, "", {}, []):
+        return True
+
+    if isinstance(sticky_notes, list):
+        for item in sticky_notes:
+            if isinstance(item, dict):
+                if str(item.get("content") or "").strip():
+                    return True
+            elif item not in (None, ""):
+                return True
+    elif sticky_notes not in (None, "", {}, []):
+        return True
+
+    return False
+
+
 def _delete_user_related_records(db: Session, user: User) -> dict:
     bind = db.get_bind()
     existing_tables = set(inspect(bind).get_table_names()) if bind is not None else set()
@@ -60,26 +100,23 @@ def _delete_user_related_records(db: Session, user: User) -> dict:
     if "oauth_accounts" in existing_tables:
         account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
 
-    account_emails = {str(row.account_email or "").lower().strip() for row in account_rows if row.account_email}
-
-    event_ids = []
-    if "events" in existing_tables:
-        event_query = db.query(Event).filter(Event.owner_id == user.id)
-        if account_emails:
-            event_query = event_query.union(
-                db.query(Event).filter(Event.account_email.in_(list(account_emails)))
-            )
-
-        event_rows = event_query.all()
-        event_ids = [row.id for row in event_rows]
+    account_emails = _collect_user_account_emails(user, account_rows)
 
     notes_deleted = 0
-    if event_ids and "notes" in existing_tables:
-        notes_deleted = db.query(Note).filter(Note.event_id.in_(event_ids)).delete(synchronize_session=False)
-
     events_deleted = 0
-    if event_ids and "events" in existing_tables:
-        events_deleted = db.query(Event).filter(Event.id.in_(event_ids)).delete(synchronize_session=False)
+    if "events" in existing_tables:
+        event_filters = _build_user_event_filters(user.id, account_emails)
+
+        event_id_subquery = db.query(Event.id).filter(or_(*event_filters)).subquery()
+
+        if "notes" in existing_tables:
+            notes_deleted = db.query(Note).filter(
+                Note.event_id.in_(db.query(event_id_subquery.c.id))
+            ).delete(synchronize_session=False)
+
+        events_deleted = db.query(Event).filter(
+            Event.id.in_(db.query(event_id_subquery.c.id))
+        ).delete(synchronize_session=False)
 
     tasks_deleted = 0
     if "tasks" in existing_tables:
@@ -238,14 +275,29 @@ def admin_get_user_related_data(
         raise HTTPException(status_code=404, detail="User not found")
 
     account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
-    account_emails = [str(row.account_email or "").lower().strip() for row in account_rows if row.account_email]
+    account_emails = _collect_user_account_emails(user, account_rows)
+    event_filters = _build_user_event_filters(user.id, account_emails)
 
-    event_count = db.query(Event).filter(Event.owner_id == user.id).count()
-    if account_emails:
-        event_count += db.query(Event).filter(
-            Event.owner_id != user.id,
-            Event.account_email.in_(account_emails),
-        ).count()
+    matched_events = db.query(Event.id, Event.sticky_note, Event.sticky_notes).filter(or_(*event_filters)).all()
+    matched_event_ids = [row.id for row in matched_events]
+    event_count = len(matched_event_ids)
+
+    notes_count = 0
+    if matched_event_ids:
+        notes_count = int(
+            db.query(Note)
+            .filter(Note.event_id.in_(matched_event_ids))
+            .count()
+        )
+
+    event_sticky_count = sum(
+        1
+        for row in matched_events
+        if _event_has_sticky_payload(row.sticky_note, row.sticky_notes)
+    )
+
+    date_sticky_count = int(db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).count())
+    sticky_total = date_sticky_count + int(event_sticky_count)
 
     return {
         "user": serialize_user(user),
@@ -253,13 +305,10 @@ def admin_get_user_related_data(
             "accounts": len(account_rows),
             "events": int(event_count),
             "tasks": int(db.query(Task).filter(Task.owner_id == user.id).count()),
-            "sticky_notes": int(db.query(DateStickyNote).filter(DateStickyNote.owner_id == user.id).count()),
-            "notes": int(
-                db.query(Note)
-                .join(Event, Note.event_id == Event.id)
-                .filter(Event.owner_id == user.id)
-                .count()
-            ),
+            "sticky_notes": int(sticky_total),
+            "date_sticky_notes": int(date_sticky_count),
+            "event_sticky_notes": int(event_sticky_count),
+            "notes": int(notes_count),
         },
     }
 
