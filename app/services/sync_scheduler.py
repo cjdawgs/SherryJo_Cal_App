@@ -49,7 +49,11 @@ def _latest_account_sync_marker(account):
         getattr(account, "last_sync_success", None),
         getattr(account, "last_manual_refresh_at", None),
     ]
-    return max((value for value in candidates if value is not None), default=None)
+    best = max((value for value in candidates if value is not None), default=None)
+    if best is not None and getattr(best, "tzinfo", None) is None:
+        # DB returns naive datetimes stored in UTC — make them aware for comparison
+        best = best.replace(tzinfo=timezone.utc)
+    return best
 
 
 def _is_user_sync_due(accounts, now):
