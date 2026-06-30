@@ -78,8 +78,15 @@ async function request(url, options = {}) {
     window.location.href = "/login";
     return null;
   }
+  
+  const json = await response.json().catch(() => ({}));
 
-  return response;
+  return {
+    ...json,
+    json: async () => json
+  };
+
+  //return response;
 }
 
 const api = {

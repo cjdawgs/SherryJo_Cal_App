@@ -180,7 +180,7 @@ async function generateKioskUrl() {
   if (regenKioskBtn) regenKioskBtn.disabled = true;
 
   try {
-    const data = await apiRequest("POST", "/tv/generate-kiosk-token");
+    const data = await apiRequest("/tv/generate-kiosk-token", { method: "POST" });
     if (!data || !data.kiosk_url) throw new Error("No URL returned");
     kioskUrlDisplay.value = data.kiosk_url;
     setKioskStatus("✓ URL ready — paste into Kitcast as a single Web Page slide.");
