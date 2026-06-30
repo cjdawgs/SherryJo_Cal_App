@@ -79,12 +79,25 @@ async function request(url, options = {}) {
     return null;
   }
   
-  const json = await response.json().catch(() => ({}));
+  // ✅ Unified safe return (compatibility layer)
+let json = {};
+try {
+  json = await response.json();
+} catch {
+  json = {};
+}
 
-  return {
-    ...json,
-    json: async () => json
-  };
+return {
+  ...json,
+
+  // ✅ old-style compatibility
+  json: async () => json,
+  text: async () => JSON.stringify(json),
+
+  // ✅ preserve metadata if anything relies on it
+  ok: response.ok,
+  status: response.status,
+};
 
   //return response;
 }
