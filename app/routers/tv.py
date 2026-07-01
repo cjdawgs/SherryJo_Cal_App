@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -228,6 +229,17 @@ def _parse_iso_datetime_or_none(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _coerce_datetime_utc(value) -> Optional[datetime]:
+    """Best-effort conversion into aware UTC datetimes for legacy DB rows."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        return _parse_iso_datetime_or_none(value)
+    return None
+
+
 def _parse_iso_date_or_none(value: Optional[str]):
     if not value:
         return None
@@ -272,12 +284,9 @@ def _group_events_by_date(events: list[Event]) -> list[dict]:
     buckets: dict[str, list] = defaultdict(list)
 
     for event in events:
-        if not event.start_time:
+        start = _coerce_datetime_utc(getattr(event, "start_time", None))
+        if not start:
             continue
-        # Normalise to aware datetime
-        start = event.start_time
-        if hasattr(start, "tzinfo") and start.tzinfo is None:
-            start = start.replace(tzinfo=timezone.utc)
 
         date_key = start.date().isoformat()
         buckets[date_key].append(_serialize_event_for_tv(event))
@@ -286,6 +295,17 @@ def _group_events_by_date(events: list[Event]) -> list[dict]:
         {"date": date_key, "events": buckets[date_key]}
         for date_key in sorted(buckets.keys())
     ]
+
+
+def _events_in_window(events: list[Event], start: datetime, end: datetime) -> list[Event]:
+    """Fallback in-memory filtering when DB datetime comparisons fail."""
+    in_range: list[tuple[datetime, Event]] = []
+    for event in events:
+        event_start = _coerce_datetime_utc(getattr(event, "start_time", None))
+        if event_start and start <= event_start <= end:
+            in_range.append((event_start, event))
+    in_range.sort(key=lambda pair: pair[0])
+    return [pair[1] for pair in in_range]
 
 
 # ─────────────────────────────────────────────────
@@ -441,28 +461,48 @@ def get_tv_events(
     window_start = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
     window_end = datetime.combine(window_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
-    events = (
-        db.query(Event)
-        .filter(
-            Event.owner_id == current_user.id,
-            Event.start_time >= window_start,
-            Event.start_time <= window_end,
+    try:
+        events = (
+            db.query(Event)
+            .filter(
+                Event.owner_id == current_user.id,
+                Event.start_time >= window_start,
+                Event.start_time <= window_end,
+            )
+            .order_by(Event.start_time)
+            .all()
         )
-        .order_by(Event.start_time)
-        .all()
-    )
+    except SQLAlchemyError:
+        logger.exception(
+            "TV_EVENTS_FETCH_DB_WINDOW_QUERY_FAILED user_id=%s; falling back to Python filtering",
+            current_user.id,
+        )
+        all_events = db.query(Event).filter(Event.owner_id == current_user.id).all()
+        events = _events_in_window(all_events, window_start, window_end)
 
     by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
 
-    sticky_rows = (
-        db.query(DateStickyNote)
-        .filter(
-            DateStickyNote.owner_id == current_user.id,
-            DateStickyNote.date >= window_start_date.isoformat(),
-            DateStickyNote.date <= window_end_date.isoformat(),
+    start_key = window_start_date.isoformat()
+    end_key = window_end_date.isoformat()
+    try:
+        sticky_rows = (
+            db.query(DateStickyNote)
+            .filter(
+                DateStickyNote.owner_id == current_user.id,
+                DateStickyNote.date >= start_key,
+                DateStickyNote.date <= end_key,
+            )
+            .all()
         )
-        .all()
-    )
+    except SQLAlchemyError:
+        logger.exception(
+            "TV_EVENTS_FETCH_STICKY_QUERY_FAILED user_id=%s; falling back to Python filtering",
+            current_user.id,
+        )
+        sticky_rows = [
+            row for row in db.query(DateStickyNote).filter(DateStickyNote.owner_id == current_user.id).all()
+            if isinstance(getattr(row, "date", None), str) and start_key <= row.date <= end_key
+        ]
     sticky_map = {
         row.date: _normalize_sticky_notes(getattr(row, "sticky_notes", None))
         for row in sticky_rows

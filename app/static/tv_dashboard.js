@@ -13,6 +13,8 @@ const state = {
   focusedEventId: null,
   days: [],
   dayMap: {},
+  eventsRequestInFlight: false,
+  eventsRefreshQueued: false,
   pollHandle: null,
   clockHandle: null,
   longPressTimer: null,
@@ -169,8 +171,6 @@ function init() {
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
-  document.addEventListener('keydown', onKeyDown);
-  document.addEventListener('keyup', onKeyUp);
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
   if (state.token) {
@@ -271,16 +271,35 @@ async function fetchTvState() {
 }
 
 async function refreshEvents() {
+  if (state.eventsRequestInFlight) {
+    state.eventsRefreshQueued = true;
+    return;
+  }
+
+  state.eventsRequestInFlight = true;
   const res = await authFetch('/tv/events');
-  if (!res) return;
-  const data = await res.json().catch(() => ({}));
-  if (data.selectedDate) state.selectedDate = data.selectedDate;
-  if (data.currentView) state.currentView = data.currentView;
-  state.days = data.days || [];
-  state.dayMap = {};
-  for (const day of state.days) state.dayMap[day.date] = day;
-  syncFocusAfterData();
-  render();
+  try {
+    if (!res) return;
+    if (!res.ok) {
+      renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
+      return;
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (data.selectedDate) state.selectedDate = data.selectedDate;
+    if (data.currentView) state.currentView = data.currentView;
+    state.days = data.days || [];
+    state.dayMap = {};
+    for (const day of state.days) state.dayMap[day.date] = day;
+    syncFocusAfterData();
+    render();
+  } finally {
+    state.eventsRequestInFlight = false;
+    if (state.eventsRefreshQueued) {
+      state.eventsRefreshQueued = false;
+      refreshEvents();
+    }
+  }
 }
 
 async function authFetch(url, options = {}) {
@@ -313,6 +332,10 @@ async function patchTvState(patch) {
 
 function onKeyDown(e) {
   if (!state.token || !dom.screenDash || dom.screenDash.classList.contains('hidden')) return;
+
+  if (e.repeat && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') {
+    return;
+  }
 
   const key = normalizeKey(e);
   logRemoteKey('down', e, key);
@@ -455,17 +478,23 @@ function normalizeKey(e) {
   const code = e.code || '';
   const kc = typeof e.keyCode === 'number' ? e.keyCode : -1;
 
-  if (key === 'ArrowLeft' || code === 'ArrowLeft' || kc === 37 || key === 'Left') return 'ArrowLeft';
-  if (key === 'ArrowRight' || code === 'ArrowRight' || kc === 39 || key === 'Right') return 'ArrowRight';
-  if (key === 'ArrowUp' || code === 'ArrowUp' || kc === 38 || key === 'Up') return 'ArrowUp';
-  if (key === 'ArrowDown' || code === 'ArrowDown' || kc === 40 || key === 'Down') return 'ArrowDown';
+  if (key === 'ArrowLeft' || code === 'ArrowLeft' || kc === 37 || kc === 21 || key === 'Left') return 'ArrowLeft';
+  if (key === 'ArrowRight' || code === 'ArrowRight' || kc === 39 || kc === 22 || key === 'Right') return 'ArrowRight';
+  if (key === 'ArrowUp' || code === 'ArrowUp' || kc === 38 || kc === 19 || key === 'Up') return 'ArrowUp';
+  if (key === 'ArrowDown' || code === 'ArrowDown' || kc === 40 || kc === 20 || key === 'Down') return 'ArrowDown';
   if (key === 'Enter' || code === 'Enter' || kc === 13 || kc === 23 || key === 'Select') return 'Enter';
   if (key === 'Escape' || kc === 27 || kc === 461) return 'Escape';
   if (key === 'Backspace' || kc === 8) return 'Backspace';
   if (key === 'ContextMenu' || code === 'ContextMenu' || kc === 93 || kc === 82) return 'ContextMenu';
+  if (key === 'AudioVolumeUp' || code === 'AudioVolumeUp' || kc === 175) return 'AudioVolumeUp';
+  if (key === 'AudioVolumeDown' || code === 'AudioVolumeDown' || kc === 174) return 'AudioVolumeDown';
   if (key === 'AudioVolumeMute' || key === 'VolumeMute' || key === 'Mute' || code === 'AudioVolumeMute' || kc === 173 || kc === 181 || kc === 449) return 'AudioVolumeMute';
+  if (key === 'PageUp' || code === 'PageUp') return 'PageUp';
+  if (key === 'PageDown' || code === 'PageDown') return 'PageDown';
   if (kc === 33) return 'PageUp';
   if (kc === 34) return 'PageDown';
+  if (key === '+' || key === 'Add' || key === 'NumpadAdd' || code === 'NumpadAdd' || kc === 107) return '+';
+  if (key === '-' || key === '_' || key === 'Subtract' || key === 'NumpadSubtract' || code === 'NumpadSubtract' || kc === 109) return '-';
   if (kc === 187) return '=';
   if (kc === 189) return '-';
   return key;
@@ -514,6 +543,10 @@ function logRemoteKey(phase, e, normalizedKey) {
 
 function renderDebugOverlay() {
   if (!dom.debugList) return;
+  if (!state.debug.lines.length) {
+    dom.debugList.innerHTML = '<li class="tv-debug-row">Press arrows / select / mute here. The overlay will show raw key data.</li>';
+    return;
+  }
   dom.debugList.innerHTML = state.debug.lines
     .map(line => `<li class="tv-debug-row">${escapeHtml(line)}</li>`)
     .join('');
@@ -697,7 +730,7 @@ function setView(viewName) {
 
 function sidebarItems() {
   return [
-    { label: `Mini Calendar: ${state.selectedDate || 'n/a'}`, action: () => patchTvState({ selectedDate: state.selectedDate }).then(() => refreshEvents()) },
+    { label: `Mini Calendar: ${state.selectedDate || 'n/a'}`, action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }).then(() => refreshEvents()) },
     { label: 'View: Day', action: () => setView('day') },
     { label: 'View: Week', action: () => setView('week') },
     { label: 'View: Month', action: () => setView('month') },

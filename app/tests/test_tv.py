@@ -296,6 +296,51 @@ class TestTVEventsEndpoint:
         assert data["status"] == "ok"
         assert data["item"]["count"] == 1
 
+    def test_group_events_skips_invalid_legacy_rows(self):
+        from types import SimpleNamespace
+        from app.routers.tv import _group_events_by_date
+
+        rows = [
+            SimpleNamespace(
+                id=1,
+                title="Valid",
+                start_time="2026-10-11T09:00:00+00:00",
+                end_time="2026-10-11T10:00:00+00:00",
+                description="",
+                source="local",
+                color=None,
+            ),
+            SimpleNamespace(
+                id=2,
+                title="Bad",
+                start_time="not-a-date",
+                end_time=None,
+                description="",
+                source="local",
+                color=None,
+            ),
+        ]
+
+        grouped = _group_events_by_date(rows)
+        assert len(grouped) == 1
+        assert grouped[0]["date"] == "2026-10-11"
+        assert grouped[0]["events"][0]["id"] == 1
+
+    def test_events_in_window_handles_string_datetimes(self):
+        from types import SimpleNamespace
+        from app.routers.tv import _events_in_window
+
+        start = datetime(2026, 10, 11, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 10, 11, 23, 59, tzinfo=timezone.utc)
+        rows = [
+            SimpleNamespace(start_time="2026-10-11T09:00:00+00:00"),
+            SimpleNamespace(start_time="2026-10-12T09:00:00+00:00"),
+            SimpleNamespace(start_time="bad-date"),
+        ]
+
+        filtered = _events_in_window(rows, start, end)
+        assert len(filtered) == 1
+
 
 class TestDisplayTVEndpoint:
     def test_display_tv_requires_auth(self, client):
