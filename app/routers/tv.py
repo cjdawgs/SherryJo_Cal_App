@@ -18,6 +18,7 @@ Endpoints:
 
 import logging
 import os
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -185,20 +186,43 @@ def _serialize_event_for_tv(event: Event) -> dict:
     """Convert a DB Event row into a TV-UI-ready dict."""
     sticky_note = getattr(event, "sticky_note", None)
     sticky_notes = getattr(event, "sticky_notes", None)
+    legacy_sticky = getattr(event, "sticky", None)
+    legacy_sticky_note = getattr(event, "stickyNote", None)
     related_notes = getattr(event, "notes", None)
 
-    has_sticky_payload = bool(sticky_note)
+    has_sticky_payload = bool(sticky_note) or bool(legacy_sticky) or bool(legacy_sticky_note)
+    if isinstance(sticky_note, str):
+        txt = sticky_note.strip()
+        if txt and txt not in {"[]", "{}", "null", "None"}:
+            try:
+                has_sticky_payload = has_sticky_payload or bool(json.loads(txt))
+            except Exception:
+                has_sticky_payload = True
+
     if isinstance(sticky_notes, list):
         has_sticky_payload = has_sticky_payload or len(sticky_notes) > 0
     elif isinstance(sticky_notes, dict):
         has_sticky_payload = has_sticky_payload or bool(sticky_notes)
+    elif isinstance(sticky_notes, str):
+        txt = sticky_notes.strip()
+        if txt and txt not in {"[]", "{}", "null", "None"}:
+            try:
+                has_sticky_payload = has_sticky_payload or bool(json.loads(txt))
+            except Exception:
+                has_sticky_payload = True
 
     has_related_notes = False
     if related_notes is not None:
-        try:
-            has_related_notes = len(related_notes) > 0
-        except Exception:
-            has_related_notes = bool(related_notes)
+        if hasattr(related_notes, "count"):
+            try:
+                has_related_notes = related_notes.count() > 0
+            except Exception:
+                has_related_notes = bool(related_notes)
+        else:
+            try:
+                has_related_notes = len(related_notes) > 0
+            except Exception:
+                has_related_notes = bool(related_notes)
 
     has_sticky = has_sticky_payload or has_related_notes
 

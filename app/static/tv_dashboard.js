@@ -112,12 +112,13 @@ function ensureStyles() {
     --tv-panel: rgba(21, 31, 48, 0.66);
     --tv-panel-soft: rgba(29, 43, 66, 0.42);
   }
-  .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); gap: 12px; }
+  .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); gap: 10px; }
   .tv-shell.month { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); }
   .tv-shell.month.has-popout { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(320px, 0.86fr); align-items: start; }
-  .tv-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; width: 220px; }
+  .tv-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; width: 260px; }
+  .tv-main { padding: 14px 52px 14px; gap: 14px; }
   .tv-user-email { font-size: 11px; line-height: 1.1; color: var(--tv-text-soft); font-weight: 600; letter-spacing: 0.2px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; }
-  .tv-header-actions { display: inline-flex; gap: 6px; }
+  .tv-header-actions { display: inline-flex; gap: 5px; }
   .tv-header-btn { border: 1px solid rgba(201,219,244,0.26); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--tv-text); background: var(--tv-panel-soft); }
   .tv-header-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
   .tv-sidebar-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
@@ -131,7 +132,7 @@ function ensureStyles() {
   .tv-sidebar-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 2px 0; }
   .tv-sidebar-footer { display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
-  .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
+  .tv-account-legend { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; min-height: 30px; max-height: 64px; overflow-y: auto; padding: 4px 52px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
   .tv-account-spacer { flex: 1 1 auto; min-width: 16px; }
   .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, opacity 180ms ease; }
   .tv-account-chip.active { color: var(--tv-text); border-color: rgba(201,219,244,0.38); }
@@ -141,12 +142,12 @@ function ensureStyles() {
   .tv-account-legend.syncing .tv-account-chip { animation: tv-sync-chip-pulse 1.1s ease-in-out infinite; }
   @keyframes tv-sync-chip-pulse { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
   .tv-account-dot { width: 8px; height: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.45); flex-shrink: 0; }
-  .tv-main-grid { min-width: 0; display: grid; gap: 10px; }
+  .tv-main-grid { min-width: 0; display: grid; gap: 8px; }
   .tv-main-grid.day { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .tv-main-grid.week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .tv-main-grid.month { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(108px, 1fr)); }
   .tv-main-center { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
-  .tv-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px 0; padding: 2px 0 4px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .tv-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 3px 0; padding: 1px 0 2px; border-bottom: 1px solid rgba(255,255,255,0.06); }
   .tv-controls-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .tv-btn { border: 1px solid rgba(201,219,244,0.24); border-radius: 9px; padding: 7px 10px; font-size: 12px; color: var(--tv-text); background: var(--tv-panel-soft); min-height: 32px; transition: transform 120ms ease, border-color 200ms ease, background 200ms ease, box-shadow 200ms ease; }
   .tv-btn:hover { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.065); }
@@ -208,12 +209,16 @@ function ensureStyles() {
   .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
-  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); }
+  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
+  .tv-sticky-indicator::before { content: 'S'; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.9); line-height: 1; }
   .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
-  .tv-month-preview-list { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
-  .tv-month-preview { font-size: 10px; opacity: 0.88; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
+  .tv-month-preview-list { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+  .tv-month-preview { position: relative; border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 2px 5px; font-size: 10px; opacity: 0.96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
+  .tv-month-preview-time { opacity: 0.92; margin-right: 4px; font-weight: 700; }
+  .tv-month-preview-title { opacity: 0.96; }
+  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(145,112,18,0.9); background: rgba(255,226,106,0.98); color: rgba(48,34,0,0.9); font-size: 7px; font-weight: 800; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
@@ -323,6 +328,13 @@ function ensureHeaderActions() {
   }
   dom.headerBackBtn = document.getElementById('tv-header-back-btn');
   dom.headerExitBtn = document.getElementById('tv-header-exit-btn');
+  if (dom.disconnectBtn) {
+    dom.disconnectBtn.classList.remove('tv-unpair-btn');
+    dom.disconnectBtn.classList.add('tv-header-btn', 'warn');
+    if (actions && dom.disconnectBtn.parentElement !== actions) {
+      actions.prepend(dom.disconnectBtn);
+    }
+  }
 }
 
 function transitionTo(screen) {
@@ -552,7 +564,8 @@ async function fetchTvState() {
   }
 }
 
-async function refreshEvents(force = false) {
+async function refreshEvents(force = false, options = {}) {
+  const showSync = Boolean(options && options.showSync);
   if (document.hidden && !force) {
     return;
   }
@@ -569,18 +582,20 @@ async function refreshEvents(force = false) {
   }
 
   state.eventsRequestInFlight = true;
-  state.syncInProgress = true;
-  applySyncVisualState();
+  if (showSync) {
+    state.syncInProgress = true;
+    applySyncVisualState();
+  }
   state.lastEventsFetchAt = nowMs;
   const res = await authFetch('/tv/events');
   try {
     if (!res) {
-      setSyncStatus(false, 'Sync Failed');
+      if (showSync) setSyncStatus(false, 'Sync Failed');
       return;
     }
     if (!res.ok) {
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
-      setSyncStatus(false, 'Sync Failed');
+      if (showSync) setSyncStatus(false, 'Sync Failed');
       return;
     }
 
@@ -597,15 +612,19 @@ async function refreshEvents(force = false) {
     const totalItems = eventCount + stickyCount;
     syncFocusAfterData();
     render();
-    if (totalItems > 0) {
-      setSyncStatus(true, 'Sync Succeed');
-    } else {
-      setSyncStatus(true, 'Sync Succeed - No data in current view window');
+    if (showSync) {
+      if (totalItems > 0) {
+        setSyncStatus(true, 'Sync Succeed');
+      } else {
+        setSyncStatus(true, 'Sync Succeed - No data in current view window');
+      }
     }
   } finally {
     state.eventsRequestInFlight = false;
-    state.syncInProgress = false;
-    applySyncVisualState();
+    if (showSync) {
+      state.syncInProgress = false;
+      applySyncVisualState();
+    }
     if (state.eventsRefreshQueued) {
       const queuedForce = state.queuedRefreshForce;
       state.eventsRefreshQueued = false;
@@ -1110,23 +1129,31 @@ function shiftByView(direction) {
   if (state.currentView === 'week') delta = 7;
   if (state.currentView === 'month') {
     d.setMonth(d.getMonth() + direction);
+    state.selectedDate = toISO(d);
     state.monthDetailOpen = false;
+    render();
     patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).then(() => refreshEvents(true));
     return;
   }
   const next = offsetDate(d, direction * delta);
+  state.selectedDate = toISO(next);
+  render();
   patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
 function goToday() {
   closeEditor(true);
   state.monthDetailOpen = false;
+  state.selectedDate = toISO(new Date());
+  render();
   patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
 function setView(viewName) {
   closeEditor(true);
+  state.currentView = viewName;
   if (viewName !== 'month') state.monthDetailOpen = false;
+  render();
   patchTvState({ currentView: viewName }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
@@ -1309,7 +1336,7 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
 
 function sidebarItems() {
   const items = [
-    { key: 'sync', label: 'Sync', group: 'top', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }, { recordHistory: false }).then(() => refreshEvents(true)) },
+    { key: 'sync', label: 'Sync', group: 'top', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }, { recordHistory: false }).then(() => refreshEvents(true, { showSync: true })) },
     { key: 'undo', label: 'Undo', group: 'history', action: () => undoTvState(), disabled: !state.history.past.length },
     { key: 'redo', label: 'Redo', group: 'history', action: () => redoTvState(), disabled: !state.history.future.length },
     { key: 'create-event', label: 'Create Event', group: 'primary', action: () => createEventAndEdit() },
@@ -1682,6 +1709,8 @@ function renderMonthView() {
 function renderDayCard(day, selected, contextDay = false) {
   const date = parseLocalDate(day.date);
   const items = itemsForDate(day.date);
+  const dayEvents = day.events || [];
+  const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && ev.hasSticky));
   const now = new Date();
   const cards = items.length
     ? items.map((item, idx) => {
@@ -1698,7 +1727,7 @@ function renderDayCard(day, selected, contextDay = false) {
       }).join('')
     : `<div class="tv-empty">No events or sticky notes</div>`;
 
-  const stickyIndicator = (day.stickyNotes || []).length ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
   return `<div class="tv-day-card ${selected ? 'selected' : ''} ${contextDay ? 'context-day' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
 }
 
@@ -1709,12 +1738,18 @@ function renderMonthCell(day, idx) {
   const inMonth = date.getMonth() === anchor.getMonth();
   const selected = day.date === state.selectedDate;
   const dayEvents = filteredEventsForDay(day);
-  const previewTitles = dayEvents.slice(0, 4).map(ev => `${formatTime(ev.start)} ${ev.title || 'Untitled'}`);
-  const stickyIndicator = (day.stickyNotes || []).length ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  const hasDaySticky = Boolean((day.stickyNotes || []).length || (day.events || []).some(ev => ev && ev.hasSticky));
+  const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
   const count = dayEvents.length + (day.stickyNotes || []).length;
   const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
-  const previewHtml = previewTitles.length
-    ? `<div class="tv-month-preview-list">${previewTitles.map(title => `<div class="tv-month-preview">${escapeHtml(title)}</div>`).join('')}</div>`
+  const previewHtml = dayEvents.length
+    ? `<div class="tv-month-preview-list">${dayEvents.slice(0, 4).map(ev => {
+      const eventColor = resolveEventColor(ev);
+      const bg = softColor(eventColor, 0.2);
+      const border = softColor(eventColor, 0.52);
+      const stickyFlag = ev.hasSticky ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
+      return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
+    }).join('')}</div>`
     : '<div class="tv-month-preview">No events</div>';
   return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div>${previewHtml}</div>`;
 }
