@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from sqlalchemy import String, cast
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -308,6 +309,11 @@ def _events_in_window(events: list[Event], start: datetime, end: datetime) -> li
     return [pair[1] for pair in in_range]
 
 
+def _sticky_owner_filter(user_id: int):
+    """Handle legacy schemas where date_sticky_notes.owner_id may be text."""
+    return cast(DateStickyNote.owner_id, String) == str(user_id)
+
+
 # ─────────────────────────────────────────────────
 # PHASE 2 — PAIRING
 # ─────────────────────────────────────────────────
@@ -496,7 +502,7 @@ def get_tv_events(
             sticky_rows = (
                 db.query(DateStickyNote)
                 .filter(
-                    DateStickyNote.owner_id == current_user.id,
+                    _sticky_owner_filter(current_user.id),
                     DateStickyNote.date >= start_key,
                     DateStickyNote.date <= end_key,
                 )
@@ -509,7 +515,7 @@ def get_tv_events(
             )
             try:
                 sticky_rows = [
-                    row for row in db.query(DateStickyNote).filter(DateStickyNote.owner_id == current_user.id).all()
+                    row for row in db.query(DateStickyNote).filter(_sticky_owner_filter(current_user.id)).all()
                     if isinstance(getattr(row, "date", None), str) and start_key <= row.date <= end_key
                 ]
             except SQLAlchemyError:
@@ -652,7 +658,7 @@ def upsert_tv_date_sticky(
     row = (
         db.query(DateStickyNote)
         .filter(
-            DateStickyNote.owner_id == current_user.id,
+            _sticky_owner_filter(current_user.id),
             DateStickyNote.date == date_obj.isoformat(),
         )
         .first()
@@ -696,7 +702,7 @@ def delete_tv_date_sticky(
     row = (
         db.query(DateStickyNote)
         .filter(
-            DateStickyNote.owner_id == current_user.id,
+            _sticky_owner_filter(current_user.id),
             DateStickyNote.date == date_key,
         )
         .first()
