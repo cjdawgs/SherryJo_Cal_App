@@ -575,6 +575,23 @@ def get_tv_events(
         except SQLAlchemyError:
             logger.exception("TV_EVENTS_FETCH_ACCOUNTS_QUERY_FAILED user_id=%s; omitting account legend metadata", current_user.id)
 
+        event_count = sum(len(day.get("events", [])) for day in days)
+        sticky_count = sum(len(day.get("stickyNotes", [])) for day in days)
+        account_count = len(accounts)
+
+        logger.info(
+            "TV_EVENTS_FETCH_RESULT user_id=%s selected_date=%s view=%s range=%s..%s day_count=%s event_count=%s sticky_count=%s account_count=%s",
+            current_user.id,
+            selected_date_str,
+            current_view,
+            start_key,
+            end_key,
+            len(days),
+            event_count,
+            sticky_count,
+            account_count,
+        )
+
         return {
             "selectedDate": selected_date_str,
             "currentView": current_view,
@@ -582,6 +599,11 @@ def get_tv_events(
             "rangeEnd": window_end_date.isoformat(),
             "days": days,
             "accounts": accounts,
+            "summary": {
+                "eventCount": event_count,
+                "stickyCount": sticky_count,
+                "accountCount": account_count,
+            },
         }
     except Exception:
         logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)

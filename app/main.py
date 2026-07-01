@@ -406,6 +406,12 @@ def home(request: Request):
     )
 
 
+@app.head("/", include_in_schema=False)
+def home_head():
+    # Some platforms/browsers probe with HEAD / before GET /.
+    return Response(status_code=200)
+
+
 @app.get("/calendar-ui")
 def calendar_ui(request: Request):
     
@@ -452,6 +458,11 @@ def health_check():
         "app": "running",
         "schema_status": schema_health.get("status", "unknown")
     }
+
+
+@app.head("/health", include_in_schema=False)
+def health_check_head():
+    return Response(status_code=200)
 
 
 @app.get("/health/schema")

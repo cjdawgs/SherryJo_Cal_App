@@ -22,6 +22,7 @@ const state = {
   syncStatusTone: null,
   syncStatusUntil: 0,
   syncStatusTimer: null,
+  syncStatusMessage: '',
   pollHandle: null,
   clockHandle: null,
   longPressTimer: null,
@@ -381,13 +382,15 @@ function applySyncVisualState() {
   dom.accountLegend.classList.toggle('syncing', Boolean(state.syncInProgress));
 }
 
-function setSyncStatus(ok) {
+function setSyncStatus(ok, message) {
   state.syncStatusTone = ok ? 'ok' : 'fail';
+  state.syncStatusMessage = message || (ok ? 'Sync Succeed' : 'Sync Failed');
   state.syncStatusUntil = Date.now() + 30000;
   if (state.syncStatusTimer) clearTimeout(state.syncStatusTimer);
   state.syncStatusTimer = setTimeout(() => {
     state.syncStatusTone = null;
     state.syncStatusUntil = 0;
+    state.syncStatusMessage = '';
     renderFooterHint();
   }, 30000);
   renderFooterHint();
@@ -458,7 +461,11 @@ async function fetchTvState() {
   state.selectedDate = data.selectedDate || null;
   state.currentView = data.currentView || 'day';
   state.focusedEventId = data.focusedEventId || null;
-  if (!state.selectedDate) state.selectedDate = toISO(new Date());
+  if (!state.selectedDate) {
+    const fallbackDate = toISO(new Date());
+    const patched = await patchTvState({ selectedDate: fallbackDate });
+    state.selectedDate = (patched && patched.selectedDate) || fallbackDate;
+  }
 }
 
 async function refreshEvents(force = false) {
@@ -484,12 +491,12 @@ async function refreshEvents(force = false) {
   const res = await authFetch('/tv/events');
   try {
     if (!res) {
-      setSyncStatus(false);
+      setSyncStatus(false, 'Sync Failed');
       return;
     }
     if (!res.ok) {
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
-      setSyncStatus(false);
+      setSyncStatus(false, 'Sync Failed');
       return;
     }
 
@@ -500,9 +507,17 @@ async function refreshEvents(force = false) {
     state.serverAccounts = data.accounts || [];
     state.dayMap = {};
     for (const day of state.days) state.dayMap[day.date] = day;
+    const summary = data.summary || {};
+    const eventCount = Number(summary.eventCount || 0);
+    const stickyCount = Number(summary.stickyCount || 0);
+    const totalItems = eventCount + stickyCount;
     syncFocusAfterData();
     render();
-    setSyncStatus(true);
+    if (totalItems > 0) {
+      setSyncStatus(true, 'Sync Succeed');
+    } else {
+      setSyncStatus(true, 'Sync Succeed - No data in current view window');
+    }
   } finally {
     state.eventsRequestInFlight = false;
     state.syncInProgress = false;
@@ -1366,7 +1381,7 @@ function renderFooterHint(extra) {
   dom.statusEl.textContent = state.centerArrowMode ? 'Arrow Mode: ON' : 'Arrow Mode: OFF';
   const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
   if (hasSyncStatus) {
-    dom.lastUpdated.textContent = state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed';
+    dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
     dom.lastUpdated.classList.toggle('tv-sync-ok', state.syncStatusTone === 'ok');
     dom.lastUpdated.classList.toggle('tv-sync-fail', state.syncStatusTone === 'fail');
     return;
