@@ -18,6 +18,10 @@ const state = {
   eventsRefreshQueued: false,
   queuedRefreshForce: false,
   lastEventsFetchAt: 0,
+  syncInProgress: false,
+  syncStatusTone: null,
+  syncStatusUntil: 0,
+  syncStatusTimer: null,
   pollHandle: null,
   clockHandle: null,
   longPressTimer: null,
@@ -36,6 +40,7 @@ const state = {
     maxLines: 12,
   },
   editor: null,
+  editorDirty: false,
   focus: {
     region: 'main',
     monthIndex: 0,
@@ -101,6 +106,8 @@ function ensureStyles() {
   .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
   .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease; }
   .tv-account-chip:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.35); }
+  .tv-account-legend.syncing .tv-account-chip { animation: tv-sync-chip-pulse 1.1s ease-in-out infinite; }
+  @keyframes tv-sync-chip-pulse { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
   .tv-account-dot { width: 8px; height: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.45); flex-shrink: 0; }
   .tv-main-grid { min-width: 0; display: grid; gap: 10px; }
   .tv-main-grid.day { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -180,6 +187,8 @@ function ensureStyles() {
   .tv-field-value { font-size: 15px; font-weight: 600; margin-top: 2px; }
   .tv-empty { opacity: 0.65; font-style: italic; font-size: 13px; }
   .tv-hint-chip { font-size: 11px; opacity: 0.8; }
+  .tv-sync-ok { color: rgba(130, 191, 148, 0.88); }
+  .tv-sync-fail { color: rgba(197, 120, 120, 0.88); }
   #tv-virtual-cursor { position: fixed; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.18); background: rgba(79,140,255,0.2); pointer-events: none; z-index: 999999; transform: translate(-50%, -50%); display: none; }
   #tv-debug-overlay { position: fixed; right: 12px; bottom: 52px; width: 420px; max-height: 50vh; overflow: hidden; background: rgba(9,12,20,0.92); border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; box-shadow: 0 12px 26px rgba(0,0,0,0.45); z-index: 999998; color: #d7e6ff; display: none; }
   #tv-debug-overlay.visible { display: block; }
@@ -316,7 +325,7 @@ function init() {
   window.addEventListener('keyup', onKeyUp);
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-      refreshEvents();
+      refreshEvents(true);
     }
   });
 
@@ -367,6 +376,31 @@ function setPairError(message) {
   dom.pairError.style.display = message ? 'block' : 'none';
 }
 
+function applySyncVisualState() {
+  if (!dom.accountLegend) return;
+  dom.accountLegend.classList.toggle('syncing', Boolean(state.syncInProgress));
+}
+
+function setSyncStatus(ok) {
+  state.syncStatusTone = ok ? 'ok' : 'fail';
+  state.syncStatusUntil = Date.now() + 30000;
+  if (state.syncStatusTimer) clearTimeout(state.syncStatusTimer);
+  state.syncStatusTimer = setTimeout(() => {
+    state.syncStatusTone = null;
+    state.syncStatusUntil = 0;
+    renderFooterHint();
+  }, 30000);
+  renderFooterHint();
+}
+
+function closeEditor(force = false) {
+  if (!state.editor) return;
+  if (!force && state.editorDirty) return;
+  state.editor = null;
+  state.editorDirty = false;
+  render();
+}
+
 async function handlePair() {
   if (!dom.pairInput || !dom.pairBtn) return;
   const code = dom.pairInput.value.trim().toUpperCase();
@@ -404,6 +438,12 @@ function handleUnpair() {
   state.days = [];
   state.dayMap = {};
   state.editor = null;
+  state.editorDirty = false;
+  state.syncInProgress = false;
+  if (state.syncStatusTimer) clearTimeout(state.syncStatusTimer);
+  state.syncStatusTimer = null;
+  state.syncStatusTone = null;
+  state.syncStatusUntil = 0;
   state.serverAccounts = [];
   state.accountLegend = [];
   state.accountColorMap = {};
@@ -422,7 +462,7 @@ async function fetchTvState() {
 }
 
 async function refreshEvents(force = false) {
-  if (document.hidden) {
+  if (document.hidden && !force) {
     return;
   }
 
@@ -438,12 +478,18 @@ async function refreshEvents(force = false) {
   }
 
   state.eventsRequestInFlight = true;
+  state.syncInProgress = true;
+  applySyncVisualState();
   state.lastEventsFetchAt = nowMs;
   const res = await authFetch('/tv/events');
   try {
-    if (!res) return;
+    if (!res) {
+      setSyncStatus(false);
+      return;
+    }
     if (!res.ok) {
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
+      setSyncStatus(false);
       return;
     }
 
@@ -456,8 +502,11 @@ async function refreshEvents(force = false) {
     for (const day of state.days) state.dayMap[day.date] = day;
     syncFocusAfterData();
     render();
+    setSyncStatus(true);
   } finally {
     state.eventsRequestInFlight = false;
+    state.syncInProgress = false;
+    applySyncVisualState();
     if (state.eventsRefreshQueued) {
       const queuedForce = state.queuedRefreshForce;
       state.eventsRefreshQueued = false;
@@ -802,6 +851,7 @@ function onSecondarySelect() {
 function handleBack() {
   if (state.editor) {
     state.editor = null;
+    state.editorDirty = false;
     render();
     return;
   }
@@ -879,6 +929,7 @@ function handleMonthArrow(key) {
 }
 
 function shiftByView(direction) {
+  closeEditor(true);
   const d = parseLocalDate(state.selectedDate || toISO(new Date()));
   let delta = 1;
   if (state.currentView === 'week') delta = 7;
@@ -892,10 +943,12 @@ function shiftByView(direction) {
 }
 
 function goToday() {
+  closeEditor(true);
   patchTvState({ selectedDate: toISO(new Date()) }).then(() => refreshEvents(true));
 }
 
 function setView(viewName) {
+  closeEditor(true);
   patchTvState({ currentView: viewName }).then(() => refreshEvents(true));
 }
 
@@ -1024,6 +1077,7 @@ function sidebarItems() {
 }
 
 function runSidebarAction(index) {
+  closeEditor(true);
   const items = sidebarItems();
   if (items[index]) items[index].action();
 }
@@ -1310,6 +1364,14 @@ function renderEditor() {
 function renderFooterHint(extra) {
   if (!dom.statusEl || !dom.lastUpdated) return;
   dom.statusEl.textContent = state.centerArrowMode ? 'Arrow Mode: ON' : 'Arrow Mode: OFF';
+  const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
+  if (hasSyncStatus) {
+    dom.lastUpdated.textContent = state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed';
+    dom.lastUpdated.classList.toggle('tv-sync-ok', state.syncStatusTone === 'ok');
+    dom.lastUpdated.classList.toggle('tv-sync-fail', state.syncStatusTone === 'fail');
+    return;
+  }
+  dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
   dom.lastUpdated.textContent = extra || 'Single SELECT edit • Double SELECT context • Triple SELECT arrow mode • Long press create • +/- tab';
 }
 
@@ -1336,6 +1398,7 @@ function enterEventEditor(item, mode) {
       description: ev ? (ev.description || '') : '',
     },
   };
+  state.editorDirty = false;
   render();
 }
 
@@ -1359,6 +1422,7 @@ function enterStickyEditor(item, mode) {
       description: sticky.description || '',
     },
   };
+  state.editorDirty = false;
   render();
 }
 
@@ -1386,6 +1450,7 @@ function handleEditorKey(key) {
   }
   if (key === 'Escape' || key === 'Backspace') {
     state.editor = null;
+    state.editorDirty = false;
     render();
     return true;
   }
@@ -1397,6 +1462,12 @@ function handleMainClick(e) {
   if (!t) return;
 
   const role = t.getAttribute('data-tv-click');
+  if (state.editor && role !== 'field') {
+    const navRoles = ['control', 'sidebar', 'day', 'month-cell'];
+    closeEditor(navRoles.includes(role));
+    if (state.editor) return;
+  }
+
   if (role === 'sidebar') {
     const idx = Number(t.getAttribute('data-sidebar-index') || 0);
     state.focus.region = 'sidebar';
@@ -1501,26 +1572,31 @@ function adjustEditorValue(direction) {
     const d = parseDateTime(data[field]);
     d.setMinutes(d.getMinutes() + (15 * direction));
     data[field] = d.toISOString();
+    state.editorDirty = true;
     return;
   }
 
   if (field === 'title') {
     data.title = cycleValue(TITLE_PRESETS, data.title, direction);
+    state.editorDirty = true;
     return;
   }
 
   if (field === 'description') {
     data.description = cycleValue(DESC_PRESETS, data.description, direction);
+    state.editorDirty = true;
     return;
   }
 
   if (field === 'content') {
     data.content = cycleValue(STICKY_PRESETS, data.content, direction);
+    state.editorDirty = true;
     return;
   }
 
   if (field === 'color') {
     data.color = cycleValue(STICKY_COLORS, data.color, direction);
+    state.editorDirty = true;
   }
 }
 
@@ -1594,6 +1670,7 @@ async function saveEditor() {
   }
 
   state.editor = null;
+  state.editorDirty = false;
   await refreshEvents(true);
 }
 

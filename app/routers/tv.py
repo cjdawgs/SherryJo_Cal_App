@@ -263,7 +263,8 @@ def _month_grid_start_for_date(d):
 
 def _window_for_view(anchor_date, current_view: str):
     if current_view == "day":
-        return anchor_date, anchor_date
+        # TV day mode renders a centered 3-day strip: previous, selected, next.
+        return anchor_date - timedelta(days=1), anchor_date + timedelta(days=1)
     if current_view == "week":
         start = _week_start_for_date(anchor_date)
         return start, start + timedelta(days=6)
