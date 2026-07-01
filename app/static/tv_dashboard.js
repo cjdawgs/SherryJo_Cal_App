@@ -61,6 +61,11 @@ const state = {
   accountLegend: [],
   serverAccounts: [],
   accountColorMap: {},
+  selectedAccountKeys: [],
+  accountChipPressTimer: null,
+  accountChipPressFired: false,
+  accountChipClickTimer: null,
+  accountChipClickCount: 0,
 };
 
 let dom = {};
@@ -111,7 +116,7 @@ function ensureStyles() {
   .tv-shell.month { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); }
   .tv-shell.month.has-popout { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(320px, 0.86fr); align-items: start; }
   .tv-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; width: 220px; }
-  .tv-user-email { font-size: 12px; line-height: 1.05; color: var(--tv-text-soft); font-weight: 600; letter-spacing: 0.2px; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-user-email { font-size: 11px; line-height: 1.1; color: var(--tv-text-soft); font-weight: 600; letter-spacing: 0.2px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; }
   .tv-header-actions { display: inline-flex; gap: 6px; }
   .tv-header-btn { border: 1px solid rgba(201,219,244,0.26); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--tv-text); background: var(--tv-panel-soft); }
   .tv-header-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
@@ -127,7 +132,10 @@ function ensureStyles() {
   .tv-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
   .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
-  .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease; }
+  .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, opacity 180ms ease; }
+  .tv-account-chip.active { color: var(--tv-text); border-color: rgba(201,219,244,0.38); }
+  .tv-account-chip.inactive { opacity: 0.42; filter: grayscale(0.8); }
+  .tv-account-chip.user-email-chip { border-style: dashed; background: rgba(255,255,255,0.03); }
   .tv-account-chip:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.35); }
   .tv-account-legend.syncing .tv-account-chip { animation: tv-sync-chip-pulse 1.1s ease-in-out infinite; }
   @keyframes tv-sync-chip-pulse { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
@@ -160,7 +168,7 @@ function ensureStyles() {
   .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
   .tv-right-subtitle { font-size: 11px; opacity: 0.78; margin: 12px 0 6px 0; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; }
   .tv-right-list { display: flex; flex-direction: column; gap: 6px; max-height: 37vh; overflow-y: auto; }
-  .tv-right-item { border: 1px solid rgba(220,234,255,0.34); border-radius: 8px; padding: 6px 8px; background: rgba(20,35,54,0.82); transition: transform 120ms ease, border-color 180ms ease; }
+  .tv-right-item { position: relative; border: 1px solid rgba(220,234,255,0.34); border-radius: 8px; padding: 6px 8px; background: rgba(20,35,54,0.82); transition: transform 120ms ease, border-color 180ms ease; }
   .tv-right-item:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.3); }
   .tv-right-item-title { font-size: 12px; font-weight: 700; color: rgba(236, 244, 255, 0.98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-right-item-time { font-size: 11px; color: rgba(212, 226, 244, 0.96); opacity: 1; }
@@ -186,7 +194,7 @@ function ensureStyles() {
   .tv-main.tv-view-day .tv-day-card.context-day .tv-item { opacity: 0.74; }
   .tv-main.tv-view-day .tv-day-card.context-day .tv-item-title { font-size: 14px; font-weight: 500; color: rgba(198, 213, 232, 0.9); }
   .tv-main.tv-view-day .tv-day-card.context-day .tv-item-sub { font-size: 11px; color: rgba(168, 184, 206, 0.82); }
-  .tv-item { border: 1px solid rgba(201,219,244,0.14); border-radius: 10px; padding: 8px; background: rgba(12,22,35,0.46); transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+  .tv-item { position: relative; border: 1px solid rgba(201,219,244,0.14); border-radius: 10px; padding: 8px; background: rgba(12,22,35,0.46); transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease; }
   .tv-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px); }
   .tv-item:hover { border-color: rgba(255,255,255,0.24); }
   .tv-item.now { background: rgba(26,115,232,0.18); }
@@ -199,10 +207,12 @@ function ensureStyles() {
   .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
-  .tv-sticky-indicator { position: absolute; top: 7px; right: 7px; width: 11px; height: 11px; border-radius: 2px; background: #f6e08c; border: 1px solid rgba(160,125,17,0.8); box-shadow: 0 0 0 1px rgba(255,255,255,0.2) inset; }
+  .tv-sticky-indicator { position: absolute; top: 6px; right: 6px; width: 12px; height: 12px; border-radius: 2px; background: #f4dc6d; border: 1px solid rgba(145,112,18,0.92); box-shadow: 0 0 0 1px rgba(255,255,255,0.24) inset; }
+  .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 4px solid transparent; border-top: 4px solid rgba(255,255,255,0.6); }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
-  .tv-month-preview { font-size: 11px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; line-height: 1.3; max-height: 1.3em; }
+  .tv-month-preview-list { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
+  .tv-month-preview { font-size: 10px; opacity: 0.88; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
@@ -351,6 +361,15 @@ function init() {
 
   if (dom.tvMain) {
     dom.tvMain.addEventListener('click', handleMainClick);
+  }
+  if (dom.accountLegend) {
+    dom.accountLegend.addEventListener('click', onAccountLegendClick);
+    dom.accountLegend.addEventListener('mousedown', onAccountLegendPointerDown);
+    dom.accountLegend.addEventListener('mouseup', onAccountLegendPointerUp);
+    dom.accountLegend.addEventListener('mouseleave', onAccountLegendPointerUp);
+    dom.accountLegend.addEventListener('touchstart', onAccountLegendPointerDown, { passive: true });
+    dom.accountLegend.addEventListener('touchend', onAccountLegendPointerUp);
+    dom.accountLegend.addEventListener('touchcancel', onAccountLegendPointerUp);
   }
 
   window.addEventListener('keydown', onKeyDown);
@@ -505,6 +524,13 @@ function handleUnpair() {
   state.serverAccounts = [];
   state.accountLegend = [];
   state.accountColorMap = {};
+  state.selectedAccountKeys = [];
+  state.accountChipPressFired = false;
+  if (state.accountChipPressTimer) clearTimeout(state.accountChipPressTimer);
+  if (state.accountChipClickTimer) clearTimeout(state.accountChipClickTimer);
+  state.accountChipPressTimer = null;
+  state.accountChipClickTimer = null;
+  state.accountChipClickCount = 0;
   closeUtilityPanel();
   state.userEmail = null;
   state.userRole = null;
@@ -1260,7 +1286,7 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
   }
 
   const selectedItems = itemsForDate(selectedDateKey).slice(0, 12);
-  const weekEvents = weekDateKeys.flatMap(dateKey => (dayData(dateKey).events || []).map(ev => ({ dateKey, ev })));
+  const weekEvents = weekDateKeys.flatMap(dateKey => filteredEventsForDay(dayData(dateKey)).map(ev => ({ dateKey, ev })));
   return `
     <aside class="tv-right-rail ${extraClass}">
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}</div>
@@ -1268,7 +1294,8 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
         ${selectedItems.length ? selectedItems.map(item => {
           if (item.type === 'event') {
             const eventColor = resolveEventColor(item.event);
-            return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
+            const sticky = item.event.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+            return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
           }
           return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
         }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
@@ -1277,7 +1304,8 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
       <div class="tv-right-list">
         ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
           const eventColor = resolveEventColor(row.ev);
-          return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
+          const sticky = row.ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+          return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
         }).join('') : '<div class="tv-empty">No events this week</div>'}
       </div>
       <div class="tv-right-editor-anchor"></div>
@@ -1307,6 +1335,75 @@ function runSidebarAction(index) {
   closeEditor(true);
   const items = sidebarItems();
   if (items[index]) items[index].action();
+}
+
+function resetAccountFilters() {
+  state.selectedAccountKeys = [];
+  render();
+}
+
+function applySingleAccountFilter(key) {
+  if (!key) return;
+  state.selectedAccountKeys = [key];
+  render();
+}
+
+function toggleMultiAccountFilter(key) {
+  if (!key) return;
+  const set = new Set(state.selectedAccountKeys);
+  if (set.has(key)) set.delete(key);
+  else set.add(key);
+  state.selectedAccountKeys = Array.from(set);
+  render();
+}
+
+function clickAccountChip(key, isMulti = false) {
+  if (!key) return;
+  if (isMulti) {
+    toggleMultiAccountFilter(key);
+    return;
+  }
+  state.accountChipClickCount += 1;
+  if (state.accountChipClickTimer) clearTimeout(state.accountChipClickTimer);
+  state.accountChipClickTimer = setTimeout(() => {
+    const count = state.accountChipClickCount;
+    state.accountChipClickCount = 0;
+    if (count >= 2) {
+      resetAccountFilters();
+    } else {
+      applySingleAccountFilter(key);
+    }
+  }, 260);
+}
+
+function onAccountLegendPointerDown(e) {
+  const chip = e.target.closest('[data-tv-click="account-chip"]');
+  if (!chip) return;
+  const key = chip.getAttribute('data-account-key');
+  state.accountChipPressFired = false;
+  if (state.accountChipPressTimer) clearTimeout(state.accountChipPressTimer);
+  state.accountChipPressTimer = setTimeout(() => {
+    state.accountChipPressFired = true;
+    toggleMultiAccountFilter(key);
+  }, LONG_PRESS_MS);
+}
+
+function onAccountLegendPointerUp() {
+  if (state.accountChipPressTimer) {
+    clearTimeout(state.accountChipPressTimer);
+    state.accountChipPressTimer = null;
+  }
+}
+
+function onAccountLegendClick(e) {
+  const chip = e.target.closest('[data-tv-click="account-chip"]');
+  if (!chip) return;
+  const key = chip.getAttribute('data-account-key') || '';
+  if (state.accountChipPressFired) {
+    state.accountChipPressFired = false;
+    return;
+  }
+  clickAccountChip(key, Boolean(e.ctrlKey || e.metaKey));
 }
 
 function focusNext() {
@@ -1386,10 +1483,34 @@ function getFocusedMonthDate() {
   return date || null;
 }
 
+function eventAccountKey(ev) {
+  const source = ev.source || 'local';
+  const account = ev.accountEmail || source;
+  return `${source}|${account}`;
+}
+
+function isAccountVisibleForEvent(ev) {
+  if (!state.selectedAccountKeys.length) return true;
+  return state.selectedAccountKeys.includes(eventAccountKey(ev));
+}
+
+function sortEventsDesc(events) {
+  return [...(events || [])].sort((a, b) => {
+    const aTs = Date.parse(a.start || '') || 0;
+    const bTs = Date.parse(b.start || '') || 0;
+    return bTs - aTs;
+  });
+}
+
+function filteredEventsForDay(day) {
+  const allEvents = sortEventsDesc(day.events || []);
+  return allEvents.filter(ev => isAccountVisibleForEvent(ev));
+}
+
 function itemsForDate(dateKey) {
   const day = state.dayMap[dateKey];
   if (!day) return [];
-  const events = (day.events || []).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
+  const events = filteredEventsForDay(day).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
   const sticky = (day.stickyNotes || []).map((s, i) => ({ type: 'sticky', id: s.id || `sticky-${i}`, date: dateKey, sticky: s, index: i }));
   return [...events, ...sticky];
 }
@@ -1446,6 +1567,10 @@ function syncAccountLegend() {
   }
   state.accountLegend = Array.from(map.values());
   state.accountColorMap = colorMap;
+  if (state.selectedAccountKeys.length) {
+    const allowed = new Set(state.accountLegend.map(item => `${item.source}|${item.account}`));
+    state.selectedAccountKeys = state.selectedAccountKeys.filter(key => allowed.has(key));
+  }
 }
 
 function resolveEventColor(ev) {
@@ -1466,11 +1591,18 @@ function renderAccountLegend() {
     dom.accountLegend.innerHTML = '<div class="tv-account-chip">No account legend available</div>';
     return;
   }
-  dom.accountLegend.innerHTML = state.accountLegend.map(item => {
+  const filtered = state.selectedAccountKeys.length > 0;
+  const chips = state.accountLegend.map(item => {
     const bg = softColor(item.color, 0.2);
     const border = softColor(item.color, 0.55);
-    return `<div class="tv-account-chip" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
+    const key = `${item.source}|${item.account}`;
+    const active = !filtered || state.selectedAccountKeys.includes(key);
+    return `<div class="tv-account-chip ${active ? 'active' : 'inactive'}" data-tv-click="account-chip" data-account-key="${escapeHtml(key)}" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
   }).join('');
+  const userEmailChip = state.userEmail
+    ? `<div class="tv-account-chip user-email-chip"><span>${escapeHtml(state.userEmail)}</span></div>`
+    : '';
+  dom.accountLegend.innerHTML = `${chips}${userEmailChip}`;
 }
 
 function renderHeader() {
@@ -1479,8 +1611,8 @@ function renderHeader() {
     dom.dateHeader.textContent = `${state.currentView.toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
   }
   if (dom.headerUserEmail) {
-    dom.headerUserEmail.textContent = state.userEmail || '';
-    dom.headerUserEmail.style.display = state.userEmail ? 'block' : 'none';
+    dom.headerUserEmail.textContent = '';
+    dom.headerUserEmail.style.display = 'none';
   }
 }
 
@@ -1564,7 +1696,8 @@ function renderDayCard(day, selected, contextDay = false) {
           const eventColor = resolveEventColor(ev);
           const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
           const border = softColor(eventColor, focused ? 0.7 : 0.5);
-          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}"><div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
+          const eventStickyIndicator = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
         }
         return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
       }).join('')
@@ -1580,13 +1713,15 @@ function renderMonthCell(day, idx) {
   const focused = state.focus.region === 'main' && state.focus.monthIndex === idx;
   const inMonth = date.getMonth() === anchor.getMonth();
   const selected = day.date === state.selectedDate;
-  const previewEvent = (day.events || [])[0];
-  const previewSticky = (day.stickyNotes || [])[0];
-  const preview = previewEvent ? previewEvent.title : (previewSticky ? previewSticky.content : '');
+  const dayEvents = filteredEventsForDay(day);
+  const previewTitles = dayEvents.slice(0, 4).map(ev => `${formatTime(ev.start)} ${ev.title || 'Untitled'}`);
   const stickyIndicator = (day.stickyNotes || []).length ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
-  const count = (day.events || []).length + (day.stickyNotes || []).length;
+  const count = dayEvents.length + (day.stickyNotes || []).length;
   const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
-  return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div><div class="tv-month-preview">${escapeHtml(preview)}</div></div>`;
+  const previewHtml = previewTitles.length
+    ? `<div class="tv-month-preview-list">${previewTitles.map(title => `<div class="tv-month-preview">${escapeHtml(title)}</div>`).join('')}</div>`
+    : '<div class="tv-month-preview">No events</div>';
+  return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div>${previewHtml}</div>`;
 }
 
 function renderEditor() {
@@ -1714,6 +1849,16 @@ function handleMainClick(e) {
     state.focus.sidebarIndex = idx;
     state.monthDetailOpen = false;
     onSelect();
+    return;
+  }
+
+  if (role === 'account-chip') {
+    const key = t.getAttribute('data-account-key') || '';
+    if (state.accountChipPressFired) {
+      state.accountChipPressFired = false;
+      return;
+    }
+    clickAccountChip(key, Boolean(e.ctrlKey || e.metaKey));
     return;
   }
 

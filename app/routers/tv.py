@@ -183,6 +183,10 @@ def _to_iso(val) -> Optional[str]:
 
 def _serialize_event_for_tv(event: Event) -> dict:
     """Convert a DB Event row into a TV-UI-ready dict."""
+    sticky_note = getattr(event, "sticky_note", None)
+    sticky_notes = getattr(event, "sticky_notes", None)
+    has_sticky = bool(sticky_note) or (isinstance(sticky_notes, list) and len(sticky_notes) > 0)
+
     return {
         "id": event.id,
         "title": event.title or "",
@@ -192,6 +196,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "source": getattr(event, "source", "local") or "local",
         "accountEmail": getattr(event, "account_email", None),
         "color": getattr(event, "color", None),
+        "hasSticky": has_sticky,
     }
 
 

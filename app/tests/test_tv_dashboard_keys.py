@@ -57,6 +57,20 @@ def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
         assert token in text
 
 
+def test_tv_dashboard_exposes_account_chip_filtering_and_sticky_icons():
+    text = _tv_js_text()
+    required_tokens = [
+        "selectedAccountKeys",
+        "data-tv-click=\"account-chip\"",
+        "clickAccountChip",
+        "toggleMultiAccountFilter",
+        "hasSticky",
+        "tv-sticky-indicator",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
 def test_tv_dashboard_auth_fetch_handles_network_exceptions():
     text = _tv_js_text()
     assert "async function authFetch" in text

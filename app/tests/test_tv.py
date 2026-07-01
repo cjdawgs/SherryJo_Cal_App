@@ -257,6 +257,9 @@ class TestTVEventsEndpoint:
         assert len(data["days"]) >= 1
         day_dates = [d["date"] for d in data["days"]]
         assert "2026-09-15" in day_dates
+        selected_day = next(d for d in data["days"] if d["date"] == "2026-09-15")
+        assert selected_day["events"]
+        assert "hasSticky" in selected_day["events"][0]
 
     def test_events_requires_auth(self, client):
         resp = client.get("/tv/events")
