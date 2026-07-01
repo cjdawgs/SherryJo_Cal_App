@@ -185,7 +185,22 @@ def _serialize_event_for_tv(event: Event) -> dict:
     """Convert a DB Event row into a TV-UI-ready dict."""
     sticky_note = getattr(event, "sticky_note", None)
     sticky_notes = getattr(event, "sticky_notes", None)
-    has_sticky = bool(sticky_note) or (isinstance(sticky_notes, list) and len(sticky_notes) > 0)
+    related_notes = getattr(event, "notes", None)
+
+    has_sticky_payload = bool(sticky_note)
+    if isinstance(sticky_notes, list):
+        has_sticky_payload = has_sticky_payload or len(sticky_notes) > 0
+    elif isinstance(sticky_notes, dict):
+        has_sticky_payload = has_sticky_payload or bool(sticky_notes)
+
+    has_related_notes = False
+    if related_notes is not None:
+        try:
+            has_related_notes = len(related_notes) > 0
+        except Exception:
+            has_related_notes = bool(related_notes)
+
+    has_sticky = has_sticky_payload or has_related_notes
 
     return {
         "id": event.id,

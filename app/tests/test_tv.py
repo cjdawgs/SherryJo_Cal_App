@@ -239,6 +239,7 @@ class TestTVEventsEndpoint:
             start_time=datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc),
             end_time=datetime(2026, 9, 15, 11, 0, tzinfo=timezone.utc),
             owner_id=user_id,
+            sticky_note={"content": "sticky from test", "color": "#F7E68A"},
         )
         db.add(evt)
         db.commit()
@@ -260,6 +261,7 @@ class TestTVEventsEndpoint:
         selected_day = next(d for d in data["days"] if d["date"] == "2026-09-15")
         assert selected_day["events"]
         assert "hasSticky" in selected_day["events"][0]
+        assert selected_day["events"][0]["hasSticky"] is True
 
     def test_events_requires_auth(self, client):
         resp = client.get("/tv/events")

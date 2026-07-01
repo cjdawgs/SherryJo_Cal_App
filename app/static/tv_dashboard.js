@@ -129,13 +129,14 @@ function ensureStyles() {
   .tv-side-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
   .tv-history-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .tv-sidebar-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 2px 0; }
-  .tv-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
+  .tv-sidebar-footer { display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
   .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
+  .tv-account-spacer { flex: 1 1 auto; min-width: 16px; }
   .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, opacity 180ms ease; }
   .tv-account-chip.active { color: var(--tv-text); border-color: rgba(201,219,244,0.38); }
   .tv-account-chip.inactive { opacity: 0.42; filter: grayscale(0.8); }
-  .tv-account-chip.user-email-chip { border-style: dashed; background: rgba(255,255,255,0.03); }
+  .tv-account-chip.user-email-chip { margin-left: auto; border-style: dashed; background: rgba(255,255,255,0.03); color: rgba(168, 185, 208, 0.92); border-color: rgba(201,219,244,0.2); }
   .tv-account-chip:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.35); }
   .tv-account-legend.syncing .tv-account-chip { animation: tv-sync-chip-pulse 1.1s ease-in-out infinite; }
   @keyframes tv-sync-chip-pulse { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
@@ -207,8 +208,8 @@ function ensureStyles() {
   .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
-  .tv-sticky-indicator { position: absolute; top: 6px; right: 6px; width: 12px; height: 12px; border-radius: 2px; background: #f4dc6d; border: 1px solid rgba(145,112,18,0.92); box-shadow: 0 0 0 1px rgba(255,255,255,0.24) inset; }
-  .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 4px solid transparent; border-top: 4px solid rgba(255,255,255,0.6); }
+  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); }
+  .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
   .tv-month-preview-list { display: flex; flex-direction: column; gap: 2px; margin-top: 2px; }
@@ -302,14 +303,9 @@ function ensureLegendRow() {
 
 function ensureHeaderActions() {
   if (!dom.headerRight) return;
-  let email = document.getElementById('tv-user-email');
-  if (!email) {
-    email = document.createElement('div');
-    email.id = 'tv-user-email';
-    email.className = 'tv-user-email';
-    dom.headerRight.insertBefore(email, dom.headerRight.firstChild || null);
-  }
-  dom.headerUserEmail = email;
+  const email = document.getElementById('tv-user-email');
+  if (email && email.parentElement) email.parentElement.removeChild(email);
+  dom.headerUserEmail = null;
   let actions = document.getElementById('tv-header-actions');
   if (!actions) {
     actions = document.createElement('div');
@@ -1211,7 +1207,6 @@ function renderLeftSidebar() {
         }).join('')}
       </div>
       <div class="tv-sidebar-footer">
-        <div class="tv-sidebar-divider"></div>
         ${footer.map(item => {
           const idx = side.findIndex(x => x.key === item.key);
           return `<button class="tv-side-btn ${item.key === 'admin-dashboard' ? 'warn' : ''} ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
@@ -1494,16 +1489,16 @@ function isAccountVisibleForEvent(ev) {
   return state.selectedAccountKeys.includes(eventAccountKey(ev));
 }
 
-function sortEventsDesc(events) {
+function sortEventsAsc(events) {
   return [...(events || [])].sort((a, b) => {
     const aTs = Date.parse(a.start || '') || 0;
     const bTs = Date.parse(b.start || '') || 0;
-    return bTs - aTs;
+    return aTs - bTs;
   });
 }
 
 function filteredEventsForDay(day) {
-  const allEvents = sortEventsDesc(day.events || []);
+  const allEvents = sortEventsAsc(day.events || []);
   return allEvents.filter(ev => isAccountVisibleForEvent(ev));
 }
 
@@ -1574,14 +1569,14 @@ function syncAccountLegend() {
 }
 
 function resolveEventColor(ev) {
-  const direct = normalizeHexColor(ev.color);
-  if (direct) return direct;
   const source = ev.source || 'local';
   const account = ev.accountEmail || source;
   const exact = state.accountColorMap[`${source}|${account}`];
   if (exact) return exact;
   const byAccount = state.accountColorMap[account];
   if (byAccount) return byAccount;
+  const direct = normalizeHexColor(ev.color);
+  if (direct) return direct;
   return '#8EA4C4';
 }
 
@@ -1602,7 +1597,7 @@ function renderAccountLegend() {
   const userEmailChip = state.userEmail
     ? `<div class="tv-account-chip user-email-chip"><span>${escapeHtml(state.userEmail)}</span></div>`
     : '';
-  dom.accountLegend.innerHTML = `${chips}${userEmailChip}`;
+  dom.accountLegend.innerHTML = `${chips}<div class="tv-account-spacer"></div>${userEmailChip}`;
 }
 
 function renderHeader() {
