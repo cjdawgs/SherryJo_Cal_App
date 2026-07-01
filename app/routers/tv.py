@@ -457,75 +457,100 @@ def get_tv_events(
     if anchor_date is None:
         raise HTTPException(status_code=400, detail="selectedDate in state is not a valid ISO date")
 
-    window_start_date, window_end_date = _window_for_view(anchor_date, current_view)
-    window_start = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
-    window_end = datetime.combine(window_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
-
     try:
-        events = (
-            db.query(Event)
-            .filter(
-                Event.owner_id == current_user.id,
-                Event.start_time >= window_start,
-                Event.start_time <= window_end,
+        window_start_date, window_end_date = _window_for_view(anchor_date, current_view)
+        window_start = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+        window_end = datetime.combine(window_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        try:
+            events = (
+                db.query(Event)
+                .filter(
+                    Event.owner_id == current_user.id,
+                    Event.start_time >= window_start,
+                    Event.start_time <= window_end,
+                )
+                .order_by(Event.start_time)
+                .all()
             )
-            .order_by(Event.start_time)
-            .all()
-        )
-    except SQLAlchemyError:
-        logger.exception(
-            "TV_EVENTS_FETCH_DB_WINDOW_QUERY_FAILED user_id=%s; falling back to Python filtering",
-            current_user.id,
-        )
-        all_events = db.query(Event).filter(Event.owner_id == current_user.id).all()
-        events = _events_in_window(all_events, window_start, window_end)
-
-    by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
-
-    start_key = window_start_date.isoformat()
-    end_key = window_end_date.isoformat()
-    try:
-        sticky_rows = (
-            db.query(DateStickyNote)
-            .filter(
-                DateStickyNote.owner_id == current_user.id,
-                DateStickyNote.date >= start_key,
-                DateStickyNote.date <= end_key,
+        except SQLAlchemyError:
+            logger.exception(
+                "TV_EVENTS_FETCH_DB_WINDOW_QUERY_FAILED user_id=%s; falling back to Python filtering",
+                current_user.id,
             )
-            .all()
-        )
-    except SQLAlchemyError:
-        logger.exception(
-            "TV_EVENTS_FETCH_STICKY_QUERY_FAILED user_id=%s; falling back to Python filtering",
-            current_user.id,
-        )
-        sticky_rows = [
-            row for row in db.query(DateStickyNote).filter(DateStickyNote.owner_id == current_user.id).all()
-            if isinstance(getattr(row, "date", None), str) and start_key <= row.date <= end_key
-        ]
-    sticky_map = {
-        row.date: _normalize_sticky_notes(getattr(row, "sticky_notes", None))
-        for row in sticky_rows
-    }
+            try:
+                all_events = db.query(Event).filter(Event.owner_id == current_user.id).all()
+                events = _events_in_window(all_events, window_start, window_end)
+            except SQLAlchemyError:
+                logger.exception(
+                    "TV_EVENTS_FETCH_DB_ALL_EVENTS_FAILED user_id=%s; using empty events",
+                    current_user.id,
+                )
+                events = []
 
-    days = []
-    cursor = window_start_date
-    while cursor <= window_end_date:
-        key = cursor.isoformat()
-        days.append({
-            "date": key,
-            "events": by_date_events.get(key, []),
-            "stickyNotes": sticky_map.get(key, []),
-        })
-        cursor = cursor + timedelta(days=1)
+        by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
 
-    return {
-        "selectedDate": selected_date_str,
-        "currentView": current_view,
-        "rangeStart": window_start_date.isoformat(),
-        "rangeEnd": window_end_date.isoformat(),
-        "days": days,
-    }
+        start_key = window_start_date.isoformat()
+        end_key = window_end_date.isoformat()
+        try:
+            sticky_rows = (
+                db.query(DateStickyNote)
+                .filter(
+                    DateStickyNote.owner_id == current_user.id,
+                    DateStickyNote.date >= start_key,
+                    DateStickyNote.date <= end_key,
+                )
+                .all()
+            )
+        except SQLAlchemyError:
+            logger.exception(
+                "TV_EVENTS_FETCH_STICKY_QUERY_FAILED user_id=%s; falling back to Python filtering",
+                current_user.id,
+            )
+            try:
+                sticky_rows = [
+                    row for row in db.query(DateStickyNote).filter(DateStickyNote.owner_id == current_user.id).all()
+                    if isinstance(getattr(row, "date", None), str) and start_key <= row.date <= end_key
+                ]
+            except SQLAlchemyError:
+                logger.exception(
+                    "TV_EVENTS_FETCH_STICKY_FALLBACK_FAILED user_id=%s; using empty sticky notes",
+                    current_user.id,
+                )
+                sticky_rows = []
+
+        sticky_map = {
+            row.date: _normalize_sticky_notes(getattr(row, "sticky_notes", None))
+            for row in sticky_rows
+            if isinstance(getattr(row, "date", None), str)
+        }
+
+        days = []
+        cursor = window_start_date
+        while cursor <= window_end_date:
+            key = cursor.isoformat()
+            days.append({
+                "date": key,
+                "events": by_date_events.get(key, []),
+                "stickyNotes": sticky_map.get(key, []),
+            })
+            cursor = cursor + timedelta(days=1)
+
+        return {
+            "selectedDate": selected_date_str,
+            "currentView": current_view,
+            "rangeStart": window_start_date.isoformat(),
+            "rangeEnd": window_end_date.isoformat(),
+            "days": days,
+        }
+    except Exception:
+        logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)
+        # Keep TV UI alive in production even if data layer is unhealthy.
+        return {
+            "selectedDate": selected_date_str,
+            "currentView": current_view,
+            "days": [],
+        }
 
 
 @router.post("/events")

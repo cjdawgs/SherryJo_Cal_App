@@ -260,6 +260,33 @@ class TestTVEventsEndpoint:
         resp = client.get("/tv/events")
         assert resp.status_code == 401  # bearer scheme: no token → 401
 
+    def test_events_never_500_when_db_read_fails(self, client, auth_headers, monkeypatch):
+        from app.routers import tv as tv_router
+        from sqlalchemy.exc import SQLAlchemyError
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-11", "currentView": "week"},
+            headers=auth_headers,
+        )
+
+        original_group = tv_router._group_events_by_date
+
+        def _boom(*_args, **_kwargs):
+            raise SQLAlchemyError("synthetic db failure")
+
+        monkeypatch.setattr(tv_router, "_group_events_by_date", _boom)
+
+        try:
+            resp = client.get("/tv/events", headers=auth_headers)
+        finally:
+            monkeypatch.setattr(tv_router, "_group_events_by_date", original_group)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("currentView") == "week"
+        assert isinstance(data.get("days"), list)
+
     def test_create_update_tv_event(self, client, auth_headers):
         client.patch(
             "/tv/state",
