@@ -316,6 +316,16 @@ def _sticky_owner_filter(user_id: int):
     return cast(DateStickyNote.owner_id, String) == str(user_id)
 
 
+def _event_owner_filter(user_id: int):
+    """Handle legacy schemas where events.owner_id may be text."""
+    return cast(Event.owner_id, String) == str(user_id)
+
+
+def _oauth_user_filter(user_id: int):
+    """Handle legacy schemas where oauth_accounts.user_id may be text."""
+    return cast(OAuthAccount.user_id, String) == str(user_id)
+
+
 # ─────────────────────────────────────────────────
 # PHASE 2 — PAIRING
 # ─────────────────────────────────────────────────
@@ -474,7 +484,7 @@ def get_tv_events(
             events = (
                 db.query(Event)
                 .filter(
-                    Event.owner_id == current_user.id,
+                    _event_owner_filter(current_user.id),
                     Event.start_time >= window_start,
                     Event.start_time <= window_end,
                 )
@@ -487,7 +497,7 @@ def get_tv_events(
                 current_user.id,
             )
             try:
-                all_events = db.query(Event).filter(Event.owner_id == current_user.id).all()
+                all_events = db.query(Event).filter(_event_owner_filter(current_user.id)).all()
                 events = _events_in_window(all_events, window_start, window_end)
             except SQLAlchemyError:
                 logger.exception(
@@ -548,7 +558,7 @@ def get_tv_events(
         try:
             account_rows = (
                 db.query(OAuthAccount)
-                .filter(OAuthAccount.user_id == current_user.id, OAuthAccount.sync_enabled.is_(True))
+                .filter(_oauth_user_filter(current_user.id), OAuthAccount.sync_enabled.is_(True))
                 .all()
             )
             seen = set()
