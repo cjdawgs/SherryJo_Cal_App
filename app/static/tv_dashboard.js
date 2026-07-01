@@ -304,13 +304,19 @@ async function refreshEvents() {
 
 async function authFetch(url, options = {}) {
   if (!state.token) return null;
-  const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
-  const res = await fetch(url, Object.assign({}, options, { headers }));
-  if (res.status === 401) {
-    if (!IS_KIOSK) handleUnpair();
+  try {
+    const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+    if (res.status === 401) {
+      if (!IS_KIOSK) handleUnpair();
+      return null;
+    }
+    return res;
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Network request failed';
+    renderFooterHint(`Network issue: ${message}`);
     return null;
   }
-  return res;
 }
 
 async function patchTvState(patch) {
