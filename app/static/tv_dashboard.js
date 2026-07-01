@@ -42,6 +42,8 @@ const state = {
   },
   monthDates: [],
   accountLegend: [],
+  serverAccounts: [],
+  accountColorMap: {},
 };
 
 let dom = {};
@@ -76,50 +78,78 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = 'tv-remote-style';
   style.textContent = `
-  .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr) minmax(260px, 320px); gap: 12px; }
-  .tv-shell.month { grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); }
+  .tv-main {
+    --tv-accent: #1a73e8;
+    --tv-accent-strong: #2563eb;
+    --tv-text: rgba(233, 240, 250, 0.95);
+    --tv-text-soft: rgba(168, 185, 208, 0.92);
+    --tv-panel: rgba(21, 31, 48, 0.66);
+    --tv-panel-soft: rgba(29, 43, 66, 0.42);
+  }
+  .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); gap: 12px; }
+  .tv-shell.month { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); }
   .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
-  .tv-account-legend { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 52px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-  .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); font-size: 11px; color: rgba(240,240,245,0.82); letter-spacing: 0.3px; }
+  .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
+  .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease; }
+  .tv-account-chip:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.35); }
   .tv-account-dot { width: 8px; height: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.45); flex-shrink: 0; }
   .tv-main-grid { min-width: 0; display: grid; gap: 10px; }
-  .tv-main-grid.day { grid-template-columns: repeat(7, 1fr); }
-  .tv-main-grid.week { grid-template-columns: repeat(7, 1fr); }
-  .tv-main-grid.month { grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, minmax(0, 1fr)); }
+  .tv-main-grid.day { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .tv-main-grid.week { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  .tv-main-grid.month { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-template-rows: repeat(6, minmax(108px, 1fr)); }
+  .tv-main-center { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tv-controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 6px 0; padding: 2px 0 4px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .tv-controls-group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .tv-btn { border: 1px solid rgba(201,219,244,0.24); border-radius: 9px; padding: 7px 10px; font-size: 12px; color: var(--tv-text); background: var(--tv-panel-soft); min-height: 32px; transition: transform 120ms ease, border-color 200ms ease, background 200ms ease, box-shadow 200ms ease; }
+  .tv-btn:hover { border-color: rgba(255,255,255,0.28); background: rgba(255,255,255,0.065); }
+  .tv-btn.primary { border-color: rgba(26,115,232,0.58); color: #e8f1ff; background: rgba(26,115,232,0.24); }
+  .tv-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
+  .tv-btn.ghost { opacity: 0.86; }
+  .tv-btn.view { padding: 6px 9px; font-size: 11px; letter-spacing: 0.5px; text-transform: uppercase; }
+  .tv-btn.view.active { border-color: rgba(26,115,232,0.68); color: #e8f1ff; background: rgba(26,115,232,0.28); box-shadow: 0 0 0 2px rgba(26,115,232,0.2); }
+  .tv-btn.active { border-color: rgba(26,115,232,0.6); color: #e8f1ff; background: rgba(26,115,232,0.2); }
   .tv-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin: 0 0 8px 0; }
   .tv-weekday-chip { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; text-align: center; padding: 6px 4px; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; opacity: 0.85; }
-  .tv-sidebar { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); overflow: hidden; }
-  .tv-side-item { border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; padding: 10px; font-size: 14px; color: rgba(240,240,245,0.9); }
-  .tv-side-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.22); transform: scale(1.02); }
+  .tv-sidebar { border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: linear-gradient(180deg, rgba(45,63,92,0.45), rgba(29,43,66,0.32)); overflow: hidden; }
+  .tv-sidebar-title { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; opacity: 0.7; margin-bottom: 2px; }
+  .tv-sidebar-date { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--tv-text); }
+  .tv-side-item { border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 8px 9px; font-size: 12px; color: var(--tv-text-soft); background: rgba(17,28,44,0.34); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }
+  .tv-side-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.26); transform: translateY(-1px) scale(1.015); background: rgba(26,115,232,0.15); color: var(--tv-text); }
   .tv-side-item:hover { border-color: rgba(255,255,255,0.24); }
-  .tv-right-rail { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 10px; background: rgba(255,255,255,0.02); overflow: hidden; }
+  .tv-right-rail { border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(45,63,92,0.44), rgba(29,43,66,0.32)); overflow: hidden; }
   .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
-  .tv-right-subtitle { font-size: 12px; opacity: 0.75; margin: 10px 0 6px 0; font-weight: 600; }
+  .tv-right-subtitle { font-size: 11px; opacity: 0.78; margin: 12px 0 6px 0; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; }
   .tv-right-list { display: flex; flex-direction: column; gap: 6px; max-height: 37vh; overflow-y: auto; }
-  .tv-right-item { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 6px 8px; background: rgba(255,255,255,0.02); }
-  .tv-right-item-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tv-right-item-time { font-size: 11px; opacity: 0.72; }
-  .tv-day-card, .tv-month-cell { border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; background: rgba(255,255,255,0.03); padding: 10px; min-height: 0; display: flex; flex-direction: column; }
-  .tv-day-card.selected { border-color: rgba(79,140,255,0.45); }
+  .tv-right-item { border: 1px solid rgba(220,234,255,0.34); border-radius: 8px; padding: 6px 8px; background: rgba(20,35,54,0.82); transition: transform 120ms ease, border-color 180ms ease; }
+  .tv-right-item:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.3); }
+  .tv-right-item-title { font-size: 12px; font-weight: 700; color: rgba(236, 244, 255, 0.98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-right-item-time { font-size: 11px; color: rgba(212, 226, 244, 0.96); opacity: 1; }
+  .tv-day-card, .tv-month-cell { border: 1px solid rgba(201,219,244,0.16); border-radius: 12px; background: rgba(13,24,38,0.44); padding: 10px; min-height: 0; display: flex; flex-direction: column; transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease; }
+  .tv-day-card.selected { border-color: rgba(26,115,232,0.52); box-shadow: 0 0 0 2px rgba(26,115,232,0.16); }
   .tv-day-head { font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; text-transform: uppercase; margin-bottom: 8px; }
   .tv-day-num { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
   .tv-item-list { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
-  .tv-item { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; background: rgba(255,255,255,0.02); }
-  .tv-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); }
+  .tv-item { border: 1px solid rgba(201,219,244,0.14); border-radius: 10px; padding: 8px; background: rgba(12,22,35,0.46); transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease; }
+  .tv-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px); }
   .tv-item:hover { border-color: rgba(255,255,255,0.24); }
-  .tv-item.now { background: rgba(79,140,255,0.14); }
+  .tv-item.now { background: rgba(26,115,232,0.18); }
   .tv-item.next { background: rgba(255,159,10,0.11); }
-  .tv-item-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .tv-item-sub { font-size: 12px; opacity: 0.78; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-item-title { font-size: 16px; font-weight: 600; color: var(--tv-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-item-sub { font-size: 12px; color: var(--tv-text-soft); opacity: 0.95; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-month-cell { justify-content: flex-start; }
-  .tv-month-cell.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); transform: scale(1.01); }
+  .tv-month-cell.outside { opacity: 0.52; background: rgba(255,255,255,0.015); }
+  .tv-month-cell.selected { border-color: rgba(26,115,232,0.52); }
+  .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
+  .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
+  .tv-sticky-indicator { position: absolute; top: 7px; right: 7px; width: 11px; height: 11px; border-radius: 2px; background: #f6e08c; border: 1px solid rgba(160,125,17,0.8); box-shadow: 0 0 0 1px rgba(255,255,255,0.2) inset; }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
-  .tv-month-preview { font-size: 11px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .tv-month-preview { font-size: 11px; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; line-height: 1.3; max-height: 1.3em; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
-  .tv-field.focused { border-color: #4f8cff; background: rgba(79,140,255,0.12); }
+  .tv-field.focused { border-color: var(--tv-accent); background: rgba(26,115,232,0.2); }
   .tv-field-name { font-size: 10px; opacity: 0.7; text-transform: uppercase; }
   .tv-field-value { font-size: 15px; font-weight: 600; margin-top: 2px; }
   .tv-empty { opacity: 0.65; font-style: italic; font-size: 13px; }
@@ -131,6 +161,31 @@ function ensureStyles() {
   #tv-debug-list { list-style: none; margin: 0; padding: 8px 10px; max-height: 40vh; overflow-y: auto; font-family: Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; }
   .tv-debug-row { white-space: pre-wrap; word-break: break-word; border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 2px 0; }
   .tv-debug-row:last-child { border-bottom: 0; }
+
+  /* Broadcast typography scaling by view */
+  .tv-main.tv-view-day .tv-day-num { font-size: 32px; }
+  .tv-main.tv-view-day .tv-item-title { font-size: 18px; font-weight: 700; letter-spacing: 0.18px; }
+  .tv-main.tv-view-day .tv-item-sub { font-size: 12px; }
+
+  .tv-main.tv-view-week .tv-day-num { font-size: 27px; }
+  .tv-main.tv-view-week .tv-item-title { font-size: 15px; }
+  .tv-main.tv-view-week .tv-item-sub { font-size: 11px; }
+
+  .tv-main.tv-view-month .tv-month-date { font-size: 20px; }
+  .tv-main.tv-view-month .tv-month-count { font-size: 10px; }
+  .tv-main.tv-view-month .tv-month-preview { font-size: 10px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .tv-account-chip,
+    .tv-btn,
+    .tv-side-item,
+    .tv-right-item,
+    .tv-day-card,
+    .tv-month-cell,
+    .tv-item {
+      transition: none;
+    }
+  }
   `;
   document.head.appendChild(style);
 
@@ -299,6 +354,9 @@ function handleUnpair() {
   state.days = [];
   state.dayMap = {};
   state.editor = null;
+  state.serverAccounts = [];
+  state.accountLegend = [];
+  state.accountColorMap = {};
   localStorage.removeItem(TOKEN_KEY);
   transitionTo('pair');
 }
@@ -336,6 +394,7 @@ async function refreshEvents() {
     if (data.selectedDate) state.selectedDate = data.selectedDate;
     if (data.currentView) state.currentView = data.currentView;
     state.days = data.days || [];
+    state.serverAccounts = data.accounts || [];
     state.dayMap = {};
     for (const day of state.days) state.dayMap[day.date] = day;
     syncFocusAfterData();
@@ -781,6 +840,14 @@ function setView(viewName) {
   patchTvState({ currentView: viewName }).then(() => refreshEvents());
 }
 
+function goBackAction() {
+  handleBack();
+}
+
+function exitTvAction() {
+  handleUnpair();
+}
+
 function weekdayNames() {
   return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 }
@@ -818,7 +885,30 @@ function renderWeekdayHeader() {
 
 function renderLeftSidebar() {
   const side = sidebarItems();
-  return `<div class="tv-sidebar">${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}<div class="tv-editor-anchor"></div></div>`;
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const selectedLabel = selected.toLocaleDateString([], { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' });
+  return `<div class="tv-sidebar"><div class="tv-sidebar-title">Selected Date</div><div class="tv-sidebar-date">${escapeHtml(selectedLabel)}</div>${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}<div class="tv-editor-anchor"></div></div>`;
+}
+
+function renderTopControls() {
+  const date = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const dateText = date.toLocaleDateString([], { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' });
+  return `
+    <div class="tv-controls">
+      <div class="tv-controls-group">
+        <button class="tv-btn ghost" type="button" data-tv-click="control" data-control="prev">&lt; Prev</button>
+        <button class="tv-btn primary" type="button" data-tv-click="control" data-control="today">Today</button>
+        <button class="tv-btn ghost" type="button" data-tv-click="control" data-control="next">Next &gt;</button>
+      </div>
+      <div class="tv-controls-group">
+        <button class="tv-btn view ${state.currentView === 'day' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-day">Day</button>
+        <button class="tv-btn view ${state.currentView === 'week' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-week">Week</button>
+        <button class="tv-btn view ${state.currentView === 'month' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-month">Month</button>
+        <button class="tv-btn" type="button" data-tv-click="control" data-control="back">Back</button>
+        <button class="tv-btn warn" type="button" data-tv-click="control" data-control="exit">Exit</button>
+        <button class="tv-btn active" type="button" disabled>${escapeHtml(dateText)}</button>
+      </div>
+    </div>`;
 }
 
 function renderRightRail(selectedDateKey, weekDateKeys) {
@@ -830,7 +920,7 @@ function renderRightRail(selectedDateKey, weekDateKeys) {
       <div class="tv-right-list">
         ${selectedItems.length ? selectedItems.map(item => {
           if (item.type === 'event') {
-            const eventColor = normalizeHexColor(item.event.color) || '#8EA4C4';
+            const eventColor = resolveEventColor(item.event);
             return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
           }
           return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
@@ -839,7 +929,7 @@ function renderRightRail(selectedDateKey, weekDateKeys) {
       <div class="tv-right-subtitle">This Week</div>
       <div class="tv-right-list">
         ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
-          const eventColor = normalizeHexColor(row.ev.color) || '#8EA4C4';
+          const eventColor = resolveEventColor(row.ev);
           return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
         }).join('') : '<div class="tv-empty">No events this week</div>'}
       </div>
@@ -848,13 +938,13 @@ function renderRightRail(selectedDateKey, weekDateKeys) {
 
 function sidebarItems() {
   return [
-    { label: `Mini Calendar: ${state.selectedDate || 'n/a'}`, action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }).then(() => refreshEvents()) },
-    { label: 'View: Day', action: () => setView('day') },
-    { label: 'View: Week', action: () => setView('week') },
-    { label: 'View: Month', action: () => setView('month') },
-    { label: 'Quick: Create Event', action: () => createEventAndEdit() },
-    { label: 'Quick: Create Sticky Note', action: () => createStickyAndEdit() },
-    { label: 'Quick: Jump to Today', action: () => goToday() },
+    { label: 'Sync', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }).then(() => refreshEvents()) },
+    { label: 'Create Event', action: () => createEventAndEdit() },
+    { label: 'Create Sticky', action: () => createStickyAndEdit() },
+    { label: 'Jump Today', action: () => goToday() },
+    { label: 'View Day', action: () => setView('day') },
+    { label: 'View Week', action: () => setView('week') },
+    { label: 'View Month', action: () => setView('month') },
   ];
 }
 
@@ -969,21 +1059,49 @@ function render() {
 
 function syncAccountLegend() {
   const map = new Map();
+  const colorMap = {};
+
+  for (const account of (state.serverAccounts || [])) {
+    const source = account.provider || account.source || 'local';
+    const email = account.accountEmail || account.email || source;
+    const color = normalizeHexColor(account.color) || '#9AA3B2';
+    const key = `${source}|${email}`;
+    map.set(key, { source, account: email, color });
+    colorMap[key] = color;
+    colorMap[email] = color;
+  }
+
   for (const day of state.days) {
     for (const ev of (day.events || [])) {
       const source = ev.source || 'local';
       const account = ev.accountEmail || source;
       const key = `${source}|${account}`;
+      const eventColor = normalizeHexColor(ev.color);
       if (!map.has(key)) {
         map.set(key, {
           source,
           account,
-          color: normalizeHexColor(ev.color) || '#9AA3B2',
+          color: eventColor || '#9AA3B2',
         });
       }
+      if (eventColor && !colorMap[key]) colorMap[key] = eventColor;
+      if (eventColor && !colorMap[account]) colorMap[account] = eventColor;
     }
   }
   state.accountLegend = Array.from(map.values());
+  state.accountColorMap = colorMap;
+}
+
+function resolveEventColor(ev) {
+  const direct = normalizeHexColor(ev.color);
+  if (direct) return direct;
+  const source = ev.source || 'local';
+  const account = ev.accountEmail || source;
+  const exact = state.accountColorMap[`${source}|${account}`];
+  if (exact) return exact;
+  const byAccount = state.accountColorMap[account];
+  if (byAccount) return byAccount;
+  return '#8EA4C4';
 }
 
 function renderAccountLegend() {
@@ -1009,11 +1127,15 @@ function renderHeader() {
 function renderMain() {
   if (!dom.tvMain) return;
   dom.tvMain.classList.toggle('tv-editor-active', Boolean(state.editor));
+  dom.tvMain.classList.remove('tv-view-day', 'tv-view-week', 'tv-view-month');
   if (state.currentView === 'month') {
+    dom.tvMain.classList.add('tv-view-month');
     dom.tvMain.innerHTML = renderMonthView();
   } else if (state.currentView === 'week') {
+    dom.tvMain.classList.add('tv-view-week');
     dom.tvMain.innerHTML = renderWeekView();
   } else {
+    dom.tvMain.classList.add('tv-view-day');
     dom.tvMain.innerHTML = renderDayView();
   }
   if (state.editor) {
@@ -1029,6 +1151,7 @@ function renderDayView() {
     <div class="tv-shell">
       ${renderLeftSidebar()}
       <div>
+        ${renderTopControls()}
         ${renderWeekdayHeader()}
         <div class="tv-main-grid day">${weekDates.map(dateKey => renderDayCard(dayData(dateKey), dateKey === state.selectedDate)).join('')}</div>
       </div>
@@ -1043,6 +1166,7 @@ function renderWeekView() {
     <div class="tv-shell">
       ${renderLeftSidebar()}
       <div>
+        ${renderTopControls()}
         ${renderWeekdayHeader()}
         <div class="tv-main-grid week">${weekDates.map(dateKey => renderDayCard(dayData(dateKey), dateKey === state.selectedDate)).join('')}</div>
       </div>
@@ -1056,6 +1180,7 @@ function renderMonthView() {
   <div class="tv-shell month">
     ${renderLeftSidebar()}
     <div>
+      ${renderTopControls()}
       ${renderWeekdayHeader()}
       <div class="tv-main-grid month">
       ${state.monthDates.map((dateKey, idx) => renderMonthCell(dayData(dateKey), idx)).join('')}
@@ -1073,7 +1198,7 @@ function renderDayCard(day, selected) {
         const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
         if (item.type === 'event') {
           const ev = item.event;
-          const eventColor = normalizeHexColor(ev.color) || '#8EA4C4';
+          const eventColor = resolveEventColor(ev);
           const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
           const border = softColor(eventColor, focused ? 0.7 : 0.5);
           return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}"><div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
@@ -1082,16 +1207,23 @@ function renderDayCard(day, selected) {
       }).join('')
     : `<div class="tv-empty">No events or sticky notes</div>`;
 
-  return `<div class="tv-day-card ${selected ? 'selected' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}"><div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
+  const stickyIndicator = (day.stickyNotes || []).length ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  return `<div class="tv-day-card ${selected ? 'selected' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
 }
 
 function renderMonthCell(day, idx) {
   const date = parseLocalDate(day.date);
+  const anchor = parseLocalDate(state.selectedDate || toISO(new Date()));
   const focused = state.focus.region === 'main' && state.focus.monthIndex === idx;
+  const inMonth = date.getMonth() === anchor.getMonth();
+  const selected = day.date === state.selectedDate;
   const previewEvent = (day.events || [])[0];
   const previewSticky = (day.stickyNotes || [])[0];
   const preview = previewEvent ? previewEvent.title : (previewSticky ? previewSticky.content : '');
-  return `<div class="tv-month-cell ${focused ? 'focused' : ''}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}"><div class="tv-month-date">${date.getDate()}</div><div class="tv-month-preview">${escapeHtml(preview)}</div></div>`;
+  const stickyIndicator = (day.stickyNotes || []).length ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  const count = (day.events || []).length + (day.stickyNotes || []).length;
+  const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
+  return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div><div class="tv-month-preview">${escapeHtml(preview)}</div></div>`;
 }
 
 function renderEditor() {
@@ -1234,6 +1366,42 @@ function handleMainClick(e) {
     const idx = Number(t.getAttribute('data-field-index') || 0);
     state.editor.fieldIndex = idx;
     render();
+    return;
+  }
+
+  if (role === 'control') {
+    const control = t.getAttribute('data-control');
+    if (control === 'prev') {
+      shiftByView(-1);
+      return;
+    }
+    if (control === 'next') {
+      shiftByView(1);
+      return;
+    }
+    if (control === 'today') {
+      goToday();
+      return;
+    }
+    if (control === 'back') {
+      goBackAction();
+      return;
+    }
+    if (control === 'view-day') {
+      setView('day');
+      return;
+    }
+    if (control === 'view-week') {
+      setView('week');
+      return;
+    }
+    if (control === 'view-month') {
+      setView('month');
+      return;
+    }
+    if (control === 'exit') {
+      exitTvAction();
+    }
   }
 }
 

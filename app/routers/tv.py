@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import DateStickyNote, Event, User
+from app.models import DateStickyNote, Event, OAuthAccount, User
 from app.security import create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 
@@ -543,12 +543,34 @@ def get_tv_events(
             })
             cursor = cursor + timedelta(days=1)
 
+        accounts = []
+        try:
+            account_rows = (
+                db.query(OAuthAccount)
+                .filter(OAuthAccount.user_id == current_user.id, OAuthAccount.sync_enabled.is_(True))
+                .all()
+            )
+            seen = set()
+            for acc in account_rows:
+                key = (acc.provider or "", acc.account_email or "")
+                if key in seen:
+                    continue
+                seen.add(key)
+                accounts.append({
+                    "provider": acc.provider or "local",
+                    "accountEmail": acc.account_email or "",
+                    "color": acc.color,
+                })
+        except SQLAlchemyError:
+            logger.exception("TV_EVENTS_FETCH_ACCOUNTS_QUERY_FAILED user_id=%s; omitting account legend metadata", current_user.id)
+
         return {
             "selectedDate": selected_date_str,
             "currentView": current_view,
             "rangeStart": window_start_date.isoformat(),
             "rangeEnd": window_end_date.isoformat(),
             "days": days,
+            "accounts": accounts,
         }
     except Exception:
         logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)
