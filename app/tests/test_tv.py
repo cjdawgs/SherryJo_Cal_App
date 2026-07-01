@@ -113,7 +113,7 @@ class TestTVStateStore:
     def test_patch_updates_only_provided_keys(self):
         from app.services.tv_pairing_service import _TVStateStore
         store = _TVStateStore()
-        store.initialize(user_id=5, selected_date="2026-06-01", current_view="month")
+        store.initialize(user_id=5, selected_date="2026-06-01", current_view="day")
         updated = store.set(user_id=5, patch={"currentView": "week"})
         assert updated["selectedDate"] == "2026-06-01"
         assert updated["currentView"] == "week"
@@ -259,6 +259,42 @@ class TestTVEventsEndpoint:
     def test_events_requires_auth(self, client):
         resp = client.get("/tv/events")
         assert resp.status_code == 401  # bearer scheme: no token → 401
+
+    def test_create_update_tv_event(self, client, auth_headers):
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-11", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        create_resp = client.post(
+            "/tv/events",
+            json={"title": "Created From TV", "description": "inline"},
+            headers=auth_headers,
+        )
+        assert create_resp.status_code == 200
+        created = create_resp.json()["event"]
+        assert created["title"] == "Created From TV"
+
+        update_resp = client.put(
+            f"/tv/events/{created['id']}",
+            json={"title": "Edited On TV"},
+            headers=auth_headers,
+        )
+        assert update_resp.status_code == 200
+        updated = update_resp.json()["event"]
+        assert updated["title"] == "Edited On TV"
+
+    def test_upsert_tv_date_sticky(self, client, auth_headers):
+        resp = client.put(
+            "/tv/date-sticky/2026-10-11",
+            json={"sticky_notes": [{"content": "TV sticky", "color": "#F7E68A"}]},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["item"]["count"] == 1
 
 
 class TestDisplayTVEndpoint:

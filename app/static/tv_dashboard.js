@@ -1,563 +1,1203 @@
-/**
- * tv_dashboard.js
- * ───────────────
- * Apple TV–style calendar dashboard.
- *
- * Two screens:
- *   1. Pairing   — enter XXXX-XXXX code, POST /tv/pair → store JWT
- *   2. Dashboard — poll GET /tv/events every 3s, render 3-day calendar view
- *
- * Architecture laws:
- *   - selectedDate NEVER defaults to today() — backend is the source of truth.
- *   - Token is stored in localStorage('tv_token'), separate from the web
- *     app's 'token' key so the two sessions never collide.
- *   - Every interval handle is tracked and cleared — no memory leaks.
- *   - DOM is diffed via a signature string — no full re-render on unchanged data.
- *   - A 401 response always triggers token clear + return to pairing screen.
- */
-
 'use strict';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+const TOKEN_KEY = 'tv_token';
+const POLL_MS = 4000;
+const LONG_PRESS_MS = 600;
 
-const TOKEN_KEY  = 'tv_token';
-const POLL_MS    = 3000;
-const MAX_ERRORS = 3;
-
-/**
- * Kiosk mode: set by tv_kiosk.html via window.KIOSK_TOKEN before this module
- * loads. When truthy the pairing screen is never shown and a 401 triggers a
- * reconnect retry rather than a logout (kiosk tokens last 1 year).
- */
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 
-/** Default color per calendar source when event.color is null. */
-const SOURCE_COLORS = {
-  google:    '#4285F4',
-  microsoft: '#0078D4',
-  apple:     '#A2AAAD',
-  local:     '#34C759',
-};
-
-// ─── Runtime state ────────────────────────────────────────────────────────────
-
 const state = {
-  token:        null,
-  selectedDate: null,          // YYYY-MM-DD string from backend
-  focusDate:    null,          // local cursor date used for TV-only selection
-  days:         {},            // { [dateStr]: Event[] }
-  connection:   'disconnected',// 'connected' | 'reconnecting' | 'disconnected'
-  lastUpdated:  null,          // Date object
-  errorCount:   0,
-  pollHandle:   null,          // setInterval id
-  clockHandle:  null,          // setInterval id
-  statePatchInFlight: false,
+  token: null,
+  selectedDate: null,
+  currentView: 'day',
+  focusedEventId: null,
+  days: [],
+  dayMap: {},
+  pollHandle: null,
+  clockHandle: null,
+  longPressTimer: null,
+  longPressTriggered: false,
+  clickCount: 0,
+  clickTimer: null,
+  centerArrowMode: false,
+  cursor: {
+    x: 0,
+    y: 0,
+    visible: false,
+  },
+  debug: {
+    visible: false,
+    lines: [],
+    maxLines: 12,
+  },
+  editor: null,
+  focus: {
+    region: 'main',
+    monthIndex: 0,
+    sidebarIndex: 0,
+    itemIndex: 0,
+  },
 };
-
-// ─── Cached DOM refs ──────────────────────────────────────────────────────────
 
 let dom = {};
 
+const TITLE_PRESETS = ['New Event', 'Meeting', 'Reminder', 'Appointment', 'Call'];
+const DESC_PRESETS = ['', 'Updated from TV', 'Bring notes', 'Follow up needed'];
+const STICKY_PRESETS = ['New sticky note', 'Action item', 'Priority', 'Reminder'];
+const STICKY_COLORS = ['#F7E68A', '#F8C8DC', '#CDEEFF', '#D8F5C1'];
+
 function cacheDom() {
   dom = {
-    screenPair:    document.getElementById('screen-pair'),
-    screenDash:    document.getElementById('screen-dashboard'),
-    pairInput:     document.getElementById('pair-code-input'),
-    pairBtn:       document.getElementById('pair-btn'),
-    pairError:     document.getElementById('pair-error'),
-    tvMain:        document.getElementById('tv-main'),
-    dateHeader:    document.getElementById('tv-date-header'),
-    clock:         document.getElementById('tv-clock'),
-    statusEl:      document.getElementById('tv-status'),
-    lastUpdated:   document.getElementById('tv-last-updated'),
+    screenPair: document.getElementById('screen-pair'),
+    screenDash: document.getElementById('screen-dashboard'),
+    pairInput: document.getElementById('pair-code-input'),
+    pairBtn: document.getElementById('pair-btn'),
+    pairError: document.getElementById('pair-error'),
+    tvMain: document.getElementById('tv-main'),
+    dateHeader: document.getElementById('tv-date-header'),
+    clock: document.getElementById('tv-clock'),
+    statusEl: document.getElementById('tv-status'),
+    lastUpdated: document.getElementById('tv-last-updated'),
     disconnectBtn: document.getElementById('disconnect-btn'),
+    cursor: document.getElementById('tv-virtual-cursor'),
+    debugOverlay: document.getElementById('tv-debug-overlay'),
+    debugList: document.getElementById('tv-debug-list'),
   };
 }
 
-// ─── Entry point ──────────────────────────────────────────────────────────────
+function ensureStyles() {
+  if (document.getElementById('tv-remote-style')) return;
+  const style = document.createElement('style');
+  style.id = 'tv-remote-style';
+  style.textContent = `
+  .tv-shell { display: flex; width: 100%; height: 100%; gap: 16px; }
+  .tv-main-grid { flex: 1; min-width: 0; display: grid; gap: 12px; }
+  .tv-main-grid.day { grid-template-columns: 1fr; }
+  .tv-main-grid.week { grid-template-columns: repeat(7, 1fr); }
+  .tv-main-grid.month { grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, minmax(0, 1fr)); }
+  .tv-sidebar { width: 27%; min-width: 300px; max-width: 420px; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.02); }
+  .tv-side-item { border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; padding: 10px; font-size: 14px; color: rgba(240,240,245,0.9); }
+  .tv-side-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.22); transform: scale(1.02); }
+  .tv-day-card, .tv-month-cell { border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; background: rgba(255,255,255,0.03); padding: 10px; min-height: 0; display: flex; flex-direction: column; }
+  .tv-day-card.selected { border-color: rgba(79,140,255,0.45); }
+  .tv-day-head { font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; text-transform: uppercase; margin-bottom: 8px; }
+  .tv-day-num { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
+  .tv-item-list { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .tv-item { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; background: rgba(255,255,255,0.02); }
+  .tv-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); }
+  .tv-item.now { background: rgba(79,140,255,0.14); }
+  .tv-item.next { background: rgba(255,159,10,0.11); }
+  .tv-item-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-item-sub { font-size: 12px; opacity: 0.78; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-month-cell { justify-content: flex-start; }
+  .tv-month-cell.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); transform: scale(1.01); }
+  .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
+  .tv-month-preview { font-size: 11px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
+  .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
+  .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
+  .tv-field.focused { border-color: #4f8cff; background: rgba(79,140,255,0.12); }
+  .tv-field-name { font-size: 10px; opacity: 0.7; text-transform: uppercase; }
+  .tv-field-value { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .tv-empty { opacity: 0.65; font-style: italic; font-size: 13px; }
+  .tv-hint-chip { font-size: 11px; opacity: 0.8; }
+  #tv-virtual-cursor { position: fixed; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.18); background: rgba(79,140,255,0.2); pointer-events: none; z-index: 999999; transform: translate(-50%, -50%); display: none; }
+  #tv-debug-overlay { position: fixed; right: 12px; bottom: 52px; width: 420px; max-height: 50vh; overflow: hidden; background: rgba(9,12,20,0.92); border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; box-shadow: 0 12px 26px rgba(0,0,0,0.45); z-index: 999998; color: #d7e6ff; display: none; }
+  #tv-debug-overlay.visible { display: block; }
+  .tv-debug-head { padding: 8px 10px; border-bottom: 1px solid rgba(79,140,255,0.22); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; color: #8eb7ff; display: flex; justify-content: space-between; }
+  #tv-debug-list { list-style: none; margin: 0; padding: 8px 10px; max-height: 40vh; overflow-y: auto; font-family: Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; }
+  .tv-debug-row { white-space: pre-wrap; word-break: break-word; border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 2px 0; }
+  .tv-debug-row:last-child { border-bottom: 0; }
+  `;
+  document.head.appendChild(style);
 
-function init() {
-  cacheDom();
-
-  dom.pairBtn.addEventListener('click', handlePair);
-  dom.pairInput.addEventListener('input', handleCodeInput);
-  dom.pairInput.addEventListener('keydown', e => { if (e.key === 'Enter') handlePair(); });
-  dom.disconnectBtn.addEventListener('click', handleUnpair);
-  window.addEventListener('keydown', handleRemoteKeyDown);
-
-  // Kiosk token (injected via window.KIOSK_TOKEN in tv_kiosk.html) takes
-  // priority; fall back to the interactive-pairing token in localStorage.
-  state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
-
-  if (state.token) {
-    transitionTo('dashboard');
-    startPolling();
-  } else {
-    transitionTo('pair');
+  if (!document.getElementById('tv-virtual-cursor')) {
+    const cursor = document.createElement('div');
+    cursor.id = 'tv-virtual-cursor';
+    document.body.appendChild(cursor);
   }
+
+  if (!document.getElementById('tv-debug-overlay')) {
+    const overlay = document.createElement('section');
+    overlay.id = 'tv-debug-overlay';
+    overlay.innerHTML = `
+      <div class="tv-debug-head">
+        <span>Remote Key Debug</span>
+        <span>Mute = Toggle</span>
+      </div>
+      <ul id="tv-debug-list"></ul>
+    `;
+    document.body.appendChild(overlay);
+  }
+
+  dom.cursor = document.getElementById('tv-virtual-cursor');
+  dom.debugOverlay = document.getElementById('tv-debug-overlay');
+  dom.debugList = document.getElementById('tv-debug-list');
 }
 
-// ─── Screen transitions ───────────────────────────────────────────────────────
-
 function transitionTo(screen) {
+  if (!dom.screenPair || !dom.screenDash) return;
   if (screen === 'dashboard') {
     dom.screenPair.classList.add('hidden');
     dom.screenDash.classList.remove('hidden');
   } else {
     dom.screenDash.classList.add('hidden');
     dom.screenPair.classList.remove('hidden');
-    setTimeout(() => dom.pairInput.focus(), 60);
+    if (dom.pairInput) setTimeout(() => dom.pairInput.focus(), 60);
   }
 }
 
-// ─── Pairing ──────────────────────────────────────────────────────────────────
+function init() {
+  cacheDom();
+  ensureStyles();
 
-/** Auto-format input as XXXX-XXXX while the user types. */
-function handleCodeInput(e) {
-  let v = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
-  if (v.length > 4) v = v.slice(0, 4) + '-' + v.slice(4);
-  e.target.value = v;
-}
-
-async function handlePair() {
-  const code = dom.pairInput.value.trim().toUpperCase();
-  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
-    setPairError('Enter a valid code in the format XXXX-XXXX.');
-    return;
-  }
-
-  dom.pairBtn.disabled = true;
-  dom.pairBtn.textContent = 'Connecting…';
-  setPairError('');
-
-  try {
-    const res = await fetch('/tv/pair', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ pairingCode: code }),
+  if (dom.pairBtn) dom.pairBtn.addEventListener('click', handlePair);
+  if (dom.pairInput) {
+    dom.pairInput.addEventListener('input', handleCodeInput);
+    dom.pairInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handlePair();
+      }
     });
+  }
+  if (dom.disconnectBtn) dom.disconnectBtn.addEventListener('click', handleUnpair);
 
-    const body = await res.json().catch(() => ({}));
+  if (dom.tvMain) {
+    dom.tvMain.addEventListener('click', handleMainClick);
+  }
 
-    if (!res.ok) {
-      throw new Error(body.detail || `Server error (${res.status})`);
-    }
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('keyup', onKeyUp);
 
-    state.token        = body.token;
-    state.selectedDate = body.selectedDate || null;
-    localStorage.setItem(TOKEN_KEY, body.token);
-
+  state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
+  if (state.token) {
     transitionTo('dashboard');
-    startPolling();
-
-  } catch (err) {
-    setPairError(err.message || 'Pairing failed. Please try again.');
-  } finally {
-    dom.pairBtn.disabled  = false;
-    dom.pairBtn.textContent = 'Connect';
+    bootstrapFromBackend();
+  } else {
+    transitionTo('pair');
   }
 }
 
-function handleUnpair() {
-  stopAll();
-  state.token        = null;
-  state.selectedDate = null;
-  state.focusDate    = null;
-  state.days         = {};
-  state.connection   = 'disconnected';
-  state.errorCount   = 0;
-  localStorage.removeItem(TOKEN_KEY);
-  transitionTo('pair');
+async function bootstrapFromBackend() {
+  await fetchTvState();
+  startPolling();
 }
-
-function setPairError(msg) {
-  dom.pairError.textContent    = msg;
-  dom.pairError.style.display  = msg ? 'block' : 'none';
-}
-
-// ─── Polling lifecycle ────────────────────────────────────────────────────────
 
 function startPolling() {
   stopAll();
-  fetchAndRender();                                   // immediate first fetch
-  state.pollHandle  = setInterval(fetchAndRender, POLL_MS);
+  refreshEvents();
+  state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   tickClock();
 }
 
 function stopAll() {
-  if (state.pollHandle  !== null) { clearInterval(state.pollHandle);  state.pollHandle  = null; }
-  if (state.clockHandle !== null) { clearInterval(state.clockHandle); state.clockHandle = null; }
+  if (state.pollHandle) clearInterval(state.pollHandle);
+  if (state.clockHandle) clearInterval(state.clockHandle);
+  state.pollHandle = null;
+  state.clockHandle = null;
 }
 
-// ─── Fetch ────────────────────────────────────────────────────────────────────
-
-async function fetchAndRender() {
-  try {
-    const res = await fetch('/tv/events', {
-      headers: { Authorization: `Bearer ${state.token}` },
-    });
-
-    if (res.status === 401) {
-      if (IS_KIOSK) {
-        // Kiosk tokens last 1 year. A 401 most likely means the server
-        // restarted. Stay on screen and keep retrying — never redirect.
-        state.errorCount++;
-        state.connection = 'reconnecting';
-        renderStatus();
-        return;
-      }
-      handleTokenExpired();
-      return;
-    }
-
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    const data = await res.json();
-
-    state.errorCount   = 0;
-    state.connection   = 'connected';
-    state.selectedDate = data.selectedDate || null;
-    if (state.selectedDate) {
-      state.focusDate = state.selectedDate;
-    }
-    state.lastUpdated  = new Date();
-
-    // Rebuild the date→events lookup from the API response
-    state.days = {};
-    for (const day of (data.days || [])) {
-      state.days[day.date] = day.events || [];
-    }
-
-    renderDashboard();
-
-  } catch (_err) {
-    state.errorCount++;
-    if (state.errorCount >= MAX_ERRORS) {
-      state.connection = 'reconnecting';
-      renderStatus();
-    }
+function tickClock() {
+  if (dom.clock) {
+    dom.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 }
 
-function handleTokenExpired() {
-  stopAll();
-  state.token = null;
-  localStorage.removeItem(TOKEN_KEY);
-  transitionTo('pair');
-  setPairError('Your session has expired. Please pair again.');
+function handleCodeInput(e) {
+  let v = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
+  if (v.length > 4) v = `${v.slice(0, 4)}-${v.slice(4)}`;
+  e.target.value = v;
 }
 
-// ─── Remote-key controls (TV-only operation) ────────────────────────────────
+function setPairError(message) {
+  if (!dom.pairError) return;
+  dom.pairError.textContent = message || '';
+  dom.pairError.style.display = message ? 'block' : 'none';
+}
 
-function getAnchorDateForRemote() {
-  if (state.selectedDate) return state.selectedDate;
-  if (state.focusDate) return state.focusDate;
-  return toISO(new Date());
+async function handlePair() {
+  if (!dom.pairInput || !dom.pairBtn) return;
+  const code = dom.pairInput.value.trim().toUpperCase();
+  if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
+    setPairError('Enter a valid pairing code (XXXX-XXXX).');
+    return;
+  }
+
+  dom.pairBtn.disabled = true;
+  setPairError('');
+  try {
+    const res = await fetch('/tv/pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pairingCode: code }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `Pairing failed (${res.status})`);
+
+    state.token = data.token;
+    localStorage.setItem(TOKEN_KEY, state.token);
+    transitionTo('dashboard');
+    await bootstrapFromBackend();
+  } catch (err) {
+    setPairError(err.message || 'Pairing failed.');
+  } finally {
+    dom.pairBtn.disabled = false;
+  }
+}
+
+function handleUnpair() {
+  stopAll();
+  state.token = null;
+  state.selectedDate = null;
+  state.days = [];
+  state.dayMap = {};
+  state.editor = null;
+  localStorage.removeItem(TOKEN_KEY);
+  transitionTo('pair');
+}
+
+async function fetchTvState() {
+  const res = await authFetch('/tv/state');
+  if (!res) return;
+  const data = await res.json().catch(() => ({}));
+  state.selectedDate = data.selectedDate || null;
+  state.currentView = data.currentView || 'day';
+  state.focusedEventId = data.focusedEventId || null;
+  if (!state.selectedDate) state.selectedDate = toISO(new Date());
+}
+
+async function refreshEvents() {
+  const res = await authFetch('/tv/events');
+  if (!res) return;
+  const data = await res.json().catch(() => ({}));
+  if (data.selectedDate) state.selectedDate = data.selectedDate;
+  if (data.currentView) state.currentView = data.currentView;
+  state.days = data.days || [];
+  state.dayMap = {};
+  for (const day of state.days) state.dayMap[day.date] = day;
+  syncFocusAfterData();
+  render();
+}
+
+async function authFetch(url, options = {}) {
+  if (!state.token) return null;
+  const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
+  const res = await fetch(url, Object.assign({}, options, { headers }));
+  if (res.status === 401) {
+    if (!IS_KIOSK) handleUnpair();
+    return null;
+  }
+  return res;
 }
 
 async function patchTvState(patch) {
-  const res = await fetch('/tv/state', {
+  const res = await authFetch('/tv/state', {
     method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${state.token}`,
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(patch),
   });
-
-  if (res.status === 401) {
-    handleTokenExpired();
-    return null;
+  if (!res) return null;
+  if (!res.ok) return null;
+  const data = await res.json().catch(() => null);
+  if (data) {
+    state.selectedDate = data.selectedDate || state.selectedDate;
+    state.currentView = data.currentView || state.currentView;
+    state.focusedEventId = data.focusedEventId || null;
   }
-  if (!res.ok) {
-    throw new Error(`State update failed (${res.status})`);
-  }
-
-  return await res.json().catch(() => null);
+  return data;
 }
 
-async function setSelectedDateFromRemote(targetDateStr) {
-  if (!state.token || state.statePatchInFlight) return;
+function onKeyDown(e) {
+  if (!state.token || !dom.screenDash || dom.screenDash.classList.contains('hidden')) return;
 
-  state.statePatchInFlight = true;
-  try {
-    // Optimistic update so remote taps feel instant.
-    state.selectedDate = targetDateStr;
-    state.focusDate = targetDateStr;
-    renderDashboard();
+  const key = normalizeKey(e);
+  logRemoteKey('down', e, key);
 
-    const patched = await patchTvState({ selectedDate: targetDateStr });
-    if (patched && patched.selectedDate) {
-      state.selectedDate = patched.selectedDate;
-      state.focusDate = patched.selectedDate;
-      renderDashboard();
+  if (isMuteKey(e, key)) {
+    e.preventDefault();
+    toggleDebugOverlay();
+    return;
+  }
+
+  if (key === 'Enter') {
+    if (!state.longPressTimer) {
+      state.longPressTriggered = false;
+      state.longPressTimer = setTimeout(() => {
+        state.longPressTriggered = true;
+        onLongPress();
+      }, LONG_PRESS_MS);
     }
-
-    // Pull fresh events immediately after changing date.
-    await fetchAndRender();
-  } catch (_err) {
-    state.connection = 'reconnecting';
-    renderStatus();
-  } finally {
-    state.statePatchInFlight = false;
-  }
-}
-
-function handleRemoteKeyDown(e) {
-  if (!state.token || dom.screenDash.classList.contains('hidden')) return;
-
-  const key = e.key;
-  const isLeft = key === 'ArrowLeft';
-  const isRight = key === 'ArrowRight';
-  const isSelect = key === 'Enter' || key === ' ' || key === 'Spacebar';
-  const isPlayPause = key === 'MediaPlayPause' || key.toLowerCase() === 'p';
-
-  if (!(isLeft || isRight || isSelect || isPlayPause)) return;
-  e.preventDefault();
-
-  const anchor = parseLocalDate(getAnchorDateForRemote());
-
-  if (isLeft) {
-    const target = toISO(offsetDate(anchor, -1));
-    setSelectedDateFromRemote(target);
+    e.preventDefault();
     return;
   }
 
-  if (isRight) {
-    const target = toISO(offsetDate(anchor, 1));
-    setSelectedDateFromRemote(target);
+  if (state.editor) {
+    if (handleEditorKey(key)) e.preventDefault();
     return;
   }
 
-  if (isSelect || isPlayPause) {
-    const target = toISO(new Date());
-    setSelectedDateFromRemote(target);
-  }
-}
-
-// ─── Dashboard rendering ──────────────────────────────────────────────────────
-
-function renderDashboard() {
-  renderDateHeader();
-  renderColumns();
-  renderStatus();
-}
-
-function renderDateHeader() {
-  if (!state.selectedDate) {
-    dom.dateHeader.textContent = '';
+  if (state.centerArrowMode && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+    e.preventDefault();
+    moveCursorByArrow(key);
     return;
   }
-  const d = parseLocalDate(state.selectedDate);
-  dom.dateHeader.textContent = d.toLocaleDateString([], {
-    weekday: 'long',
-    month:   'long',
-    day:     'numeric',
-    year:    'numeric',
-  }).toUpperCase();
+
+  if (isBackKey(key)) {
+    e.preventDefault();
+    handleBack();
+    return;
+  }
+
+  if (isVolumeForwardKey(key)) {
+    e.preventDefault();
+    focusNext();
+    return;
+  }
+
+  if (isVolumeReverseKey(key)) {
+    e.preventDefault();
+    focusPrev();
+    return;
+  }
+
+  if (isListKey(key)) {
+    e.preventDefault();
+    triggerStickyAction();
+    return;
+  }
+
+  if (key.toLowerCase() === 'c') {
+    e.preventDefault();
+    shiftByView(1);
+    return;
+  }
+  if (key.toLowerCase() === 'e') {
+    e.preventDefault();
+    shiftByView(-1);
+    return;
+  }
+  if (key.toLowerCase() === 'd') {
+    e.preventDefault();
+    goToday();
+    return;
+  }
+  if (key.toLowerCase() === 'f') {
+    e.preventDefault();
+    setView('day');
+    return;
+  }
+
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+    e.preventDefault();
+    handleArrow(key);
+  }
 }
 
-function renderColumns() {
-  const main = dom.tvMain;
+function onKeyUp(e) {
+  const key = normalizeKey(e);
+  logRemoteKey('up', e, key);
 
-  // ── No date selected → waiting screen ────────────────────────
-  if (!state.selectedDate) {
-    if (main.dataset.view !== 'waiting') {
-      main.dataset.view = 'waiting';
-      main.innerHTML = `
-        <div class="tv-waiting">
-          <div class="tv-waiting-icon">📅</div>
-          <div class="tv-waiting-title">Waiting for date selection</div>
-          <div class="tv-waiting-sub">
-            Use remote Left/Right to choose date.<br>
-            Press Select or Play/Pause to jump to today.
-          </div>
-        </div>`;
+  if (isMuteKey(e, key)) {
+    e.preventDefault();
+    return;
+  }
+
+  if (key !== 'Enter') return;
+
+  if (state.editor) {
+    if (state.longPressTimer) {
+      clearTimeout(state.longPressTimer);
+      state.longPressTimer = null;
     }
-    return;
-  }
-
-  // ── Connection lost before first successful fetch ─────────────
-  if (state.connection === 'reconnecting' && !Object.keys(state.days).length) {
-    if (main.dataset.view !== 'reconnecting') {
-      main.dataset.view = 'reconnecting';
-      main.innerHTML = `
-        <div class="tv-reconnecting">
-          <div class="tv-reconnecting-label">◌ Reconnecting…</div>
-        </div>`;
+    if (!state.longPressTriggered) {
+      const last = state.editor.fieldIndex === state.editor.fields.length - 1;
+      if (last) {
+        saveEditor();
+      } else {
+        state.editor.fieldIndex += 1;
+        render();
+      }
     }
+    state.longPressTriggered = false;
     return;
   }
 
-  // ── 3-day column view ─────────────────────────────────────────
-  const anchor    = parseLocalDate(state.selectedDate);
-  const prevDay   = offsetDate(anchor, -1);
-  const nextDay   = offsetDate(anchor,  1);
+  if (state.longPressTimer) {
+    clearTimeout(state.longPressTimer);
+    state.longPressTimer = null;
+  }
+  if (state.longPressTriggered) {
+    state.longPressTriggered = false;
+    return;
+  }
 
-  const cols = [
-    { dateStr: toISO(prevDay),          isSelected: false },
-    { dateStr: state.selectedDate,      isSelected: true  },
-    { dateStr: toISO(nextDay),          isSelected: false },
+  state.clickCount += 1;
+  if (state.clickTimer) clearTimeout(state.clickTimer);
+  state.clickTimer = setTimeout(() => {
+    const count = state.clickCount;
+    state.clickCount = 0;
+    if (count === 1) onSelect();
+    else if (count === 2) onSecondarySelect();
+    else if (count >= 3) {
+      state.centerArrowMode = !state.centerArrowMode;
+      setCursorVisible(state.centerArrowMode);
+      renderFooterHint(`Arrow mode ${state.centerArrowMode ? 'enabled' : 'disabled'}`);
+    }
+  }, 260);
+}
+
+function normalizeKey(e) {
+  const key = e.key || '';
+  const code = e.code || '';
+  const kc = typeof e.keyCode === 'number' ? e.keyCode : -1;
+
+  if (key === 'ArrowLeft' || code === 'ArrowLeft' || kc === 37 || key === 'Left') return 'ArrowLeft';
+  if (key === 'ArrowRight' || code === 'ArrowRight' || kc === 39 || key === 'Right') return 'ArrowRight';
+  if (key === 'ArrowUp' || code === 'ArrowUp' || kc === 38 || key === 'Up') return 'ArrowUp';
+  if (key === 'ArrowDown' || code === 'ArrowDown' || kc === 40 || key === 'Down') return 'ArrowDown';
+  if (key === 'Enter' || code === 'Enter' || kc === 13 || kc === 23 || key === 'Select') return 'Enter';
+  if (key === 'Escape' || kc === 27 || kc === 461) return 'Escape';
+  if (key === 'Backspace' || kc === 8) return 'Backspace';
+  if (key === 'ContextMenu' || code === 'ContextMenu' || kc === 93 || kc === 82) return 'ContextMenu';
+  if (key === 'AudioVolumeMute' || key === 'VolumeMute' || key === 'Mute' || code === 'AudioVolumeMute' || kc === 173 || kc === 181 || kc === 449) return 'AudioVolumeMute';
+  if (kc === 33) return 'PageUp';
+  if (kc === 34) return 'PageDown';
+  if (kc === 187) return '=';
+  if (kc === 189) return '-';
+  return key;
+}
+
+function isMuteKey(e, normalizedKey) {
+  const raw = e.key || '';
+  const code = e.code || '';
+  const kc = typeof e.keyCode === 'number' ? e.keyCode : -1;
+  return normalizedKey === 'AudioVolumeMute'
+    || raw === 'AudioVolumeMute'
+    || raw === 'VolumeMute'
+    || raw === 'Mute'
+    || code === 'AudioVolumeMute'
+    || kc === 173
+    || kc === 181
+    || kc === 449;
+}
+
+function toggleDebugOverlay() {
+  state.debug.visible = !state.debug.visible;
+  if (!dom.debugOverlay) return;
+  dom.debugOverlay.classList.toggle('visible', state.debug.visible);
+  if (state.debug.visible) {
+    renderDebugOverlay();
+    renderFooterHint('Key debug overlay enabled (Mute to hide)');
+  } else {
+    renderFooterHint('Key debug overlay hidden (Mute to show)');
+  }
+}
+
+function logRemoteKey(phase, e, normalizedKey) {
+  const ts = new Date().toLocaleTimeString([], { hour12: false });
+  const rawKey = String(e.key || '');
+  const code = String(e.code || '');
+  const kc = typeof e.keyCode === 'number' ? e.keyCode : -1;
+  const line = `${ts} ${phase.toUpperCase()}  raw=${rawKey}  code=${code}  keyCode=${kc}  normalized=${normalizedKey}`;
+  state.debug.lines.unshift(line);
+  if (state.debug.lines.length > state.debug.maxLines) {
+    state.debug.lines.length = state.debug.maxLines;
+  }
+  if (state.debug.visible) {
+    renderDebugOverlay();
+  }
+}
+
+function renderDebugOverlay() {
+  if (!dom.debugList) return;
+  dom.debugList.innerHTML = state.debug.lines
+    .map(line => `<li class="tv-debug-row">${escapeHtml(line)}</li>`)
+    .join('');
+}
+
+function setCursorVisible(visible) {
+  if (!dom.cursor) return;
+  state.cursor.visible = visible;
+  dom.cursor.style.display = visible ? 'block' : 'none';
+  if (visible && state.cursor.x === 0 && state.cursor.y === 0) {
+    state.cursor.x = Math.floor(window.innerWidth / 2);
+    state.cursor.y = Math.floor(window.innerHeight / 2);
+  }
+  if (visible) {
+    dom.cursor.style.left = `${state.cursor.x}px`;
+    dom.cursor.style.top = `${state.cursor.y}px`;
+  }
+}
+
+function moveCursorByArrow(key) {
+  const step = 40;
+  if (key === 'ArrowLeft') state.cursor.x -= step;
+  if (key === 'ArrowRight') state.cursor.x += step;
+  if (key === 'ArrowUp') state.cursor.y -= step;
+  if (key === 'ArrowDown') state.cursor.y += step;
+
+  state.cursor.x = Math.max(12, Math.min(window.innerWidth - 12, state.cursor.x));
+  state.cursor.y = Math.max(12, Math.min(window.innerHeight - 12, state.cursor.y));
+
+  if (dom.cursor) {
+    dom.cursor.style.left = `${state.cursor.x}px`;
+    dom.cursor.style.top = `${state.cursor.y}px`;
+  }
+}
+
+function onLongPress() {
+  if (state.currentView === 'month') {
+    createStickyAndEdit();
+  } else {
+    createEventAndEdit();
+  }
+}
+
+function onSelect() {
+  if (state.centerArrowMode && state.cursor.visible) {
+    clickCursorTarget('left');
+    return;
+  }
+
+  if (state.currentView === 'month' && state.focus.region === 'main') {
+    const date = getFocusedMonthDate();
+    if (!date) return;
+    patchTvState({ selectedDate: date, currentView: 'day' }).then(() => refreshEvents());
+    return;
+  }
+
+  if (state.focus.region === 'sidebar') {
+    runSidebarAction(state.focus.sidebarIndex);
+    return;
+  }
+
+  const item = getFocusedItem();
+  if (item && item.type === 'event') enterEventEditor(item, 'update');
+  if (item && item.type === 'sticky') enterStickyEditor(item, 'update');
+}
+
+function onSecondarySelect() {
+  if (state.centerArrowMode && state.cursor.visible) {
+    clickCursorTarget('right');
+    return;
+  }
+
+  const item = getFocusedItem();
+  if (!item) {
+    triggerStickyAction();
+    return;
+  }
+  if (item.type === 'sticky') enterStickyEditor(item, 'update');
+  else enterEventEditor(item, 'update');
+}
+
+function handleBack() {
+  if (state.editor) {
+    state.editor = null;
+    render();
+    return;
+  }
+  if (state.focus.region === 'sidebar') {
+    state.focus.region = 'main';
+    render();
+    return;
+  }
+  setView('day');
+}
+
+function isBackKey(key) { return key === 'Escape' || key === 'Backspace'; }
+function isVolumeForwardKey(key) { return key === '+' || key === '=' || key === 'PageDown' || key === 'AudioVolumeUp'; }
+function isVolumeReverseKey(key) { return key === '-' || key === '_' || key === 'PageUp' || key === 'AudioVolumeDown'; }
+function isListKey(key) { return key === 'ContextMenu' || key === 'F2'; }
+
+function handleArrow(key) {
+  if (state.focus.region === 'sidebar') {
+    if (key === 'ArrowRight') {
+      state.focus.region = 'main';
+    } else if (key === 'ArrowUp') {
+      state.focus.sidebarIndex = Math.max(0, state.focus.sidebarIndex - 1);
+    } else if (key === 'ArrowDown') {
+      state.focus.sidebarIndex = Math.min(sidebarItems().length - 1, state.focus.sidebarIndex + 1);
+    }
+    render();
+    return;
+  }
+
+  if (state.currentView === 'month') {
+    handleMonthArrow(key);
+    return;
+  }
+
+  if (state.currentView === 'week') {
+    handleWeekArrow(key);
+    return;
+  }
+
+  handleDayArrow(key);
+}
+
+function handleDayArrow(key) {
+  if (key === 'ArrowLeft') shiftByView(-1);
+  if (key === 'ArrowRight') shiftByView(1);
+  if (key === 'ArrowUp') setView('week');
+  if (key === 'ArrowDown') setView('month');
+}
+
+function handleWeekArrow(key) {
+  if (key === 'ArrowLeft') shiftByView(-1);
+  if (key === 'ArrowRight') shiftByView(1);
+  if (key === 'ArrowUp') focusPrev();
+  if (key === 'ArrowDown') setView('month');
+}
+
+function handleMonthArrow(key) {
+  let idx = state.focus.monthIndex;
+  if (key === 'ArrowLeft') {
+    if (idx % 7 === 0) {
+      state.focus.region = 'sidebar';
+      render();
+      return;
+    }
+    idx -= 1;
+  }
+  if (key === 'ArrowRight') idx += 1;
+  if (key === 'ArrowUp') idx -= 7;
+  if (key === 'ArrowDown') idx += 7;
+  idx = Math.max(0, Math.min(41, idx));
+  state.focus.monthIndex = idx;
+  const date = getFocusedMonthDate();
+  if (date) patchTvState({ selectedDate: date });
+  render();
+}
+
+function shiftByView(direction) {
+  const d = parseLocalDate(state.selectedDate || toISO(new Date()));
+  let delta = 1;
+  if (state.currentView === 'week') delta = 7;
+  if (state.currentView === 'month') {
+    d.setMonth(d.getMonth() + direction);
+    patchTvState({ selectedDate: toISO(d) }).then(() => refreshEvents());
+    return;
+  }
+  const next = offsetDate(d, direction * delta);
+  patchTvState({ selectedDate: toISO(next) }).then(() => refreshEvents());
+}
+
+function goToday() {
+  patchTvState({ selectedDate: toISO(new Date()) }).then(() => refreshEvents());
+}
+
+function setView(viewName) {
+  patchTvState({ currentView: viewName }).then(() => refreshEvents());
+}
+
+function sidebarItems() {
+  return [
+    { label: `Mini Calendar: ${state.selectedDate || 'n/a'}`, action: () => patchTvState({ selectedDate: state.selectedDate }).then(() => refreshEvents()) },
+    { label: 'View: Day', action: () => setView('day') },
+    { label: 'View: Week', action: () => setView('week') },
+    { label: 'View: Month', action: () => setView('month') },
+    { label: 'Quick: Create Event', action: () => createEventAndEdit() },
+    { label: 'Quick: Create Sticky Note', action: () => createStickyAndEdit() },
+    { label: 'Quick: Jump to Today', action: () => goToday() },
   ];
-
-  // Diff: skip full DOM rebuild if nothing changed
-  const sig = cols.map(c =>
-    c.dateStr + '=' + (state.days[c.dateStr] || []).map(e => e.id).join(',')
-  ).join('|');
-
-  if (main.dataset.sig === sig && main.dataset.view === 'columns') return;
-  main.dataset.sig  = sig;
-  main.dataset.view = 'columns';
-  main.innerHTML    = cols.map(col => buildDayColumn(col)).join('');
 }
 
-function buildDayColumn({ dateStr, isSelected }) {
-  const d      = parseLocalDate(dateStr);
-  const events = state.days[dateStr] || [];
-  const now    = new Date();
+function runSidebarAction(index) {
+  const items = sidebarItems();
+  if (items[index]) items[index].action();
+}
 
-  const weekday  = d.toLocaleDateString([], { weekday: 'long' }).toUpperCase();
-  const dayNum   = d.getDate();
-  const monthStr = d.toLocaleDateString([], { month: 'long', year: 'numeric' });
+function focusNext() {
+  if (state.currentView === 'month') {
+    if (state.focus.region === 'sidebar') {
+      state.focus.sidebarIndex = (state.focus.sidebarIndex + 1) % sidebarItems().length;
+    } else {
+      state.focus.monthIndex = (state.focus.monthIndex + 1) % 42;
+      const date = getFocusedMonthDate();
+      if (date) patchTvState({ selectedDate: date });
+    }
+    render();
+    return;
+  }
+  const items = itemsForSelectedDate();
+  if (!items.length) return;
+  state.focus.itemIndex = (state.focus.itemIndex + 1) % items.length;
+  syncFocusedEventWithState(items[state.focus.itemIndex]);
+  render();
+}
 
-  // First upcoming event index (badges: "Now" / "Next")
-  const nowIdx  = events.findIndex(ev => eventIsNow(ev, now));
-  const nextIdx = events.findIndex(ev => eventIsUpcoming(ev, now));
+function focusPrev() {
+  if (state.currentView === 'month') {
+    if (state.focus.region === 'sidebar') {
+      state.focus.sidebarIndex = (state.focus.sidebarIndex - 1 + sidebarItems().length) % sidebarItems().length;
+    } else {
+      state.focus.monthIndex = (state.focus.monthIndex - 1 + 42) % 42;
+      const date = getFocusedMonthDate();
+      if (date) patchTvState({ selectedDate: date });
+    }
+    render();
+    return;
+  }
+  const items = itemsForSelectedDate();
+  if (!items.length) return;
+  state.focus.itemIndex = (state.focus.itemIndex - 1 + items.length) % items.length;
+  syncFocusedEventWithState(items[state.focus.itemIndex]);
+  render();
+}
 
-  const cards = events.length === 0
-    ? '<div class="tv-no-events">No events scheduled</div>'
-    : events.map((ev, i) =>
-        buildEventCard(ev, i === nowIdx && nowIdx !== -1, i === nextIdx && nextIdx !== -1 && nowIdx === -1)
-      ).join('');
+function triggerStickyAction() {
+  const item = getFocusedItem();
+  if (item && item.type === 'sticky') {
+    enterStickyEditor(item, 'update');
+  } else {
+    createStickyAndEdit();
+  }
+}
 
-  const selectedPill = isSelected
-    ? '<div class="tv-selected-pill">Selected</div>'
-    : '';
+function syncFocusAfterData() {
+  if (state.currentView === 'month') {
+    const idx = state.days.findIndex(d => d.date === state.selectedDate);
+    state.focus.monthIndex = idx >= 0 ? idx : 0;
+    return;
+  }
+  const items = itemsForSelectedDate();
+  if (!items.length) {
+    state.focus.itemIndex = 0;
+    return;
+  }
+  let idx = items.findIndex(it => it.type === 'event' && it.id === state.focusedEventId);
+  if (idx < 0) idx = Math.min(state.focus.itemIndex, items.length - 1);
+  state.focus.itemIndex = Math.max(0, idx);
+  syncFocusedEventWithState(items[state.focus.itemIndex]);
+}
 
+function syncFocusedEventWithState(item) {
+  if (!item || item.type !== 'event') return;
+  if (item.id === state.focusedEventId) return;
+  state.focusedEventId = item.id;
+  patchTvState({ focusedEventId: item.id });
+}
+
+function getFocusedMonthDate() {
+  const day = state.days[state.focus.monthIndex];
+  return day ? day.date : null;
+}
+
+function itemsForDate(dateKey) {
+  const day = state.dayMap[dateKey];
+  if (!day) return [];
+  const events = (day.events || []).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
+  const sticky = (day.stickyNotes || []).map((s, i) => ({ type: 'sticky', id: s.id || `sticky-${i}`, date: dateKey, sticky: s, index: i }));
+  return [...events, ...sticky];
+}
+
+function itemsForSelectedDate() {
+  return itemsForDate(state.selectedDate);
+}
+
+function getFocusedItem() {
+  const items = itemsForSelectedDate();
+  if (!items.length) return null;
+  const idx = Math.max(0, Math.min(items.length - 1, state.focus.itemIndex));
+  return items[idx];
+}
+
+function render() {
+  renderHeader();
+  renderMain();
+  renderFooterHint();
+}
+
+function renderHeader() {
+  if (dom.dateHeader) {
+    const d = parseLocalDate(state.selectedDate || toISO(new Date()));
+    dom.dateHeader.textContent = `${state.currentView.toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
+  }
+}
+
+function renderMain() {
+  if (!dom.tvMain) return;
+  if (state.currentView === 'month') {
+    dom.tvMain.innerHTML = renderMonthView();
+  } else if (state.currentView === 'week') {
+    dom.tvMain.innerHTML = renderWeekView();
+  } else {
+    dom.tvMain.innerHTML = renderDayView();
+  }
+  if (state.editor) {
+    const holder = dom.tvMain.querySelector('.tv-editor-anchor');
+    if (holder) holder.innerHTML = renderEditor();
+  }
+}
+
+function renderDayView() {
+  const day = state.dayMap[state.selectedDate] || { date: state.selectedDate, events: [], stickyNotes: [] };
+  return `<div class="tv-shell"><div class="tv-main-grid day">${renderDayCard(day, true)}</div></div>`;
+}
+
+function renderWeekView() {
+  const selected = parseLocalDate(state.selectedDate);
+  const start = offsetDate(selected, -selected.getDay() + 1);
+  const days = [];
+  for (let i = 0; i < 7; i += 1) {
+    const key = toISO(offsetDate(start, i));
+    days.push(state.dayMap[key] || { date: key, events: [], stickyNotes: [] });
+  }
+  return `<div class="tv-shell"><div class="tv-main-grid week">${days.map(d => renderDayCard(d, d.date === state.selectedDate)).join('')}</div></div>`;
+}
+
+function renderMonthView() {
+  const side = sidebarItems();
   return `
-    <div class="tv-day-col${isSelected ? ' tv-day-selected' : ''}">
-      <div class="tv-col-accent"></div>
-      <div class="tv-day-header">
-        <div class="tv-day-weekday">${weekday}</div>
-        <div class="tv-day-num">${dayNum}</div>
-        <div class="tv-day-month">${monthStr}</div>
-        ${selectedPill}
-      </div>
-      <div class="tv-events-list">${cards}</div>
-    </div>`;
+  <div class="tv-shell">
+    <div class="tv-sidebar">
+      ${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}
+      <div class="tv-editor-anchor"></div>
+    </div>
+    <div class="tv-main-grid month">
+      ${state.days.map((day, idx) => renderMonthCell(day, idx)).join('')}
+    </div>
+  </div>`;
 }
 
-function buildEventCard(ev, evIsNow, evIsNext) {
-  const color       = ev.color || SOURCE_COLORS[ev.source] || SOURCE_COLORS.local;
-  const timeStart   = fmtTime(ev.start);
-  const timeEnd     = fmtTime(ev.end);
-  const timeDisplay = timeStart && timeEnd ? `${timeStart} – ${timeEnd}` : timeStart;
+function renderDayCard(day, selected) {
+  const date = parseLocalDate(day.date);
+  const items = itemsForDate(day.date);
+  const now = new Date();
+  const cards = items.length
+    ? items.map((item, idx) => {
+        const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
+        if (item.type === 'event') {
+          const ev = item.event;
+          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}"><div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
+        }
+        return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
+      }).join('')
+    : `<div class="tv-empty">No events or sticky notes</div>`;
 
-  const badge = evIsNow
-    ? '<span class="ev-badge ev-badge-now">Now</span>'
-    : evIsNext
-      ? '<span class="ev-badge ev-badge-next">Next</span>'
-      : '';
-
-  const descHtml = ev.description
-    ? `<div class="ev-desc">${esc(ev.description.slice(0, 100))}${ev.description.length > 100 ? '…' : ''}</div>`
-    : '';
-
-  return `
-    <div class="tv-event-card${evIsNow ? ' ev-now' : ''}${evIsNext ? ' ev-next' : ''}"
-         style="--ev-color:${color}">
-      <div class="ev-color-bar"></div>
-      <div class="ev-body">
-        <div class="ev-time-row">
-          <span class="ev-time">${esc(timeDisplay)}</span>${badge}
-        </div>
-        <div class="ev-title">${esc(ev.title || 'Untitled')}</div>
-        ${descHtml}
-        <div class="ev-source">${esc(ev.source || 'local')}</div>
-      </div>
-    </div>`;
+  return `<div class="tv-day-card ${selected ? 'selected' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}"><div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
 }
 
-function renderStatus() {
-  const cfg = {
-    connected:    { cls: 'status-ok',   icon: '●', label: 'Connected'     },
-    reconnecting: { cls: 'status-warn', icon: '◌', label: 'Reconnecting…' },
-    disconnected: { cls: 'status-err',  icon: '○', label: 'Disconnected'  },
+function renderMonthCell(day, idx) {
+  const date = parseLocalDate(day.date);
+  const focused = state.focus.region === 'main' && state.focus.monthIndex === idx;
+  const previewEvent = (day.events || [])[0];
+  const previewSticky = (day.stickyNotes || [])[0];
+  const preview = previewEvent ? previewEvent.title : (previewSticky ? previewSticky.content : '');
+  return `<div class="tv-month-cell ${focused ? 'focused' : ''}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}"><div class="tv-month-date">${date.getDate()}</div><div class="tv-month-preview">${escapeHtml(preview)}</div></div>`;
+}
+
+function renderEditor() {
+  if (!state.editor) return '';
+  const fieldsHtml = state.editor.fields.map((f, idx) => `<div class="tv-field ${idx === state.editor.fieldIndex ? 'focused' : ''}" data-tv-click="field" data-field-index="${idx}"><div class="tv-field-name">${escapeHtml(f.label)}</div><div class="tv-field-value">${escapeHtml(formatFieldValue(f.key, state.editor.data[f.key]))}</div></div>`).join('');
+  return `<div class="tv-editor"><div class="tv-editor-title">Inline Editing</div>${fieldsHtml}<div class="tv-hint-chip">UP/DOWN field • LEFT/RIGHT change • SELECT save • ESC cancel</div></div>`;
+}
+
+function renderFooterHint(extra) {
+  if (!dom.statusEl || !dom.lastUpdated) return;
+  dom.statusEl.textContent = state.centerArrowMode ? 'Arrow Mode: ON' : 'Arrow Mode: OFF';
+  dom.lastUpdated.textContent = extra || 'Single SELECT edit • Double SELECT context • Triple SELECT arrow mode • Long press create • +/- tab';
+}
+
+function enterEventEditor(item, mode) {
+  const ev = item ? item.event : null;
+  const start = ev ? ev.start : `${state.selectedDate}T09:00:00+00:00`;
+  const end = ev ? ev.end : `${state.selectedDate}T10:00:00+00:00`;
+  state.editor = {
+    type: 'event',
+    mode,
+    eventId: ev ? ev.id : null,
+    date: item ? item.date : state.selectedDate,
+    fieldIndex: 0,
+    fields: [
+      { key: 'title', label: 'Title' },
+      { key: 'start', label: 'Start Time' },
+      { key: 'end', label: 'End Time' },
+      { key: 'description', label: 'Description' },
+    ],
+    data: {
+      title: ev ? (ev.title || 'New Event') : 'New Event',
+      start,
+      end,
+      description: ev ? (ev.description || '') : '',
+    },
   };
-  const { cls, icon, label } = cfg[state.connection] || cfg.disconnected;
-  dom.statusEl.innerHTML     = `<span class="${cls}">${icon} ${label}</span>`;
-  const updatedText = state.lastUpdated
-    ? `Last updated ${state.lastUpdated.toLocaleTimeString()}`
-    : '';
-  const remoteHint = '◀ ▶ change day  •  Select/Play = today';
-  dom.lastUpdated.textContent = `${updatedText}${updatedText ? '  •  ' : ''}${remoteHint}`;
+  render();
 }
 
-// ─── Clock ────────────────────────────────────────────────────────────────────
-
-function tickClock() {
-  dom.clock.textContent = new Date().toLocaleTimeString([], {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
+function enterStickyEditor(item, mode) {
+  const sticky = item ? item.sticky : { content: 'New sticky note', color: STICKY_COLORS[0] };
+  state.editor = {
+    type: 'sticky',
+    mode,
+    stickyId: item ? item.id : null,
+    stickyIndex: item ? item.index : null,
+    date: item ? item.date : state.selectedDate,
+    fieldIndex: 0,
+    fields: [
+      { key: 'content', label: 'Title' },
+      { key: 'color', label: 'Color' },
+      { key: 'description', label: 'Description' },
+    ],
+    data: {
+      content: sticky.content || 'New sticky note',
+      color: sticky.color || STICKY_COLORS[0],
+      description: sticky.description || '',
+    },
+  };
+  render();
 }
 
-// ─── Date/time helpers ────────────────────────────────────────────────────────
+function handleEditorKey(key) {
+  if (!state.editor) return false;
+  if (key === 'ArrowUp') {
+    state.editor.fieldIndex = (state.editor.fieldIndex - 1 + state.editor.fields.length) % state.editor.fields.length;
+    render();
+    return true;
+  }
+  if (key === 'ArrowDown') {
+    state.editor.fieldIndex = (state.editor.fieldIndex + 1) % state.editor.fields.length;
+    render();
+    return true;
+  }
+  if (key === 'ArrowLeft') {
+    adjustEditorValue(-1);
+    render();
+    return true;
+  }
+  if (key === 'ArrowRight') {
+    adjustEditorValue(1);
+    render();
+    return true;
+  }
+  if (key === 'Escape' || key === 'Backspace') {
+    state.editor = null;
+    render();
+    return true;
+  }
+  return false;
+}
 
-/**
- * Parse a YYYY-MM-DD string as a LOCAL date (not UTC).
- * Using `new Date("YYYY-MM-DD")` would give midnight UTC → wrong local date.
- */
+function handleMainClick(e) {
+  const t = e.target.closest('[data-tv-click]');
+  if (!t) return;
+
+  const role = t.getAttribute('data-tv-click');
+  if (role === 'sidebar') {
+    const idx = Number(t.getAttribute('data-sidebar-index') || 0);
+    state.focus.region = 'sidebar';
+    state.focus.sidebarIndex = idx;
+    onSelect();
+    return;
+  }
+
+  if (role === 'month-cell') {
+    const idx = Number(t.getAttribute('data-month-index') || 0);
+    const date = t.getAttribute('data-date');
+    state.focus.region = 'main';
+    state.focus.monthIndex = idx;
+    if (date) {
+      patchTvState({ selectedDate: date }).then(() => {
+        onSelect();
+      });
+    }
+    return;
+  }
+
+  if (role === 'day') {
+    const date = t.getAttribute('data-date');
+    if (date) {
+      patchTvState({ selectedDate: date }).then(() => refreshEvents());
+    }
+    return;
+  }
+
+  if (role === 'item') {
+    const date = t.getAttribute('data-date');
+    const idx = Number(t.getAttribute('data-item-index') || 0);
+    if (date) state.selectedDate = date;
+    state.focus.region = 'main';
+    state.focus.itemIndex = idx;
+    render();
+    onSelect();
+    return;
+  }
+
+  if (role === 'field' && state.editor) {
+    const idx = Number(t.getAttribute('data-field-index') || 0);
+    state.editor.fieldIndex = idx;
+    render();
+  }
+}
+
+function clickCursorTarget(mode) {
+  if (!state.cursor.visible) return;
+  const el = document.elementFromPoint(state.cursor.x, state.cursor.y);
+  if (!el) return;
+  if (mode === 'right') {
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 2 });
+    el.dispatchEvent(ev);
+    return;
+  }
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 0 });
+  el.dispatchEvent(click);
+}
+
+function adjustEditorValue(direction) {
+  const field = state.editor.fields[state.editor.fieldIndex].key;
+  const data = state.editor.data;
+
+  if (field === 'start' || field === 'end') {
+    const d = parseDateTime(data[field]);
+    d.setMinutes(d.getMinutes() + (15 * direction));
+    data[field] = d.toISOString();
+    return;
+  }
+
+  if (field === 'title') {
+    data.title = cycleValue(TITLE_PRESETS, data.title, direction);
+    return;
+  }
+
+  if (field === 'description') {
+    data.description = cycleValue(DESC_PRESETS, data.description, direction);
+    return;
+  }
+
+  if (field === 'content') {
+    data.content = cycleValue(STICKY_PRESETS, data.content, direction);
+    return;
+  }
+
+  if (field === 'color') {
+    data.color = cycleValue(STICKY_COLORS, data.color, direction);
+  }
+}
+
+function cycleValue(values, current, direction) {
+  const i = values.indexOf(current);
+  if (i < 0) return values[0];
+  let next = i + direction;
+  if (next < 0) next = values.length - 1;
+  if (next >= values.length) next = 0;
+  return values[next];
+}
+
+function createEventAndEdit() { enterEventEditor(null, 'create'); }
+function createStickyAndEdit() { enterStickyEditor(null, 'create'); }
+
+async function saveEditor() {
+  if (!state.editor) return;
+
+  if (state.editor.type === 'event') {
+    const payload = {
+      title: state.editor.data.title,
+      description: state.editor.data.description,
+      start: state.editor.data.start,
+      end: state.editor.data.end,
+      date: state.editor.date,
+    };
+
+    if (state.editor.mode === 'create') {
+      await authFetch('/tv/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await authFetch(`/tv/events/${state.editor.eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
+  } else {
+    const dateKey = state.editor.date || state.selectedDate;
+    const day = state.dayMap[dateKey] || { stickyNotes: [] };
+    const list = (day.stickyNotes || []).map(x => ({
+      id: x.id,
+      content: x.content,
+      color: x.color,
+      createdAt: x.createdAt,
+      updatedAt: x.updatedAt,
+    }));
+
+    if (state.editor.mode === 'create') {
+      list.push({
+        id: `sticky-${Date.now()}`,
+        content: state.editor.data.content,
+        color: state.editor.data.color,
+      });
+    } else {
+      const idx = list.findIndex(x => x.id === state.editor.stickyId);
+      if (idx >= 0) {
+        list[idx].content = state.editor.data.content;
+        list[idx].color = state.editor.data.color;
+      }
+    }
+
+    await authFetch(`/tv/date-sticky/${dateKey}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sticky_notes: list }),
+    });
+  }
+
+  state.editor = null;
+  await refreshEvents();
+}
+
+function parseDateTime(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return new Date();
+  return d;
+}
+
+function formatFieldValue(key, value) {
+  if (key === 'start' || key === 'end') return formatTime(value);
+  return value || '';
+}
+
+function formatTime(iso) {
+  const d = parseDateTime(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function parseLocalDate(str) {
   const [y, m, d] = str.slice(0, 10).split('-').map(Number);
   return new Date(y, m - 1, d);
 }
 
 function offsetDate(d, delta) {
-  const r = new Date(d);
-  r.setDate(r.getDate() + delta);
-  return r;
+  const n = new Date(d);
+  n.setDate(n.getDate() + delta);
+  return n;
 }
 
 function toISO(d) {
-  const y  = d.getFullYear();
-  const m  = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${dd}`;
-}
-
-/**
- * Parse an event ISO timestamp.
- * Naive strings (no Z / offset) are treated as UTC to match backend behaviour
- * (backend marks naive datetimes as UTC before returning them).
- */
-function parseEventTime(iso) {
-  if (!iso) return null;
-  const isZoned = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso);
-  const d = new Date(isZoned ? iso : iso + 'Z');
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function fmtTime(iso) {
-  const d = parseEventTime(iso);
-  return d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function eventIsNow(ev, now) {
-  const s = parseEventTime(ev.start);
-  const e = parseEventTime(ev.end);
-  return Boolean(s && e && s <= now && now <= e);
+  const s = parseDateTime(ev.start);
+  const e = parseDateTime(ev.end);
+  return s <= now && now <= e;
 }
 
 function eventIsUpcoming(ev, now) {
-  const s = parseEventTime(ev.start);
-  return Boolean(s && s > now);
+  const s = parseDateTime(ev.start);
+  return s > now;
 }
 
-// ─── Security util ────────────────────────────────────────────────────────────
-
-/** HTML-escape a value before injecting into innerHTML. */
-function esc(val) {
+function escapeHtml(val) {
   return String(val == null ? '' : val)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -565,7 +1205,5 @@ function esc(val) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
-
-// ─── Bootstrap ────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', init);

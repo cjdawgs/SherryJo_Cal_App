@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Event, User
+from app.models import DateStickyNote, Event, User
 from app.security import create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 
@@ -144,6 +144,19 @@ class TVStatePatch(BaseModel):
     focusedEventId: Optional[int] = None
 
 
+class TVEventUpsert(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    date: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    durationMinutes: Optional[int] = 60
+
+
+class TVStickyUpsert(BaseModel):
+    sticky_notes: Optional[list[dict]] = None
+
+
 class GeneratePairCodeResponse(BaseModel):
     pairingCode: str
     expiresAt: str
@@ -175,6 +188,74 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "source": getattr(event, "source", "local") or "local",
         "color": getattr(event, "color", None),
     }
+
+
+def _normalize_sticky_notes(payload) -> list[dict]:
+    if payload is None:
+        return []
+
+    if isinstance(payload, dict):
+        payload = [payload]
+
+    if not isinstance(payload, list):
+        return []
+
+    out: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        out.append({
+            "id": item.get("id") or f"sticky-{len(out) + 1}",
+            "content": content,
+            "color": str(item.get("color") or "#F7E68A"),
+            "createdAt": item.get("createdAt") or now_iso,
+            "updatedAt": now_iso,
+        })
+    return out
+
+
+def _parse_iso_datetime_or_none(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _parse_iso_date_or_none(value: Optional[str]):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value[:10]).date()
+    except ValueError:
+        return None
+
+
+def _week_start_for_date(d):
+    # Monday-start week grid
+    return d - timedelta(days=d.weekday())
+
+
+def _month_grid_start_for_date(d):
+    first = d.replace(day=1)
+    return _week_start_for_date(first)
+
+
+def _window_for_view(anchor_date, current_view: str):
+    if current_view == "day":
+        return anchor_date, anchor_date
+    if current_view == "week":
+        start = _week_start_for_date(anchor_date)
+        return start, start + timedelta(days=6)
+    # month view: 6-week TV grid for stable layout
+    start = _month_grid_start_for_date(anchor_date)
+    return start, start + timedelta(days=41)
 
 
 def _group_events_by_date(events: list[Event]) -> list[dict]:
@@ -253,7 +334,7 @@ def pair_tv(
     # Initialize TV state (inherits any existing web state; selectedDate may be None)
     existing_state = tv_state_store.get(user_id)
     if not existing_state:
-        tv_state_store.initialize(user_id, selected_date=None, current_view="month")
+        tv_state_store.initialize(user_id, selected_date=None, current_view="day")
     state = tv_state_store.get(user_id)
 
     # Issue a long-lived TV token (8 hours)
@@ -262,7 +343,7 @@ def pair_tv(
     return {
         "token": token,
         "selectedDate": state.get("selectedDate"),
-        "currentView": state.get("currentView", "month"),
+        "currentView": state.get("currentView", "day"),
     }
 
 
@@ -285,12 +366,12 @@ def get_tv_state(
         # Return empty state — do NOT inject today()
         return TVStateResponse(
             selectedDate=None,
-            currentView="month",
+            currentView="day",
             focusedEventId=None,
         )
     return TVStateResponse(
         selectedDate=state.get("selectedDate"),
-        currentView=state.get("currentView", "month"),
+        currentView=state.get("currentView", "day"),
         focusedEventId=state.get("focusedEventId"),
     )
 
@@ -311,7 +392,7 @@ def patch_tv_state(
 
     return TVStateResponse(
         selectedDate=updated.get("selectedDate"),
-        currentView=updated.get("currentView", "month"),
+        currentView=updated.get("currentView", "day"),
         focusedEventId=updated.get("focusedEventId"),
     )
 
@@ -328,11 +409,17 @@ def get_tv_events(
     """
     Returns UI-ready, pre-grouped events for the TV client.
 
-    Uses selectedDate from TV state as the anchor for a ±31-day window.
+    Uses selectedDate and currentView from TV state to compute a TV layout window.
     If selectedDate is not set, returns an empty result — never defaults to today().
 
     Response shape:
-        { "selectedDate": "...", "days": [ { "date": "...", "events": [...] } ] }
+                {
+                    "selectedDate": "...",
+                    "currentView": "day|week|month",
+                    "rangeStart": "YYYY-MM-DD",
+                    "rangeEnd": "YYYY-MM-DD",
+                    "days": [ { "date": "...", "events": [...], "stickyNotes": [...] } ]
+                }
 
     Logs: TV_EVENTS_FETCH
     """
@@ -340,18 +427,19 @@ def get_tv_events(
 
     state = tv_state_store.get(current_user.id)
     selected_date_str: Optional[str] = state.get("selectedDate") if state else None
+    current_view = (state.get("currentView") if state else None) or "day"
 
     if not selected_date_str:
         # Do NOT default to today — return empty, let client decide
-        return {"selectedDate": None, "days": []}
+        return {"selectedDate": None, "currentView": current_view, "days": []}
 
-    try:
-        anchor = datetime.fromisoformat(selected_date_str).replace(tzinfo=timezone.utc)
-    except ValueError:
+    anchor_date = _parse_iso_date_or_none(selected_date_str)
+    if anchor_date is None:
         raise HTTPException(status_code=400, detail="selectedDate in state is not a valid ISO date")
 
-    window_start = anchor - timedelta(days=31)
-    window_end = anchor + timedelta(days=31)
+    window_start_date, window_end_date = _window_for_view(anchor_date, current_view)
+    window_start = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    window_end = datetime.combine(window_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
 
     events = (
         db.query(Event)
@@ -364,9 +452,191 @@ def get_tv_events(
         .all()
     )
 
-    days = _group_events_by_date(events)
+    by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
+
+    sticky_rows = (
+        db.query(DateStickyNote)
+        .filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date >= window_start_date.isoformat(),
+            DateStickyNote.date <= window_end_date.isoformat(),
+        )
+        .all()
+    )
+    sticky_map = {
+        row.date: _normalize_sticky_notes(getattr(row, "sticky_notes", None))
+        for row in sticky_rows
+    }
+
+    days = []
+    cursor = window_start_date
+    while cursor <= window_end_date:
+        key = cursor.isoformat()
+        days.append({
+            "date": key,
+            "events": by_date_events.get(key, []),
+            "stickyNotes": sticky_map.get(key, []),
+        })
+        cursor = cursor + timedelta(days=1)
 
     return {
         "selectedDate": selected_date_str,
+        "currentView": current_view,
+        "rangeStart": window_start_date.isoformat(),
+        "rangeEnd": window_end_date.isoformat(),
         "days": days,
     }
+
+
+@router.post("/events")
+def create_tv_event(
+    body: TVEventUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    state = tv_state_store.get(current_user.id) or {}
+    selected_date = body.date or state.get("selectedDate")
+    date_obj = _parse_iso_date_or_none(selected_date)
+    if not date_obj:
+        raise HTTPException(status_code=422, detail="selectedDate is required to create an event")
+
+    now_utc = datetime.now(timezone.utc)
+    start_dt = _parse_iso_datetime_or_none(body.start)
+    if start_dt is None:
+        start_dt = datetime.combine(date_obj, datetime.min.time()).replace(tzinfo=timezone.utc) + timedelta(hours=9)
+
+    end_dt = _parse_iso_datetime_or_none(body.end)
+    if end_dt is None:
+        end_dt = start_dt + timedelta(minutes=max(15, int(body.durationMinutes or 60)))
+
+    event = Event(
+        title=(body.title or "New Event").strip() or "New Event",
+        description=(body.description or "").strip(),
+        start_time=start_dt,
+        end_time=end_dt,
+        owner_id=current_user.id,
+        source="local",
+        account_email="local",
+        created_at=now_utc,
+        updated_at=now_utc,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    tv_state_store.set(current_user.id, {"focusedEventId": event.id})
+
+    return {"status": "ok", "event": _serialize_event_for_tv(event)}
+
+
+@router.put("/events/{event_id}")
+def update_tv_event(
+    event_id: int,
+    body: TVEventUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    event = (
+        db.query(Event)
+        .filter(Event.id == event_id, Event.owner_id == current_user.id)
+        .first()
+    )
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    if body.title is not None:
+        title = body.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="title cannot be empty")
+        event.title = title
+
+    if body.description is not None:
+        event.description = body.description.strip()
+
+    if body.start is not None:
+        start_dt = _parse_iso_datetime_or_none(body.start)
+        if start_dt is None:
+            raise HTTPException(status_code=422, detail="start is invalid")
+        event.start_time = start_dt
+
+    if body.end is not None:
+        end_dt = _parse_iso_datetime_or_none(body.end)
+        if body.end and end_dt is None:
+            raise HTTPException(status_code=422, detail="end is invalid")
+        event.end_time = end_dt
+
+    event.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return {"status": "ok", "event": _serialize_event_for_tv(event)}
+
+
+@router.put("/date-sticky/{date_key}")
+def upsert_tv_date_sticky(
+    date_key: str,
+    body: TVStickyUpsert,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    date_obj = _parse_iso_date_or_none(date_key)
+    if date_obj is None:
+        raise HTTPException(status_code=422, detail="date_key must be YYYY-MM-DD")
+
+    sticky_notes = _normalize_sticky_notes(body.sticky_notes)
+
+    row = (
+        db.query(DateStickyNote)
+        .filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date == date_obj.isoformat(),
+        )
+        .first()
+    )
+
+    if not sticky_notes:
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"status": "ok", "item": {"date": date_obj.isoformat(), "sticky_notes": [], "count": 0}}
+
+    if not row:
+        row = DateStickyNote(
+            owner_id=current_user.id,
+            date=date_obj.isoformat(),
+            sticky_notes=sticky_notes,
+        )
+        db.add(row)
+    else:
+        row.sticky_notes = sticky_notes
+        row.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(row)
+    return {
+        "status": "ok",
+        "item": {
+            "date": row.date,
+            "sticky_notes": _normalize_sticky_notes(row.sticky_notes),
+            "count": len(_normalize_sticky_notes(row.sticky_notes)),
+        },
+    }
+
+
+@router.delete("/date-sticky/{date_key}")
+def delete_tv_date_sticky(
+    date_key: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    row = (
+        db.query(DateStickyNote)
+        .filter(
+            DateStickyNote.owner_id == current_user.id,
+            DateStickyNote.date == date_key,
+        )
+        .first()
+    )
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"status": "ok", "deleted": date_key}

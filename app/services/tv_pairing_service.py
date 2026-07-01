@@ -153,7 +153,7 @@ class _TVStateStore:
         )
         return current
 
-    def initialize(self, user_id: int, selected_date: Optional[str], current_view: str = "month") -> dict:
+    def initialize(self, user_id: int, selected_date: Optional[str], current_view: str = "day") -> dict:
         """
         Called after pairing. Sets initial state from the web session.
         selected_date may be None — we do NOT substitute today().
