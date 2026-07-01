@@ -188,6 +188,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "end": _to_iso(event.end_time),
         "description": event.description or "",
         "source": getattr(event, "source", "local") or "local",
+        "accountEmail": getattr(event, "account_email", None),
         "color": getattr(event, "color", None),
     }
 

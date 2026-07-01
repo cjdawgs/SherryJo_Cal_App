@@ -1,7 +1,8 @@
 'use strict';
 
 const TOKEN_KEY = 'tv_token';
-const POLL_MS = 4000;
+// TV state remains backend-driven. Use low-frequency auto poll; interactions trigger immediate refresh.
+const POLL_MS = 300000;
 const LONG_PRESS_MS = 600;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
@@ -39,6 +40,8 @@ const state = {
     sidebarIndex: 0,
     itemIndex: 0,
   },
+  monthDates: [],
+  accountLegend: [],
 };
 
 let dom = {};
@@ -64,6 +67,7 @@ function cacheDom() {
     cursor: document.getElementById('tv-virtual-cursor'),
     debugOverlay: document.getElementById('tv-debug-overlay'),
     debugList: document.getElementById('tv-debug-list'),
+    accountLegend: document.getElementById('tv-account-legend'),
   };
 }
 
@@ -72,27 +76,44 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = 'tv-remote-style';
   style.textContent = `
-  .tv-shell { display: flex; width: 100%; height: 100%; gap: 16px; }
-  .tv-main-grid { flex: 1; min-width: 0; display: grid; gap: 12px; }
-  .tv-main-grid.day { grid-template-columns: 1fr; }
+  .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(160px, 210px) minmax(0, 1fr) minmax(260px, 320px); gap: 12px; }
+  .tv-shell.month { grid-template-columns: minmax(160px, 210px) minmax(0, 1fr); }
+  .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
+  .tv-account-legend { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 52px 4px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); font-size: 11px; color: rgba(240,240,245,0.82); letter-spacing: 0.3px; }
+  .tv-account-dot { width: 8px; height: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.45); flex-shrink: 0; }
+  .tv-main-grid { min-width: 0; display: grid; gap: 10px; }
+  .tv-main-grid.day { grid-template-columns: repeat(7, 1fr); }
   .tv-main-grid.week { grid-template-columns: repeat(7, 1fr); }
   .tv-main-grid.month { grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, minmax(0, 1fr)); }
-  .tv-sidebar { width: 27%; min-width: 300px; max-width: 420px; border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; background: rgba(255,255,255,0.02); }
+  .tv-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 10px; margin: 0 0 8px 0; }
+  .tv-weekday-chip { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; text-align: center; padding: 6px 4px; font-size: 11px; letter-spacing: 1.1px; text-transform: uppercase; opacity: 0.85; }
+  .tv-sidebar { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.02); overflow: hidden; }
   .tv-side-item { border: 1px solid rgba(255,255,255,0.09); border-radius: 10px; padding: 10px; font-size: 14px; color: rgba(240,240,245,0.9); }
   .tv-side-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.22); transform: scale(1.02); }
+  .tv-side-item:hover { border-color: rgba(255,255,255,0.24); }
+  .tv-right-rail { border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 10px; background: rgba(255,255,255,0.02); overflow: hidden; }
+  .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
+  .tv-right-subtitle { font-size: 12px; opacity: 0.75; margin: 10px 0 6px 0; font-weight: 600; }
+  .tv-right-list { display: flex; flex-direction: column; gap: 6px; max-height: 37vh; overflow-y: auto; }
+  .tv-right-item { border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 6px 8px; background: rgba(255,255,255,0.02); }
+  .tv-right-item-title { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-right-item-time { font-size: 11px; opacity: 0.72; }
   .tv-day-card, .tv-month-cell { border: 1px solid rgba(255,255,255,0.09); border-radius: 12px; background: rgba(255,255,255,0.03); padding: 10px; min-height: 0; display: flex; flex-direction: column; }
   .tv-day-card.selected { border-color: rgba(79,140,255,0.45); }
   .tv-day-head { font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; text-transform: uppercase; margin-bottom: 8px; }
-  .tv-day-num { font-size: 28px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
+  .tv-day-num { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
   .tv-item-list { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
   .tv-item { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 8px; background: rgba(255,255,255,0.02); }
   .tv-item.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); }
+  .tv-item:hover { border-color: rgba(255,255,255,0.24); }
   .tv-item.now { background: rgba(79,140,255,0.14); }
   .tv-item.next { background: rgba(255,159,10,0.11); }
   .tv-item-title { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-item-sub { font-size: 12px; opacity: 0.78; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-month-cell { justify-content: flex-start; }
   .tv-month-cell.focused { border-color: #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.2); transform: scale(1.01); }
+  .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-preview { font-size: 11px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
@@ -135,6 +156,23 @@ function ensureStyles() {
   dom.cursor = document.getElementById('tv-virtual-cursor');
   dom.debugOverlay = document.getElementById('tv-debug-overlay');
   dom.debugList = document.getElementById('tv-debug-list');
+
+  ensureLegendRow();
+}
+
+function ensureLegendRow() {
+  const dashboard = document.getElementById('screen-dashboard');
+  if (!dashboard) return;
+  let legend = document.getElementById('tv-account-legend');
+  if (!legend) {
+    legend = document.createElement('div');
+    legend.id = 'tv-account-legend';
+    legend.className = 'tv-account-legend';
+    const header = dashboard.querySelector('.tv-header');
+    if (header) dashboard.insertBefore(legend, header);
+    else dashboard.prepend(legend);
+  }
+  dom.accountLegend = legend;
 }
 
 function transitionTo(screen) {
@@ -171,6 +209,11 @@ function init() {
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      refreshEvents();
+    }
+  });
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
   if (state.token) {
@@ -271,6 +314,10 @@ async function fetchTvState() {
 }
 
 async function refreshEvents() {
+  if (document.hidden) {
+    return;
+  }
+
   if (state.eventsRequestInFlight) {
     state.eventsRefreshQueued = true;
     return;
@@ -734,6 +781,71 @@ function setView(viewName) {
   patchTvState({ currentView: viewName }).then(() => refreshEvents());
 }
 
+function weekdayNames() {
+  return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+}
+
+function weekStartSunday(date) {
+  return offsetDate(date, -date.getDay());
+}
+
+function buildWeekDates(anchorDate) {
+  const start = weekStartSunday(anchorDate);
+  const out = [];
+  for (let i = 0; i < 7; i += 1) {
+    out.push(toISO(offsetDate(start, i)));
+  }
+  return out;
+}
+
+function buildMonthDates(anchorDate) {
+  const firstOfMonth = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+  const start = weekStartSunday(firstOfMonth);
+  const out = [];
+  for (let i = 0; i < 42; i += 1) {
+    out.push(toISO(offsetDate(start, i)));
+  }
+  return out;
+}
+
+function dayData(dateKey) {
+  return state.dayMap[dateKey] || { date: dateKey, events: [], stickyNotes: [] };
+}
+
+function renderWeekdayHeader() {
+  return `<div class="tv-weekdays">${weekdayNames().map(name => `<div class="tv-weekday-chip">${name}</div>`).join('')}</div>`;
+}
+
+function renderLeftSidebar() {
+  const side = sidebarItems();
+  return `<div class="tv-sidebar">${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}<div class="tv-editor-anchor"></div></div>`;
+}
+
+function renderRightRail(selectedDateKey, weekDateKeys) {
+  const selectedItems = itemsForDate(selectedDateKey).slice(0, 12);
+  const weekEvents = weekDateKeys.flatMap(dateKey => (dayData(dateKey).events || []).map(ev => ({ dateKey, ev })));
+  return `
+    <aside class="tv-right-rail">
+      <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}</div>
+      <div class="tv-right-list">
+        ${selectedItems.length ? selectedItems.map(item => {
+          if (item.type === 'event') {
+            const eventColor = normalizeHexColor(item.event.color) || '#8EA4C4';
+            return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
+          }
+          return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
+        }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
+      </div>
+      <div class="tv-right-subtitle">This Week</div>
+      <div class="tv-right-list">
+        ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
+          const eventColor = normalizeHexColor(row.ev.color) || '#8EA4C4';
+          return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}"><div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
+        }).join('') : '<div class="tv-empty">No events this week</div>'}
+      </div>
+    </aside>`;
+}
+
 function sidebarItems() {
   return [
     { label: `Mini Calendar: ${state.selectedDate || 'n/a'}`, action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }).then(() => refreshEvents()) },
@@ -800,7 +912,8 @@ function triggerStickyAction() {
 
 function syncFocusAfterData() {
   if (state.currentView === 'month') {
-    const idx = state.days.findIndex(d => d.date === state.selectedDate);
+    const dates = state.monthDates.length ? state.monthDates : buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
+    const idx = dates.indexOf(state.selectedDate);
     state.focus.monthIndex = idx >= 0 ? idx : 0;
     return;
   }
@@ -823,8 +936,8 @@ function syncFocusedEventWithState(item) {
 }
 
 function getFocusedMonthDate() {
-  const day = state.days[state.focus.monthIndex];
-  return day ? day.date : null;
+  const date = state.monthDates[state.focus.monthIndex];
+  return date || null;
 }
 
 function itemsForDate(dateKey) {
@@ -847,9 +960,43 @@ function getFocusedItem() {
 }
 
 function render() {
+  syncAccountLegend();
   renderHeader();
+  renderAccountLegend();
   renderMain();
   renderFooterHint();
+}
+
+function syncAccountLegend() {
+  const map = new Map();
+  for (const day of state.days) {
+    for (const ev of (day.events || [])) {
+      const source = ev.source || 'local';
+      const account = ev.accountEmail || source;
+      const key = `${source}|${account}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          source,
+          account,
+          color: normalizeHexColor(ev.color) || '#9AA3B2',
+        });
+      }
+    }
+  }
+  state.accountLegend = Array.from(map.values());
+}
+
+function renderAccountLegend() {
+  if (!dom.accountLegend) return;
+  if (!state.accountLegend.length) {
+    dom.accountLegend.innerHTML = '<div class="tv-account-chip">No account legend available</div>';
+    return;
+  }
+  dom.accountLegend.innerHTML = state.accountLegend.map(item => {
+    const bg = softColor(item.color, 0.2);
+    const border = softColor(item.color, 0.55);
+    return `<div class="tv-account-chip" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
+  }).join('');
 }
 
 function renderHeader() {
@@ -861,6 +1008,7 @@ function renderHeader() {
 
 function renderMain() {
   if (!dom.tvMain) return;
+  dom.tvMain.classList.toggle('tv-editor-active', Boolean(state.editor));
   if (state.currentView === 'month') {
     dom.tvMain.innerHTML = renderMonthView();
   } else if (state.currentView === 'week') {
@@ -875,31 +1023,43 @@ function renderMain() {
 }
 
 function renderDayView() {
-  const day = state.dayMap[state.selectedDate] || { date: state.selectedDate, events: [], stickyNotes: [] };
-  return `<div class="tv-shell"><div class="tv-main-grid day">${renderDayCard(day, true)}</div></div>`;
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const weekDates = buildWeekDates(selected);
+  return `
+    <div class="tv-shell">
+      ${renderLeftSidebar()}
+      <div>
+        ${renderWeekdayHeader()}
+        <div class="tv-main-grid day">${weekDates.map(dateKey => renderDayCard(dayData(dateKey), dateKey === state.selectedDate)).join('')}</div>
+      </div>
+      ${renderRightRail(state.selectedDate, weekDates)}
+    </div>`;
 }
 
 function renderWeekView() {
-  const selected = parseLocalDate(state.selectedDate);
-  const start = offsetDate(selected, -selected.getDay() + 1);
-  const days = [];
-  for (let i = 0; i < 7; i += 1) {
-    const key = toISO(offsetDate(start, i));
-    days.push(state.dayMap[key] || { date: key, events: [], stickyNotes: [] });
-  }
-  return `<div class="tv-shell"><div class="tv-main-grid week">${days.map(d => renderDayCard(d, d.date === state.selectedDate)).join('')}</div></div>`;
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const weekDates = buildWeekDates(selected);
+  return `
+    <div class="tv-shell">
+      ${renderLeftSidebar()}
+      <div>
+        ${renderWeekdayHeader()}
+        <div class="tv-main-grid week">${weekDates.map(dateKey => renderDayCard(dayData(dateKey), dateKey === state.selectedDate)).join('')}</div>
+      </div>
+      ${renderRightRail(state.selectedDate, weekDates)}
+    </div>`;
 }
 
 function renderMonthView() {
-  const side = sidebarItems();
+  state.monthDates = buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
   return `
-  <div class="tv-shell">
-    <div class="tv-sidebar">
-      ${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}
-      <div class="tv-editor-anchor"></div>
-    </div>
-    <div class="tv-main-grid month">
-      ${state.days.map((day, idx) => renderMonthCell(day, idx)).join('')}
+  <div class="tv-shell month">
+    ${renderLeftSidebar()}
+    <div>
+      ${renderWeekdayHeader()}
+      <div class="tv-main-grid month">
+      ${state.monthDates.map((dateKey, idx) => renderMonthCell(dayData(dateKey), idx)).join('')}
+      </div>
     </div>
   </div>`;
 }
@@ -913,7 +1073,10 @@ function renderDayCard(day, selected) {
         const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
         if (item.type === 'event') {
           const ev = item.event;
-          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}"><div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
+          const eventColor = normalizeHexColor(ev.color) || '#8EA4C4';
+          const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
+          const border = softColor(eventColor, focused ? 0.7 : 0.5);
+          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}"><div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
         }
         return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
       }).join('')
@@ -1234,6 +1397,34 @@ function eventIsNow(ev, now) {
 function eventIsUpcoming(ev, now) {
   const s = parseDateTime(ev.start);
   return s > now;
+}
+
+function normalizeHexColor(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const raw = hex.trim().replace('#', '');
+  if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+    return `#${raw.split('').map(ch => ch + ch).join('').toUpperCase()}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(raw)) {
+    return `#${raw.toUpperCase()}`;
+  }
+  return null;
+}
+
+function hexToRgb(hex) {
+  const n = normalizeHexColor(hex);
+  if (!n) return null;
+  return {
+    r: parseInt(n.slice(1, 3), 16),
+    g: parseInt(n.slice(3, 5), 16),
+    b: parseInt(n.slice(5, 7), 16),
+  };
+}
+
+function softColor(hex, alpha = 0.2) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return `rgba(142,164,196,${alpha})`;
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
 }
 
 function escapeHtml(val) {
