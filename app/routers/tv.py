@@ -138,6 +138,8 @@ class TVStateResponse(BaseModel):
     selectedDate: Optional[str]
     currentView: str
     focusedEventId: Optional[int]
+    currentUserEmail: Optional[str] = None
+    currentUserRole: Optional[str] = None
 
 
 class TVStatePatch(BaseModel):
@@ -406,11 +408,15 @@ def get_tv_state(
             selectedDate=None,
             currentView="day",
             focusedEventId=None,
+            currentUserEmail=current_user.email,
+            currentUserRole=current_user.role,
         )
     return TVStateResponse(
         selectedDate=state.get("selectedDate"),
         currentView=state.get("currentView", "day"),
         focusedEventId=state.get("focusedEventId"),
+        currentUserEmail=current_user.email,
+        currentUserRole=current_user.role,
     )
 
 
@@ -432,6 +438,8 @@ def patch_tv_state(
         selectedDate=updated.get("selectedDate"),
         currentView=updated.get("currentView", "day"),
         focusedEventId=updated.get("focusedEventId"),
+        currentUserEmail=current_user.email,
+        currentUserRole=current_user.role,
     )
 
 

@@ -12,6 +12,8 @@ const state = {
   selectedDate: null,
   currentView: 'day',
   focusedEventId: null,
+  userEmail: null,
+  userRole: null,
   days: [],
   dayMap: {},
   eventsRequestInFlight: false,
@@ -42,6 +44,13 @@ const state = {
   },
   editor: null,
   editorDirty: false,
+  monthDetailOpen: false,
+  utilityPanel: null,
+  adminUsers: [],
+  history: {
+    past: [],
+    future: [],
+  },
   focus: {
     region: 'main',
     monthIndex: 0,
@@ -75,6 +84,7 @@ function cacheDom() {
     lastUpdated: document.getElementById('tv-last-updated'),
     disconnectBtn: document.getElementById('disconnect-btn'),
     headerRight: document.querySelector('.tv-header-right'),
+    headerUserEmail: document.getElementById('tv-user-email'),
     headerBackBtn: document.getElementById('tv-header-back-btn'),
     headerExitBtn: document.getElementById('tv-header-exit-btn'),
     cursor: document.getElementById('tv-virtual-cursor'),
@@ -99,10 +109,22 @@ function ensureStyles() {
   }
   .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); gap: 12px; }
   .tv-shell.month { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); }
+  .tv-shell.month.has-popout { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(320px, 0.86fr); align-items: start; }
   .tv-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; width: 220px; }
+  .tv-user-email { font-size: 12px; line-height: 1.05; color: var(--tv-text-soft); font-weight: 600; letter-spacing: 0.2px; max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-header-actions { display: inline-flex; gap: 6px; }
   .tv-header-btn { border: 1px solid rgba(201,219,244,0.26); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--tv-text); background: var(--tv-panel-soft); }
   .tv-header-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
+  .tv-sidebar-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+  .tv-side-btn { width: 100%; min-height: 32px; border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 7px 10px; font-size: 12px; color: var(--tv-text); background: rgba(17,28,44,0.34); text-align: left; transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease, opacity 180ms ease; }
+  .tv-side-btn:hover { border-color: rgba(255,255,255,0.24); }
+  .tv-side-btn.focused { border-color: var(--tv-accent); background: rgba(26,115,232,0.22); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px); }
+  .tv-side-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .tv-side-btn.primary { background: rgba(26,115,232,0.16); border-color: rgba(26,115,232,0.44); }
+  .tv-side-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
+  .tv-history-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tv-sidebar-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 2px 0; }
+  .tv-sidebar-footer { margin-top: auto; display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-editor-active { background: rgba(228, 232, 239, 0.08); border: 1px solid rgba(198, 206, 220, 0.22); border-radius: 12px; box-shadow: inset 0 0 0 1px rgba(236, 241, 250, 0.12); }
   .tv-account-legend { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 34px; max-height: 76px; overflow-y: auto; padding: 6px 52px 6px; border-bottom: 1px solid rgba(255,255,255,0.06); background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); }
   .tv-account-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(201,219,244,0.22); background: var(--tv-panel-soft); font-size: 11px; color: var(--tv-text-soft); letter-spacing: 0.3px; backdrop-filter: blur(2px); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease; }
@@ -134,6 +156,7 @@ function ensureStyles() {
   .tv-side-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.26); transform: translateY(-1px) scale(1.015); background: rgba(26,115,232,0.15); color: var(--tv-text); }
   .tv-side-item:hover { border-color: rgba(255,255,255,0.24); }
   .tv-right-rail { border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(45,63,92,0.44), rgba(29,43,66,0.32)); overflow: hidden; }
+  .tv-right-rail.month-popout { align-self: start; min-height: 74vh; max-height: 74vh; }
   .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
   .tv-right-subtitle { font-size: 11px; opacity: 0.78; margin: 12px 0 6px 0; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; }
   .tv-right-list { display: flex; flex-direction: column; gap: 6px; max-height: 37vh; overflow-y: auto; }
@@ -269,6 +292,14 @@ function ensureLegendRow() {
 
 function ensureHeaderActions() {
   if (!dom.headerRight) return;
+  let email = document.getElementById('tv-user-email');
+  if (!email) {
+    email = document.createElement('div');
+    email.id = 'tv-user-email';
+    email.className = 'tv-user-email';
+    dom.headerRight.insertBefore(email, dom.headerRight.firstChild || null);
+  }
+  dom.headerUserEmail = email;
   let actions = document.getElementById('tv-header-actions');
   if (!actions) {
     actions = document.createElement('div');
@@ -404,6 +435,29 @@ function closeEditor(force = false) {
   render();
 }
 
+function closeUtilityPanel() {
+  state.utilityPanel = null;
+  state.adminUsers = [];
+}
+
+function openManageAccountsPanel() {
+  state.monthDetailOpen = false;
+  state.utilityPanel = 'accounts';
+  render();
+}
+
+async function openAdminDashboardPanel() {
+  state.monthDetailOpen = false;
+  state.utilityPanel = 'admin';
+  const res = await authFetch('/users');
+  if (res && res.ok) {
+    state.adminUsers = await res.json().catch(() => []);
+  } else {
+    state.adminUsers = [];
+  }
+  render();
+}
+
 async function handlePair() {
   if (!dom.pairInput || !dom.pairBtn) return;
   const code = dom.pairInput.value.trim().toUpperCase();
@@ -442,6 +496,7 @@ function handleUnpair() {
   state.dayMap = {};
   state.editor = null;
   state.editorDirty = false;
+  state.monthDetailOpen = false;
   state.syncInProgress = false;
   if (state.syncStatusTimer) clearTimeout(state.syncStatusTimer);
   state.syncStatusTimer = null;
@@ -450,6 +505,11 @@ function handleUnpair() {
   state.serverAccounts = [];
   state.accountLegend = [];
   state.accountColorMap = {};
+  closeUtilityPanel();
+  state.userEmail = null;
+  state.userRole = null;
+  state.history.past = [];
+  state.history.future = [];
   localStorage.removeItem(TOKEN_KEY);
   transitionTo('pair');
 }
@@ -461,9 +521,11 @@ async function fetchTvState() {
   state.selectedDate = data.selectedDate || null;
   state.currentView = data.currentView || 'day';
   state.focusedEventId = data.focusedEventId || null;
+  state.userEmail = data.currentUserEmail || state.userEmail || null;
+  state.userRole = data.currentUserRole || state.userRole || null;
   if (!state.selectedDate) {
     const fallbackDate = toISO(new Date());
-    const patched = await patchTvState({ selectedDate: fallbackDate });
+    const patched = await patchTvState({ selectedDate: fallbackDate }, { recordHistory: false });
     state.selectedDate = (patched && patched.selectedDate) || fallbackDate;
   }
 }
@@ -548,7 +610,46 @@ async function authFetch(url, options = {}) {
   }
 }
 
-async function patchTvState(patch) {
+function snapshotTvState() {
+  return {
+    selectedDate: state.selectedDate,
+    currentView: state.currentView,
+    focusedEventId: state.focusedEventId,
+    monthDetailOpen: state.monthDetailOpen,
+    focus: {
+      region: state.focus.region,
+      monthIndex: state.focus.monthIndex,
+      sidebarIndex: state.focus.sidebarIndex,
+      itemIndex: state.focus.itemIndex,
+    },
+  };
+}
+
+function applyTvSnapshot(snapshot) {
+  if (!snapshot) return;
+  if (snapshot.selectedDate) state.selectedDate = snapshot.selectedDate;
+  if (snapshot.currentView) state.currentView = snapshot.currentView;
+  state.focusedEventId = snapshot.focusedEventId || null;
+  state.monthDetailOpen = Boolean(snapshot.monthDetailOpen);
+  if (snapshot.focus) {
+    state.focus.region = snapshot.focus.region || state.focus.region;
+    if (typeof snapshot.focus.monthIndex === 'number') state.focus.monthIndex = snapshot.focus.monthIndex;
+    if (typeof snapshot.focus.sidebarIndex === 'number') state.focus.sidebarIndex = snapshot.focus.sidebarIndex;
+    if (typeof snapshot.focus.itemIndex === 'number') state.focus.itemIndex = snapshot.focus.itemIndex;
+  }
+}
+
+function pushHistorySnapshot(snapshot) {
+  if (!snapshot) return;
+  state.history.past.push(snapshot);
+  if (state.history.past.length > 25) state.history.past.shift();
+  state.history.future = [];
+}
+
+async function patchTvState(patch, options = {}) {
+  const recordHistory = options.recordHistory !== false;
+  const shouldRecord = recordHistory && (Object.prototype.hasOwnProperty.call(patch, 'selectedDate') || Object.prototype.hasOwnProperty.call(patch, 'currentView') || Object.prototype.hasOwnProperty.call(patch, 'focusedEventId'));
+  const before = shouldRecord ? snapshotTvState() : null;
   const res = await authFetch('/tv/state', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -561,8 +662,39 @@ async function patchTvState(patch) {
     state.selectedDate = data.selectedDate || state.selectedDate;
     state.currentView = data.currentView || state.currentView;
     state.focusedEventId = data.focusedEventId || null;
+    state.userEmail = data.currentUserEmail || state.userEmail || null;
+    state.userRole = data.currentUserRole || state.userRole || null;
+    if (before) pushHistorySnapshot(before);
   }
   return data;
+}
+
+async function undoTvState() {
+  const snapshot = state.history.past.pop();
+  if (!snapshot) return;
+  state.history.future.push(snapshotTvState());
+  applyTvSnapshot(snapshot);
+  await patchTvState({
+    selectedDate: state.selectedDate,
+    currentView: state.currentView,
+    focusedEventId: state.focusedEventId,
+  }, { recordHistory: false });
+  render();
+  await refreshEvents(true);
+}
+
+async function redoTvState() {
+  const snapshot = state.history.future.pop();
+  if (!snapshot) return;
+  state.history.past.push(snapshotTvState());
+  applyTvSnapshot(snapshot);
+  await patchTvState({
+    selectedDate: state.selectedDate,
+    currentView: state.currentView,
+    focusedEventId: state.focusedEventId,
+  }, { recordHistory: false });
+  render();
+  await refreshEvents(true);
 }
 
 function onKeyDown(e) {
@@ -834,7 +966,8 @@ function onSelect() {
   if (state.currentView === 'month' && state.focus.region === 'main') {
     const date = getFocusedMonthDate();
     if (!date) return;
-    patchTvState({ selectedDate: date, currentView: 'day' }).then(() => refreshEvents(true));
+    state.monthDetailOpen = true;
+    patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
     return;
   }
 
@@ -867,6 +1000,11 @@ function handleBack() {
   if (state.editor) {
     state.editor = null;
     state.editorDirty = false;
+    render();
+    return;
+  }
+  if (state.currentView === 'month' && state.monthDetailOpen) {
+    state.monthDetailOpen = false;
     render();
     return;
   }
@@ -939,7 +1077,7 @@ function handleMonthArrow(key) {
   idx = Math.max(0, Math.min(41, idx));
   state.focus.monthIndex = idx;
   const date = getFocusedMonthDate();
-  if (date) patchTvState({ selectedDate: date });
+  if (date) patchTvState({ selectedDate: date }, { recordHistory: true });
   render();
 }
 
@@ -950,21 +1088,24 @@ function shiftByView(direction) {
   if (state.currentView === 'week') delta = 7;
   if (state.currentView === 'month') {
     d.setMonth(d.getMonth() + direction);
-    patchTvState({ selectedDate: toISO(d) }).then(() => refreshEvents(true));
+    state.monthDetailOpen = false;
+    patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).then(() => refreshEvents(true));
     return;
   }
   const next = offsetDate(d, direction * delta);
-  patchTvState({ selectedDate: toISO(next) }).then(() => refreshEvents(true));
+  patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
 function goToday() {
   closeEditor(true);
-  patchTvState({ selectedDate: toISO(new Date()) }).then(() => refreshEvents(true));
+  state.monthDetailOpen = false;
+  patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
 function setView(viewName) {
   closeEditor(true);
-  patchTvState({ currentView: viewName }).then(() => refreshEvents(true));
+  if (viewName !== 'month') state.monthDetailOpen = false;
+  patchTvState({ currentView: viewName }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
 function goBackAction() {
@@ -1022,7 +1163,36 @@ function renderLeftSidebar() {
   const side = sidebarItems();
   const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
   const selectedLabel = selected.toLocaleDateString([], { weekday: 'short', month: 'short', day: '2-digit', year: 'numeric' });
-  return `<div class="tv-sidebar"><div class="tv-sidebar-title">Selected Date</div><div class="tv-sidebar-date">${escapeHtml(selectedLabel)}</div>${side.map((item, idx) => `<div class="tv-side-item ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</div>`).join('')}<div class="tv-editor-anchor"></div></div>`;
+  const syncIndex = side.findIndex(item => item.key === 'sync');
+  const undoIndex = side.findIndex(item => item.key === 'undo');
+  const redoIndex = side.findIndex(item => item.key === 'redo');
+  const primary = side.filter(item => item.group === 'primary');
+  const footer = side.filter(item => item.group === 'footer');
+  return `
+    <div class="tv-sidebar">
+      <div class="tv-sidebar-title">Selected Date</div>
+      <div class="tv-sidebar-date">${escapeHtml(selectedLabel)}</div>
+      <div class="tv-sidebar-actions">
+        ${syncIndex >= 0 ? `<button class="tv-side-btn primary ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === syncIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${syncIndex}">${escapeHtml(side[syncIndex].label)}</button>` : ''}
+        <div class="tv-history-row">
+          ${undoIndex >= 0 ? `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === undoIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${undoIndex}" ${side[undoIndex].disabled ? 'disabled' : ''}>${escapeHtml(side[undoIndex].label)}</button>` : ''}
+          ${redoIndex >= 0 ? `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === redoIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${redoIndex}" ${side[redoIndex].disabled ? 'disabled' : ''}>${escapeHtml(side[redoIndex].label)}</button>` : ''}
+        </div>
+        <div class="tv-sidebar-divider"></div>
+        ${primary.map(item => {
+          const idx = side.findIndex(x => x.key === item.key);
+          return `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
+        }).join('')}
+      </div>
+      <div class="tv-sidebar-footer">
+        <div class="tv-sidebar-divider"></div>
+        ${footer.map(item => {
+          const idx = side.findIndex(x => x.key === item.key);
+          return `<button class="tv-side-btn ${item.key === 'admin-dashboard' ? 'warn' : ''} ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
+        }).join('')}
+      </div>
+      <div class="tv-editor-anchor"></div>
+    </div>`;
 }
 
 function renderTopControls() {
@@ -1044,10 +1214,45 @@ function renderTopControls() {
     </div>`;
 }
 
-function renderRightRail(selectedDateKey, weekDateKeys) {
+function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
+  if (state.utilityPanel === 'accounts') {
+    return `
+      <aside class="tv-right-rail ${extraClass}">
+        <div class="tv-right-title">Manage Accounts</div>
+        <div class="tv-right-subtitle">Currently signed in</div>
+        <div class="tv-right-list">
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Email</div>
+            <div class="tv-right-item-title">${escapeHtml(state.userEmail || 'Unknown')}</div>
+          </div>
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Role</div>
+            <div class="tv-right-item-title">${escapeHtml(state.userRole || 'user')}</div>
+          </div>
+        </div>
+        <div class="tv-right-subtitle">Connections</div>
+        <div class="tv-right-list">
+          ${state.accountLegend.length ? state.accountLegend.map(item => `<div class="tv-right-item" style="background:${softColor(item.color, 0.2)}; border-color:${softColor(item.color, 0.52)}"><div class="tv-right-item-time">${escapeHtml(item.source)}</div><div class="tv-right-item-title">${escapeHtml(item.account)}</div></div>`).join('') : '<div class="tv-empty">No connected accounts found</div>'}
+        </div>
+        <div class="tv-right-editor-anchor"><button class="tv-side-btn full" type="button" data-tv-click="control" data-control="close-panel">Close</button></div>
+      </aside>`;
+  }
+
+  if (state.utilityPanel === 'admin') {
+    return `
+      <aside class="tv-right-rail ${extraClass}">
+        <div class="tv-right-title">Admin Dashboard</div>
+        <div class="tv-right-subtitle">User access</div>
+        <div class="tv-right-list">
+          ${state.adminUsers.length ? state.adminUsers.map(user => `<div class="tv-right-item"><div class="tv-right-item-time">${escapeHtml(user.role || 'user')}</div><div class="tv-right-item-title">${escapeHtml(user.email || '')}</div></div>`).join('') : '<div class="tv-empty">No admin data loaded</div>'}
+        </div>
+        <div class="tv-right-editor-anchor"><button class="tv-side-btn full" type="button" data-tv-click="control" data-control="close-panel">Close</button></div>
+      </aside>`;
+  }
+
   if (state.editor) {
     return `
-      <aside class="tv-right-rail editor-cover">
+      <aside class="tv-right-rail editor-cover ${extraClass}">
         <div class="tv-right-title">Inline Editing</div>
         <div class="tv-right-subtitle">Day/Week rail hidden while editing</div>
         <div class="tv-right-editor-anchor"></div>
@@ -1057,7 +1262,7 @@ function renderRightRail(selectedDateKey, weekDateKeys) {
   const selectedItems = itemsForDate(selectedDateKey).slice(0, 12);
   const weekEvents = weekDateKeys.flatMap(dateKey => (dayData(dateKey).events || []).map(ev => ({ dateKey, ev })));
   return `
-    <aside class="tv-right-rail">
+    <aside class="tv-right-rail ${extraClass}">
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}</div>
       <div class="tv-right-list">
         ${selectedItems.length ? selectedItems.map(item => {
@@ -1080,15 +1285,22 @@ function renderRightRail(selectedDateKey, weekDateKeys) {
 }
 
 function sidebarItems() {
-  return [
-    { label: 'Sync', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }).then(() => refreshEvents(true)) },
-    { label: 'Create Event', action: () => createEventAndEdit() },
-    { label: 'Create Sticky', action: () => createStickyAndEdit() },
-    { label: 'Jump Today', action: () => goToday() },
-    { label: 'View Day', action: () => setView('day') },
-    { label: 'View Week', action: () => setView('week') },
-    { label: 'View Month', action: () => setView('month') },
+  const items = [
+    { key: 'sync', label: 'Sync', group: 'top', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }, { recordHistory: false }).then(() => refreshEvents(true)) },
+    { key: 'undo', label: 'Undo', group: 'history', action: () => undoTvState(), disabled: !state.history.past.length },
+    { key: 'redo', label: 'Redo', group: 'history', action: () => redoTvState(), disabled: !state.history.future.length },
+    { key: 'create-event', label: 'Create Event', group: 'primary', action: () => createEventAndEdit() },
+    { key: 'create-sticky', label: 'Create Sticky', group: 'primary', action: () => createStickyAndEdit() },
+    { key: 'jump-today', label: 'Jump Today', group: 'primary', action: () => goToday() },
+    { key: 'view-day', label: 'View Day', group: 'primary', action: () => setView('day') },
+    { key: 'view-week', label: 'View Week', group: 'primary', action: () => setView('week') },
+    { key: 'view-month', label: 'View Month', group: 'primary', action: () => setView('month') },
+    { key: 'manage-accounts', label: 'Manage Accounts', group: 'footer', action: () => openManageAccountsPanel() },
   ];
+  if (state.userRole === 'admin') {
+    items.push({ key: 'admin-dashboard', label: 'Admin Dashboard', group: 'footer', action: () => openAdminDashboardPanel() });
+  }
+  return items;
 }
 
 function runSidebarAction(index) {
@@ -1166,7 +1378,7 @@ function syncFocusedEventWithState(item) {
   if (!item || item.type !== 'event') return;
   if (item.id === state.focusedEventId) return;
   state.focusedEventId = item.id;
-  patchTvState({ focusedEventId: item.id });
+  patchTvState({ focusedEventId: item.id }, { recordHistory: false });
 }
 
 function getFocusedMonthDate() {
@@ -1266,6 +1478,10 @@ function renderHeader() {
     const d = parseLocalDate(state.selectedDate || toISO(new Date()));
     dom.dateHeader.textContent = `${state.currentView.toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
   }
+  if (dom.headerUserEmail) {
+    dom.headerUserEmail.textContent = state.userEmail || '';
+    dom.headerUserEmail.style.display = state.userEmail ? 'block' : 'none';
+  }
 }
 
 function renderMain() {
@@ -1320,8 +1536,10 @@ function renderWeekView() {
 
 function renderMonthView() {
   state.monthDates = buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const weekDates = buildWeekDates(selected);
   return `
-  <div class="tv-shell month">
+  <div class="tv-shell month ${state.monthDetailOpen ? 'has-popout' : ''}">
     ${renderLeftSidebar()}
     <div>
       ${renderTopControls()}
@@ -1330,6 +1548,7 @@ function renderMonthView() {
       ${state.monthDates.map((dateKey, idx) => renderMonthCell(dayData(dateKey), idx)).join('')}
       </div>
     </div>
+    ${state.monthDetailOpen ? renderRightRail(state.selectedDate, weekDates, 'month-popout') : ''}
   </div>`;
 }
 
@@ -1474,7 +1693,13 @@ function handleEditorKey(key) {
 
 function handleMainClick(e) {
   const t = e.target.closest('[data-tv-click]');
-  if (!t) return;
+  if (!t) {
+    if (state.currentView === 'month' && state.monthDetailOpen) {
+      state.monthDetailOpen = false;
+      render();
+    }
+    return;
+  }
 
   const role = t.getAttribute('data-tv-click');
   if (state.editor && role !== 'field') {
@@ -1487,6 +1712,7 @@ function handleMainClick(e) {
     const idx = Number(t.getAttribute('data-sidebar-index') || 0);
     state.focus.region = 'sidebar';
     state.focus.sidebarIndex = idx;
+    state.monthDetailOpen = false;
     onSelect();
     return;
   }
@@ -1497,8 +1723,16 @@ function handleMainClick(e) {
     state.focus.region = 'main';
     state.focus.monthIndex = idx;
     if (date) {
-      patchTvState({ selectedDate: date }).then(() => {
-        onSelect();
+      closeUtilityPanel();
+      if (state.monthDetailOpen && state.selectedDate === date) {
+        state.monthDetailOpen = false;
+        render();
+        return;
+      }
+      state.monthDetailOpen = true;
+      patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => {
+        render();
+        refreshEvents(true);
       });
     }
     return;
@@ -1507,7 +1741,9 @@ function handleMainClick(e) {
   if (role === 'day') {
     const date = t.getAttribute('data-date');
     if (date) {
-      patchTvState({ selectedDate: date }).then(() => refreshEvents(true));
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
+      patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
     }
     return;
   }
@@ -1532,6 +1768,11 @@ function handleMainClick(e) {
 
   if (role === 'control') {
     const control = t.getAttribute('data-control');
+    if (control === 'close-panel') {
+      closeUtilityPanel();
+      render();
+      return;
+    }
     if (control === 'prev') {
       shiftByView(-1);
       return;
@@ -1549,17 +1790,22 @@ function handleMainClick(e) {
       return;
     }
     if (control === 'view-day') {
+      state.monthDetailOpen = false;
       setView('day');
       return;
     }
     if (control === 'view-week') {
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
       setView('week');
       return;
     }
+      closeUtilityPanel();
     if (control === 'view-month') {
       setView('month');
       return;
     }
+      closeUtilityPanel();
     if (control === 'exit') {
       exitTvAction();
     }

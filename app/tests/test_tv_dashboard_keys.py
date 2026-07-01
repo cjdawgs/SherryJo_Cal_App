@@ -42,6 +42,21 @@ def test_tv_dashboard_prevents_overlapping_events_requests():
     assert "if (state.eventsRequestInFlight)" in text
 
 
+def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
+    text = _tv_js_text()
+    required_tokens = [
+        "monthDetailOpen",
+        "tv-user-email",
+        "Undo",
+        "Redo",
+        "Manage Accounts",
+        "Admin Dashboard",
+        "month-popout",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
 def test_tv_dashboard_auth_fetch_handles_network_exceptions():
     text = _tv_js_text()
     assert "async function authFetch" in text

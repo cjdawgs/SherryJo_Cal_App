@@ -182,6 +182,8 @@ class TestTVStateEndpoints:
         assert resp.status_code == 200
         data = resp.json()
         assert data["selectedDate"] is None
+        assert data["currentUserEmail"]
+        assert data["currentUserRole"]
 
     def test_patch_state_persists(self, client, auth_headers):
         resp = client.patch(
