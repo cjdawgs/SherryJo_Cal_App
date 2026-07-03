@@ -76,6 +76,75 @@ const wakeLock = (() => {
   return { request, reacquire, release };
 })();
 
+// ─── Three-Layer Anti-Sleep Engine ───────────────────────────────────────────
+// FireOS ignores navigator.wakeLock alone because it has OS-level sleep that
+// supersedes browser APIs when no physical input is detected.
+//
+// Layer 1: Screen Wake Lock API (already above)
+// Layer 2: Hidden 1×1 canvas with requestAnimationFrame — keeps the GPU
+//   renderer active every frame.  FireOS treats active rendering as display
+//   activity and resets its inactivity counter.
+// Layer 3: Synthetic mousemove event every 20 s — explicitly resets the
+//   FireOS/Android user-activity watchdog timer.
+//
+// All three together reliably prevent the 20-30 min sleep on Amazon Silk.
+const antiSleep = (() => {
+  let _rafHandle  = null;
+  let _evtHandle  = null;
+  let _tick = 0;
+
+  // 1×1 canvas placed off-screen at near-zero opacity
+  const _canvas = document.createElement('canvas');
+  _canvas.width  = 1;
+  _canvas.height = 1;
+  Object.assign(_canvas.style, {
+    position: 'fixed', bottom: '0', right: '0',
+    width: '1px', height: '1px',
+    opacity: '0.002',
+    pointerEvents: 'none',
+    zIndex: '-9999',
+  });
+  const _ctx = _canvas.getContext('2d');
+
+  function _rafLoop() {
+    // Alternate between two near-invisible values — renderer stays dirty
+    _tick = (_tick + 1) & 255;
+    _ctx.clearRect(0, 0, 1, 1);
+    _ctx.fillStyle = `rgba(0,0,0,${0.001 + (_tick % 2) * 0.001})`;
+    _ctx.fillRect(0, 0, 1, 1);
+    _rafHandle = requestAnimationFrame(_rafLoop);
+  }
+
+  function start() {
+    if (!document.body.contains(_canvas)) document.body.appendChild(_canvas);
+    if (!_rafHandle) {
+      _rafLoop();
+      console.log('[AntiSleep] Layer 2 rAF canvas loop: started');
+    }
+    if (!_evtHandle) {
+      _evtHandle = setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          document.dispatchEvent(new MouseEvent('mousemove', {
+            bubbles: true, cancelable: true, clientX: 1, clientY: 1,
+          }));
+        }
+      }, 20000);
+      console.log('[AntiSleep] Layer 3 synthetic events: started (20s interval)');
+    }
+    window.__ANTI_SLEEP_ACTIVE__ = true;
+  }
+
+  function stop() {
+    if (_rafHandle) { cancelAnimationFrame(_rafHandle); _rafHandle = null; }
+    if (_evtHandle) { clearInterval(_evtHandle); _evtHandle = null; }
+    if (document.body.contains(_canvas)) document.body.removeChild(_canvas);
+    window.__ANTI_SLEEP_ACTIVE__ = false;
+    console.log('[AntiSleep] stopped');
+  }
+
+  return { start, stop };
+})();
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 const state = {
@@ -98,6 +167,9 @@ const state = {
   syncStatusMessage: '',
   pollHandle: null,
   clockHandle: null,
+  sessionStartAt: null,        // set by startPolling()
+  sleepGuardEnabled: true,     // read from /tv/state
+  sleepGuardTimeoutMinutes: 0, // 0 = never timeout
   longPressTimer: null,
   longPressTriggered: false,
   clickCount: 0,
@@ -167,6 +239,7 @@ function cacheDom() {
     debugOverlay: document.getElementById('tv-debug-overlay'),
     debugList: document.getElementById('tv-debug-list'),
     accountLegend: document.getElementById('tv-account-legend'),
+    sleepStatus: document.getElementById('tv-sleep-status'),
   };
 }
 
@@ -482,12 +555,15 @@ async function bootstrapFromBackend() {
 
 function startPolling() {
   stopAll();
+  state.sessionStartAt = Date.now();
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   tickClock();
-  // Acquire Screen Wake Lock so FireOS/Silk never sleeps the browser.
+  // Layer 1: Screen Wake Lock API
   wakeLock.request();
+  // Layers 2+3: rAF canvas loop + synthetic events (main FireOS defense)
+  if (state.sleepGuardEnabled !== false) antiSleep.start();
 }
 
 function stopAll() {
@@ -497,11 +573,56 @@ function stopAll() {
   state.clockHandle = null;
   // Release wake lock on clean teardown (unpair / logout).
   wakeLock.release();
+  antiSleep.stop();
 }
 
 function tickClock() {
   if (dom.clock) {
     dom.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  renderSleepStatus();
+  enforceSleepTimeout();
+}
+
+// Renders the sleep guard counter in the TV footer bottom-right.
+function renderSleepStatus() {
+  const el = dom.sleepStatus;
+  if (!el) return;
+
+  if (state.sleepGuardEnabled === false) {
+    el.textContent = '\u25CB sleep guard off';
+    return;
+  }
+  if (!state.sessionStartAt) {
+    el.textContent = '';
+    return;
+  }
+
+  const totalSecs  = Math.floor((Date.now() - state.sessionStartAt) / 1000);
+  const hours      = Math.floor(totalSecs / 3600);
+  const mins       = Math.floor((totalSecs % 3600) / 60);
+  const elapsed    = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+
+  if (state.sleepGuardTimeoutMinutes > 0) {
+    const remaining = state.sleepGuardTimeoutMinutes - Math.floor(totalSecs / 60);
+    if (remaining <= 0) {
+      el.textContent = `\u25CB session ended (${elapsed})`;
+    } else {
+      el.textContent = `\u25CF ${elapsed} awake \u00B7 ${remaining}m left`;
+    }
+  } else {
+    el.textContent = `\u25CF ${elapsed} awake`;
+  }
+}
+
+// Stops anti-sleep when the configured session timeout is reached.
+function enforceSleepTimeout() {
+  if (!state.sleepGuardEnabled || !state.sleepGuardTimeoutMinutes || !state.sessionStartAt) return;
+  const elapsedMins = (Date.now() - state.sessionStartAt) / 60000;
+  if (elapsedMins >= state.sleepGuardTimeoutMinutes) {
+    // Timeout reached — release prevention but keep polling & clock running
+    antiSleep.stop();
+    wakeLock.release();
   }
 }
 
@@ -639,6 +760,9 @@ async function fetchTvState() {
   state.focusedEventId = data.focusedEventId || null;
   state.userEmail = data.currentUserEmail || state.userEmail || null;
   state.userRole = data.currentUserRole || state.userRole || null;
+  // Sleep guard settings (default to guard enabled, no timeout)
+  state.sleepGuardEnabled = data.sleepGuardEnabled !== undefined ? data.sleepGuardEnabled : true;
+  state.sleepGuardTimeoutMinutes = data.sleepGuardTimeoutMinutes || 0;
   if (!state.selectedDate) {
     const fallbackDate = toISO(new Date());
     const patched = await patchTvState({ selectedDate: fallbackDate }, { recordHistory: false });

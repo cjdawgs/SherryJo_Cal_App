@@ -437,6 +437,7 @@
     .status-ok   { color: var(--green); }
     .status-warn { color: var(--orange); }
     .status-err  { color: var(--red); }
+    .tv-footer-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .tv-last-updated { font-size: 12px; color: var(--text-muted); }
   </style>
 </head>
@@ -490,11 +491,14 @@
 
     <footer class="tv-footer">
       <div id="tv-status" class="tv-status"></div>
-      <div id="tv-last-updated" class="tv-last-updated"></div>
+      <div class="tv-footer-right">
+        <div id="tv-last-updated" class="tv-last-updated"></div>
+        <div id="tv-sleep-status" class="tv-last-updated"></div>
+      </div>
     </footer>
 
   </div>
 
-  <script type="module" src="/static/tv_dashboard.js?v=20260701a"></script>
+  <script type="module" src="/static/tv_dashboard.js?v=20260702a"></script>
 </body>
 </html>

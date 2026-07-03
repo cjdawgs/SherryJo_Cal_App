@@ -219,3 +219,77 @@ if (copyKioskBtn) {
 if (regenKioskBtn) {
   regenKioskBtn.addEventListener("click", generateKioskUrl);
 }
+
+// ─────────────────────────────────────────────────
+// SLEEP GUARD CONTROLS
+// ─────────────────────────────────────────────────
+
+const sleepToggleBtn   = document.getElementById("tvSleepToggleBtn");
+const sleepTimeoutSel  = document.getElementById("tvSleepTimeout");
+const sleepAdminStatus = document.getElementById("tvSleepAdminStatus");
+
+let _sleepGuardEnabled        = true;
+let _sleepGuardTimeoutMinutes = 0;
+
+function applySleepGuardUI(enabled, timeoutMinutes) {
+  _sleepGuardEnabled        = enabled;
+  _sleepGuardTimeoutMinutes = timeoutMinutes;
+  if (sleepToggleBtn) {
+    sleepToggleBtn.textContent = enabled ? "Disable" : "Enable";
+    sleepToggleBtn.style.opacity = enabled ? "1" : "0.6";
+  }
+  if (sleepTimeoutSel) {
+    sleepTimeoutSel.value = String(timeoutMinutes);
+    sleepTimeoutSel.disabled = !enabled;
+  }
+  if (sleepAdminStatus) {
+    if (!enabled) {
+      sleepAdminStatus.textContent = "Off";
+    } else if (timeoutMinutes === 0) {
+      sleepAdminStatus.textContent = "Active — never times out";
+    } else {
+      sleepAdminStatus.textContent = `Active — stops after ${timeoutMinutes} min`;
+    }
+  }
+}
+
+async function patchSleepGuard(enabled, timeoutMinutes) {
+  try {
+    await apiRequest("/tv/state", {
+      method: "PATCH",
+      body: { sleepGuardEnabled: enabled, sleepGuardTimeoutMinutes: timeoutMinutes },
+    });
+    applySleepGuardUI(enabled, timeoutMinutes);
+  } catch (err) {
+    if (sleepAdminStatus) sleepAdminStatus.textContent = `Error: ${err.message || "update failed"}`;
+  }
+}
+
+async function loadSleepGuardState() {
+  try {
+    const data = await apiRequest("/tv/state", { method: "GET" });
+    if (data) {
+      applySleepGuardUI(
+        data.sleepGuardEnabled !== undefined ? data.sleepGuardEnabled : true,
+        data.sleepGuardTimeoutMinutes || 0,
+      );
+    }
+  } catch {
+    // Non-fatal — leave controls at defaults
+  }
+}
+
+if (sleepToggleBtn) {
+  sleepToggleBtn.addEventListener("click", () => {
+    patchSleepGuard(!_sleepGuardEnabled, _sleepGuardTimeoutMinutes);
+  });
+}
+
+if (sleepTimeoutSel) {
+  sleepTimeoutSel.addEventListener("change", () => {
+    patchSleepGuard(_sleepGuardEnabled, Number(sleepTimeoutSel.value));
+  });
+}
+
+// Load current sleep guard state when the admin page loads
+loadSleepGuardState();

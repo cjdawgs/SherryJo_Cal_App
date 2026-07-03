@@ -6,6 +6,22 @@
   <title>Admin Management</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' d='M0 0h16v16H0z'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="{{ asset_url('admin.css') }}">
+  <style>
+    /* TV Sleep Guard control strip */
+    .tv-sleep-strip {
+      display: flex; align-items: center; gap: 8px;
+      margin-top: 6px; padding: 4px 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .tv-sleep-label { font-size: 13px; opacity: 0.75; white-space: nowrap; }
+    .tv-sleep-select {
+      font-size: 12px; padding: 4px 8px;
+      background: #1a1a2e; color: #f0f0f5;
+      border: 1px solid rgba(255,255,255,0.18); border-radius: 6px;
+      cursor: pointer;
+    }
+    .tv-sleep-admin-status { font-size: 12px; opacity: 0.6; white-space: nowrap; }
+  </style>
 </head>
 <body>
   <div class="admin-shell">
@@ -20,6 +36,18 @@
         <button id="enableTVModeBtn" class="ghost-btn" type="button">&#x1F4FA; Enable TV Mode</button>
         <button id="generateKioskUrlBtn" class="ghost-btn" type="button">&#x1F5A5; Kiosk URL</button>
         <button id="goCalendar" class="ghost-btn" type="button">Calendar</button>
+      </div>
+      <div id="tvSleepGuardStrip" class="tv-sleep-strip">
+        <span class="tv-sleep-label">&#x1F6E1;&#xFE0F; Sleep Guard</span>
+        <button id="tvSleepToggleBtn" class="ghost-btn" type="button">Loading&hellip;</button>
+        <select id="tvSleepTimeout" class="tv-sleep-select">
+          <option value="0">Never timeout</option>
+          <option value="120">2 hours</option>
+          <option value="240">4 hours</option>
+          <option value="480">8 hours</option>
+          <option value="1440">24 hours</option>
+        </select>
+        <span id="tvSleepAdminStatus" class="tv-sleep-admin-status">&mdash;</span>
       </div>
     </header>
 

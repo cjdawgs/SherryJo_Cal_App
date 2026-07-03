@@ -141,12 +141,16 @@ class TVStateResponse(BaseModel):
     focusedEventId: Optional[int]
     currentUserEmail: Optional[str] = None
     currentUserRole: Optional[str] = None
+    sleepGuardEnabled: bool = True
+    sleepGuardTimeoutMinutes: int = 0
 
 
 class TVStatePatch(BaseModel):
     selectedDate: Optional[str] = None
     currentView: Optional[str] = None
     focusedEventId: Optional[int] = None
+    sleepGuardEnabled: Optional[bool] = None
+    sleepGuardTimeoutMinutes: Optional[int] = None
 
 
 class TVEventUpsert(BaseModel):
@@ -454,6 +458,8 @@ def get_tv_state(
             focusedEventId=None,
             currentUserEmail=current_user.email,
             currentUserRole=current_user.role,
+            sleepGuardEnabled=True,
+            sleepGuardTimeoutMinutes=0,
         )
     return TVStateResponse(
         selectedDate=state.get("selectedDate"),
@@ -461,6 +467,8 @@ def get_tv_state(
         focusedEventId=state.get("focusedEventId"),
         currentUserEmail=current_user.email,
         currentUserRole=current_user.role,
+        sleepGuardEnabled=state.get("sleepGuardEnabled", True),
+        sleepGuardTimeoutMinutes=state.get("sleepGuardTimeoutMinutes", 0),
     )
 
 
@@ -484,6 +492,8 @@ def patch_tv_state(
         focusedEventId=updated.get("focusedEventId"),
         currentUserEmail=current_user.email,
         currentUserRole=current_user.role,
+        sleepGuardEnabled=updated.get("sleepGuardEnabled", True),
+        sleepGuardTimeoutMinutes=updated.get("sleepGuardTimeoutMinutes", 0),
     )
 
 

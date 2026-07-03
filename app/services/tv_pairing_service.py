@@ -140,7 +140,8 @@ class _TVStateStore:
         """
         current = self._states.get(user_id, {})
 
-        allowed_keys = {"selectedDate", "currentView", "focusedEventId"}
+        allowed_keys = {"selectedDate", "currentView", "focusedEventId",
+                        "sleepGuardEnabled", "sleepGuardTimeoutMinutes"}
         for key in allowed_keys:
             if key in patch:
                 current[key] = patch[key]
@@ -162,6 +163,8 @@ class _TVStateStore:
             "selectedDate": selected_date,     # may be None — client must handle
             "currentView": current_view,
             "focusedEventId": None,
+            "sleepGuardEnabled": True,
+            "sleepGuardTimeoutMinutes": 0,
         }
         self._states[user_id] = state
         return state
