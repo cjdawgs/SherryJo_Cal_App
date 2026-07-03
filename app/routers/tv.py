@@ -377,6 +377,65 @@ def _oauth_user_filter(user_id: int):
 
 
 # ─────────────────────────────────────────────────
+# DIAGNOSTICS  (ring-buffer log of TV lifecycle events)
+# ─────────────────────────────────────────────────
+
+# In-memory ring buffer.  Max 500 entries; cleared when the server restarts.
+_diag_buffer: list[dict] = []
+_DIAG_MAX = 500
+
+
+class TVDiagEntry(BaseModel):
+    event:             str
+    details:           Optional[str] = ""
+    ts:                Optional[str] = None       # ISO timestamp from client
+    sessionElapsedMin: Optional[int] = None
+    visibilityState:   Optional[str] = None
+    guardEnabled:      Optional[bool] = None
+    guardTimeout:      Optional[int] = None
+
+
+@router.post("/diag", status_code=200)
+def post_tv_diag(
+    body: TVDiagEntry,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Receives a diagnostic event beaconed by the TV dashboard JS.
+    Fire-and-forget from the client — uses fetch keepalive so it
+    survives page unload.  Never blocks the TV UI.
+    """
+    global _diag_buffer
+    entry = {
+        "ts_server":      datetime.now(timezone.utc).isoformat(),
+        "user_id":        current_user.id,
+        "event":          (body.event or "")[:64],
+        "details":        (body.details or "")[:256],
+        "ts_client":      (body.ts or "")[:32],
+        "elapsed_min":    body.sessionElapsedMin,
+        "visibility":     body.visibilityState,
+        "guard_enabled":  body.guardEnabled,
+        "guard_timeout":  body.guardTimeout,
+    }
+    _diag_buffer.append(entry)
+    if len(_diag_buffer) > _DIAG_MAX:
+        del _diag_buffer[:-_DIAG_MAX]
+    logger.info("TV_DIAG user_id=%s event=%s details=%s", current_user.id, entry["event"], entry["details"])
+    return {"ok": True}
+
+
+@router.get("/diag")
+def get_tv_diag(
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the last 100 diagnostic entries (most-recent first).
+    Intended for the Admin page diagnostic panel and developer debugging.
+    """
+    return {"entries": list(reversed(_diag_buffer[-100:]))}
+
+
+# ─────────────────────────────────────────────────
 # PHASE 2 — PAIRING
 # ─────────────────────────────────────────────────
 

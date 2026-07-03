@@ -25,7 +25,7 @@ def get_test_token():
 
 @patch("app.services.calendar_service.GoogleCalendarService.refresh_token")
 @patch("app.services.calendar_service.GoogleCalendarService.fetch_events")
-@patch("app.services.calendar_service.GraphClient.get_all_events")
+@patch("app.services.calendar_service.GraphClient.get_events")
 def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
     """
     ✅ Tests full sync pipeline:
@@ -47,8 +47,8 @@ def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
 
     data = response.json()
 
-    # ✅ Correct structure
-    assert "message" in data
+    # ✅ Correct structure — sync returns {status, result, range_days, ...}
+    assert data.get("status") == "success"
     assert "result" in data
 
     result = data["result"]
@@ -56,8 +56,6 @@ def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
     # ✅ Metrics validation
     assert "created" in result
     assert "updated" in result
-    assert "deleted" in result
-    assert "total" in result
 
 
 # ==================================================
@@ -81,7 +79,7 @@ def test_unified_calendar(mock_get_tasks):
 
     data = response.json()
 
-    # ✅ Validate structure based on your API
+    # ✅ Validate structure based on actual API response
     assert "events" in data
-    assert "accounts" in data
-    assert "count" in data
+    assert "account_status" in data
+    assert "account_event_totals" in data

@@ -293,3 +293,73 @@ if (sleepTimeoutSel) {
 
 // Load current sleep guard state when the admin page loads
 loadSleepGuardState();
+
+// ─────────────────────────────────────────────────
+// TV DIAGNOSTICS PANEL
+// ─────────────────────────────────────────────────
+
+const diagLoadBtn      = document.getElementById("tvDiagLoadBtn");
+const diagClearBtn     = document.getElementById("tvDiagClearBtn");
+const diagAutoRefresh  = document.getElementById("tvDiagAutoRefresh");
+const diagBody         = document.getElementById("tvDiagBody");
+const diagCount        = document.getElementById("tvDiagCount");
+let   _diagAutoHandle  = null;
+
+function _fmtDiagTime(isoStr) {
+  if (!isoStr) return "—";
+  try {
+    return new Date(isoStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch { return isoStr; }
+}
+
+async function loadTvDiag() {
+  if (!diagBody) return;
+  try {
+    const data = await apiRequest("/tv/diag", { method: "GET" });
+    if (!data || !data.entries) {
+      if (diagCount) diagCount.textContent = "error loading";
+      return;
+    }
+    const entries = data.entries;
+    if (diagCount) diagCount.textContent = `${entries.length} entries (most-recent first)`;
+    if (entries.length === 0) {
+      diagBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">No events captured yet.</td></tr>';
+      return;
+    }
+    diagBody.innerHTML = entries.map(e => `
+      <tr>
+        <td>${_fmtDiagTime(e.ts_server)}</td>
+        <td>${e.elapsed_min != null ? e.elapsed_min + "m" : "—"}</td>
+        <td style="font-weight:700;color:${e.event.includes("freeze") || e.event.includes("hide") || e.event.includes("unload") ? "#ff9500" : e.event.includes("gap") ? "#ff453a" : "#e0e0f0"};">${e.event}</td>
+        <td style="opacity:0.8;">${e.details || "—"}</td>
+        <td>${e.visibility || "—"}</td>
+        <td>${e.guard_enabled === true ? "✓" : e.guard_enabled === false ? "✗" : "—"}</td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    if (diagCount) diagCount.textContent = `Error: ${err.message}`;
+  }
+}
+
+if (diagLoadBtn) {
+  diagLoadBtn.addEventListener("click", loadTvDiag);
+}
+
+if (diagClearBtn) {
+  diagClearBtn.addEventListener("click", () => {
+    if (diagBody) diagBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (diagCount) diagCount.textContent = "cleared";
+  });
+}
+
+if (diagAutoRefresh) {
+  diagAutoRefresh.addEventListener("change", () => {
+    if (diagAutoRefresh.checked) {
+      loadTvDiag();
+      _diagAutoHandle = setInterval(loadTvDiag, 10000);
+    } else {
+      if (_diagAutoHandle) clearInterval(_diagAutoHandle);
+      _diagAutoHandle = null;
+    }
+  });
+}

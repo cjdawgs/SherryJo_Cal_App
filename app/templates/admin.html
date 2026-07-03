@@ -21,6 +21,22 @@
       cursor: pointer;
     }
     .tv-sleep-admin-status { font-size: 12px; opacity: 0.6; white-space: nowrap; }
+    /* TV Diagnostics panel */
+    .tv-diag-panel {
+      margin-top: 8px; padding: 6px 0;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+    .tv-diag-panel summary { font-size: 12px; opacity: 0.7; cursor: pointer; user-select: none; }
+    .tv-diag-table {
+      width: 100%; border-collapse: collapse; margin-top: 6px;
+      font-size: 11px; font-family: monospace;
+    }
+    .tv-diag-table th {
+      text-align: left; padding: 3px 6px; opacity: 0.55;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .tv-diag-table td { padding: 2px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .tv-diag-table tr:hover td { background: rgba(255,255,255,0.04); }
   </style>
 </head>
 <body>
@@ -49,6 +65,22 @@
         </select>
         <span id="tvSleepAdminStatus" class="tv-sleep-admin-status">&mdash;</span>
       </div>
+      <details id="tvDiagPanel" class="tv-diag-panel">
+        <summary>&#x1F4E1; TV Diagnostics &mdash; <span id="tvDiagCount">click to load</span></summary>
+        <div style="display:flex;gap:8px;margin:6px 0;">
+          <button id="tvDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+          <button id="tvDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+          <label style="font-size:11px;opacity:0.6;">
+            <input id="tvDiagAutoRefresh" type="checkbox"> Auto-refresh (10s)
+          </label>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="tv-diag-table" id="tvDiagTable">
+            <thead><tr><th>Server time</th><th>Elapsed</th><th>Event</th><th>Details</th><th>Vis</th><th>Guard</th></tr></thead>
+            <tbody id="tvDiagBody"><tr><td colspan="6" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
+          </table>
+        </div>
+      </details>
     </header>
 
     <section class="panel" id="controlPanel">

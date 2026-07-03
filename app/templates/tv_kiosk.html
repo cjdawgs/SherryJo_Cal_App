@@ -235,6 +235,14 @@
     .status-err  { color: var(--red); }
     .tv-footer-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
     .tv-last-updated { font-size: 12px; color: var(--text-muted); }
+    /* Diagnostic event ticker */
+    .tv-diag-line {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 9000;
+      padding: 1px 10px; font-size: 9px; font-family: monospace;
+      color: rgba(255,255,255,0.28); background: rgba(0,0,0,0.25);
+      pointer-events: none; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
   </style>
 </head>
 <body>
@@ -272,6 +280,7 @@
     The JS reads window.KIOSK_TOKEN first, skipping the pairing screen entirely.
   -->
   <script>window.KIOSK_TOKEN = "{{ kiosk_token }}";</script>
-  <script type="module" src="/static/tv_dashboard.js?v=20260702a"></script>
+  <script type="module" src="/static/tv_dashboard.js?v=20260703b"></script>
+  <div id="tv-diag-line" class="tv-diag-line"></div>
 </body>
 </html>

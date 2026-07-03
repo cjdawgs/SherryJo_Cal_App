@@ -7,6 +7,11 @@ const LONG_PRESS_MS = 600;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 
+// tvDiag is assigned after state is initialised (below).
+// Declaring it here with let means wakeLock/antiSleep callbacks can safely
+// reference it at runtime without a temporal-dead-zone crash.
+let tvDiag = null;
+
 // ─── Screen Wake Lock Manager ────────────────────────────────────────────────
 // Prevents FireOS / Amazon Silk from sleeping the browser after 20-30 minutes
 // of no physical user input.  All state is encapsulated in this singleton so
@@ -40,6 +45,7 @@ const wakeLock = (() => {
         console.log('[WakeLock] Status: Released by OS/Browser — scheduling re-acquisition');
         _sentinel = null;
         window.__WAKE_LOCK_ACTIVE__ = false;
+        if (tvDiag) tvDiag.log('wake_lock_released', `vis=${document.visibilityState}`);
         // Re-acquire only when the document is still visible; if it's hidden the
         // visibilitychange listener will re-acquire when it comes back.
         if (document.visibilityState === 'visible') {
@@ -92,11 +98,13 @@ const antiSleep = (() => {
   let _rafHandle  = null;
   let _evtHandle  = null;
   let _tick = 0;
+  let _lastRafTs  = null;
+  let _gapCb      = null;
 
-  // 1×1 canvas placed off-screen at near-zero opacity
+  // ── Layer 2: Hidden canvas (rAF loop keeps GPU renderer active) ──────────
   const _canvas = document.createElement('canvas');
-  _canvas.width  = 1;
-  _canvas.height = 1;
+  _canvas.width  = 2;   // 2×2 so captureStream has real pixels
+  _canvas.height = 2;
   Object.assign(_canvas.style, {
     position: 'fixed', bottom: '0', right: '0',
     width: '1px', height: '1px',
@@ -106,20 +114,96 @@ const antiSleep = (() => {
   });
   const _ctx = _canvas.getContext('2d');
 
-  function _rafLoop() {
-    // Alternate between two near-invisible values — renderer stays dirty
+  // ── Layer 4: canvas.captureStream() → <video> playback ───────────────────
+  // Registers the page as "actively playing media" with the Android media
+  // framework. FireOS explicitly exempts media-playing apps from sleep.
+  // This is the most reliable FireOS fix — the OS-level power manager checks
+  // for media sessions, not browser wake locks.
+  let _videoEl = null;
+
+  function _startVideoStream() {
+    if (_videoEl && !_videoEl.paused) return;
+    try {
+      if (!_videoEl) {
+        const stream = _canvas.captureStream(1); // 1 fps — negligible CPU
+        _videoEl = document.createElement('video');
+        _videoEl.srcObject   = stream;
+        _videoEl.muted       = true;
+        _videoEl.loop        = true;
+        _videoEl.playsInline = true;
+        _videoEl.setAttribute('playsinline', '');
+        Object.assign(_videoEl.style, {
+          position: 'fixed', bottom: '0', right: '0',
+          width: '1px', height: '1px',
+          opacity: '0.001',
+          pointerEvents: 'none',
+          zIndex: '-9998',
+        });
+      }
+      if (!document.body.contains(_videoEl)) document.body.appendChild(_videoEl);
+      _videoEl.play()
+        .then(() => console.log('[AntiSleep] Layer 4 video stream: playing (media-exempt)'))
+        .catch(err => console.log('[AntiSleep] Layer 4 video stream: play() failed —', err.message));
+    } catch (err) {
+      console.log('[AntiSleep] Layer 4 video stream: not available —', err.message);
+    }
+  }
+
+  function _stopVideoStream() {
+    if (_videoEl) {
+      try { _videoEl.pause(); } catch {}
+      if (document.body.contains(_videoEl)) document.body.removeChild(_videoEl);
+      _videoEl = null;
+    }
+  }
+
+  // ── Layer 5: Web Audio silent oscillator ─────────────────────────────────
+  // Keeps Android audio manager showing the app as active. Uses ultrasonic
+  // frequency (20 kHz) at near-zero gain — completely inaudible.
+  // Requires a prior user gesture; gracefully skipped in kiosk mode.
+  let _audioCtx = null;
+  let _audioOsc = null;
+
+  function _startAudio() {
+    if (_audioCtx && _audioCtx.state !== 'closed') return;
+    try {
+      _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      _audioOsc = _audioCtx.createOscillator();
+      const gain = _audioCtx.createGain();
+      gain.gain.setValueAtTime(0.00001, _audioCtx.currentTime);      // inaudible
+      _audioOsc.frequency.setValueAtTime(20000, _audioCtx.currentTime); // 20 kHz
+      _audioOsc.connect(gain);
+      gain.connect(_audioCtx.destination);
+      _audioOsc.start();
+      console.log('[AntiSleep] Layer 5 Web Audio: started (20 kHz ultrasonic, gain=0.00001)');
+    } catch (err) {
+      console.log('[AntiSleep] Layer 5 Web Audio: not available —', err.message);
+    }
+  }
+
+  function _stopAudio() {
+    try { if (_audioOsc) _audioOsc.stop();  } catch {}
+    try { if (_audioCtx) _audioCtx.close(); } catch {}
+    _audioOsc = null;
+    _audioCtx = null;
+  }
+
+  function _rafLoop(ts) {
+    if (_lastRafTs !== null && _gapCb && (ts - _lastRafTs) > 2000) _gapCb(ts - _lastRafTs);
+    _lastRafTs = ts;
     _tick = (_tick + 1) & 255;
-    _ctx.clearRect(0, 0, 1, 1);
+    _ctx.clearRect(0, 0, 2, 2);
     _ctx.fillStyle = `rgba(0,0,0,${0.001 + (_tick % 2) * 0.001})`;
-    _ctx.fillRect(0, 0, 1, 1);
+    _ctx.fillRect(0, 0, 2, 2);
     _rafHandle = requestAnimationFrame(_rafLoop);
   }
 
   function start() {
     if (!document.body.contains(_canvas)) document.body.appendChild(_canvas);
     if (!_rafHandle) {
-      _rafLoop();
-      console.log('[AntiSleep] Layer 2 rAF canvas loop: started');
+      _lastRafTs = null;
+      requestAnimationFrame(_rafLoop);
+      console.log('[AntiSleep] Layer 2 rAF canvas: started');
     }
     if (!_evtHandle) {
       _evtHandle = setInterval(() => {
@@ -127,22 +211,32 @@ const antiSleep = (() => {
           document.dispatchEvent(new MouseEvent('mousemove', {
             bubbles: true, cancelable: true, clientX: 1, clientY: 1,
           }));
+          document.dispatchEvent(new PointerEvent('pointermove', {
+            bubbles: true, cancelable: true, clientX: 1, clientY: 1, isPrimary: true,
+          }));
         }
       }, 20000);
-      console.log('[AntiSleep] Layer 3 synthetic events: started (20s interval)');
+      console.log('[AntiSleep] Layer 3 synthetic events: started (20s)');
     }
+    _startVideoStream();   // Layer 4 — primary FireOS fix
+    _startAudio();         // Layer 5 — audio manager backup
     window.__ANTI_SLEEP_ACTIVE__ = true;
+    window.__ANTI_SLEEP_LAYERS__ = 'WakeLock+rAF+SyntheticEvents+VideoStream+WebAudio';
   }
 
   function stop() {
     if (_rafHandle) { cancelAnimationFrame(_rafHandle); _rafHandle = null; }
     if (_evtHandle) { clearInterval(_evtHandle); _evtHandle = null; }
     if (document.body.contains(_canvas)) document.body.removeChild(_canvas);
+    _stopVideoStream();
+    _stopAudio();
     window.__ANTI_SLEEP_ACTIVE__ = false;
-    console.log('[AntiSleep] stopped');
+    console.log('[AntiSleep] all 5 layers stopped');
   }
 
-  return { start, stop };
+  function setRafGapCb(fn) { _gapCb = fn; }
+
+  return { start, stop, setRafGapCb };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -167,6 +261,7 @@ const state = {
   syncStatusMessage: '',
   pollHandle: null,
   clockHandle: null,
+  heartbeatHandle: null,       // 60-second diagnostic heartbeat
   sessionStartAt: null,        // set by startPolling()
   sleepGuardEnabled: true,     // read from /tv/state
   sleepGuardTimeoutMinutes: 0, // 0 = never timeout
@@ -213,6 +308,90 @@ const state = {
 
 let dom = {};
 
+// ─── TV Diagnostic Logger ────────────────────────────────────────────────────
+// Assigned here so all subsequent code (including wakeLock/antiSleep callbacks
+// that run at runtime) can call tvDiag.log safely.
+//
+// Each entry is stored to:
+//   1. An in-memory ring buffer (shown on TV in real-time)
+//   2. localStorage('tv_diag') — survives the tab being backgrounded
+//   3. POST /tv/diag via fetch keepalive — survives page unload, stored server-side
+//
+// View server log from Admin → TV Diagnostics panel, or GET /tv/diag.
+tvDiag = (() => {
+  const MAX = 60;
+  const _buf = [];
+
+  function _elapsed() {
+    if (!state.sessionStartAt) return '—';
+    return `${Math.floor((Date.now() - state.sessionStartAt) / 60000)}m`;
+  }
+
+  function log(event, details = '') {
+    const entry = {
+      t:        new Date().toISOString(),
+      ms:       Date.now(),
+      event,
+      details:  String(details).slice(0, 200),
+      guard:    state.sleepGuardEnabled,
+      timeout:  state.sleepGuardTimeoutMinutes,
+      elapsed:  _elapsed(),
+      vis:      document.visibilityState,
+    };
+    _buf.push(entry);
+    if (_buf.length > MAX) _buf.shift();
+
+    // Persist last 20 entries to localStorage (survives backgrounding)
+    try { localStorage.setItem('tv_diag', JSON.stringify(_buf.slice(-20))); } catch {}
+
+    // Silk console — visible in remote developer tools
+    console.log(`[TVDiag] ${entry.event} | ${entry.details} | elapsed=${entry.elapsed} vis=${entry.vis}`);
+
+    // On-screen footer line
+    _renderDiagLine(entry);
+
+    // Beacon to server (fire-and-forget, keepalive survives page unload)
+    _beacon(entry);
+  }
+
+  function _renderDiagLine(entry) {
+    const el = dom.diagLine;
+    if (!el) return;
+    const ts = new Date(entry.ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.textContent = `[${ts}] ${entry.event}${entry.details ? ' \u00b7 ' + entry.details : ''}`;
+  }
+
+  function _beacon(entry) {
+    const token = state.token || (IS_KIOSK ? window.KIOSK_TOKEN : null);
+    if (!token) return;
+    fetch('/tv/diag', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({
+        event:            entry.event,
+        details:          entry.details,
+        ts:               entry.t,
+        sessionElapsedMin: state.sessionStartAt ? Math.floor((Date.now() - state.sessionStartAt) / 60000) : null,
+        visibilityState:  entry.vis,
+        guardEnabled:     entry.guard,
+        guardTimeout:     entry.timeout,
+      }),
+      keepalive: true,   // delivers even when page is unloading
+    }).catch(() => {});  // never block on diagnostics
+  }
+
+  function getLog() { return [..._buf]; }
+
+  return { log, getLog };
+})();
+
+// Wire the RAF frame-gap callback now that tvDiag is ready
+antiSleep.setRafGapCb((deltaMs) => {
+  tvDiag.log('raf_gap', `${Math.round(deltaMs / 1000)}s gap \u2014 OS may be throttling renderer`);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const TITLE_PRESETS = ['New Event', 'Meeting', 'Reminder', 'Appointment', 'Call'];
 const DESC_PRESETS = ['', 'Updated from TV', 'Bring notes', 'Follow up needed'];
 const STICKY_PRESETS = ['New sticky note', 'Action item', 'Priority', 'Reminder'];
@@ -240,6 +419,7 @@ function cacheDom() {
     debugList: document.getElementById('tv-debug-list'),
     accountLegend: document.getElementById('tv-account-legend'),
     sleepStatus: document.getElementById('tv-sleep-status'),
+    diagLine:    document.getElementById('tv-diag-line'),
   };
 }
 
@@ -526,18 +706,54 @@ function init() {
 
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
+
+  // ── Lifecycle event instrumentation ────────────────────────────────────────
+  // All events are logged through tvDiag (ring buffer → localStorage → server)
+  // so we can diagnose exactly what FireOS does when the screen goes dark.
+
   document.addEventListener('visibilitychange', () => {
+    const vis = document.visibilityState;
+    if (tvDiag) tvDiag.log('visibilitychange', vis);
     if (!document.hidden) {
       refreshEvents(true);
       // Re-acquire wake lock — the OS always releases it when the tab hides.
       if (state.token) wakeLock.reacquire();
+      if (state.sleepGuardEnabled !== false) antiSleep.start();
     }
   });
 
-  // pageshow fires on back-navigation and bfcache restores; re-lock there too.
-  window.addEventListener('pageshow', () => {
-    if (state.token && document.visibilityState === 'visible') wakeLock.reacquire();
+  // window blur / focus — fires when focus shifts (e.g., FireOS overlay opens)
+  window.addEventListener('blur',  () => { if (tvDiag) tvDiag.log('window_blur',  `vis=${document.visibilityState}`); });
+  window.addEventListener('focus', () => {
+    if (tvDiag) tvDiag.log('window_focus', `vis=${document.visibilityState}`);
+    if (state.token && document.visibilityState === 'visible') {
+      wakeLock.reacquire();
+      if (state.sleepGuardEnabled !== false) antiSleep.start();
+    }
   });
+
+  // pagehide / pageshow — fires on navigation and bfcache restore
+  window.addEventListener('pagehide', (e) => { if (tvDiag) tvDiag.log('pagehide', `persisted=${e.persisted}`); });
+  window.addEventListener('pageshow', (e) => {
+    if (tvDiag) tvDiag.log('pageshow', `persisted=${e.persisted}`);
+    if (state.token && document.visibilityState === 'visible') {
+      wakeLock.reacquire();
+      if (state.sleepGuardEnabled !== false) antiSleep.start();
+    }
+  });
+
+  // Page Lifecycle API (Chromium 68+ / Amazon Silk)
+  // 'freeze' fires when the browser decides to freeze the page (CPU saving).
+  // This is the last chance to log before the page stops executing.
+  document.addEventListener('freeze',  () => { if (tvDiag) tvDiag.log('page_freeze',  'browser froze the page'); });
+  document.addEventListener('resume',  () => {
+    if (tvDiag) tvDiag.log('page_resume', 'page resumed from frozen state');
+    if (state.token) { wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) antiSleep.start(); }
+  });
+
+  // beforeunload — last sync opportunity before page is torn down
+  window.addEventListener('beforeunload', () => { if (tvDiag) tvDiag.log('beforeunload', 'page unloading'); });
+  // ────────────────────────────────────────────────────────────────────────────
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
   if (state.token) {
@@ -556,9 +772,19 @@ async function bootstrapFromBackend() {
 function startPolling() {
   stopAll();
   state.sessionStartAt = Date.now();
+  if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.clockHandle = setInterval(tickClock, 1000);
+  // Heartbeat every 60 s — confirms guard is alive between visible events
+  state.heartbeatHandle = setInterval(() => {
+    if (tvDiag) tvDiag.log('heartbeat',
+      `elapsed=${Math.floor((Date.now()-state.sessionStartAt)/60000)}m` +
+      ` guard=${state.sleepGuardEnabled}` +
+      ` timeout=${state.sleepGuardTimeoutMinutes}` +
+      ` rafActive=${window.__ANTI_SLEEP_ACTIVE__}` +
+      ` wakeLock=${window.__WAKE_LOCK_ACTIVE__}`);
+  }, 60000);
   tickClock();
   // Layer 1: Screen Wake Lock API
   wakeLock.request();
@@ -567,10 +793,12 @@ function startPolling() {
 }
 
 function stopAll() {
-  if (state.pollHandle) clearInterval(state.pollHandle);
-  if (state.clockHandle) clearInterval(state.clockHandle);
+  if (state.pollHandle)     clearInterval(state.pollHandle);
+  if (state.clockHandle)    clearInterval(state.clockHandle);
+  if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
   state.pollHandle = null;
   state.clockHandle = null;
+  state.heartbeatHandle = null;
   // Release wake lock on clean teardown (unpair / logout).
   wakeLock.release();
   antiSleep.stop();
