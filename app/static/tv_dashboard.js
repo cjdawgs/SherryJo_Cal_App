@@ -7,6 +7,77 @@ const LONG_PRESS_MS = 600;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 
+// ─── Screen Wake Lock Manager ────────────────────────────────────────────────
+// Prevents FireOS / Amazon Silk from sleeping the browser after 20-30 minutes
+// of no physical user input.  All state is encapsulated in this singleton so
+// there are no global sentinel references that could leak.
+//
+// Browser support:  Chrome 84+, Edge 86+, Amazon Silk (Chromium engine).
+// Graceful degradation: unsupported browsers receive a console note and no error.
+//
+// Diagnostics: inspect window.__WAKE_LOCK_ACTIVE__ from remote devtools.
+const wakeLock = (() => {
+  let _sentinel = null;
+
+  async function request() {
+    if (!('wakeLock' in navigator)) {
+      console.log('[WakeLock] Not supported on this browser — skipping.');
+      return;
+    }
+    // If we already hold a live sentinel, nothing to do.
+    if (_sentinel && !_sentinel.released) return;
+
+    try {
+      console.log('[WakeLock] Status: Requested');
+      _sentinel = await navigator.wakeLock.request('screen');
+      window.__WAKE_LOCK_ACTIVE__ = true;
+      console.log('[WakeLock] Status: Active');
+
+      // The OS/browser releases the lock automatically when the tab is hidden,
+      // the screen turns off, or a network glitch causes a reload.
+      // Bind once per sentinel acquisition so we never stack listeners.
+      _sentinel.addEventListener('release', () => {
+        console.log('[WakeLock] Status: Released by OS/Browser — scheduling re-acquisition');
+        _sentinel = null;
+        window.__WAKE_LOCK_ACTIVE__ = false;
+        // Re-acquire only when the document is still visible; if it's hidden the
+        // visibilitychange listener will re-acquire when it comes back.
+        if (document.visibilityState === 'visible') {
+          setTimeout(request, 1000);
+        }
+      }, { once: true });
+
+    } catch (err) {
+      // NotAllowedError is normal (page not visible, low-power mode, etc.)
+      _sentinel = null;
+      window.__WAKE_LOCK_ACTIVE__ = false;
+      console.log(`[WakeLock] Error: ${err.name} - ${err.message}`);
+    }
+  }
+
+  // Called whenever the page regains visibility.
+  async function reacquire() {
+    if (!_sentinel || _sentinel.released) {
+      _sentinel = null;
+      await request();
+    }
+  }
+
+  // Called on clean application teardown (unpair / logout).
+  function release() {
+    if (_sentinel && !_sentinel.released) {
+      _sentinel.release().catch(() => {});
+    }
+    _sentinel = null;
+    window.__WAKE_LOCK_ACTIVE__ = false;
+    console.log('[WakeLock] Status: Explicitly released');
+  }
+
+  return { request, reacquire, release };
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const state = {
   token: null,
   selectedDate: null,
@@ -385,7 +456,14 @@ function init() {
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
       refreshEvents(true);
+      // Re-acquire wake lock — the OS always releases it when the tab hides.
+      if (state.token) wakeLock.reacquire();
     }
+  });
+
+  // pageshow fires on back-navigation and bfcache restores; re-lock there too.
+  window.addEventListener('pageshow', () => {
+    if (state.token && document.visibilityState === 'visible') wakeLock.reacquire();
   });
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
@@ -408,6 +486,8 @@ function startPolling() {
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   tickClock();
+  // Acquire Screen Wake Lock so FireOS/Silk never sleeps the browser.
+  wakeLock.request();
 }
 
 function stopAll() {
@@ -415,6 +495,8 @@ function stopAll() {
   if (state.clockHandle) clearInterval(state.clockHandle);
   state.pollHandle = null;
   state.clockHandle = null;
+  // Release wake lock on clean teardown (unpair / logout).
+  wakeLock.release();
 }
 
 function tickClock() {
