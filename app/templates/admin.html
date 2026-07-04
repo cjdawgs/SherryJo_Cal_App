@@ -21,12 +21,7 @@
       cursor: pointer;
     }
     .tv-sleep-admin-status { font-size: 12px; opacity: 0.6; white-space: nowrap; }
-    /* TV Diagnostics panel */
-    .tv-diag-panel {
-      margin-top: 8px; padding: 6px 0;
-      border-top: 1px solid rgba(255,255,255,0.08);
-    }
-    .tv-diag-panel summary { font-size: 12px; opacity: 0.7; cursor: pointer; user-select: none; }
+    /* TV Diagnostics table (shared between header strip and monitor section) */
     .tv-diag-table {
       width: 100%; border-collapse: collapse; margin-top: 6px;
       font-size: 11px; font-family: monospace;
@@ -35,8 +30,54 @@
       text-align: left; padding: 3px 6px; opacity: 0.55;
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-    .tv-diag-table td { padding: 2px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+    .tv-diag-table td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
     .tv-diag-table tr:hover td { background: rgba(255,255,255,0.04); }
+    /* TV Monitor section layout */
+    .tv-monitor-grid {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 16px;
+      margin-top: 10px;
+    }
+    @media (max-width: 960px) { .tv-monitor-grid { grid-template-columns: 1fr; } }
+    .tv-setup-card {
+      background: rgba(255,180,60,0.06);
+      border: 1px solid rgba(255,180,60,0.18);
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 12px;
+      align-self: start;
+    }
+    .tv-setup-card h3 { font-size: 13px; margin: 0 0 8px; }
+    .tv-setup-cmd {
+      background: rgba(0,0,0,0.4);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: monospace;
+      font-size: 11px;
+      margin: 4px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .tv-setup-step {
+      margin: 10px 0 3px;
+      font-size: 10px;
+      opacity: 0.55;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .tv-copy-btn {
+      font-size: 10px; padding: 2px 7px;
+      border-radius: 3px;
+      border: 1px solid rgba(255,255,255,0.2);
+      background: transparent; color: inherit;
+      cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    .tv-copy-btn:hover { background: rgba(255,255,255,0.1); }
   </style>
 </head>
 <body>
@@ -65,23 +106,78 @@
         </select>
         <span id="tvSleepAdminStatus" class="tv-sleep-admin-status">&mdash;</span>
       </div>
-      <details id="tvDiagPanel" class="tv-diag-panel">
-        <summary>&#x1F4E1; TV Diagnostics &mdash; <span id="tvDiagCount">click to load</span></summary>
-        <div style="display:flex;gap:8px;margin:6px 0;">
-          <button id="tvDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
-          <button id="tvDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
-          <label style="font-size:11px;opacity:0.6;">
-            <input id="tvDiagAutoRefresh" type="checkbox"> Auto-refresh (10s)
-          </label>
-        </div>
-        <div style="overflow-x:auto;">
-          <table class="tv-diag-table" id="tvDiagTable">
-            <thead><tr><th>Server time</th><th>Device</th><th>Elapsed</th><th>Event</th><th>Details</th><th>Vis</th><th>Guard</th></tr></thead>
-            <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
-          </table>
+    </header>
+
+    <section class="panel" id="tvMonitorPanel">
+      <details id="tvMonitorDetails">
+        <summary>&#x1F4E1; TV Monitor &amp; Sleep Fix</summary>
+        <div class="tv-monitor-grid">
+
+          <!-- ── Live diagnostics log ───────────────────────────── -->
+          <div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+              <strong style="font-size:13px;">Live Diagnostics Log</strong>
+              <span id="tvDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+              <button id="tvDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+              <button id="tvDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+              <label style="font-size:11px;opacity:0.6;display:flex;align-items:center;gap:4px;">
+                <input id="tvDiagAutoRefresh" type="checkbox"> Auto-refresh (10s)
+              </label>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="tv-diag-table" id="tvDiagTable">
+                <thead><tr><th>Server time</th><th>Device</th><th>Elapsed</th><th>Event</th><th>Details</th><th>Vis</th><th>Guard</th></tr></thead>
+                <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ── One-time FireStick sleep fix ─────────────────────── -->
+          <div class="tv-setup-card">
+            <h3>&#x1F525; FireStick One-Time Sleep Fix</h3>
+            <p style="opacity:0.7;margin:0 0 10px;line-height:1.5;font-size:11px;">
+              The app&rsquo;s 5-layer anti-sleep engine delays sleep, but FireOS
+              has a hidden system sleep timer (default 10&ndash;20 min) that no
+              browser API can override. Run these ADB commands
+              <strong>once per device</strong> to permanently disable it.
+            </p>
+
+            <div class="tv-setup-step">Step 1 &mdash; on the FireStick</div>
+            <p style="font-size:11px;opacity:0.65;margin:3px 0 8px;line-height:1.5;">
+              Settings &rarr; My Fire TV &rarr; Developer Options<br>
+              &rarr; turn ON <em>ADB Debugging</em><br>
+              Settings &rarr; System &rarr; About &rarr; Network<br>
+              &rarr; note the IP address
+            </p>
+
+            <div class="tv-setup-step">Step 2 &mdash; on your laptop (adbLink / adb)</div>
+            <p style="font-size:11px;opacity:0.65;margin:3px 0 6px;">Connect to the FireStick IP, open ADB Shell, paste:</p>
+            <div class="tv-setup-cmd">
+              <code>settings put system screen_off_timeout 2147460000</code>
+              <button class="tv-copy-btn" type="button"
+                onclick="navigator.clipboard.writeText('settings put system screen_off_timeout 2147460000').then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+            </div>
+            <div class="tv-setup-cmd">
+              <code>settings put secure sleep_timeout 0</code>
+              <button class="tv-copy-btn" type="button"
+                onclick="navigator.clipboard.writeText('settings put secure sleep_timeout 0').then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+            </div>
+            <p style="font-size:10px;opacity:0.45;margin:5px 0 10px;">
+              These survive reboots. <code>sleep_timeout 0</code> = disabled.
+              <code>screen_off_timeout 2147460000</code> &asymp; 24 days (screensaver off).
+            </p>
+
+            <div class="tv-setup-step">Step 3 &mdash; on the Samsung TV</div>
+            <p style="font-size:11px;opacity:0.65;margin:3px 0;line-height:1.5;">
+              Settings &rarr; General &rarr; <strong>Anynet+ (HDMI-CEC)</strong> &rarr; Off<br>
+              <span style="opacity:0.7;">Stops the Samsung from signaling the FireStick
+              to sleep when the TV remote goes idle.</span>
+            </p>
+          </div>
+
         </div>
       </details>
-    </header>
+    </section>
 
     <section class="panel" id="controlPanel">
       <details open>

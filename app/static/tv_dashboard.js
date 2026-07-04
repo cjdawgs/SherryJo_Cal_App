@@ -215,8 +215,8 @@ const antiSleep = (() => {
             bubbles: true, cancelable: true, clientX: 1, clientY: 1, isPrimary: true,
           }));
         }
-      }, 20000);
-      console.log('[AntiSleep] Layer 3 synthetic events: started (20s)');
+      }, 8000);  // 8 s — resets FireOS activity watchdog more aggressively than 20 s
+      console.log('[AntiSleep] Layer 3 synthetic events: started (8s)');
     }
     _startVideoStream();   // Layer 4 — primary FireOS fix
     _startAudio();         // Layer 5 — audio manager backup
@@ -234,9 +234,27 @@ const antiSleep = (() => {
     console.log('[AntiSleep] all 5 layers stopped');
   }
 
+  // Called after a visibility hidden→visible transition to force the video
+  // element back into play().  Browsers always pause <video> when a tab goes
+  // hidden, killing our Layer-4 media-exempt status on FireOS.  Explicit
+  // restart is required; antiSleep.start() alone does not always re-trigger it.
+  function restartVideo() {
+    if (_videoEl) {
+      _videoEl.play()
+        .then(() => console.log('[AntiSleep] Layer 4 video: restarted after visibility restore'))
+        .catch(err => console.log('[AntiSleep] Layer 4 video restart failed:', err.message));
+    } else {
+      _startVideoStream();  // element was removed — create fresh
+    }
+  }
+
+  function isVideoActive() {
+    return !!(_videoEl && !_videoEl.paused && !_videoEl.ended);
+  }
+
   function setRafGapCb(fn) { _gapCb = fn; }
 
-  return { start, stop, setRafGapCb };
+  return { start, stop, setRafGapCb, restartVideo, isVideoActive };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -736,7 +754,12 @@ function init() {
       refreshEvents(true);
       // Re-acquire wake lock — the OS always releases it when the tab hides.
       if (state.token) wakeLock.reacquire();
-      if (state.sleepGuardEnabled !== false) antiSleep.start();
+      if (state.sleepGuardEnabled !== false) {
+        antiSleep.start();
+        // Browser ALWAYS pauses <video> when the tab goes hidden, killing our
+        // Layer-4 media-exempt status. Force a fresh play() immediately.
+        antiSleep.restartVideo();
+      }
     }
   });
 
@@ -746,7 +769,7 @@ function init() {
     if (tvDiag) tvDiag.log('window_focus', `vis=${document.visibilityState}`);
     if (state.token && document.visibilityState === 'visible') {
       wakeLock.reacquire();
-      if (state.sleepGuardEnabled !== false) antiSleep.start();
+      if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
   });
 
@@ -756,7 +779,7 @@ function init() {
     if (tvDiag) tvDiag.log('pageshow', `persisted=${e.persisted}`);
     if (state.token && document.visibilityState === 'visible') {
       wakeLock.reacquire();
-      if (state.sleepGuardEnabled !== false) antiSleep.start();
+      if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
   });
 
@@ -766,7 +789,7 @@ function init() {
   document.addEventListener('freeze',  () => { if (tvDiag) tvDiag.log('page_freeze',  'browser froze the page'); });
   document.addEventListener('resume',  () => {
     if (tvDiag) tvDiag.log('page_resume', 'page resumed from frozen state');
-    if (state.token) { wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) antiSleep.start(); }
+    if (state.token) { wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
   });
 
   // beforeunload — last sync opportunity before page is torn down
@@ -801,7 +824,8 @@ function startPolling() {
       ` guard=${state.sleepGuardEnabled}` +
       ` timeout=${state.sleepGuardTimeoutMinutes}` +
       ` rafActive=${window.__ANTI_SLEEP_ACTIVE__}` +
-      ` wakeLock=${window.__WAKE_LOCK_ACTIVE__}`);
+      ` wakeLock=${window.__WAKE_LOCK_ACTIVE__}` +
+      ` videoActive=${antiSleep.isVideoActive()}`);
   }, 60000);
   tickClock();
   // Layer 1: Screen Wake Lock API
