@@ -323,19 +323,26 @@ async function loadTvDiag() {
     const entries = data.entries;
     if (diagCount) diagCount.textContent = `${entries.length} entries (most-recent first)`;
     if (entries.length === 0) {
-      diagBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">No events captured yet.</td></tr>';
+      diagBody.innerHTML = '<tr><td colspan="7" style="opacity:0.4;">No events captured yet.</td></tr>';
       return;
     }
-    diagBody.innerHTML = entries.map(e => `
+    diagBody.innerHTML = entries.map(e => {
+      // Show last 8 chars of device_id so rows from the same device group visually.
+      // Full UA is in the title tooltip for hover inspection.
+      const shortId = e.device_id ? e.device_id.slice(-8) : '—';
+      const ua      = e.device_ua || '';
+      const deviceLabel = `<span title="${ua.replace(/"/g, '&quot;')}" style="font-family:monospace;cursor:default;">…${shortId}</span>`;
+      return `
       <tr>
         <td>${_fmtDiagTime(e.ts_server)}</td>
-        <td>${e.elapsed_min != null ? e.elapsed_min + "m" : "—"}</td>
-        <td style="font-weight:700;color:${e.event.includes("freeze") || e.event.includes("hide") || e.event.includes("unload") ? "#ff9500" : e.event.includes("gap") ? "#ff453a" : "#e0e0f0"};">${e.event}</td>
-        <td style="opacity:0.8;">${e.details || "—"}</td>
-        <td>${e.visibility || "—"}</td>
-        <td>${e.guard_enabled === true ? "✓" : e.guard_enabled === false ? "✗" : "—"}</td>
-      </tr>
-    `).join("");
+        <td>${deviceLabel}</td>
+        <td>${e.elapsed_min != null ? e.elapsed_min + 'm' : '—'}</td>
+        <td style="font-weight:700;color:${e.event.includes('freeze') || e.event.includes('hide') || e.event.includes('unload') ? '#ff9500' : e.event.includes('gap') ? '#ff453a' : '#e0e0f0'}">${e.event}</td>
+        <td style="opacity:0.8;">${e.details || '—'}</td>
+        <td>${e.visibility || '—'}</td>
+        <td>${e.guard_enabled === true ? '✓' : e.guard_enabled === false ? '✗' : '—'}</td>
+      </tr>`;
+    }).join('');
   } catch (err) {
     if (diagCount) diagCount.textContent = `Error: ${err.message}`;
   }
@@ -347,7 +354,7 @@ if (diagLoadBtn) {
 
 if (diagClearBtn) {
   diagClearBtn.addEventListener("click", () => {
-    if (diagBody) diagBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (diagBody) diagBody.innerHTML = '<tr><td colspan="7" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
     if (diagCount) diagCount.textContent = "cleared";
   });
 }

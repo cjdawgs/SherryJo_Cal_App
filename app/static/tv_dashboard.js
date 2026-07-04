@@ -315,9 +315,26 @@ let dom = {};
 // Each entry is stored to:
 //   1. An in-memory ring buffer (shown on TV in real-time)
 //   2. localStorage('tv_diag') — survives the tab being backgrounded
-//   3. POST /tv/diag via fetch keepalive — survives page unload, stored server-side
+//   3. POST /tv/diag via fetch keepalive — written to Supabase/Postgres,
+//      queryable from any device over the network (Admin → TV Diagnostics)
 //
-// View server log from Admin → TV Diagnostics panel, or GET /tv/diag.
+// device_id is a stable UUID stored in localStorage('tv_device_id').
+// It is created once on first load and never changes, so every entry in the
+// DB can be filtered by device regardless of IP or session.
+
+// Generate or retrieve a stable per-device UUID.
+const TV_DEVICE_ID = (() => {
+  const KEY = 'tv_device_id';
+  let id = localStorage.getItem(KEY);
+  if (!id) {
+    // crypto.randomUUID() is available on all modern browsers incl. Silk/FireOS
+    id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    try { localStorage.setItem(KEY, id); } catch {}
+  }
+  return id;
+})();
 tvDiag = (() => {
   const MAX = 60;
   const _buf = [];
@@ -375,6 +392,7 @@ tvDiag = (() => {
         visibilityState:  entry.vis,
         guardEnabled:     entry.guard,
         guardTimeout:     entry.timeout,
+        device_id:        TV_DEVICE_ID,
       }),
       keepalive: true,   // delivers even when page is unloading
     }).catch(() => {});  // never block on diagnostics

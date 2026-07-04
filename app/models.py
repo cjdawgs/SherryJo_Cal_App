@@ -269,3 +269,33 @@ class DateStickyNote(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc)
     )
+
+
+# --------------------------------------------------
+# ✅ TV DIAGNOSTIC LOG TABLE
+# --------------------------------------------------
+
+class TVDiagLog(Base):
+    """
+    Persistent log of TV sleep-guard and lifecycle events beaconed from
+    the TV dashboard JS.  Written to Supabase/Postgres so it is accessible
+    from any device, regardless of which FireStick or server instance sent it.
+
+    device_id  — stable UUID stored in the TV's localStorage (survives reboots)
+    device_ua  — User-Agent string captured server-side (identifies FireStick model)
+    """
+
+    __tablename__ = "tv_diag_log"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    ts_server     = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+    user_id       = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    device_id     = Column(String, nullable=True, index=True)   # localStorage UUID, stable per device
+    device_ua     = Column(String, nullable=True)               # User-Agent (e.g. "Silk/…" for FireStick)
+    event         = Column(String, nullable=False)
+    details       = Column(String, nullable=True)
+    ts_client     = Column(String, nullable=True)               # ISO timestamp from JS
+    elapsed_min   = Column(Integer, nullable=True)
+    visibility    = Column(String, nullable=True)
+    guard_enabled = Column(Boolean, nullable=True)
+    guard_timeout = Column(Integer, nullable=True)

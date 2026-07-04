@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import DateStickyNote, Event, OAuthAccount, User
+from app.models import DateStickyNote, Event, OAuthAccount, TVDiagLog, User
 from app.security import create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 
@@ -393,22 +393,32 @@ class TVDiagEntry(BaseModel):
     visibilityState:   Optional[str] = None
     guardEnabled:      Optional[bool] = None
     guardTimeout:      Optional[int] = None
+    device_id:         Optional[str] = None       # stable UUID from localStorage
 
 
 @router.post("/diag", status_code=200)
 def post_tv_diag(
     body: TVDiagEntry,
+    request: Request,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Receives a diagnostic event beaconed by the TV dashboard JS.
     Fire-and-forget from the client — uses fetch keepalive so it
     survives page unload.  Never blocks the TV UI.
+
+    Writes to both the in-memory ring buffer (fast, current-session display)
+    AND to the tv_diag_log table in Supabase/Postgres so the log is
+    permanently accessible from any device over the network.
     """
     global _diag_buffer
+    ua = (request.headers.get("user-agent") or "")[:512]
     entry = {
         "ts_server":      datetime.now(timezone.utc).isoformat(),
         "user_id":        current_user.id,
+        "device_id":      (body.device_id or "")[:64],
+        "device_ua":      ua,
         "event":          (body.event or "")[:64],
         "details":        (body.details or "")[:256],
         "ts_client":      (body.ts or "")[:32],
@@ -417,22 +427,70 @@ def post_tv_diag(
         "guard_enabled":  body.guardEnabled,
         "guard_timeout":  body.guardTimeout,
     }
+    # Memory ring buffer (fast, for live admin panel display)
     _diag_buffer.append(entry)
     if len(_diag_buffer) > _DIAG_MAX:
         del _diag_buffer[:-_DIAG_MAX]
-    logger.info("TV_DIAG user_id=%s event=%s details=%s", current_user.id, entry["event"], entry["details"])
+    # Persistent DB write — survives server restarts, accessible from anywhere
+    try:
+        db_row = TVDiagLog(
+            user_id       = current_user.id,
+            device_id     = entry["device_id"] or None,
+            device_ua     = ua or None,
+            event         = entry["event"],
+            details       = entry["details"] or None,
+            ts_client     = entry["ts_client"] or None,
+            elapsed_min   = entry["elapsed_min"],
+            visibility    = entry["visibility"],
+            guard_enabled = entry["guard_enabled"],
+            guard_timeout = entry["guard_timeout"],
+        )
+        db.add(db_row)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("TV_DIAG db write failed (memory buffer still updated): %s", exc)
+    logger.info("TV_DIAG user_id=%s device=%s event=%s", current_user.id, entry["device_id"], entry["event"])
     return {"ok": True}
 
 
 @router.get("/diag")
 def get_tv_diag(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Returns the last 100 diagnostic entries (most-recent first).
-    Intended for the Admin page diagnostic panel and developer debugging.
+    Reads from Supabase/Postgres so it reflects all devices and survives restarts.
+    Falls back to the in-memory buffer if the DB is unavailable.
     """
-    return {"entries": list(reversed(_diag_buffer[-100:]))}
+    try:
+        rows = (
+            db.query(TVDiagLog)
+            .order_by(TVDiagLog.ts_server.desc())
+            .limit(100)
+            .all()
+        )
+        entries = [
+            {
+                "ts_server":    r.ts_server.isoformat() if r.ts_server else None,
+                "user_id":      r.user_id,
+                "device_id":    r.device_id or "",
+                "device_ua":    r.device_ua or "",
+                "event":        r.event,
+                "details":      r.details or "",
+                "ts_client":    r.ts_client or "",
+                "elapsed_min":  r.elapsed_min,
+                "visibility":   r.visibility or "",
+                "guard_enabled": r.guard_enabled,
+                "guard_timeout": r.guard_timeout,
+            }
+            for r in rows
+        ]
+        return {"entries": entries, "source": "db"}
+    except Exception as exc:
+        logger.warning("TV_DIAG db read failed, falling back to memory buffer: %s", exc)
+        return {"entries": list(reversed(_diag_buffer[-100:])), "source": "memory"}
 
 
 # ─────────────────────────────────────────────────
