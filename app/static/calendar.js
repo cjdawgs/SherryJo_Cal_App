@@ -1746,6 +1746,14 @@ async function preloadEventCache({ silent = false } = {}) {
   **************************************************************/
   renderAccountsSafe();
   } // end if (!silent)
+
+  const now = new Date();
+  const start = new Date(now);
+  const end = new Date(now);
+
+  start.setMonth(start.getMonth() - 6);
+  end.setMonth(end.getMonth() + 6);
+
   const res = await apiFetch(
     
     `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`

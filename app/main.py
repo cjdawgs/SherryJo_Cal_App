@@ -348,21 +348,52 @@ try:
         )
 
         _filled = 0
+        _upgraded = 0
         for _ev in _to_backfill:
             try:
                 _parts = (_ev.externalId or "").split(":", 2)
                 if len(_parts) == 3:
-                    _provider, _, _raw_id = _parts
+                    _provider, _acct_email, _raw_id = _parts
                     # Skip fallback synthetic IDs — they are not real provider IDs
                     if _raw_id and not _raw_id.startswith("fb:"):
-                        _ev.external_ids = {_provider: _raw_id}
+                        # Use provider:account_email key so multi-account write-back works
+                        _key = f"{_provider}:{_acct_email}" if _acct_email else _provider
+                        _ev.external_ids = {_key: _raw_id}
                         _filled += 1
             except Exception:
                 continue
 
-        if _filled:
+        # Also upgrade any previously-backfilled rows that used the old
+        # bare-provider key format {"google": "raw_id"} → {"google:email": "raw_id"}
+        _to_upgrade = (
+            _sess.query(_Ev)
+            .filter(
+                _Ev.external_ids.isnot(None),
+                _Ev.externalId.isnot(None),
+                _Ev.source.in_(["google", "microsoft", "apple"]),
+            )
+            .all()
+        )
+        for _ev in _to_upgrade:
+            _ids = dict(_ev.external_ids or {})
+            _needs_upgrade = any(":" not in k for k in _ids)
+            if not _needs_upgrade:
+                continue
+            _parts = (_ev.externalId or "").split(":", 2)
+            if len(_parts) != 3:
+                continue
+            _provider, _acct_email, _raw_id = _parts
+            if not _raw_id or _raw_id.startswith("fb:"):
+                continue
+            _new_key = f"{_provider}:{_acct_email}" if _acct_email else _provider
+            _new_ids = {k: v for k, v in _ids.items() if ":" in k}
+            _new_ids[_new_key] = _raw_id
+            _ev.external_ids = _new_ids
+            _upgraded += 1
+
+        if _filled or _upgraded:
             _sess.commit()
-            print(f"✅ [BACKFILL] external_ids populated for {_filled} existing events")
+            print(f"✅ [BACKFILL] external_ids: filled={_filled} upgraded={_upgraded}")
         else:
             print("✅ [BACKFILL] external_ids: nothing to backfill")
 

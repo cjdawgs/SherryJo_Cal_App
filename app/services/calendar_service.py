@@ -871,10 +871,11 @@ class CalendarService:
                 db.delete(dup)
                 merged_count += 1
 
-            # Promote to local canonical — single source of truth
+            # Promote to canonical: absorb all provider IDs, keep the
+            # original source/account_email so the event continues to appear
+            # under its original account chip filter in the frontend.
+            # Write-back propagates to ALL accounts via external_ids.
             canonical.external_ids = merged_ids
-            canonical.source = "local"
-            canonical.account_email = "local"
 
         if merged_count:
             db.commit()
