@@ -2742,6 +2742,8 @@ async function syncNow() {
   if (syncBtn) {
     syncBtn.classList.add("is-syncing");
     syncBtn.disabled = true;
+    const labelEl = syncBtn.querySelector(".btnLabel");
+    if (labelEl) labelEl.textContent = "Syncing…";
   }
 
   try {
@@ -2816,6 +2818,21 @@ async function syncNow() {
     //setSyncBanner("success");
 
     /**************************************************************
+     * ✅ STOP SPINNER — sync data is committed, stop here
+     * (preloadEventCache + smartRefresh run after this)
+     **************************************************************/
+    {
+      const btn = document.getElementById("syncBtn");
+      if (btn) {
+        btn.classList.remove("is-syncing");
+        btn.disabled = false;
+        const labelEl = btn.querySelector(".btnLabel");
+        if (labelEl) labelEl.textContent =
+          (window.layoutMode === "desktop" || window.layoutMode === "large") ? "Sync Now" : "Sync";
+      }
+    }
+
+    /**************************************************************
      * ✅ UPDATE STATUS MAP
      **************************************************************/
     if (resultPayload.results) {
@@ -2856,9 +2873,14 @@ async function syncNow() {
      **************************************************************/
     //setSyncBanner("hidden");
   } finally {
-    if (syncBtn) {
-      syncBtn.classList.remove("is-syncing");
-      syncBtn.disabled = false;
+    // Re-query to avoid stale reference if DOM was modified during sync
+    const btn = document.getElementById("syncBtn");
+    if (btn) {
+      btn.classList.remove("is-syncing");
+      btn.disabled = false;
+      const labelEl = btn.querySelector(".btnLabel");
+      if (labelEl) labelEl.textContent =
+        (window.layoutMode === "desktop" || window.layoutMode === "large") ? "Sync Now" : "Sync";
     }
   }
 }
