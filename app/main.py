@@ -161,6 +161,17 @@ if engine.url.drivername.startswith("postgresql"):
 
     if "oauth_accounts" in inspector.get_table_names():
         columns = {col["name"] for col in inspector.get_columns("oauth_accounts")}
+
+        # Always-safe patch — runs unconditionally so new columns are added
+        # even when all previously-required columns already exist in production.
+        # Wrapped in try/except so a transient DB issue never crashes startup.
+        try:
+            with engine.connect() as _patch_conn:
+                _patch_conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_token JSONB"))
+                _patch_conn.commit()
+        except Exception as _e:
+            print(f"⚠️ [PATCH] sync_token column patch failed (non-fatal): {_e}")
+
         required_columns = {
             "last_sync_success",
             "last_sync_failure",
@@ -173,6 +184,7 @@ if engine.url.drivername.startswith("postgresql"):
             "sync_frequency_minutes",
             "sync_range_days",
             "last_manual_refresh_at",
+            "sync_token",
         }
         missing = required_columns - columns
         if missing:
