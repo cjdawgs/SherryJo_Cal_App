@@ -343,6 +343,7 @@ function isChipMultiSelectEvent(e) {
 window.selectedDate = null;
 
 let lastLoadedAccounts = [];
+window.connectedCalendarAccounts = window.connectedCalendarAccounts || [];
 let recentlySynced = new Set();
 /**************************************************************
  ✅ GLOBAL DELETE BLACKLIST (PERSISTS DURING SESSION)
@@ -1675,6 +1676,7 @@ async function loadAccounts() {
     const data = rawData.filter((acc) => !isPlaceholderAccountRecord(acc));
 
     lastLoadedAccounts = data;
+    window.connectedCalendarAccounts = [...data];
 
     if (typeof window.hydrateAccountColorMap === "function") {
       window.hydrateAccountColorMap(data);
@@ -2027,6 +2029,7 @@ async function preloadEventCache({ silent = false } = {}) {
   );
 
 }
+window.preloadEventCache = preloadEventCache;
 
 function openCustomRange() {
 

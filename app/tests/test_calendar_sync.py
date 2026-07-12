@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 import jwt
 from app.routers.auth import SECRET_KEY
-from app.models import Event, User
+from app.models import Event, User, OAuthAccount
 
 client = TestClient(app)
 
@@ -128,3 +128,56 @@ def test_unified_calendar_expands_linked_accounts_when_dedup_off(client, auth_he
     assert "google:sherryajohansson@gmail.com" in keys
     assert "apple:sherryajohansson@gmail.com" in keys
     assert "google:sherryjohanssonrealestate@gmail.com" in keys
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
+@patch("app.services.google_calendar_service.GoogleCalendarService.create_event", return_value="google-new-1")
+def test_publish_single_event_to_selected_account_creates_missing_link(mock_google_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="publish@example.com",
+        access_token="token-1",
+        refresh_token="refresh-1",
+    ))
+    db.add(Event(
+        title="Publish Me",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:publish-me",
+        external_ids={},
+        description="Needs to land on a second calendar",
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Me").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [event.id],
+            "publish_targets": {
+                str(event.id): ["google:publish@example.com"]
+            }
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["published"] == 1
+    assert data["created"] == 1
+    assert data["failed"] == 0
+    assert data["affected_accounts"] == ["google:publish@example.com"]
+
+    db.refresh(event)
+    assert event.external_ids["google:publish@example.com"] == "google-new-1"
+    mock_google_create.assert_called_once()

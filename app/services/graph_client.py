@@ -158,6 +158,51 @@ class GraphClient:
             print("❌ Outlook update failed:", response.text)
 
     # ==================================================
+    # ✅ CREATE EVENT
+    # ==================================================
+    def create_event(self, token, event_payload):
+        url = f"{GRAPH_BASE_URL}/me/events"
+
+        payload = {
+            "subject": event_payload.get("title") or "Untitled Event",
+        }
+
+        if event_payload.get("description"):
+            payload["body"] = {
+                "contentType": "HTML",
+                "content": event_payload["description"],
+            }
+
+        start_time = event_payload.get("start_time")
+        if start_time:
+            payload["start"] = {
+                "dateTime": start_time.isoformat(),
+                "timeZone": "UTC",
+            }
+
+        end_time = event_payload.get("end_time")
+        if end_time:
+            payload["end"] = {
+                "dateTime": end_time.isoformat(),
+                "timeZone": "UTC",
+            }
+
+        response = requests.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"}
+        )
+
+        if response.status_code not in [200, 201]:
+            print("❌ Outlook create failed:", response.text)
+            return None
+
+        try:
+            return (response.json() or {}).get("id")
+        except Exception:
+            return None
+
+    # ==================================================
     # ✅ DELETE EVENT
     # ==================================================
 

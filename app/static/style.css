@@ -908,6 +908,149 @@ button.primary {
   font-weight: 700;
 }
 
+.publishTargetsSection {
+  background: linear-gradient(180deg, #f8fbff 0%, #eef4fc 100%);
+}
+
+.publishTargetsHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.publishTargetsIntro,
+.publishConfirmSummary,
+.accountPublishSelectionInfo {
+  margin: 4px 0 0;
+  color: #4a6285;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.accountPublishList {
+  display: grid;
+  gap: 8px;
+}
+
+.accountPublishRow {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid #d5dfef;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.accountPublishRow.is-linked {
+  border-color: #7aa6e6;
+  background: rgba(225, 238, 255, 0.95);
+}
+
+.accountPublishRow.is-disabled {
+  opacity: 0.72;
+}
+
+.accountPublishRow input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.accountPublishMeta {
+  display: grid;
+  gap: 3px;
+}
+
+.accountPublishLabel {
+  font-weight: 700;
+  color: #183252;
+  word-break: break-word;
+}
+
+.accountPublishHint {
+  color: #5a7396;
+  font-size: 0.78rem;
+  line-height: 1.3;
+}
+
+.accountPublishBadge {
+  align-self: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eaf1fb;
+  color: #29466f;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.accountPublishBadge.is-linked {
+  background: #d6e8ff;
+  color: #1d4b8f;
+}
+
+.accountPublishBadge.is-disabled {
+  background: #eceff5;
+  color: #64748b;
+}
+
+.accountPublishEmpty {
+  padding: 12px;
+  border: 1px dashed #c8d4e6;
+  border-radius: 10px;
+  color: #5d7290;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.publishConfirmDialog {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(78vh, 760px);
+  background: #ffffff;
+  border: 1px solid #d9e2f0;
+  border-radius: 16px;
+  box-shadow: 0 24px 54px rgba(15, 23, 42, 0.28);
+  z-index: 12000;
+  display: none;
+  overflow: hidden;
+}
+
+.publishConfirmDialog.show,
+#publishConfirmOverlay.show {
+  display: block;
+}
+
+.publishConfirmHeader,
+.publishConfirmActions {
+  padding: 16px 18px;
+  background: #f7faff;
+}
+
+.publishConfirmHeader {
+  border-bottom: 1px solid #dde7f3;
+}
+
+.publishConfirmHeader h3 {
+  margin: 0;
+  color: #183252;
+}
+
+.publishConfirmBody {
+  padding: 16px 18px;
+  max-height: min(48vh, 420px);
+  overflow: auto;
+  background: #fbfdff;
+}
+
+.publishConfirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #dde7f3;
+}
+
 .modalActions {
   display: flex;
   justify-content: space-between;

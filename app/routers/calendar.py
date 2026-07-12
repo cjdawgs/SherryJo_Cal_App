@@ -138,6 +138,7 @@ def serialize_event(event: Event):
     return {
         "id": event.id,
         "external_id": event.externalId,
+        "external_ids": event.external_ids or {},
         "title": event.title,
         "description": event.description or "",
         "start": to_iso(event.start_time),
@@ -158,6 +159,7 @@ def serialize_event(event: Event):
             "source": normalize_provider(source),
             "account": account_email,
             "account_key": f"{normalize_provider(source)}:{account_email.lower().strip()}",
+            "external_ids": event.external_ids or {},
             "description": event.description or "",
             "tags": event.tags or [],
             "eventColor": event.color,
@@ -602,6 +604,7 @@ async def publish_to_providers(
         body = {}
 
     event_ids_raw = body.get("event_ids", None)  # None = key absent (publish all)
+    publish_targets = body.get("publish_targets") or {}
     if event_ids_raw is not None and len(event_ids_raw) == 0:
         # Client sent an explicit empty list — no edits tracked, nothing to do
         return {"status": "success", "published": 0, "failed": 0,
@@ -649,27 +652,38 @@ async def publish_to_providers(
                 affected_accounts.add(id_key)
 
     published = 0
+    created   = 0
     failed    = 0
+    warnings  = []
 
     for event in events_to_publish:
         try:
-            pushed = _event_actions.push_to_providers(
-                db, event, _google_service, _graph_client, current_user
+            selected_keys = publish_targets.get(str(event.id)) or publish_targets.get(event.id) or None
+            push_result = _event_actions.push_to_providers(
+                db, event, _google_service, _graph_client, current_user,
+                selected_account_keys=selected_keys,
             )
-            if pushed > 0:
+            for key in (push_result.get("affected_accounts") or []):
+                affected_accounts.add(key)
+            warnings.extend(push_result.get("warnings") or [])
+            created += int(push_result.get("created") or 0)
+            if (int(push_result.get("updated") or 0) + int(push_result.get("created") or 0)) > 0:
                 published += 1
         except Exception as e:
             print(f"⚠️ Publish failed for event {event.id}: {e}")
             failed += 1
+            warnings.append(f"Event {event.id}: {e}")
 
     return {
         "status": "success",
         "published":          published,
+        "created":            created,
         "failed":             failed,
         "total_events":       len(events_to_publish),
         "affected_accounts":  sorted(affected_accounts),
         "range_start":        range_start,
         "range_end":          range_end,
+        "warnings":           warnings,
     }
 
 

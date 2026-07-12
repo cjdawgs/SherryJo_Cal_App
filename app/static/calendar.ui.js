@@ -18,12 +18,191 @@ const modalState = {
   eventId: null,
   eventRef: null,
   stickyNotes: [],
-  stickyIndex: 0
+  stickyIndex: 0,
+  publishTargetKeys: []
 };
 
 let isSavingEvent = false;
 let isSavingSticky = false;
+let isPublishingEvent = false;
 let activeRichEditorId = null;
+
+const PUBLISHABLE_PROVIDERS = new Set(["google", "microsoft"]);
+
+function normalizeAccountKey(provider, email) {
+  return `${String(provider || "local").toLowerCase().trim()}:${String(email || "local").toLowerCase().trim()}`;
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function getConnectedCalendarAccounts() {
+  return Array.isArray(window.connectedCalendarAccounts) ? window.connectedCalendarAccounts : [];
+}
+
+function getEventExternalIds(eventRef = null) {
+  return {
+    ...(eventRef?.external_ids || {}),
+    ...(eventRef?.extendedProps?.external_ids || {}),
+  };
+}
+
+function getExistingLinkedAccountKeys(eventRef = null) {
+  const linked = new Set();
+  Object.keys(getEventExternalIds(eventRef)).forEach((key) => {
+    if (!key || typeof key !== "string" || !key.includes(":")) return;
+    const [provider, email] = key.split(":", 2);
+    linked.add(normalizeAccountKey(provider, email));
+  });
+
+  const currentKey = eventRef?.extendedProps?.account_key || eventRef?.account_key || "";
+  if (currentKey && currentKey !== "local:local") linked.add(currentKey.toLowerCase());
+
+  return linked;
+}
+
+function buildModalAccountRows() {
+  const linkedKeys = getExistingLinkedAccountKeys(modalState.eventRef);
+  const connected = getConnectedCalendarAccounts();
+
+  return connected
+    .map((account) => {
+      const provider = String(account?.provider || "").toLowerCase().trim();
+      const email = String(account?.account_email || "").toLowerCase().trim();
+      const key = normalizeAccountKey(provider, email);
+      const linked = linkedKeys.has(key);
+      const publishable = PUBLISHABLE_PROVIDERS.has(provider);
+      return {
+        key,
+        provider,
+        email,
+        label: `${provider}: ${email}`,
+        status: account?.status || "unknown",
+        publishable,
+        linked,
+        disabled: !publishable,
+      };
+    })
+    .sort((a, b) => {
+      if (a.linked !== b.linked) return a.linked ? -1 : 1;
+      if (a.publishable !== b.publishable) return a.publishable ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function seedPublishTargetsFromEvent(eventRef = null) {
+  modalState.publishTargetKeys = [...getExistingLinkedAccountKeys(eventRef)];
+}
+
+function getSelectedPublishTargetKeys() {
+  return [...new Set((modalState.publishTargetKeys || []).map((key) => String(key || "").toLowerCase()).filter(Boolean))];
+}
+
+function setSelectedPublishTargetKeys(keys) {
+  modalState.publishTargetKeys = [...new Set((keys || []).map((key) => String(key || "").toLowerCase()).filter(Boolean))];
+}
+
+function collectSelectedKeysFromContainer(container) {
+  if (!container) return [];
+  return [...container.querySelectorAll('input[data-publish-account-key]:checked')].map((input) => String(input.value || "").toLowerCase());
+}
+
+function getPublishTargetSummary() {
+  const rows = buildModalAccountRows();
+  const selected = new Set(getSelectedPublishTargetKeys());
+  return rows.filter((row) => selected.has(row.key));
+}
+
+function renderAccountSelectionChecklist(containerId, options = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const rows = buildModalAccountRows();
+  const selected = new Set(getSelectedPublishTargetKeys());
+  const mode = options.mode || "editor";
+
+  if (!rows.length) {
+    container.innerHTML = '<div class="accountPublishEmpty">Connect calendar accounts to publish this event across calendars.</div>';
+    return;
+  }
+
+  container.innerHTML = rows.map((row) => {
+    const checked = selected.has(row.key) ? "checked" : "";
+    const disabled = row.disabled ? "disabled" : "";
+    const badge = row.linked ? "Linked" : (row.publishable ? "Available" : "View only");
+    const hint = row.disabled
+      ? "Apple visibility is shown here, but direct publish to Apple is not supported in this build."
+      : (row.linked ? "Already linked to this event." : "Create or update this event on this calendar when published.");
+    return `
+      <label class="accountPublishRow ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""}">
+        <input type="checkbox" data-publish-account-key="1" value="${escapeHtml(row.key)}" ${checked} ${disabled} />
+        <span class="accountPublishMeta">
+          <span class="accountPublishLabel">${escapeHtml(row.label)}</span>
+          <span class="accountPublishHint">${escapeHtml(hint)}</span>
+        </span>
+        <span class="accountPublishBadge ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""}">${escapeHtml(badge)}</span>
+      </label>`;
+  }).join("");
+
+  container.dataset.mode = mode;
+}
+
+function syncPublishSelectionStateFrom(container) {
+  const picked = collectSelectedKeysFromContainer(container);
+  setSelectedPublishTargetKeys(picked);
+  renderEventPublishControls();
+  renderPublishConfirmationContents();
+}
+
+function renderEventPublishControls() {
+  renderAccountSelectionChecklist("eventPublishTargets", { mode: "editor" });
+
+  const selectedCount = getPublishTargetSummary().filter((row) => row.publishable).length;
+  const info = document.getElementById("eventPublishSelectionInfo");
+  const publishBtn = document.getElementById("publishEventBtn");
+  if (info) {
+    info.textContent = selectedCount > 0
+      ? `${selectedCount} calendar${selectedCount === 1 ? "" : "s"} selected for one-event publish`
+      : "Select one or more publish-capable calendars to export this event.";
+  }
+  if (publishBtn) {
+    publishBtn.disabled = selectedCount === 0 || isPublishingEvent;
+    publishBtn.textContent = isPublishingEvent ? "Publishing…" : "Publish This Event";
+  }
+}
+
+function openPublishConfirmationDialog() {
+  const dialog = document.getElementById("publishConfirmDialog");
+  const overlay = document.getElementById("publishConfirmOverlay");
+  if (!dialog || !overlay) return;
+  renderPublishConfirmationContents();
+  overlay.classList.add("show");
+  dialog.classList.add("show");
+}
+
+function closePublishConfirmationDialog() {
+  document.getElementById("publishConfirmOverlay")?.classList.remove("show");
+  document.getElementById("publishConfirmDialog")?.classList.remove("show");
+}
+
+function renderPublishConfirmationContents() {
+  renderAccountSelectionChecklist("publishConfirmTargets", { mode: "confirm" });
+
+  const summary = document.getElementById("publishConfirmSummary");
+  if (!summary) return;
+
+  const selectedRows = getPublishTargetSummary();
+  const publishable = selectedRows.filter((row) => row.publishable);
+  summary.textContent = publishable.length > 0
+    ? `Publish this event to ${publishable.length} selected calendar${publishable.length === 1 ? "" : "s"}. Existing linked copies will be updated; newly selected calendars will get a new copy.`
+    : "Choose at least one publish-capable calendar before confirming.";
+}
 
 const DATE_STICKY_STORAGE_KEY = "sj_date_sticky_notes_v1";
 let dateStickyMap = {};
@@ -557,6 +736,9 @@ function fillModalFields(date = null, eventRef = null) {
   if (created) created.textContent = formatMetaDate(eventRef?.extendedProps?.createdAt || eventRef?.created_at || null);
   if (updated) updated.textContent = formatMetaDate(eventRef?.extendedProps?.updatedAt || eventRef?.updated_at || null);
   if (source) source.textContent = eventRef?.extendedProps?.source || eventRef?.source || "local";
+
+  seedPublishTargetsFromEvent(eventRef);
+  renderEventPublishControls();
 }
 
 function openModal(type = "event", date = null, eventRef = null) {
@@ -569,6 +751,7 @@ function openModal(type = "event", date = null, eventRef = null) {
   modalState.stickyScope = "event";
   modalState.dateStickyKey = null;
   window.editingEventId = modalState.eventId;
+  modalState.publishTargetKeys = [];
 
   fillModalFields(date, eventRef);
   setModalType(type);
@@ -643,6 +826,7 @@ function openStickyModalForNew(event = null) {
 
 function closeCreateModal() {
   window.isModalOpen = false;
+  closePublishConfirmationDialog();
   document.getElementById("createEventModal")?.classList.remove("show");
   document.getElementById("modalOverlay")?.classList.remove("show");
 }
@@ -657,6 +841,7 @@ function normalizeEventForCache(eventData, fallback = null) {
 
   return {
     id: eventData?.external_id || eventData?.id || fallback?.id,
+    external_ids: eventData?.external_ids || ext.external_ids || fallback?.external_ids || fallback?.extendedProps?.external_ids || {},
     title: eventData?.title || fallback?.title || "Untitled",
     start: startVal ? new Date(startVal) : null,
     end: endVal ? new Date(endVal) : null,
@@ -666,6 +851,7 @@ function normalizeEventForCache(eventData, fallback = null) {
       source: ext.source || eventData?.source || fallback?.extendedProps?.source || "local",
       account: ext.account || eventData?.account_email || fallback?.extendedProps?.account || "local",
       account_key: ext.account_key || eventData?.account_key || fallback?.extendedProps?.account_key || "local:local",
+      external_ids: ext.external_ids || eventData?.external_ids || fallback?.extendedProps?.external_ids || {},
       description: ext.description || eventData?.description || fallback?.extendedProps?.description || "",
       tags: ext.tags || eventData?.tags || fallback?.extendedProps?.tags || [],
       eventColor: ext.eventColor || eventData?.color || fallback?.extendedProps?.eventColor || "#4F8EF7",
@@ -847,22 +1033,16 @@ async function saveStickyOnly() {
   }
 }
 
-async function saveEvent() {
-  if (modalState.type === "sticky") {
-    await saveStickyOnly();
-    return;
-  }
-
-  if (isSavingEvent) return;
+async function persistEventRecord({ closeAfterSave = false, showSuccessToast = false } = {}) {
+  if (isSavingEvent) return null;
   const payload = buildEventPayload();
-  if (!payload) return;
+  if (!payload) return null;
 
   const isEdit = !!modalState.eventId;
   const previousEvent = isEdit ? JSON.parse(JSON.stringify(modalState.eventRef)) : null;
 
   isSavingEvent = true;
   try {
-    // Create undo/redo command
     const command = {
       label: isEdit ? "Edit event" : "Create event",
       execute: async () => {
@@ -876,11 +1056,9 @@ async function saveEvent() {
       },
       undo: async () => {
         if (!isEdit && modalState.eventId) {
-          // Undo create = delete
           const res = await apiFetch(`/calendar/event/${modalState.eventId}`, { method: "DELETE" });
           if (!res || !res.ok) throw new Error("Delete failed");
         } else if (previousEvent && isEdit && modalState.eventId) {
-          // Undo edit = restore previous state
           const res = await apiFetch(`/calendar/event/${modalState.eventId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
@@ -892,23 +1070,19 @@ async function saveEvent() {
       }
     };
 
-    // Execute command first to get the server response
     const data = await command.execute();
     const nextEvent = normalizeEventForCache(data.event, modalState.eventRef);
     modalState.eventRef = nextEvent;
     modalState.eventId = nextEvent.extendedProps?.backendId || modalState.eventId;
-    
-    // Update command with new event ID for undo operations
+
     if (!isEdit) {
       command.undo_eventId = modalState.eventId;
     }
 
-    // Register to undo/redo history (already executed)
     await window.undoRedoManager.registerExecuted(command);
 
     upsertCacheEvent(nextEvent);
 
-    // Track this event as modified so Publish knows its scope
     const savedId = nextEvent.extendedProps?.backendId ?? modalState.eventId;
     window.trackModifiedEvent?.(savedId);
 
@@ -917,17 +1091,126 @@ async function saveEvent() {
       window.highlightSelectedDay?.(window.selectedDate);
     }
 
+    const mergedPublishTargets = new Set(getSelectedPublishTargetKeys());
+    getExistingLinkedAccountKeys(nextEvent).forEach((key) => mergedPublishTargets.add(key));
+    setSelectedPublishTargetKeys([...mergedPublishTargets]);
+    renderEventPublishControls();
+
     window.updateDayDetails?.();
     window.updateWeekView?.();
-    closeCreateModal();
-    window.showToast?.("✅ Event saved");
     window.smartRefresh?.({ reason: "event_saved", force: true });
     updateUndoRedoButtonStates();
+
+    if (closeAfterSave) {
+      closeCreateModal();
+    }
+    if (showSuccessToast) {
+      window.showToast?.("✅ Event saved");
+    }
+
+    return nextEvent;
   } catch (err) {
     console.error("❌ Save failed", err);
     window.showToast?.("❌ Save failed", "error");
+    return null;
   } finally {
     isSavingEvent = false;
+  }
+}
+
+async function saveEvent() {
+  if (modalState.type === "sticky") {
+    await saveStickyOnly();
+    return;
+  }
+
+  const nextEvent = await persistEventRecord({ closeAfterSave: true, showSuccessToast: true });
+  if (!nextEvent) return;
+}
+
+async function publishCurrentEvent() {
+  if (modalState.type === "sticky") return;
+
+  const nextEvent = await persistEventRecord({ closeAfterSave: false, showSuccessToast: false });
+  if (!nextEvent) return;
+
+  const selectedRows = getPublishTargetSummary().filter((row) => row.publishable);
+  if (!selectedRows.length) {
+    window.showToast?.("Select at least one Google or Microsoft calendar", "error");
+    return;
+  }
+
+  openPublishConfirmationDialog();
+}
+
+async function confirmPublishCurrentEvent() {
+  const eventId = modalState.eventId || modalState.eventRef?.extendedProps?.backendId;
+  if (!eventId || isPublishingEvent) return;
+
+  const selectedRows = getPublishTargetSummary().filter((row) => row.publishable);
+  const selectedKeys = selectedRows.map((row) => row.key);
+
+  if (!selectedKeys.length) {
+    window.showToast?.("Select at least one Google or Microsoft calendar", "error");
+    return;
+  }
+
+  isPublishingEvent = true;
+  renderEventPublishControls();
+
+  const confirmBtn = document.getElementById("confirmPublishEventBtn");
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Publishing…";
+  }
+
+  try {
+    const res = await apiFetch("/calendar/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        event_ids: [eventId],
+        publish_targets: { [String(eventId)]: selectedKeys }
+      })
+    });
+    if (!res) return;
+
+    const raw = await res.text();
+    const data = raw ? JSON.parse(raw) : {};
+    if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+      throw new Error(data?.message || `Publish failed (${res.status})`);
+    }
+
+    const touched = data.affected_accounts || [];
+    const warnings = data.warnings || [];
+    const published = Number(data.published || 0);
+    const created = Number(data.created || 0);
+
+    if (modalState.eventId != null) {
+      window.sessionModifiedEventIds?.delete?.(Number(modalState.eventId));
+    }
+
+    await window.preloadEventCache?.({ silent: true });
+    window.smartRefresh?.({ reason: "single_event_publish", force: true });
+
+    closePublishConfirmationDialog();
+    closeCreateModal();
+
+    if (warnings.length) {
+      window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` , "error");
+    } else {
+      window.showToast?.(`✅ Published event to ${touched.length || selectedKeys.length} calendar${(touched.length || selectedKeys.length) === 1 ? "" : "s"} (${created} new link${created === 1 ? "" : "s"})`);
+    }
+  } catch (err) {
+    console.error("❌ Single-event publish failed", err);
+    window.showToast?.("❌ Publish failed", "error");
+  } finally {
+    isPublishingEvent = false;
+    renderEventPublishControls();
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = "Confirm Publish";
+    }
   }
 }
 
@@ -1079,9 +1362,23 @@ function bindUIEvents() {
   document.getElementById("addTaskBtn")?.addEventListener("click", addTask);
 
   document.getElementById("saveEventBtn")?.addEventListener("click", saveEvent);
+  document.getElementById("publishEventBtn")?.addEventListener("click", publishCurrentEvent);
   document.getElementById("cancelEventBtn")?.addEventListener("click", closeCreateModal);
   document.getElementById("deleteEventBtn")?.addEventListener("click", deleteEvent);
   document.getElementById("modalOverlay")?.addEventListener("click", closeCreateModal);
+  document.getElementById("publishConfirmOverlay")?.addEventListener("click", closePublishConfirmationDialog);
+  document.getElementById("cancelPublishConfirmBtn")?.addEventListener("click", closePublishConfirmationDialog);
+  document.getElementById("confirmPublishEventBtn")?.addEventListener("click", confirmPublishCurrentEvent);
+
+  document.getElementById("eventPublishTargets")?.addEventListener("change", (event) => {
+    if (!event.target?.matches?.('input[data-publish-account-key]')) return;
+    syncPublishSelectionStateFrom(event.currentTarget);
+  });
+
+  document.getElementById("publishConfirmTargets")?.addEventListener("change", (event) => {
+    if (!event.target?.matches?.('input[data-publish-account-key]')) return;
+    syncPublishSelectionStateFrom(event.currentTarget);
+  });
 
   document.getElementById("openStickyFromEventBtn")?.addEventListener("click", () => {
     openStickyModal(modalState.eventRef);

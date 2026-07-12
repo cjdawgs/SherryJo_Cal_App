@@ -42,6 +42,39 @@ def _iter_write_back_targets(external_ids: dict, fallback_account_email: str):
         yield provider, acct_email, raw_id
 
 
+def _normalize_target_keys(event, selected_account_keys=None):
+    normalized = set()
+    if selected_account_keys:
+        for key in selected_account_keys:
+            if not isinstance(key, str) or ":" not in key:
+                continue
+            provider_part, email_part = key.split(":", 1)
+            provider = normalize_provider(provider_part)
+            account_email = (email_part or "").lower().strip()
+            if provider and account_email:
+                normalized.add(f"{provider}:{account_email}")
+    if normalized:
+        return normalized
+
+    external_ids = dict(getattr(event, "external_ids", None) or {})
+    return {
+        f"{normalize_provider(provider_part)}:{(email_part or '').lower().strip()}"
+        for raw_key in external_ids.keys()
+        if isinstance(raw_key, str) and ":" in raw_key
+        for provider_part, email_part in [raw_key.split(":", 1)]
+        if normalize_provider(provider_part) in ("google", "microsoft") and (email_part or "").strip()
+    }
+
+
+def _build_publish_updates(event):
+    updates = {"title": event.title, "description": event.description or ""}
+    if event.start_time:
+        updates["start_time"] = event.start_time
+    if event.end_time:
+        updates["end_time"] = event.end_time
+    return updates
+
+
 class EventActions:
 
     def update_event(self, db: Session, event, updates, google_service, graph_client, user):
@@ -94,32 +127,71 @@ class EventActions:
         db.commit()
         return True
 
-    def push_to_providers(self, db: Session, event, google_service, graph_client, user) -> int:
+    def push_to_providers(self, db: Session, event, google_service, graph_client, user, selected_account_keys=None) -> dict:
         """
         Push current local event state to ALL linked provider accounts.
         Does NOT modify the local DB. Used exclusively by the Publish action.
-        Returns the number of provider accounts successfully updated.
+        Creates missing provider copies for selected supported accounts.
+        Returns per-account publish details.
         """
-        updates = {"title": event.title}
-        if event.start_time:
-            updates["start_time"] = event.start_time
-        if event.end_time:
-            updates["end_time"] = event.end_time
+        updates = _build_publish_updates(event)
+        external_ids = dict(getattr(event, "external_ids", None) or {})
+        targets = _normalize_target_keys(event, selected_account_keys=selected_account_keys)
 
         pushed = 0
-        fallback_email = getattr(event, "account_email", None) or ""
-        for provider, acct_email, raw_id in _iter_write_back_targets(event.external_ids, fallback_email):
+        created = 0
+        affected_accounts = []
+        warnings = []
+
+        for target_key in sorted(targets):
+            provider, acct_email = target_key.split(":", 1)
+            provider = normalize_provider(provider)
+            raw_id = external_ids.get(target_key)
+
+            if provider not in ("google", "microsoft"):
+                warnings.append(f"Publish not supported for {target_key}")
+                continue
+
             try:
                 token = _get_token(db, user.id, provider, acct_email)
                 if not token:
+                    warnings.append(f"No valid token for {target_key}")
                     continue
+
+                if raw_id:
+                    if provider == "google":
+                        google_service.update_event(token=token, event_id=raw_id,
+                                                    updates=updates, account_email=acct_email or None)
+                    elif provider == "microsoft":
+                        graph_client.update_event(token=token, event_id=raw_id, updates=updates)
+                    pushed += 1
+                    affected_accounts.append(target_key)
+                    continue
+
+                new_raw_id = None
                 if provider == "google":
-                    google_service.update_event(token=token, event_id=raw_id,
-                                                updates=updates, account_email=acct_email or None)
-                    pushed += 1
+                    new_raw_id = google_service.create_event(token=token, event_payload=updates,
+                                                             account_email=acct_email or None)
                 elif provider == "microsoft":
-                    graph_client.update_event(token=token, event_id=raw_id, updates=updates)
-                    pushed += 1
+                    new_raw_id = graph_client.create_event(token=token, event_payload=updates)
+
+                if new_raw_id:
+                    external_ids[target_key] = new_raw_id
+                    created += 1
+                    affected_accounts.append(target_key)
+                else:
+                    warnings.append(f"Create failed for {target_key}")
             except Exception as e:
                 print(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
-        return pushed
+                warnings.append(f"Publish failed for {target_key}: {e}")
+
+        if external_ids != (getattr(event, "external_ids", None) or {}):
+            event.external_ids = external_ids
+            db.commit()
+
+        return {
+            "updated": pushed,
+            "created": created,
+            "affected_accounts": sorted(set(affected_accounts)),
+            "warnings": warnings,
+        }

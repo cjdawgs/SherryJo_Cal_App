@@ -318,6 +318,17 @@
       <div class="metaRow"><span>Updated:</span><strong id="eventMetaUpdated">-</strong></div>
       <div class="metaRow"><span>Source:</span><strong id="eventMetaSource">local</strong></div>
     </section>
+
+    <section class="modalSection eventOnly publishTargetsSection">
+      <div class="publishTargetsHeader">
+        <div>
+          <label class="fieldLabel">Calendar Visibility And Publish Targets</label>
+          <p class="publishTargetsIntro">Checked accounts already linked to this event are shown automatically. Check additional Google or Microsoft calendars to create a matching copy there when you publish this event.</p>
+        </div>
+      </div>
+      <div id="eventPublishTargets" class="accountPublishList"></div>
+      <div id="eventPublishSelectionInfo" class="accountPublishSelectionInfo">Select one or more publish-capable calendars to export this event.</div>
+    </section>
   </div>
 
   <div class="modalActions">
@@ -328,8 +339,25 @@
     </div>
     <div class="modalActionRight">
       <button id="cancelEventBtn" class="secondaryBtn" type="button">Cancel</button>
+      <button id="publishEventBtn" class="secondaryBtn" type="button">Publish This Event</button>
       <button id="saveEventBtn" class="primaryBtn" type="button">Save Event</button>
     </div>
+  </div>
+</div>
+
+<div id="publishConfirmOverlay" class="modalOverlay"></div>
+
+<div id="publishConfirmDialog" class="publishConfirmDialog" aria-hidden="true">
+  <div class="publishConfirmHeader">
+    <h3>Confirm Event Publish</h3>
+    <p id="publishConfirmSummary" class="publishConfirmSummary">Publish this event to the selected calendars.</p>
+  </div>
+  <div class="publishConfirmBody">
+    <div id="publishConfirmTargets" class="accountPublishList"></div>
+  </div>
+  <div class="publishConfirmActions">
+    <button id="cancelPublishConfirmBtn" class="secondaryBtn" type="button">Back</button>
+    <button id="confirmPublishEventBtn" class="primaryBtn" type="button">Confirm Publish</button>
   </div>
 </div>
 
