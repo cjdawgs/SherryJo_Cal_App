@@ -1712,7 +1712,7 @@ function applyChipStyle(row, key, isActive) {
   }
 }
 
-async function preloadEventCache() {
+async function preloadEventCache({ silent = false } = {}) {
   console.log("🧠 PRELOADING CACHE");
   document.body.style.cursor = "wait";
   isAppSyncing = true;
@@ -1720,14 +1720,17 @@ async function preloadEventCache() {
   console.log("🟡 SYNC MODE ON");
   /****************************************************************
    * ✅ FORCE SYNC STATE FOR DOTS DURING PRELOAD
+   * Skip when silent=true (post-sync call) so chip spinners
+   * don't reappear after the sync complete toast fires.
    ****************************************************************/
-  syncingAccounts.clear();
-  lastLoadedAccounts.forEach(acc => {
-    const provider = normalizeProvider(acc.provider || "other");
-    const email = (acc.account_email || "").toLowerCase().trim();
-    if (!email) return;
+  if (!silent) {
+    syncingAccounts.clear();
+    lastLoadedAccounts.forEach(acc => {
+      const provider = normalizeProvider(acc.provider || "other");
+      const email = (acc.account_email || "").toLowerCase().trim();
+      if (!email) return;
 
-    const key = normalizeKey(provider, email);
+      const key = normalizeKey(provider, email);
 
     syncingAccounts.add(key);
 
@@ -1738,15 +1741,7 @@ async function preloadEventCache() {
    ✅ ADD THIS LINE RIGHT HERE
   **************************************************************/
   renderAccountsSafe();
-
-  //setSyncBanner("syncing");
-  const now = new Date();
-  const start = new Date(now);
-  const end = new Date(now);
-  
-  start.setMonth(start.getMonth() - 6);
-  end.setMonth(end.getMonth() + 6);
-
+  } // end if (!silent)
   const res = await apiFetch(
     
     `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
@@ -2852,9 +2847,11 @@ async function syncNow() {
     renderAccountsSafe();
 
     /**************************************************************
-     * ✅ 4. NORMAL REFRESH
+     * ✅ 4. NORMAL REFRESH — silent=true suppresses chip re-spinners
      **************************************************************/
-    await preloadEventCache();
+    // Force a paint so the browser commits "no spinner" before heavy work
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    await preloadEventCache({ silent: true });
     smartRefresh({ reason: "event_saved", force: true });
 
     
