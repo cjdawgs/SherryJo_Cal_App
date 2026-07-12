@@ -354,15 +354,8 @@ async def update_event(
     db.commit()
     db.refresh(event)
 
-    # ── Provider write-back (non-fatal) ────────────────────────────────
-    # Fire when the event has external_ids regardless of source:
-    # canonical local events carry provider IDs and must write back.
-    if provider_updates and event.external_ids:
-        try:
-            _event_actions.update_event(db, event, provider_updates, _google_service, _graph_client, current_user)
-        except Exception as wb_err:
-            print(f"⚠️ Provider write-back failed (non-fatal): {wb_err}")
-    # ───────────────────────────────────────────────────────────────────
+    # Write-back to providers is intentionally NOT done here.
+    # Edits stay local until the user explicitly clicks Publish.
 
     return {"status": "ok", "event": serialize_event(event)}
 
@@ -381,14 +374,8 @@ def delete_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
-    # ── Provider write-back (non-fatal) ────────────────────────────────
-    if event.external_ids:
-        try:
-            _event_actions.delete_event(db, event, _google_service, _graph_client, current_user)
-            return {"status": "ok", "deleted": event_id}
-        except Exception as wb_err:
-            print(f"⚠️ Provider delete write-back failed (non-fatal): {wb_err}")
-    # ───────────────────────────────────────────────────────────────────
+    # Write-back to providers is intentionally NOT done here.
+    # Deletions stay local until the user explicitly clicks Publish.
 
     db.delete(event)
     db.commit()
@@ -596,56 +583,91 @@ def sync_calendar(
 # ==================================================
 
 @router.post("/publish")
-def publish_to_providers(
+async def publish_to_providers(
+    request: Request,
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
     """
-    Iterate every canonical event that has external_ids and push the
-    current local state (title, start, end) back to each linked provider
-    account.  Non-fatal: failures are counted but do not block the response.
+    Push local edits to provider accounts.
+    Scope: only the event_ids provided by the client (modified this session).
+    If no event_ids supplied, publishes ALL events with external_ids.
+    Never triggered by Sync — user must click Publish explicitly.
     """
-    events_with_ids = (
-        db.query(Event)
-        .filter(
-            Event.owner_id == current_user.id,
-            Event.external_ids.isnot(None),
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    event_ids_raw = body.get("event_ids", None)  # None = key absent (publish all)
+    if event_ids_raw is not None and len(event_ids_raw) == 0:
+        # Client sent an explicit empty list — no edits tracked, nothing to do
+        return {"status": "success", "published": 0, "failed": 0,
+                "message": "No modified events to publish — make edits first"}
+
+    event_ids = [int(i) for i in (event_ids_raw or [])
+                 if str(i).lstrip("-").replace(".", "", 1).isdigit()]
+
+    if event_ids:
+        events_to_publish = (
+            db.query(Event)
+            .filter(
+                Event.owner_id == current_user.id,
+                Event.id.in_(event_ids),
+                Event.external_ids.isnot(None),
+            )
+            .all()
         )
-        .all()
-    )
+    else:
+        events_to_publish = (
+            db.query(Event)
+            .filter(
+                Event.owner_id == current_user.id,
+                Event.external_ids.isnot(None),
+            )
+            .all()
+        )
+
+    if not events_to_publish:
+        return {"status": "success", "published": 0, "failed": 0,
+                "message": "No modified events with provider links to publish"}
+
+    # Compute dynamic date range from the modified events
+    starts = [e.start_time for e in events_to_publish if e.start_time]
+    range_start = min(starts).date().isoformat() if starts else None
+    range_end   = max(starts).date().isoformat() if starts else None
+
+    # Collect the unique account keys that will be touched
+    affected_accounts: set = set()
+    for ev in events_to_publish:
+        for id_key in (ev.external_ids or {}):
+            # id_key is "provider:email" or legacy "provider"
+            provider_part = id_key.split(":")[0] if ":" in id_key else id_key
+            if provider_part in ("google", "microsoft", "apple"):
+                affected_accounts.add(id_key)
 
     published = 0
-    failed = 0
-    skipped = 0
+    failed    = 0
 
-    for event in events_with_ids:
-        if not event.external_ids:
-            skipped += 1
-            continue
-
-        updates = {"title": event.title}
-        if event.start_time:
-            updates["start_time"] = event.start_time
-        if event.end_time:
-            updates["end_time"] = event.end_time
-
+    for event in events_to_publish:
         try:
             pushed = _event_actions.push_to_providers(
                 db, event, _google_service, _graph_client, current_user
             )
             if pushed > 0:
                 published += 1
-            else:
-                skipped += 1
         except Exception as e:
             print(f"⚠️ Publish failed for event {event.id}: {e}")
             failed += 1
 
     return {
         "status": "success",
-        "published": published,
-        "failed": failed,
-        "skipped": skipped,
+        "published":          published,
+        "failed":             failed,
+        "total_events":       len(events_to_publish),
+        "affected_accounts":  sorted(affected_accounts),
+        "range_start":        range_start,
+        "range_end":          range_end,
     }
 
 

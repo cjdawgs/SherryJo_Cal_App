@@ -228,6 +228,17 @@ let isAppSyncing = false;
 // ✅ editingEventId is shared with calendar.ui.js via window so both modules
 //    read/write the same value without circular imports.
 window.editingEventId = window.editingEventId ?? null;
+
+// ── Session modification tracking ───────────────────────────────────────────
+// Tracks event IDs edited/created this session so Publish is scoped only to
+// events actually changed, covering only their affected accounts and date span.
+// Sync NEVER clears this — only an explicit Publish does.
+window.sessionModifiedEventIds = window.sessionModifiedEventIds ?? new Set();
+
+window.trackModifiedEvent = function(id) {
+  if (id != null) window.sessionModifiedEventIds.add(Number(id));
+};
+// ────────────────────────────────────────────────────────────────────────────
 let editingEventId = null;   // kept for backward-compat within this module
 let editingNoteId = null;
 let providerAccountCounts = {};
@@ -2863,7 +2874,9 @@ async function syncNow() {
      **************************************************************/
     // Force a paint so the browser commits "no spinner" before heavy work
     await new Promise(resolve => requestAnimationFrame(resolve));
+    document.body.style.cursor = "progress"; // subtle indicator while cache reloads
     await preloadEventCache({ silent: true });
+    document.body.style.cursor = "default";
     smartRefresh({ reason: "event_saved", force: true });
 
     
@@ -2900,6 +2913,13 @@ window.syncNow = syncNow;
  * ✅ PUBLISH NOW — push local canonical events to all provider accounts
  **************************************************************/
 async function publishNow() {
+  const modifiedIds = [...(window.sessionModifiedEventIds || new Set())];
+
+  if (modifiedIds.length === 0) {
+    showToast("ℹ️ No local changes to publish — edit events first", "info");
+    return;
+  }
+
   const publishBtn = document.getElementById("publishBtn");
 
   if (publishBtn) {
@@ -2910,14 +2930,16 @@ async function publishNow() {
   }
 
   try {
-    const res = await apiFetch("/calendar/publish", { method: "POST" });
+    const res = await apiFetch("/calendar/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_ids: modifiedIds }),
+    });
     if (!res) return;
 
     const raw = await res.text();
     let data = {};
-    try {
-      data = raw ? JSON.parse(raw) : {};
-    } catch {
+    try { data = raw ? JSON.parse(raw) : {}; } catch {
       throw new Error(`Publish endpoint returned invalid response (${res.status})`);
     }
 
@@ -2927,11 +2949,26 @@ async function publishNow() {
 
     const published = data.published ?? 0;
     const failed    = data.failed   ?? 0;
+    const accounts  = (data.affected_accounts || []);
+    const rangeStart = data.range_start;
+    const rangeEnd   = data.range_end;
+
+    // Build a concise human-readable summary
+    const accountSummary = accounts.length
+      ? accounts.map(k => k.split(":")[1] || k).join(", ")
+      : "no accounts";
+    const rangeSummary = (rangeStart && rangeEnd && rangeStart !== rangeEnd)
+      ? ` (${rangeStart} – ${rangeEnd})`
+      : rangeStart ? ` (${rangeStart})` : "";
 
     if (failed > 0) {
-      showToast(`⚠️ Published ${published} events — ${failed} failed`, "error");
+      showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed`, "error");
+    } else if (published === 0) {
+      showToast("ℹ️ Nothing published — events may not be linked to provider accounts yet", "info");
     } else {
-      showToast(`✅ Published ${published} events to all accounts`);
+      showToast(`✅ Published ${published} events → ${accountSummary}${rangeSummary}`);
+      // Clear tracking only on full success
+      window.sessionModifiedEventIds.clear();
     }
 
   } catch (err) {

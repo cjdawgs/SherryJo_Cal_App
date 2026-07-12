@@ -160,8 +160,8 @@ class ExternalCalendarService:
 
             results = []
 
-            search_start = datetime.now(timezone.utc) - timedelta(days=365)
-            search_end = datetime.now(timezone.utc) + timedelta(days=730)
+            search_start = datetime.now(timezone.utc) - timedelta(days=90)
+            search_end   = datetime.now(timezone.utc) + timedelta(days=90)
 
             for calendar in calendars:
                 try:

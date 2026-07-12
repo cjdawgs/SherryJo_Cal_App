@@ -811,18 +811,17 @@ class CalendarService:
         Canonical Event Model
         ─────────────────────
         After sync, collapse events that share the same title + start_time
-        (rounded to the minute) into ONE canonical local row.
+        (rounded to the minute) into ONE canonical row.
 
         Rules:
         • ALL events (local + provider) are fingerprinted together.
-        • An existing local canonical (source='local' with external_ids) wins
-          over a fresh provider event for the same slot — it is never replaced.
-        • The canonical row is promoted to source='local' / account_email='local'
-          so it belongs to the user, not to any specific provider.
-        • ALL provider IDs are merged into canonical.external_ids so write-back
+        • An existing local canonical (source='local' with external_ids) wins.
+        • ALL provider IDs are merged into canonical.external_ids so Publish
           reaches every account that originally held the event.
-        • Subsequent syncs refetch provider events; the dedup pass re-merges
-          them into the existing canonical without losing user edits.
+        • The canonical row keeps its original source/account_email for chip
+          filter display; Publish scope is determined by external_ids, not source.
+        • Subsequent syncs re-merge fresh provider rows into the existing
+          canonical without losing user edits.
         """
         from collections import defaultdict
         import hashlib as _hs
@@ -849,10 +848,18 @@ class CalendarService:
             if len(group) <= 1:
                 continue
 
-            # Sort: existing local canonicals first (they win), then by created_at
+            # Sort: existing local canonicals first (they win), then by created_at.
+            # Normalise created_at to UTC-aware to prevent TypeError when
+            # comparing naive and aware datetimes (SQLite stores naive).
+            def _safe_dt(e):
+                dt = e.created_at
+                if dt is None:
+                    return datetime(2000, 1, 1, tzinfo=timezone.utc)
+                return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
             group.sort(key=lambda e: (
                 0 if (e.source == "local" and e.external_ids) else 1,
-                e.created_at or datetime(2000, 1, 1, tzinfo=timezone.utc),
+                _safe_dt(e),
             ))
 
             canonical = group[0]

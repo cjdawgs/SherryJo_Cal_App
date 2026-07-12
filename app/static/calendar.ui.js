@@ -908,6 +908,10 @@ async function saveEvent() {
 
     upsertCacheEvent(nextEvent);
 
+    // Track this event as modified so Publish knows its scope
+    const savedId = nextEvent.extendedProps?.backendId ?? modalState.eventId;
+    window.trackModifiedEvent?.(savedId);
+
     if (nextEvent.start) {
       window.selectedDate = toDayString(nextEvent.start);
       window.highlightSelectedDay?.(window.selectedDate);
