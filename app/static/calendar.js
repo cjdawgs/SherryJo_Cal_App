@@ -86,6 +86,7 @@ function applyControlBandDensity(mode) {
   const undoBtn = document.getElementById("undoBtn");
   const redoBtn = document.getElementById("redoBtn");
   const syncBtn = document.getElementById("syncBtn");
+  const publishBtn = document.getElementById("publishBtn");
   const logoutBtn = document.getElementById("logoutBtn");
 
   if (!createBtn) return;
@@ -105,6 +106,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
+    withIconLabel(publishBtn, "Publish");
     withIconLabel(logoutBtn, "Logout");
     return;
   }
@@ -116,6 +118,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
+    withIconLabel(publishBtn, "Publish");
     withIconLabel(logoutBtn, "Logout");
     return;
   }
@@ -126,6 +129,7 @@ function applyControlBandDensity(mode) {
   withIconLabel(undoBtn, "Undo");
   withIconLabel(redoBtn, "Redo");
   withIconLabel(syncBtn, "Sync Now");
+  withIconLabel(publishBtn, "Publish");
   withIconLabel(logoutBtn, "Logout");
 }
 
@@ -2883,6 +2887,60 @@ async function syncNow() {
 }
 
 window.syncNow = syncNow;
+
+/**************************************************************
+ * ✅ PUBLISH NOW — push local canonical events to all provider accounts
+ **************************************************************/
+async function publishNow() {
+  const publishBtn = document.getElementById("publishBtn");
+
+  if (publishBtn) {
+    publishBtn.classList.add("is-publishing");
+    publishBtn.disabled = true;
+    const labelEl = publishBtn.querySelector(".btnLabel");
+    if (labelEl) labelEl.textContent = "Publishing…";
+  }
+
+  try {
+    const res = await apiFetch("/calendar/publish", { method: "POST" });
+    if (!res) return;
+
+    const raw = await res.text();
+    let data = {};
+    try {
+      data = raw ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error(`Publish endpoint returned invalid response (${res.status})`);
+    }
+
+    if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+      throw new Error(data?.message || `Publish failed (${res.status})`);
+    }
+
+    const published = data.published ?? 0;
+    const failed    = data.failed   ?? 0;
+
+    if (failed > 0) {
+      showToast(`⚠️ Published ${published} events — ${failed} failed`, "error");
+    } else {
+      showToast(`✅ Published ${published} events to all accounts`);
+    }
+
+  } catch (err) {
+    console.error("❌ publishNow failed:", err);
+    showToast("❌ Publish failed", "error");
+  } finally {
+    const btn = document.getElementById("publishBtn");
+    if (btn) {
+      btn.classList.remove("is-publishing");
+      btn.disabled = false;
+      const labelEl = btn.querySelector(".btnLabel");
+      if (labelEl) labelEl.textContent = "Publish";
+    }
+  }
+}
+
+window.publishNow = publishNow;
 
 /**************************************************************
  * ✅ LOGOUT

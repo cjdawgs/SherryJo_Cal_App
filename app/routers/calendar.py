@@ -355,7 +355,9 @@ async def update_event(
     db.refresh(event)
 
     # ── Provider write-back (non-fatal) ────────────────────────────────
-    if provider_updates and event.source in ("google", "microsoft") and event.external_ids:
+    # Fire when the event has external_ids regardless of source:
+    # canonical local events carry provider IDs and must write back.
+    if provider_updates and event.external_ids:
         try:
             _event_actions.update_event(db, event, provider_updates, _google_service, _graph_client, current_user)
         except Exception as wb_err:
@@ -380,10 +382,9 @@ def delete_event(
         raise HTTPException(status_code=404, detail="Event not found")
 
     # ── Provider write-back (non-fatal) ────────────────────────────────
-    if event.source in ("google", "microsoft") and event.external_ids:
+    if event.external_ids:
         try:
             _event_actions.delete_event(db, event, _google_service, _graph_client, current_user)
-            # delete_event already calls db.delete + db.commit
             return {"status": "ok", "deleted": event_id}
         except Exception as wb_err:
             print(f"⚠️ Provider delete write-back failed (non-fatal): {wb_err}")
@@ -589,6 +590,64 @@ def sync_calendar(
             "status": "error",
             "message": str(e)
         }
+
+# ==================================================
+# ✅ PUBLISH — push all canonical local events to provider accounts
+# ==================================================
+
+@router.post("/publish")
+def publish_to_providers(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Iterate every canonical event that has external_ids and push the
+    current local state (title, start, end) back to each linked provider
+    account.  Non-fatal: failures are counted but do not block the response.
+    """
+    events_with_ids = (
+        db.query(Event)
+        .filter(
+            Event.owner_id == current_user.id,
+            Event.external_ids.isnot(None),
+        )
+        .all()
+    )
+
+    published = 0
+    failed = 0
+    skipped = 0
+
+    for event in events_with_ids:
+        if not event.external_ids:
+            skipped += 1
+            continue
+
+        updates = {"title": event.title}
+        if event.start_time:
+            updates["start_time"] = event.start_time
+        if event.end_time:
+            updates["end_time"] = event.end_time
+
+        try:
+            pushed = _event_actions.push_to_providers(
+                db, event, _google_service, _graph_client, current_user
+            )
+            if pushed > 0:
+                published += 1
+            else:
+                skipped += 1
+        except Exception as e:
+            print(f"⚠️ Publish failed for event {event.id}: {e}")
+            failed += 1
+
+    return {
+        "status": "success",
+        "published": published,
+        "failed": failed,
+        "skipped": skipped,
+    }
+
 
 # ==================================================
 # ✅ UNIFIED CALENDAR (FINAL CLEAN VERSION)

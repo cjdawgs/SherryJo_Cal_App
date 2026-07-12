@@ -804,6 +804,85 @@ class CalendarService:
         }
 
     # ==================================================
+    # ✅ CROSS-ACCOUNT DEDUP PASS
+    # ==================================================
+    def _dedup_pass(self, db: Session, user_id: int) -> int:
+        """
+        Canonical Event Model
+        ─────────────────────
+        After sync, collapse events that share the same title + start_time
+        (rounded to the minute) into ONE canonical local row.
+
+        Rules:
+        • ALL events (local + provider) are fingerprinted together.
+        • An existing local canonical (source='local' with external_ids) wins
+          over a fresh provider event for the same slot — it is never replaced.
+        • The canonical row is promoted to source='local' / account_email='local'
+          so it belongs to the user, not to any specific provider.
+        • ALL provider IDs are merged into canonical.external_ids so write-back
+          reaches every account that originally held the event.
+        • Subsequent syncs refetch provider events; the dedup pass re-merges
+          them into the existing canonical without losing user edits.
+        """
+        from collections import defaultdict
+        import hashlib as _hs
+
+        all_events = db.query(Event).filter(
+            Event.owner_id == user_id,
+        ).all()
+
+        groups: dict = defaultdict(list)
+        for ev in all_events:
+            title_norm = (ev.title or "").strip().lower()
+            if not title_norm:
+                continue  # skip untitled placeholders
+            if ev.start_time:
+                dt = ev.start_time.replace(second=0, microsecond=0)
+                dt_str = dt.isoformat()[:16]
+            else:
+                dt_str = ""
+            fp = _hs.md5(f"{title_norm}|{dt_str}".encode()).hexdigest()
+            groups[fp].append(ev)
+
+        merged_count = 0
+        for fp, group in groups.items():
+            if len(group) <= 1:
+                continue
+
+            # Sort: existing local canonicals first (they win), then by created_at
+            group.sort(key=lambda e: (
+                0 if (e.source == "local" and e.external_ids) else 1,
+                e.created_at or datetime(2000, 1, 1, tzinfo=timezone.utc),
+            ))
+
+            canonical = group[0]
+            merged_ids = dict(canonical.external_ids or {})
+
+            for dup in group[1:]:
+                # Absorb all provider IDs from the duplicate
+                for k, v in (dup.external_ids or {}).items():
+                    if k not in merged_ids:
+                        merged_ids[k] = v
+                # Preserve description / color if canonical is missing it
+                if not canonical.description and dup.description:
+                    canonical.description = dup.description
+                if not canonical.color and dup.color:
+                    canonical.color = dup.color
+                db.delete(dup)
+                merged_count += 1
+
+            # Promote to local canonical — single source of truth
+            canonical.external_ids = merged_ids
+            canonical.source = "local"
+            canonical.account_email = "local"
+
+        if merged_count:
+            db.commit()
+            log_info(f"🔀 Dedup: promoted {merged_count} provider events into local canonical rows")
+
+        return merged_count
+
+    # ==================================================
     # ✅ SYNC ENGINE (FIXED + INSIDE CLASS)
     # ==================================================
     def sync_all(self, db: Session, user, start_date=None, end_date=None):
@@ -842,10 +921,13 @@ class CalendarService:
                 Event.owner_id == user.id
             ).first()
 
-            # Build external_ids dict for write-back support
+            # Build external_ids dict keyed by provider:account_email
+            # so a single canonical event can track IDs from multiple accounts
             raw_ext_id = e.get("external_id", "")
             provider = normalize_provider(e.get("source", "local"))
-            provider_ids = {provider: raw_ext_id} if raw_ext_id else {}
+            acct_email = (e.get("account_email") or "").lower().strip()
+            ext_id_key = f"{provider}:{acct_email}" if acct_email else provider
+            provider_ids = {ext_id_key: raw_ext_id} if raw_ext_id else {}
 
             if not existing:
                 db.add(Event(
@@ -915,8 +997,16 @@ class CalendarService:
         
         db.commit()
 
+        # ==================================================
+        # ✅ CROSS-ACCOUNT DEDUP PASS
+        # Merge events with same title+start_time from different accounts
+        # into a single canonical row so the calendar shows no duplicates.
+        # ==================================================
+        deduped = self._dedup_pass(db, user.id)
+
         return {
             "created": created,
             "updated": updated,
+            "deduped": deduped,
             "account_sync_totals": account_sync_totals
         }

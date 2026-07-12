@@ -1156,6 +1156,10 @@ function bindUIEvents() {
     if (typeof window.syncNow === "function") await window.syncNow();
   });
 
+  document.getElementById("publishBtn")?.addEventListener("click", async () => {
+    if (typeof window.publishNow === "function") await window.publishNow();
+  });
+
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     if (typeof window.logout === "function") window.logout();
   });

@@ -354,6 +354,22 @@ button.primary {
   to   { transform: rotate(-360deg); }
 }
 
+/* Publish button — clockwise spin (outward/send direction) */
+#publishBtn.is-publishing {
+  opacity: 0.72;
+  cursor: default;
+}
+
+#publishBtn.is-publishing svg {
+  animation: publishIconSpin 0.75s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes publishIconSpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 
 /* =====================================================
 ✅ MAIN LAYOUT
