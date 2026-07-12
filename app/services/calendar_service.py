@@ -1,1020 +1,1877 @@
+﻿
 
 from datetime import datetime, timezone
+
 import hashlib
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from dateutil.relativedelta import relativedelta
+
 from sqlalchemy.orm import Session
+
 import requests
+
 from app.routers import events
+
 from app.services.graph_client import GraphClient
+
 from app.services.google_calendar_service import GoogleCalendarService
+
 from app.models import Event
+
 from app.services.external_calendar_service import ExternalCalendarService
+
 from app.services.multi_account_oauth_service import (
+
     MultiAccountOAuthService,
+
     ensure_valid_token,
+
     safe_commit,
+
     resolve_account_status,
+
     normalize_provider,
+
 )
+
 import pytz
+
+
 
 SAFE_DELETE = False
 
+
+
 ACCOUNT_COLORS = {
+
     "google": "#1f9d55",
+
     "microsoft": "#1d4ed8",
+
     "apple": "#ef4444",
+
     "other": "#eab308"  
+
 }
 
+
+
 # ==================================================
-# ✅ LOGGING SYSTEM (STANDARDIZED - PRODUCTION SAFE)
+
+# âœ… LOGGING SYSTEM (STANDARDIZED - PRODUCTION SAFE)
+
 # ==================================================
+
 import os
 
+
+
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG | INFO | ERROR
+
+
 
 CANONICAL_PROVIDERS = ["google", "microsoft", "apple", "local"]
 
 
+
+
+
 def build_event_id(e: dict) -> str:
-    """
-    ✅ SINGLE SOURCE OF TRUTH for event identity
-    - provider normalized
-    - external_id normalized
-    - account_email normalized (prevents cross-account collisions)
+
     """
 
+    âœ… SINGLE SOURCE OF TRUTH for event identity
+
+    - provider normalized
+
+    - external_id normalized
+
+    - account_email normalized (prevents cross-account collisions)
+
+    """
+
+
+
     provider = normalize_provider(e.get("source"))
+
     ext_id = str(e.get("external_id", "")).strip()
+
     account_email = str(e.get("account_email", "")).lower().strip()
+
+
 
     return f"{provider}:{account_email}:{ext_id}"
 
+
+
 def build_account_key(provider: str, email: str) -> str:
+
     provider = normalize_provider(provider)
+
     email = (email or "").lower().strip()
+
     return f"{provider}:{email}"
 
 
+
+
+
 def build_fallback_external_id(provider: str, account_email: str, title: str, start_val) -> str:
+
     """Build a stable fallback ID when provider payload omits event ID."""
+
     safe_provider = normalize_provider(provider)
+
     safe_account = (account_email or "").lower().strip()
+
     safe_title = (title or "Untitled Event").strip()
 
+
+
     if isinstance(start_val, datetime):
+
         if start_val.tzinfo is None:
+
             safe_start = start_val.replace(tzinfo=timezone.utc).isoformat()
+
         else:
+
             safe_start = start_val.astimezone(timezone.utc).isoformat()
+
     else:
+
         safe_start = str(start_val or "")
+
+
 
     return f"fb:{safe_provider}:{safe_account}:{safe_title}:{safe_start}"
 
 
+
+
+
 def log_debug(msg: str):
+
     if LOG_LEVEL == "DEBUG":
+
         print(f"[DEBUG] {msg}")
 
 
+
+
+
 def log_info(msg: str):
+
     print(f"[INFO] {msg}")
 
 
+
+
+
 def log_error(msg: str):
+
     print(f"[ERROR] {msg}")
 
-class CalendarService:
+
+
+
+
+# ==================================================
+
+# âœ… PURE HTTP FETCH â€” thread-safe, no DB access
+
+# Called from ThreadPoolExecutor in fetch_all_events.
+
+# ==================================================
+
+def _fetch_account_http(config: dict, start_date, end_date) -> dict:
+
+    """
+
+    Fetch events for ONE account via its provider API.
+
+    Receives a pre-built config dict (no SQLAlchemy session).
+
+    Returns a result dict consumed by fetch_all_events Phase 3.
+
+    """
+
+    provider       = config["provider"]
+
+    account_email  = config["account_email"]
+
+    token          = config["token"]
+
+    sync_state     = config.get("sync_token_state") or {}
+
+
+
+    result = {
+
+        "acc_id":           config["acc_id"],
+
+        "provider":         provider,
+
+        "account_email":    account_email,
+
+        "events":           [],
+
+        "cancelled_ids":    [],
+
+        "new_sync_tokens":  {},
+
+        "used_incremental": False,
+
+        "raw_count":        0,
+
+        "error":            None,
+
+    }
+
+
+
+    try:
+
+        if provider == "google":
+
+            _gcs = GoogleCalendarService()
+
+            fetch_result = _gcs.fetch_events_v2(
+
+                access_token=token,
+
+                account_email=account_email,
+
+                start_date=start_date,
+
+                end_date=end_date,
+
+                sync_token_state=sync_state,
+
+            )
+
+            raw_events          = fetch_result["events"]
+
+            result["cancelled_ids"]    = fetch_result["cancelled_ids"]
+
+            result["new_sync_tokens"]  = fetch_result["next_tokens"]
+
+            result["used_incremental"] = fetch_result["used_incremental"]
+
+            result["raw_count"]        = len(raw_events) + len(fetch_result["cancelled_ids"])
+
+
+
+            # Tag events with account metadata
+
+            for e in raw_events:
+
+                calendar_id = (
+
+                    (e.get("organizer") or {}).get("email") or
+
+                    (e.get("creator")   or {}).get("email") or ""
+
+                ).lower()
+
+                if "holiday" in calendar_id or "@group.v.calendar.google.com" in calendar_id:
+
+                    continue
+
+                e["account_email"] = account_email
+
+                e["account"]       = account_email
+
+                e["provider"]      = "google"
+
+                e["source"]        = "google"
+
+                result["events"].append(e)
+
+
+
+        elif provider == "apple":
+
+            # Apple CalDAV â€” no incremental support
+
+            from app.services.external_calendar_service import ExternalCalendarService as _ECS
+
+
+
+            class _FakeAcc:
+
+                def __init__(self, cfg):
+
+                    self.access_token  = cfg["caldav_url"]
+
+                    self.account_email = cfg["account_email"]
+
+                    self.refresh_token = cfg["app_password"]
+
+
+
+            raw_events = _ECS.fetch_apple_calendar_events(_FakeAcc(config)) or []
+
+            result["raw_count"] = len(raw_events)
+
+
+
+            apple_start = start_date or datetime(1900, 1, 1, tzinfo=timezone.utc)
+
+            apple_end   = end_date   or datetime(2100, 1, 1, tzinfo=timezone.utc)
+
+
+
+            for e in raw_events:
+
+                dt = e.get("start")
+
+                if isinstance(dt, datetime):
+
+                    dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+                elif isinstance(dt, str):
+
+                    try:
+
+                        dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+
+                        dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+                    except Exception:
+
+                        continue
+
+                else:
+
+                    continue
+
+
+
+                if not (apple_start <= dt <= apple_end):
+
+                    continue
+
+
+
+                e["account_email"] = account_email
+
+                e["account"]       = account_email
+
+                e["provider"]      = "apple"
+
+                e["source"]        = "apple"
+
+                result["events"].append(e)
+
+
+
+        elif provider == "microsoft":
+
+            delta_link = sync_state.get("delta_link")
+
+            ms_events, new_delta_link, cancelled = _fetch_ms_incremental(
+
+                token=token,
+
+                start_date=start_date,
+
+                end_date=end_date,
+
+                delta_link=delta_link,
+
+            )
+
+            result["raw_count"]        = len(ms_events) + len(cancelled)
+
+            result["cancelled_ids"]    = cancelled
+
+            result["new_sync_tokens"]  = {"delta_link": new_delta_link} if new_delta_link else {}
+
+            result["used_incremental"] = bool(delta_link)
+
+            result["events"]           = ms_events
+
+
+
+    except Exception as exc:
+
+        result["error"] = str(exc)
+
+
+
+    return result
+
+
+
+
+
+def _fetch_ms_incremental(token: str, start_date, end_date, delta_link: str = None):
+
+    """
+
+    Microsoft Graph calendarView with optional delta-link for incremental sync.
+
+    Returns (events_list, new_delta_link, cancelled_ids_list).
+
+    Falls back to full fetch when delta_link is missing or returns an error.
+
+    """
+
     REQUEST_TIMEOUT = (5, 20)
 
+    headers = {"Authorization": f"Bearer {token}"}
+
+    events = []
+
+    cancelled_ids = []
+
+    new_delta_link = None
+
+
+
+    def _full_fetch():
+
+        url = "https://graph.microsoft.com/v1.0/me/calendarView/delta"
+
+        params = {
+
+            "startDateTime": start_date.isoformat().replace("+00:00", "Z") if start_date else None,
+
+            "endDateTime":   end_date.isoformat().replace("+00:00", "Z")   if end_date   else None,
+
+        }
+
+        params = {k: v for k, v in params.items() if v}
+
+        return url, params
+
+
+
+    if delta_link:
+
+        fetch_url, fetch_params = delta_link, None
+
+    else:
+
+        fetch_url, fetch_params = _full_fetch()
+
+
+
+    retry_full = False
+
+    while fetch_url:
+
+        resp = requests.get(
+
+            fetch_url,
+
+            headers=headers,
+
+            params=fetch_params if fetch_params else None,
+
+            timeout=REQUEST_TIMEOUT,
+
+        )
+
+        fetch_params = None  # params only on first request
+
+
+
+        if resp.status_code in (410, 400) and delta_link and not retry_full:
+
+            # Delta link expired â€” fall back to full fetch
+
+            fetch_url, fetch_params = _full_fetch()
+
+            delta_link = None
+
+            retry_full = True
+
+            events = []
+
+            cancelled_ids = []
+
+            continue
+
+
+
+        if resp.status_code != 200:
+
+            break
+
+
+
+        data = resp.json()
+
+        for item in data.get("value", []):
+
+            if item.get("@removed"):
+
+                raw_id = item.get("id")
+
+                if raw_id:
+
+                    cancelled_ids.append(raw_id)
+
+            else:
+
+                # Normalise MS event format expected downstream
+
+                start_obj = item.get("start", {})
+
+                end_obj   = item.get("end", {})
+
+                dt_str    = start_obj.get("dateTime")
+
+                tz_name   = start_obj.get("timeZone")
+
+                if not dt_str:
+
+                    continue
+
+                try:
+
+                    import pytz as _pytz
+
+                    dt_naive = datetime.fromisoformat(dt_str)
+
+                    if tz_name:
+
+                        def _map(n):
+
+                            if "Eastern"  in n: return _pytz.timezone("US/Eastern")
+
+                            if "Central"  in n: return _pytz.timezone("US/Central")
+
+                            if "Mountain" in n: return _pytz.timezone("US/Mountain")
+
+                            if "Pacific"  in n: return _pytz.timezone("US/Pacific")
+
+                            return _pytz.utc
+
+                        dt = _map(tz_name).localize(dt_naive).astimezone(timezone.utc)
+
+                    else:
+
+                        dt = dt_naive.replace(tzinfo=timezone.utc)
+
+
+
+                    end_dt = None
+
+                    end_str = end_obj.get("dateTime")
+
+                    if end_str:
+
+                        end_naive = datetime.fromisoformat(end_str)
+
+                        end_tz = end_obj.get("timeZone")
+
+                        end_dt = (_map(end_tz).localize(end_naive).astimezone(timezone.utc)
+
+                                  if end_tz else end_naive.replace(tzinfo=timezone.utc))
+
+                except Exception:
+
+                    continue
+
+
+
+                events.append({
+
+                    "id":            item.get("id"),
+
+                    "subject":       item.get("subject"),
+
+                    "start":         dt.isoformat(),
+
+                    "end":           end_dt.isoformat() if end_dt else None,
+
+                    "account_email": "",   # filled in by caller
+
+                    "provider":      "microsoft",
+
+                    "source":        "microsoft",
+
+                })
+
+
+
+        next_link  = data.get("@odata.nextLink")
+
+        delta_out  = data.get("@odata.deltaLink")
+
+        if delta_out:
+
+            new_delta_link = delta_out
+
+        fetch_url = next_link  # None when done
+
+
+
+    return events, new_delta_link, cancelled_ids
+
+
+
+class CalendarService:
+
+    REQUEST_TIMEOUT = (5, 20)
+
+
+
     def __init__(self):
+
         self.graph = GraphClient()
+
         self.google = GoogleCalendarService()
 
+
+
     # ==================================================
-    # ✅ TIME SAFETY (CRITICAL FIX)
+
+    # âœ… TIME SAFETY (CRITICAL FIX)
+
     # ==================================================
+
     def _to_utc(self, dt_str):
+
         """
-        ✅ Always return UTC-aware datetime
+
+        âœ… Always return UTC-aware datetime
+
         """
+
         if not dt_str:
+
             return None
 
+
+
         try:
+
             # handle Z properly
+
             if dt_str.endswith("Z"):
+
                 dt_str = dt_str.replace("Z", "+00:00")
 
+
+
             dt = datetime.fromisoformat(dt_str)
+
+
 
             return self._ensure_utc(dt)
 
 
+
+
+
         except Exception:
+
             return None
+
+
+
 
 
     def _safe_datetime(self, val):
+
         if isinstance(val, dict):
+
             return val.get("dateTime") or val.get("date")
+
         return val
 
+
+
     def _normalize_time(self, value):
+
         """
+
         Legacy helper kept for test/backward compatibility.
+
         """
+
         if value is None:
+
             return ""
+
+
 
         text = str(value).strip()
+
         if not text:
+
             return ""
 
+
+
         if text.endswith("Z"):
+
             text = text[:-1] + "+00:00"
 
+
+
         try:
+
             dt = datetime.fromisoformat(text)
+
             return dt.strftime("%Y-%m-%d %H:%M")
+
         except Exception:
+
             # date-only fallback and non-ISO safety
+
             return text.replace("T", " ")[:16] if "T" in text else text
 
+
+
     def _fingerprint(self, event: dict) -> str:
+
         """
+
         Legacy dedupe fingerprint used by historical tests.
+
         """
+
         title = str((event or {}).get("title") or "").strip().lower()
+
         start = self._normalize_time((event or {}).get("start"))
+
         end = self._normalize_time((event or {}).get("end"))
+
         raw = f"{title}|{start}|{end}"
+
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
+
     def _deduplicate(self, events):
+
         """
+
         Legacy merge behavior: duplicates combine source labels.
+
         """
+
         by_fp = {}
+
         for ev in events or []:
+
             fp = self._fingerprint(ev)
+
             src = str((ev or {}).get("source") or "").strip().lower()
+
             src = "outlook" if src == "microsoft" else src
 
+
+
             if fp not in by_fp:
+
                 clone = dict(ev)
+
                 clone["source"] = src
+
                 by_fp[fp] = clone
+
                 continue
 
+
+
             existing_sources = [s for s in str(by_fp[fp].get("source") or "").split(",") if s]
+
             if src and src not in existing_sources:
+
                 existing_sources.append(src)
+
             by_fp[fp]["source"] = ",".join(existing_sources)
+
+
 
         return list(by_fp.values())
 
+
+
     # ==================================================
-    # ✅ NORMALIZATION
+
+    # âœ… NORMALIZATION
+
     # ==================================================
+
     def _normalize(self, google_events, ms_events):
+
         unified = []
+
         
-        print("🧠 NORMALIZE INPUT COUNT:",
+
+        print("ðŸ§  NORMALIZE INPUT COUNT:",
+
             len(google_events), "primary |",
+
             len(ms_events), "ms")
 
-        # ✅ combine everything FIRST
+
+
+        # âœ… combine everything FIRST
+
         all_events = []
 
+
+
         
-        # ✅ Preserve original provider if already set (Apple compatibility)
+
+        # âœ… Preserve original provider if already set (Apple compatibility)
+
         for e in google_events:
+
             if not e.get("provider"):
+
                 e["provider"] = "google"
+
             if not e.get("source"):
+
                 e["source"] = "google"
 
+
+
             all_events.append(e)
 
-        # ✅ Preserve provider/source if already set (future-safe)
+
+
+        # âœ… Preserve provider/source if already set (future-safe)
+
         for e in ms_events:
+
             if not e.get("provider"):
+
                 e["provider"] = "microsoft"
+
             if not e.get("source"):
+
                 e["source"] = "microsoft"
 
-            all_events.append(e)
-            #print("🟦 MS EVENT RAW:", e.get("id"))
-            #print("🧪 MS BEFORE:", e)
 
-        # ✅ SINGLE NORMALIZATION PIPELINE (THIS FIXES EVERYTHING)
+
+            all_events.append(e)
+
+            #print("ðŸŸ¦ MS EVENT RAW:", e.get("id"))
+
+            #print("ðŸ§ª MS BEFORE:", e)
+
+
+
+        # âœ… SINGLE NORMALIZATION PIPELINE (THIS FIXES EVERYTHING)
+
         for e in all_events:
 
+
+
             # ==================================================
-            # 🔬 SURGICAL FIX — PROVIDER NORMALIZATION
+
+            # ðŸ”¬ SURGICAL FIX â€” PROVIDER NORMALIZATION
+
             # --------------------------------------------------
+
             # FORCE ALL EVENTS INTO CANONICAL PROVIDER SPACE
+
             # ==================================================
+
             # ==================================================
-            # 🔬 SAFE PROVIDER DETECTION (CRITICAL FIX)
+
+            # ðŸ”¬ SAFE PROVIDER DETECTION (CRITICAL FIX)
+
             # ==================================================
+
             raw_provider = (
+
                 e.get("provider")
+
                 or e.get("source")
+
                 or ("microsoft" if "subject" in e else None)
+
             )
+
+
 
             if not isinstance(raw_provider, str):
+
                 raw_provider = ""
 
+
+
             provider = normalize_provider(raw_provider)
+
             source_label = "outlook" if provider == "microsoft" else provider
 
-            # ✅ DEBUG (REMOVE LATER)
-            #print("🧪 PROVIDER NORMALIZED →", provider)
+
+
+            # âœ… DEBUG (REMOVE LATER)
+
+            #print("ðŸ§ª PROVIDER NORMALIZED â†’", provider)
+
             
+
             # ==================================================
-            # 🔬 SURGICAL FIX — ACCOUNT EMAIL CONTRACT
+
+            # ðŸ”¬ SURGICAL FIX â€” ACCOUNT EMAIL CONTRACT
+
             # --------------------------------------------------
+
             # ALWAYS use account_email (frontend depends on this)
+
             # ==================================================
+
             account_email = (
+
                 e.get("account_email")
+
                 or e.get("account")
-                or "local"   # ✅ CRITICAL FIX
+
+                or "local"   # âœ… CRITICAL FIX
+
             ).lower().strip()
 
-            #print("🧪 ACCOUNT NORMALIZED →", account_email)
+
+
+            #print("ðŸ§ª ACCOUNT NORMALIZED â†’", account_email)
+
+
 
             start = self._safe_datetime(e.get("start"))
+
             end = self._safe_datetime(e.get("end"))
+
             title = (
+
                 e.get("summary") or
+
                 e.get("subject") or
+
                 "Untitled Event"
+
             )
 
+
+
             raw_external_id = e.get("id")
+
             external_id = str(raw_external_id).strip() if raw_external_id is not None else ""
+
             if not external_id or external_id.lower() == "none":
+
                 external_id = build_fallback_external_id(
+
                     provider=provider,
+
                     account_email=account_email,
+
                     title=title,
+
                     start_val=start,
+
                 )
 
+
+
             unified.append({
+
                 "external_id": external_id,
 
+
+
                 "title": title,
+
                 # ==================================================
-                # 🔬 SURGICAL FIX — DATE CONSISTENCY
+
+                # ðŸ”¬ SURGICAL FIX â€” DATE CONSISTENCY
+
                 # --------------------------------------------------
+
                 # ENSURE ALL DATES ARE ISO STRINGS
+
                 # (frontend safeParseDate expects this)
+
                 # ==================================================
+
                 "start": (
+
                     start.isoformat() if isinstance(start, datetime) else start
+
                 ),
+
                 "end": (
+
                     end.isoformat() if isinstance(end, datetime) else end
+
                 ),
+
                 # ==================================================
+
                 "source": source_label,
+
                 "provider": provider,
-                # ✅ REQUIRED BY FRONTEND
+
+                # âœ… REQUIRED BY FRONTEND
+
                 "account_email": account_email,
-                # ✅ SINGLE SOURCE KEY
+
+                # âœ… SINGLE SOURCE KEY
+
                 "account_key": f"{provider}:{account_email}",
+
                 "color": ACCOUNT_COLORS.get(provider, ACCOUNT_COLORS["other"])
+
             })
+
             
+
         sources = [e["source"] for e in unified]
 
-        #print("🚀 FINAL SOURCE BREAKDOWN:",{s: sources.count(s) for s in set(sources)})
+
+
+        #print("ðŸš€ FINAL SOURCE BREAKDOWN:",{s: sources.count(s) for s in set(sources)})
+
         return unified
 
-    # ==================================================
-    # ✅ ENSURE UTC (FINAL FIX - CORRECT)
-    # ==================================================
-    def _ensure_utc(self, dt):
-        """
-        ✅ Ensures datetime is always timezone-aware (UTC)
 
-        - None → stays None
-        - naive datetime → converted to UTC
-        - aware datetime → unchanged
+
+    # ==================================================
+
+    # âœ… ENSURE UTC (FINAL FIX - CORRECT)
+
+    # ==================================================
+
+    def _ensure_utc(self, dt):
+
         """
+
+        âœ… Ensures datetime is always timezone-aware (UTC)
+
+
+
+        - None â†’ stays None
+
+        - naive datetime â†’ converted to UTC
+
+        - aware datetime â†’ unchanged
+
+        """
+
+
 
         if not dt:
+
             return None
 
-        # ✅ Convert naive → UTC
+
+
+        # âœ… Convert naive â†’ UTC
+
         if dt.tzinfo is None:
+
             return dt.replace(tzinfo=timezone.utc)
+
+
 
         return dt
 
+
+
     # ==================================================
-    # ✅ FETCH EVENTS (FIXED)
+
+    # âœ… FETCH EVENTS (FIXED)
+
     # ==================================================
+
     @staticmethod
 
+
+
     def map_ms_tz(tz_name):
+
         if not tz_name:
+
             return pytz.utc
 
+
+
         if "Eastern" in tz_name:
+
             return pytz.timezone("US/Eastern")
+
         if "Central" in tz_name:
+
             return pytz.timezone("US/Central")
+
         if "Mountain" in tz_name:
+
             return pytz.timezone("US/Mountain")
+
         if "Pacific" in tz_name:
+
             return pytz.timezone("US/Pacific")
 
+
+
         return pytz.utc
+
     
+
     def get_events_from_db(self, db, user, start_date, end_date):
 
+
+
         events = db.query(Event).filter(
+
             Event.owner_id == user.id,
+
             Event.start_time >= start_date,
+
             Event.start_time <= end_date
+
         ).all()
 
+
+
         per_account_counts = {}
+
         for ev in events:
+
             provider = normalize_provider(getattr(ev, "source", None) or "local")
+
             email = (getattr(ev, "account_email", None) or "local").lower().strip()
+
             key = f"{provider}:{email}"
+
             per_account_counts[key] = per_account_counts.get(key, 0) + 1
 
-        log_info(f"🧪 DB VIEW ACCOUNT TOTALS | {per_account_counts}")
+
+
+        log_info(f"ðŸ§ª DB VIEW ACCOUNT TOTALS | {per_account_counts}")
+
         
+
         return [
+
             {
+
                 "id": ev.id,
+
                 "external_id": ev.externalId,
+
                 "title": ev.title,
+
                 "start": ev.start_time.isoformat(),
+
                 "end": ev.end_time.isoformat() if ev.end_time else None,
+
                 "description": ev.description or "",
+
                 "color": ev.color,
+
                 "tags": ev.tags or [],
+
                 "sticky_note": ev.sticky_note,
+
                 "sticky_notes": ev.sticky_notes or [],
+
                 "created_at": ev.created_at.isoformat() if ev.created_at else None,
+
                 "updated_at": ev.updated_at.isoformat() if getattr(ev, "updated_at", None) else None,
 
-                # ✅ CANONICAL SOURCE
+
+
+                # âœ… CANONICAL SOURCE
+
                 "source": ev.source or "local",
 
-                # ✅ KEEP FOR LEGACY COMPAT
+
+
+                # âœ… KEEP FOR LEGACY COMPAT
+
                 "account_email": getattr(ev, "account_email", "local"),
 
-                # ✅ GOLD STANDARD: SINGLE SOURCE OF TRUTH
+
+
+                # âœ… GOLD STANDARD: SINGLE SOURCE OF TRUTH
+
                 "account_key": build_account_key(
+
                     ev.source or "local",
+
                     getattr(ev, "account_email", "local")
+
                 )
+
             }
+
             for ev in events
+
         ]
+
         
+
     def fetch_all_events(self, db, user, start_date=None, end_date=None):
-        """
-        ✅ NEW: RANGE-AWARE FETCH
-        
-        If no range provided → default to FAST monthly window
+
         """
 
-        google_events = []
-        ms_events = []
-        apple_events = []
-        account_sync_totals = []
+        3-phase parallel fetch.
 
 
-        # ==================================================
-        # ✅ RANGE INITIALIZATION (STANDARDIZED LOGGING)
-        # ==================================================
+
+        Phase 1 (sequential, DB):  resolve tokens, build per-account configs.
+
+        Phase 2 (parallel, NO DB): HTTP calls to all providers concurrently.
+
+        Phase 3 (sequential, DB):  write statuses + sync tokens back.
+
+        """
+
         now = datetime.now(timezone.utc)
 
         if not start_date or not end_date:
-            
-            # ==================================================
-            # ✅ FIX: EXPANDED DEFAULT RANGE (USER-REALISTIC)
-            # ==================================================
-            # ✅ WHY:
-            # - 30 days is too narrow for real-world calendars
-            # - Apple calendars contain historical + recurring events
-            # - Google calendars often sparse outside near-term
+
             start_date = now - relativedelta(days=90)
-            end_date = now + relativedelta(days=90)
 
-            log_info("📦 Using default 90-day range")
+            end_date   = now + relativedelta(days=90)
+
+            log_info("ðŸ“¦ Using default 90-day range")
+
         else:
-            log_info("📥 Using UI-provided range")
 
-        # ✅ ✅ NORMALIZE ONCE (CRITICAL IMPROVEMENT)
+            log_info("ðŸ“¥ Using UI-provided range")
+
+
+
         safe_start = self._ensure_utc(start_date)
-        safe_end = self._ensure_utc(end_date)
 
-        # ✅ GET ALL SYNC-ENABLED ACCOUNTS
+        safe_end   = self._ensure_utc(end_date)
+
+
+
         accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, user.id)
 
-        # ==================================================
-        # ✅ FETCH SUMMARY (CLEAN + READABLE) - Debug
-        # ==================================================
+        log_info(f"ðŸ“… Fetch window: {safe_start.date()} â†’ {safe_end.date()}")
 
-        log_info(f"📅 Fetch window: {safe_start.date()} → {safe_end.date()}")
-        log_info(f"👤 Accounts found: {len(accounts)}")
+        log_info(f"ðŸ‘¤ Accounts found: {len(accounts)}")
+
+
+
+        # â”€â”€ Phase 1: Resolve tokens (sequential, DB) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        configs = []
+
+        failed_accs = []
+
+        sync_time = now
+
 
 
         for acc in accounts:
-            
-            #/**************************************************************
-            #* ✅ SKIP SYSTEM / HOLIDAY CALENDARS (CRITICAL FIX)
-            #* MUST RUN BEFORE ANY TOKEN OR API CALL
-            #**************************************************************/
+
             email = (acc.account_email or "").lower()
 
             if "holiday" in email or "@group.v.calendar.google.com" in email:
-                log_info(f"⏭ Skipping system calendar: {email}")
+
                 continue
 
 
-            #print("🧪 ACCOUNT CHECK:",
-            #    acc.provider,
-            #    acc.account_email,
-            #    acc.access_token)
-            # ==================================================
-            # ✅ ACCOUNT PROCESSING START
-            # ==================================================
-            log_info(f"🔄 Processing: {acc.provider} | {acc.account_email}")
-
-            sync_time = datetime.now(timezone.utc)
 
             token = ensure_valid_token(db, acc)
 
             if not token:
-                log_error(f"🚫 No token: {acc.account_email}")
+
+                log_error(f"ðŸš« No token: {email}")
 
                 acc.last_sync = sync_time
+
                 acc.last_sync_failure = sync_time
+
                 acc.last_error = "No valid token available"
+
                 acc.status = "error"
 
                 safe_commit(db)
 
                 continue
 
-            try:
-                # ==================================================
-                # ✅ PROVIDER ROUTING (FAIL SAFE)
-                # ==================================================
-                fetched_raw_count = 0
-                added = 0
-
-                if acc.provider not in ["google", "apple", "microsoft"]:
-                    log_error(f"Unknown provider: {acc.provider}")
-                    continue
-                
-                # ==================================================
-                # ✅ GOOGLE FETCH + FILTER
-                # ==================================================
-                if acc.provider == "google":
-
-                    events = self.google.fetch_events(
-                    access_token=token,
-                    account_email=acc.account_email,
-                    start_date=start_date,
-                    end_date=end_date
-                ) or []
-
-                    fetched_raw_count = len(events)
-
-                    log_debug(f"Google raw count: {len(events)}")
-
-                    for e in events:
-                        #/**************************************************************
-                        #* ✅ FILTER GOOGLE SYSTEM CALENDARS (REAL FIX)
-                        #**************************************************************/
-                        calendar_id = (
-                            e.get("organizer", {}).get("email") or
-                            e.get("creator", {}).get("email") or
-                            ""
-                        ).lower()
-
-                        if "holiday" in calendar_id or "@group.v.calendar.google.com" in calendar_id:
-                            log_debug(f"⏭ Skipping holiday event: {calendar_id}")
-                            continue
-                        
-                        start_val = (
-                            e.get("start", {}).get("dateTime")
-                            or e.get("start", {}).get("date")
-                        )
-
-                        dt = self._to_utc(start_val)
-                        dt = self._ensure_utc(dt)
-
-                        if not dt:
-                            continue
-
-                        #if safe_start <= dt <= safe_end:
-                        # ==================================================
-                        # ✅ FIX: ENSURE GOOGLE EVENTS HAVE PROVIDER METADATA
-                        # ==================================================
-                        # ✅ WHY:
-                        # - Summary + normalization depend on provider/source
-                        # - Without this → events counted as "other"
-
-                        #if safe_start <= dt <= safe_end:
-                        if True:
-                            e["account"] = acc.account_email
-                            e["account_email"] = acc.account_email  # ✅ CRITICAL
-                            # ✅ CRITICAL FIX
-                            e["provider"] = "google"
-                            e["source"] = "google"
-
-                            google_events.append(e)
-                            added += 1
-
-                    log_info(f"   🟢 Google events in range: {added}")
-                    
-                    # ==================================================
-                    # ✅ GOOGLE DEBUG VISIBILITY
-                    # ==================================================
-                    log_info(f"🟢 Google RAW fetched: {len(events)}")
 
 
-                # ==================================================
-                # ✅ APPLE FETCH + FILTER (CALDAV)
-                #   ✅ Phase 1 Apple support
-                #   ✅ Safe: does not break pipeline
-                #   ✅ Reuses normalization system
-                # ==================================================
-                elif acc.provider == "apple":
+            sync_state = dict(acc.sync_token or {})
 
-                    events = ExternalCalendarService.fetch_apple_calendar_events(acc) or []
-                    fetched_raw_count = len(events)
-                    log_debug(f"Apple raw count: {len(events)}")
-                    
-                    # ✅ WHY:
-                    # Apple data spans MANY years and is not "window-based"
 
-                    apple_start = datetime(1900, 1, 1, tzinfo=timezone.utc)
-                    apple_end = datetime(2100, 1, 1, tzinfo=timezone.utc)
 
-                    for e in events:
-                        
-                        # ==================================================
-                        # ✅ FIX: ROBUST APPLE DATETIME HANDLING
-                        # ==================================================
-                        # ✅ WHY:
-                        # Apple events may already be datetime OR string
-                        # We must safely handle both without losing data
+            config = {
 
-                        dt = e.get("start")
+                "acc_id":           acc.id,
 
-                        # ✅ Case 1: already datetime → just normalize
-                        if isinstance(dt, datetime):
-                            dt = self._ensure_utc(dt)
+                "provider":         acc.provider,
 
-                        # ✅ Case 2: string → convert
-                        elif isinstance(dt, str):
-                            dt = self._to_utc(dt)
+                "account_email":    acc.account_email,
 
-                        # ✅ Invalid case
-                        else:
-                            log_debug(f"Skipped Apple event (invalid start): {dt}")
-                            continue
+                "token":            token,
 
-                        # ✅ Final safety check
-                        if not dt:
-                            log_debug("Skipped Apple event after conversion (None)")
-                            continue
+                "sync_token_state": sync_state,
 
-                        log_debug(f"✅ Apple dt parsed: {dt}")
-                        
-                        if apple_start <= dt <= apple_end:
-                            
-                            # Apple MUST provide account_email or frontend breaks
-                            # ==================================================
-                            e["account_email"] = acc.account_email
-                            e["account"] = acc.account_email  # backward compatibility
-                            e["provider"] = "apple"
-                            e["source"] = "apple"
+            }
 
-                            apple_events.append(e)
-                            added += 1
+            if acc.provider == "apple":
 
-                    log_info(f"   🍎 Apple events in range: {added}")
-                    
-                # ==================================================
-                # ✅ MICROSOFT FETCH + PAGINATION
-                # ==================================================
+                config["caldav_url"]   = acc.access_token
 
-                elif acc.provider == "microsoft":
-                    url = "https://graph.microsoft.com/v1.0/me/calendarView"
-                    params = {
-                        "startDateTime": start_date.isoformat().replace("+00:00", "Z"),
-                        "endDateTime": end_date.isoformat().replace("+00:00", "Z")
-                    }
-                    events = []
+                config["app_password"] = acc.refresh_token
 
-                    
-                    # ✅ PAGINATED FETCH
-                    while url:
 
-                        res = requests.get(
-                            url,
-                            headers={"Authorization": f"Bearer {token}"},
-                            params=params,
-                            timeout=self.REQUEST_TIMEOUT,
-                        )
 
-                        log_debug(f"MS status: {res.status_code}")
+            configs.append(config)
 
-                        if res.status_code != 200:
-                            log_error(f"Microsoft API error: {res.status_code}")
-                            break
 
-                        data = res.json()
 
-                        batch = data.get("value", [])
-                        events.extend(batch)
+        if not configs:
 
-                        url = data.get("@odata.nextLink")
-                        params = None
+            return {
 
-                    
-                    log_debug(f"Microsoft raw events: {len(events)}")
-                    fetched_raw_count = len(events)
+                "events": [],
 
-                    # ==================================================
-                    # ✅ MICROSOFT DATE NORMALIZATION + FILTER
-                    # ==================================================
-                    added = 0
-                    for e in events:
-                        start_obj = e.get("start", {})
-                        dt_str = start_obj.get("dateTime")
-                        tz_name = start_obj.get("timeZone")
+                "account_status": {},
 
-                        dt = None
+                "account_sync_totals": [],
 
-                        if dt_str:
-                            try:
-                                dt_naive = datetime.fromisoformat(dt_str)
+                "cancelled_external_ids": [],
 
-                                if tz_name:
-                                    tz = self.map_ms_tz(tz_name)
-                                    dt = tz.localize(dt_naive).astimezone(timezone.utc)
-                                else:
-                                    dt = dt_naive.replace(tzinfo=timezone.utc)
+                "incremental_account_keys": set(),
 
-                            except Exception as err:
-                                log_debug(f"MS start parse error: {err}")
+            }
 
-                        if not dt:
-                            continue
 
-                        if safe_start <= dt <= safe_end:
-                            end_obj = e.get("end", {})
-                            end_str = end_obj.get("dateTime")
-                            end_tz = end_obj.get("timeZone")
 
-                            end_dt = None
+        # â”€â”€ Phase 2: Parallel HTTP fetch â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-                            if end_str:
-                                try:
-                                    end_naive = datetime.fromisoformat(end_str)
+        max_workers = min(8, len(configs))
 
-                                    if end_tz:
-                                        tz = self.map_ms_tz(end_tz)
+        fetch_results = []
 
-                                        try:
-                                            end_dt = tz.localize(end_naive).astimezone(timezone.utc)
-                                        except:
-                                            end_dt = end_naive.replace(tzinfo=timezone.utc)
 
-                                    else:
-                                        end_dt = end_naive.replace(tzinfo=timezone.utc)
 
-                                except Exception as err:
-                                    log_debug(f"MS end parse error: {err}")
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
 
-                            ms_events.append({
-                                "id": e.get("id"),
-                                "subject": e.get("subject"),
+            future_map = {
 
-                                "start": dt.isoformat(),
-                                "end": end_dt.isoformat() if end_dt else None,
+                pool.submit(_fetch_account_http, cfg, safe_start, safe_end): cfg
 
-                                "account_email": acc.account_email,
+                for cfg in configs
 
-                                # ==================================================
-                                # 🔬 SURGICAL FIX — FORCE PROVIDER TAG
-                                # ==================================================
-                                "provider": "microsoft",
-                                "source": "microsoft",
-                            })
-                            added += 1
-                    log_info(f"   🟦 Microsoft events in range: {added}")
+            }
 
-                log_info(
-                    f"🧪 ACCOUNT SYNC TOTALS | {acc.provider}:{acc.account_email} | raw={fetched_raw_count} | in_range={added}"
-                )
+            for future in as_completed(future_map):
+
+                try:
+
+                    fetch_results.append(future.result())
+
+                except Exception as exc:
+
+                    cfg = future_map[future]
+
+                    fetch_results.append({
+
+                        "acc_id":           cfg["acc_id"],
+
+                        "provider":         cfg["provider"],
+
+                        "account_email":    cfg["account_email"],
+
+                        "events":           [],
+
+                        "cancelled_ids":    [],
+
+                        "new_sync_tokens":  {},
+
+                        "used_incremental": False,
+
+                        "raw_count":        0,
+
+                        "error":            str(exc),
+
+                    })
+
+
+
+        # â”€â”€ Phase 3: Aggregate + write DB statuses â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        google_events: list = []
+
+        apple_events:  list = []
+
+        ms_events:     list = []
+
+        account_sync_totals: list = []
+
+        cancelled_external_ids: list = []
+
+        incremental_account_keys: set = set()
+
+
+
+        # Build acc lookup by id for DB writes
+
+        acc_by_id = {acc.id: acc for acc in accounts}
+
+
+
+        for r in fetch_results:
+
+            acc = acc_by_id.get(r["acc_id"])
+
+            provider     = r["provider"]
+
+            acct_email   = (r["account_email"] or "").lower().strip()
+
+            account_key  = f"{normalize_provider(provider)}:{acct_email}"
+
+
+
+            if r["error"]:
+
+                log_error(f"Account failed ({acct_email}): {r['error']}")
 
                 account_sync_totals.append({
-                    "provider": acc.provider,
-                    "account_email": acc.account_email,
-                    "raw": fetched_raw_count,
-                    "in_range": added,
-                    "status": "ok"
+
+                    "provider":      provider,
+
+                    "account_email": acct_email,
+
+                    "raw": 0, "in_range": 0,
+
+                    "status": "error", "error": r["error"],
+
                 })
 
-                acc.last_sync = sync_time
+                if acc:
+
+                    acc.last_sync         = sync_time
+
+                    acc.last_sync_failure = sync_time
+
+                    acc.last_error        = r["error"]
+
+                    acc.status            = "error"
+
+                    safe_commit(db)
+
+                continue
+
+
+
+            # Tag MS events with account_email (done here, not in thread)
+
+            for e in r["events"]:
+
+                if provider == "microsoft":
+
+                    e["account_email"] = acct_email
+
+                    e["account"]       = acct_email
+
+
+
+            # Route to the right list for _normalize()
+
+            if provider == "google":
+
+                google_events.extend(r["events"])
+
+            elif provider == "apple":
+
+                apple_events.extend(r["events"])
+
+            elif provider == "microsoft":
+
+                ms_events.extend(r["events"])
+
+
+
+            # Track cancelled events for sync_all deletion
+
+            for raw_id in r["cancelled_ids"]:
+
+                if raw_id:
+
+                    eid = f"{normalize_provider(provider)}:{acct_email}:{raw_id}"
+
+                    cancelled_external_ids.append(eid)
+
+
+
+            if r["used_incremental"]:
+
+                incremental_account_keys.add(account_key)
+
+
+
+            in_range = len(r["events"])
+
+            log_info(f"ðŸ§ª ACCOUNT SYNC TOTALS | {provider}:{acct_email} | raw={r['raw_count']} | in_range={in_range} | {'incremental' if r['used_incremental'] else 'full'}")
+
+            account_sync_totals.append({
+
+                "provider":      provider,
+
+                "account_email": acct_email,
+
+                "raw":           r["raw_count"],
+
+                "in_range":      in_range,
+
+                "status":        "ok",
+
+            })
+
+
+
+            if acc:
+
+                # Store new incremental sync tokens back in DB
+
+                if r["new_sync_tokens"]:
+
+                    merged_tokens = dict(acc.sync_token or {})
+
+                    merged_tokens.update(r["new_sync_tokens"])
+
+                    acc.sync_token = merged_tokens
+
+
+
+                acc.last_sync         = sync_time
+
                 acc.last_sync_success = sync_time
+
                 acc.last_sync_failure = None
-                acc.last_error = None
-                acc.status = "ok"
+
+                acc.last_error        = None
+
+                acc.status            = "ok"
+
                 safe_commit(db)
 
-            # ==================================================
-            # ✅ ACCOUNT ERROR HANDLING (STANDARDIZED)
-            # ==================================================
-            except Exception as e:
-                log_error(f"Account failed ({acc.account_email}): {e}")
-                account_sync_totals.append({
-                    "provider": acc.provider,
-                    "account_email": acc.account_email,
-                    "raw": 0,
-                    "in_range": 0,
-                    "status": "error",
-                    "error": str(e)
-                })
-                acc.last_sync = sync_time
-                acc.last_sync_failure = sync_time
-                acc.last_error = str(e)
-                acc.status = "error"
-                safe_commit(db)
-                continue
 
-        
-        # ==================================================
-        # ✅ FINAL FETCH SUMMARY (PROVIDER-AWARE)
-        # ==================================================
 
-        total_google = len([e for e in google_events if e.get("source") == "google"])
-        total_apple = len(apple_events)
-        total_ms = len(ms_events)
+        total_g = len(google_events)
 
-        total = total_google + total_apple + total_ms
+        total_a = len(apple_events)
 
-        log_info("✅ Fetch complete")
-        log_info(f"📊 Google: {total_google}")
-        log_info(f"📊 Apple:  {total_apple}")
-        log_info(f"📊 MSFT:   {total_ms}")
-        log_info(f"📊 TOTAL:  {total}")
+        total_m = len(ms_events)
 
-        accounts = MultiAccountOAuthService.get_user_accounts(db, user.id)
+        log_info(f"âœ… Parallel fetch complete | Google:{total_g} Apple:{total_a} MS:{total_m}")
+
+
+
+        all_accounts = MultiAccountOAuthService.get_user_accounts(db, user.id)
 
         account_status = {
+
             f"{acc.provider}:{(acc.account_email or '').lower().strip()}": resolve_account_status(acc)
-            for acc in accounts
+
+            for acc in all_accounts
+
         }
 
-        
-        #/**************************************************************
-        # ✅ MERGE APPLE INTO GOOGLE PIPE (NORMALIZER EXPECTS 2 LISTS)
-        # Keep normalize() unchanged (low-risk surgery)
-        #*************************************************************/
+
+
         combined_primary = google_events + apple_events
 
-        return {
-            "events": self._normalize(combined_primary, ms_events),
 
-            "account_status": account_status,
-            "account_sync_totals": account_sync_totals
+
+        return {
+
+            "events":                    self._normalize(combined_primary, ms_events),
+
+            "account_status":            account_status,
+
+            "account_sync_totals":       account_sync_totals,
+
+            "cancelled_external_ids":    cancelled_external_ids,
+
+            "incremental_account_keys":  incremental_account_keys,
+
         }
 
+
+
+
+
     # ==================================================
-    # ✅ CROSS-ACCOUNT DEDUP PASS
+
+    # âœ… CROSS-ACCOUNT DEDUP PASS
+
     # ==================================================
+
     def _dedup_pass(self, db: Session, user_id: int) -> int:
+
         """
+
         Canonical Event Model
-        ─────────────────────
+
+        â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
         After sync, collapse events that share the same title + start_time
+
         (rounded to the minute) into ONE canonical row.
 
+
+
         Rules:
-        • ALL events (local + provider) are fingerprinted together.
-        • An existing local canonical (source='local' with external_ids) wins.
-        • ALL provider IDs are merged into canonical.external_ids so Publish
+
+        â€¢ ALL events (local + provider) are fingerprinted together.
+
+        â€¢ An existing local canonical (source='local' with external_ids) wins.
+
+        â€¢ ALL provider IDs are merged into canonical.external_ids so Publish
+
           reaches every account that originally held the event.
-        • The canonical row keeps its original source/account_email for chip
+
+        â€¢ The canonical row keeps its original source/account_email for chip
+
           filter display; Publish scope is determined by external_ids, not source.
-        • Subsequent syncs re-merge fresh provider rows into the existing
+
+        â€¢ Subsequent syncs re-merge fresh provider rows into the existing
+
           canonical without losing user edits.
+
         """
+
         from collections import defaultdict
+
         import hashlib as _hs
 
+
+
         all_events = db.query(Event).filter(
+
             Event.owner_id == user_id,
+
         ).all()
 
+
+
         groups: dict = defaultdict(list)
+
         for ev in all_events:
+
             title_norm = (ev.title or "").strip().lower()
+
             if not title_norm:
+
                 continue  # skip untitled placeholders
+
             if ev.start_time:
+
                 dt = ev.start_time.replace(second=0, microsecond=0)
+
                 dt_str = dt.isoformat()[:16]
+
             else:
+
                 dt_str = ""
+
             fp = _hs.md5(f"{title_norm}|{dt_str}".encode()).hexdigest()
+
             groups[fp].append(ev)
 
+
+
         merged_count = 0
+
         for fp, group in groups.items():
+
             if len(group) <= 1:
+
                 continue
 
+
+
             # Sort: existing local canonicals first (they win), then by created_at.
+
             # Normalise created_at to UTC-aware to prevent TypeError when
+
             # comparing naive and aware datetimes (SQLite stores naive).
+
             def _safe_dt(e):
+
                 dt = e.created_at
+
                 if dt is None:
+
                     return datetime(2000, 1, 1, tzinfo=timezone.utc)
+
                 return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
+
+
             group.sort(key=lambda e: (
+
                 0 if (e.source == "local" and e.external_ids) else 1,
+
                 _safe_dt(e),
+
             ))
 
+
+
             canonical = group[0]
+
             merged_ids = dict(canonical.external_ids or {})
 
+
+
             for dup in group[1:]:
+
                 # Absorb all provider IDs from the duplicate
+
                 for k, v in (dup.external_ids or {}).items():
+
                     if k not in merged_ids:
+
                         merged_ids[k] = v
+
                 # Preserve description / color if canonical is missing it
+
                 if not canonical.description and dup.description:
+
                     canonical.description = dup.description
+
                 if not canonical.color and dup.color:
+
                     canonical.color = dup.color
+
                 db.delete(dup)
+
                 merged_count += 1
 
+
+
             # Promote to canonical: absorb all provider IDs, keep the
+
             # original source/account_email so the event continues to appear
+
             # under its original account chip filter in the frontend.
+
             # Write-back propagates to ALL accounts via external_ids.
+
             canonical.external_ids = merged_ids
 
+
+
         if merged_count:
+
             db.commit()
-            log_info(f"🔀 Dedup: promoted {merged_count} provider events into local canonical rows")
+
+            log_info(f"ðŸ”€ Dedup: promoted {merged_count} provider events into local canonical rows")
+
+
 
         return merged_count
 
+
+
     # ==================================================
-    # ✅ SYNC ENGINE (FIXED + INSIDE CLASS)
+
+    # âœ… SYNC ENGINE (FIXED + INSIDE CLASS)
+
     # ==================================================
+
     def sync_all(self, db: Session, user, start_date=None, end_date=None):
 
-        result = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date)
-        account_sync_totals = result.get("account_sync_totals", []) if isinstance(result, dict) else []
-
-        events = result.get("events", []) if isinstance(result, dict) else []
+        result               = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date)
+        account_sync_totals  = result.get("account_sync_totals", [])    if isinstance(result, dict) else []
+        cancelled_eids       = result.get("cancelled_external_ids", []) if isinstance(result, dict) else []
+        incremental_keys     = result.get("incremental_account_keys", set()) if isinstance(result, dict) else set()
+        events               = result.get("events", [])                 if isinstance(result, dict) else []
 
         if not isinstance(events, list):
-            log_error("❌ Invalid events payload structure")
+            log_error("Invalid events payload structure")
             return {"created": 0, "updated": 0}
+
         created = updated = 0
 
-        
         for e in events:
-
             if not isinstance(e, dict):
-                log_debug(f"⚠️ Skipping invalid event: {e}")
                 continue
-
             external_id = build_event_id(e)
-            
-            # ✅ guard against bad data
             if ":" not in external_id or external_id.endswith(":"):
                 continue
-
             start = self._to_utc(e["start"])
-            end = self._to_utc(e["end"])
-
+            end   = self._to_utc(e["end"])
             if not start:
                 continue
-
             existing = db.query(Event).filter(
                 Event.externalId == external_id,
-                Event.owner_id == user.id
+                Event.owner_id   == user.id,
             ).first()
-
-            # Build external_ids dict keyed by provider:account_email
-            # so a single canonical event can track IDs from multiple accounts
-            raw_ext_id = e.get("external_id", "")
-            provider = normalize_provider(e.get("source", "local"))
-            acct_email = (e.get("account_email") or "").lower().strip()
-            ext_id_key = f"{provider}:{acct_email}" if acct_email else provider
+            raw_ext_id   = e.get("external_id", "")
+            provider     = normalize_provider(e.get("source", "local"))
+            acct_email   = (e.get("account_email") or "").lower().strip()
+            ext_id_key   = f"{provider}:{acct_email}" if acct_email else provider
             provider_ids = {ext_id_key: raw_ext_id} if raw_ext_id else {}
-
             if not existing:
                 db.add(Event(
-                    title=e["title"],
-                    start_time=start,
-                    end_time=end,
-                    source=e["source"],
-                    externalId=external_id,
-                    owner_id=user.id,
-                    account_email=e.get("account_email"),
-                    color=e.get("color"),
-                    external_ids=provider_ids,
+                    title=e["title"], start_time=start, end_time=end,
+                    source=e["source"], externalId=external_id,
+                    owner_id=user.id, account_email=e.get("account_email"),
+                    color=e.get("color"), external_ids=provider_ids,
                 ))
                 created += 1
                 continue
-
             changed = False
-
             if existing.start_time != start:
-                existing.start_time = start
-                changed = True
-
+                existing.start_time = start; changed = True
             if existing.end_time != end:
-                existing.end_time = end
-                changed = True
-
-            # Keep external_ids populated / updated
+                existing.end_time = end;     changed = True
             if provider_ids and existing.external_ids != provider_ids:
                 merged = dict(existing.external_ids or {})
                 merged.update(provider_ids)
-                existing.external_ids = merged
-                changed = True
-
+                existing.external_ids = merged; changed = True
             if changed:
                 updated += 1
 
-        # ==================================================
-        # ✅ HARD DELETE — REMOVE ORPHANED EVENTS
-        # ==================================================
-        existing_events = db.query(Event).filter(
-            Event.owner_id == user.id
-        ).all()
+        all_evs      = db.query(Event).filter(Event.owner_id == user.id).all()
+        incoming_ids = set(build_event_id(e) for e in events if e.get("external_id"))
+        deleted      = 0
 
-        # build set of valid external IDs from fresh fetch
-        incoming_ids = set(
-            build_event_id(e)
-            for e in events
-            if e.get("external_id")
-        )
-
-        deleted = 0
-
-        for ev in existing_events:
-
-            ev_source = str(ev.source) if ev.source is not None else None
-            ev_external_id = str(ev.externalId) if ev.externalId is not None else None
-
-            # ✅ NEVER DELETE LOCAL EVENTS
-            if ev_source == "local":
+        for ev in all_evs:
+            ev_src = str(ev.source) if ev.source is not None else None
+            ev_eid = str(ev.externalId) if ev.externalId is not None else None
+            if ev_src == "local":
                 continue
+            ev_key = f"{normalize_provider(ev_src)}:{(getattr(ev, 'account_email', None) or '').lower().strip()}"
+            if ev_key in incremental_keys:
+                if ev_eid and ev_eid in cancelled_eids:
+                    db.delete(ev); deleted += 1
+            else:
+                if ev_eid and ev_eid not in incoming_ids:
+                    db.delete(ev); deleted += 1
 
-            if ev_external_id and ev_external_id not in incoming_ids:
-                db.delete(ev)
-                deleted += 1
+        for eid in cancelled_eids:
+            ev = db.query(Event).filter(
+                Event.owner_id == user.id, Event.externalId == eid,
+            ).first()
+            if ev and ev.source != "local":
+                db.delete(ev); deleted += 1
 
-        log_info(f"🗑 Deleted stale external events: {deleted}")
-        
+        log_info(f"Deleted stale/cancelled events: {deleted}")
         db.commit()
 
-        # ==================================================
-        # ✅ CROSS-ACCOUNT DEDUP PASS
-        # Merge events with same title+start_time from different accounts
-        # into a single canonical row so the calendar shows no duplicates.
-        # ==================================================
         deduped = self._dedup_pass(db, user.id)
 
         return {
-            "created": created,
-            "updated": updated,
-            "deduped": deduped,
-            "account_sync_totals": account_sync_totals
+            "created":             created,
+            "updated":             updated,
+            "deduped":             deduped,
+            "account_sync_totals": account_sync_totals,
         }

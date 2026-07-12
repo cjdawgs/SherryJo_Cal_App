@@ -289,6 +289,141 @@ class GoogleCalendarService:
         )
 
     # ==================================================
+    # ✅ INCREMENTAL FETCH (V2)
+    # Uses syncToken per calendar when available; full fetch with
+    # date range otherwise.  Returns a structured result dict so
+    # the caller can store new tokens and handle cancellations.
+    # ==================================================
+    def fetch_events_v2(
+        self,
+        access_token: str,
+        account_email: str = None,
+        start_date=None,
+        end_date=None,
+        sync_token_state: dict = None,   # {cal_id: syncToken}
+    ) -> dict:
+        """
+        Returns:
+            {
+              "events":          [event_dict, ...],   # active events only
+              "cancelled_ids":   ["raw_event_id", ...],  # deleted since last sync
+              "next_tokens":     {cal_id: nextSyncToken},  # store back in DB
+              "used_incremental": bool,
+            }
+        """
+        headers = {"Authorization": f"Bearer {access_token}"}
+        sync_state = dict(sync_token_state or {})
+        next_tokens: dict = {}
+        all_events: list = []
+        cancelled_ids: list = []
+        used_incremental = False
+
+        # ── discover calendars ──────────────────────────────────────────
+        calendar_ids = ["primary"]
+        if account_email and account_email.lower() != "primary":
+            calendar_ids.append(account_email.lower())
+
+        try:
+            cl_resp = requests.get(
+                "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+                headers=headers,
+                timeout=self.REQUEST_TIMEOUT,
+            )
+            if cl_resp.status_code == 200:
+                for c in cl_resp.json().get("items", []):
+                    cid = (c.get("id") or "").lower()
+                    if not cid:
+                        continue
+                    if "holiday" in cid or "@group.v.calendar.google.com" in cid or "#" in cid:
+                        continue
+                    if cid not in calendar_ids:
+                        calendar_ids.append(cid)
+        except Exception as e:
+            print(f"⚠️ Google calendarList failed: {e}")
+
+        # ── fetch each calendar (incremental when token available) ──────
+        start_iso = start_date.isoformat() if start_date else None
+        end_iso   = end_date.isoformat()   if end_date   else None
+
+        for cal_id in calendar_ids:
+            cid_lower = cal_id.lower()
+            if "holiday" in cid_lower or "@group.v.calendar.google.com" in cid_lower or "#" in cid_lower:
+                continue
+
+            token_for_cal = sync_state.get(cal_id)
+
+            # Try incremental; fall back to full on 410 GONE
+            for attempt in range(2):
+                if token_for_cal and attempt == 0:
+                    # Incremental: syncToken, no date range
+                    params: dict = {"syncToken": token_for_cal, "singleEvents": True, "maxResults": 2500}
+                    used_incremental = True
+                else:
+                    # Full fetch with date range
+                    params = {"singleEvents": True, "orderBy": "startTime", "maxResults": 2500}
+                    if start_iso:
+                        params["timeMin"] = start_iso
+                    if end_iso:
+                        params["timeMax"] = end_iso
+                    token_for_cal = None  # clear so next calendar starts fresh
+
+                url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
+                items: list = []
+                next_sync_token = None
+                need_retry = False
+
+                # paginate
+                while url:
+                    resp = requests.get(url, headers=headers, params=params, timeout=self.REQUEST_TIMEOUT)
+
+                    if resp.status_code == 410:
+                        # syncToken expired → retry as full fetch
+                        need_retry = True
+                        break
+
+                    if resp.status_code != 200:
+                        print(f"❌ Google events failed ({resp.status_code}): {cal_id}")
+                        break
+
+                    data = resp.json()
+                    items.extend(data.get("items", []))
+
+                    page_token = data.get("nextPageToken")
+                    if page_token:
+                        params = dict(params)   # copy to avoid mutation
+                        params["pageToken"] = page_token
+                        params.pop("syncToken", None)
+                        url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
+                    else:
+                        next_sync_token = data.get("nextSyncToken")
+                        url = None
+
+                if need_retry:
+                    # Loop again (attempt==1) with full fetch
+                    continue
+
+                # Separate active from cancelled
+                for item in items:
+                    if item.get("status") == "cancelled":
+                        raw_id = item.get("id")
+                        if raw_id:
+                            cancelled_ids.append(raw_id)
+                    else:
+                        all_events.append(item)
+
+                if next_sync_token:
+                    next_tokens[cal_id] = next_sync_token
+
+                break  # done with this calendar
+
+        return {
+            "events":           all_events,
+            "cancelled_ids":    cancelled_ids,
+            "next_tokens":      next_tokens,
+            "used_incremental": used_incremental,
+        }
+
+    # ==================================================
     # ✅ UPDATE EVENT
     # ==================================================
     def update_event(self, token, event_id, updates, account_email=None):

@@ -131,6 +131,12 @@ class OAuthAccount(Base):
     last_error = Column(String, nullable=True)
     status = Column(String, default="ok")
 
+    # ✅ INCREMENTAL SYNC STATE
+    # Stores per-calendar sync tokens so subsequent syncs only fetch changes.
+    # Google:    {"primary": "token...", "cal@gmail.com": "token..."}
+    # Microsoft: {"delta_link": "https://graph.microsoft.com/v1.0/..."}
+    sync_token = Column(JSON, nullable=True)
+
     # ✅ TIMESTAMPS
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -251,6 +257,11 @@ class Event(Base):
 
     # ✅ MULTI-PROVIDER SUPPORT
     external_ids = Column(JSON, nullable=True)
+
+    # ✅ INCREMENTAL SYNC TOKENS (per-provider state)
+    # Google:    {"primary": "nextSyncToken_abc", "cal2@gmail.com": "nextSyncToken_xyz"}
+    # Microsoft: {"delta_link": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=..."}
+    # Apple:     not used (CalDAV has no delta API)
 
 
 class DateStickyNote(Base):
