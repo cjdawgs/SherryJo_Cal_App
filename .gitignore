@@ -1,66 +1,51 @@
-# Python
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.env/
 .venv/
 .venv-1/
-__pycache__/
-*.pyc
+venv/
+Lib/
+scripts/
+
+# Environment Files (Machine-specific secrets)
 .env
+*-local.env
+*.local.env
 
-# Archives
-*.zip
+# Databases
+*.db
 
-# Logs
+# Logs & Documents
 *.log
 *.txt
 !requirements.txt
 
-# Specific log file
-commit_sherryjo_cal_app_log.txt
-
-# Database
-app.db
-*.db
-
-# OS / IDE
-.DS_Store
-Thumbs.db
-.vscode/*
-
-# Machine-specific env files (never commit these)
-*-local.env
-*.local.env
-
-
-# Python cache
-__pycache__/
-*.py[cod]
-
-# Virtual environments
-venv/
-.env/
-
-# Logs
-*.log
-
-# OS junk
-.DS_Store
-Thumbs.db
-
-# IDE
-.vscode/*
-.idea/
-!.vscode/tasks.json
-
-# Test + temp
+# Testing & Coverage
 .pytest_cache/
 coverage/
 htmlcov/
 
-# Build artifacts
-dist/
+# Build Artifacts
 build/
+dist/
 *.egg-info/
 
-# Node (you have JS too)
+# Node / JavaScript
 node_modules/
 
+# OS Junk
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/*
+!.vscode/tasks.json
+
+# Backups & Archives
+*.zip
 _backup_before_force/

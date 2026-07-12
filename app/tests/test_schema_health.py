@@ -48,7 +48,7 @@ def test_date_sticky_list_route_graceful_when_model_query_fails(client, auth_hea
 
 
 def test_sync_route_returns_json_error_on_internal_failure(client, auth_headers, monkeypatch):
-    def _boom(_db, _user):
+    def _boom(_db, _user, **kwargs):
         raise RuntimeError("forced sync failure")
 
     monkeypatch.setattr(calendar_router.calendar_service, "sync_all", _boom)

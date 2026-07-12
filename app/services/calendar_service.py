@@ -13,7 +13,8 @@ from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     ensure_valid_token,
     safe_commit,
-    resolve_account_status
+    resolve_account_status,
+    normalize_provider,
 )
 import pytz
 
@@ -33,53 +34,7 @@ import os
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG | INFO | ERROR
 
-# ==================================================
-# 🧠 GOLD STANDARD: CANONICAL PROVIDERS (CORE CONTRACT)
-# --------------------------------------------------
-# PURPOSE:
-# One single provider identity across ENTIRE system
-#
-# WHY:
-# Prevents:
-# - "outlook" vs "microsoft" drift
-# - broken filters
-# - broken sync keys
-#
-# RULE:
-# EVERYTHING must resolve to these values
-# ==================================================
 CANONICAL_PROVIDERS = ["google", "microsoft", "apple", "local"]
-
-def normalize_provider(p: str) -> str:
-    """
-    ✅ Canonical provider normalization
-    - Handles aliases
-    - Handles noise (None, whitespace)
-    - Returns ONLY known canonical values
-    """
-
-    if not p:
-        return "other"
-
-    p = str(p).lower().strip()
-
-    # ✅ MICROSOFT FAMILY
-    if p in {"outlook", "office365", "microsoft", "ms", "msft"}:
-        return "microsoft"
-
-    # ✅ APPLE FAMILY
-    if p in {"icloud", "caldav", "apple", "mac"}:
-        return "apple"
-
-    # ✅ GOOGLE FAMILY
-    if p in {"google", "gmail"}:
-        return "google"
-
-    # ✅ LOCAL EVENTS
-    if p in {"local", "internal"}:
-        return "local"
-
-    return p
 
 
 def build_event_id(e: dict) -> str:
@@ -887,6 +842,11 @@ class CalendarService:
                 Event.owner_id == user.id
             ).first()
 
+            # Build external_ids dict for write-back support
+            raw_ext_id = e.get("external_id", "")
+            provider = normalize_provider(e.get("source", "local"))
+            provider_ids = {provider: raw_ext_id} if raw_ext_id else {}
+
             if not existing:
                 db.add(Event(
                     title=e["title"],
@@ -895,12 +855,9 @@ class CalendarService:
                     source=e["source"],
                     externalId=external_id,
                     owner_id=user.id,
-
-                    # ✅ CRITICAL — REQUIRED FOR PALETTE MATCHING
                     account_email=e.get("account_email"),
-
-                    # ✅ OPTIONAL BUT POWERFUL (future-proof)
-                    color=e.get("color")
+                    color=e.get("color"),
+                    external_ids=provider_ids,
                 ))
                 created += 1
                 continue
@@ -913,6 +870,13 @@ class CalendarService:
 
             if existing.end_time != end:
                 existing.end_time = end
+                changed = True
+
+            # Keep external_ids populated / updated
+            if provider_ids and existing.external_ids != provider_ids:
+                merged = dict(existing.external_ids or {})
+                merged.update(provider_ids)
+                existing.external_ids = merged
                 changed = True
 
             if changed:

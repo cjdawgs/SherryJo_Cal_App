@@ -133,7 +133,11 @@ def evaluate_schema_health(db_engine=engine):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ✅ allow all (safe for dev)
+    allow_origins=[
+        "https://sherryjo-cal-app.onrender.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -317,6 +321,53 @@ if engine.url.drivername.startswith("sqlite"):
             print("✅ SQLite date_sticky_notes.sticky_notes present.")
 
 print("✅ Tables registered:", Base.metadata.tables.keys())
+
+
+# ==================================================
+# ONE-TIME BACKFILL: external_ids for existing synced events
+# --------------------------------------------------
+# Events synced before the write-back feature was added have
+# external_ids = NULL.  We reconstruct the raw provider ID from
+# the composite externalId column (format: "provider:account_email:raw_id").
+# Fallback IDs (starting with "fb:") are NOT real provider IDs and are skipped.
+# This block is idempotent — safe to run on every startup.
+# ==================================================
+try:
+    from app.database import SessionLocal as _SL
+    from app.models import Event as _Ev
+
+    with _SL() as _sess:
+        _to_backfill = (
+            _sess.query(_Ev)
+            .filter(
+                _Ev.external_ids.is_(None),
+                _Ev.externalId.isnot(None),
+                _Ev.source.in_(["google", "microsoft", "apple"]),
+            )
+            .all()
+        )
+
+        _filled = 0
+        for _ev in _to_backfill:
+            try:
+                _parts = (_ev.externalId or "").split(":", 2)
+                if len(_parts) == 3:
+                    _provider, _, _raw_id = _parts
+                    # Skip fallback synthetic IDs — they are not real provider IDs
+                    if _raw_id and not _raw_id.startswith("fb:"):
+                        _ev.external_ids = {_provider: _raw_id}
+                        _filled += 1
+            except Exception:
+                continue
+
+        if _filled:
+            _sess.commit()
+            print(f"✅ [BACKFILL] external_ids populated for {_filled} existing events")
+        else:
+            print("✅ [BACKFILL] external_ids: nothing to backfill")
+
+except Exception as _bf_err:
+    print(f"⚠️ [BACKFILL] external_ids backfill failed (non-fatal): {_bf_err}")
 
 
 # ==================================================

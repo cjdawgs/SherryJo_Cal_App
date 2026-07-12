@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
 from app.models import Event, Note, OAuthAccount, DateStickyNote
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 
 from app.services.calendar_service import CalendarService, normalize_provider
 from app.services.multi_account_oauth_service import (
@@ -19,6 +19,9 @@ from app.services.multi_account_oauth_service import (
     ensure_valid_token,
     resolve_account_status
 )
+from app.services.event_actions import EventActions
+from app.services.google_calendar_service import GoogleCalendarService
+from app.services.graph_client import GraphClient
 
 
 
@@ -27,6 +30,9 @@ print("✅ CALENDAR ROUTER FILE LOADED")
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
 calendar_service = CalendarService()
+_event_actions = EventActions()
+_google_service = GoogleCalendarService()
+_graph_client = GraphClient()
 
 # ==================================================
 # ✅ SAFE HELPERS (TOP LEVEL — NOT INSIDE ANY FUNCTION)
@@ -200,7 +206,7 @@ def debug_db_count(
 @router.post("/debug/wipe-user-events")
 def wipe_user_events(
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(require_admin)
 ):
     deleted = db.query(Event).filter(
         Event.owner_id == current_user.id
@@ -284,11 +290,34 @@ async def update_event(
 
     data = await request.json()
 
+    # ── Conflict guard ──────────────────────────────────────────────────
+    # If the client sends its known updated_at timestamp and the DB has a
+    # newer one (scheduler wrote in the meantime), reject with 409 so the
+    # UI can show a conflict prompt instead of silently losing edits.
+    client_updated_at = to_dt(data.get("client_updated_at"))
+    server_updated_at = getattr(event, "updated_at", None)
+    if client_updated_at and server_updated_at:
+        srv = server_updated_at if server_updated_at.tzinfo else server_updated_at.replace(tzinfo=timezone.utc)
+        cli = client_updated_at if client_updated_at.tzinfo else client_updated_at.replace(tzinfo=timezone.utc)
+        if cli < srv:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "conflict": True,
+                    "message": "Event was updated by another process. Reload and try again.",
+                    "server_updated_at": srv.isoformat(),
+                },
+            )
+    # ───────────────────────────────────────────────────────────────────
+
+    provider_updates = {}  # track fields to propagate to providers
+
     if "title" in data:
         title = (data.get("title") or "").strip()
         if not title:
             raise HTTPException(status_code=422, detail="title cannot be empty")
         event.title = title
+        provider_updates["title"] = title
 
     if "description" in data:
         event.description = (data.get("description") or "").strip()
@@ -298,9 +327,11 @@ async def update_event(
         if not start_time:
             raise HTTPException(status_code=422, detail="start_time is invalid")
         event.start_time = start_time
+        provider_updates["start_time"] = start_time
 
     if "end_time" in data:
         event.end_time = to_dt(data.get("end_time"))
+        provider_updates["end_time"] = event.end_time
 
     if "color" in data:
         event.color = data.get("color")
@@ -323,6 +354,14 @@ async def update_event(
     db.commit()
     db.refresh(event)
 
+    # ── Provider write-back (non-fatal) ────────────────────────────────
+    if provider_updates and event.source in ("google", "microsoft") and event.external_ids:
+        try:
+            _event_actions.update_event(db, event, provider_updates, _google_service, _graph_client, current_user)
+        except Exception as wb_err:
+            print(f"⚠️ Provider write-back failed (non-fatal): {wb_err}")
+    # ───────────────────────────────────────────────────────────────────
+
     return {"status": "ok", "event": serialize_event(event)}
 
 
@@ -339,6 +378,16 @@ def delete_event(
 
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
+
+    # ── Provider write-back (non-fatal) ────────────────────────────────
+    if event.source in ("google", "microsoft") and event.external_ids:
+        try:
+            _event_actions.delete_event(db, event, _google_service, _graph_client, current_user)
+            # delete_event already calls db.delete + db.commit
+            return {"status": "ok", "deleted": event_id}
+        except Exception as wb_err:
+            print(f"⚠️ Provider delete write-back failed (non-fatal): {wb_err}")
+    # ───────────────────────────────────────────────────────────────────
 
     db.delete(event)
     db.commit()
@@ -496,12 +545,6 @@ def sync_calendar(
                 print("🧯 [SYNC] Session rollback after count failure")
             except Exception as rb_err:
                 print("⚠️ [SYNC] Rollback after count failure failed:", rb_err)
-
-        # Ensure sync starts from a clean transactional state.
-        try:
-            db.rollback()
-        except Exception:
-            pass
 
         # Use the user-configured sync window to keep requests bounded and avoid upstream timeouts.
         sync_accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)

@@ -28,7 +28,8 @@ from app.deps import get_current_user
 from app.models import User, OAuthAccount
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
-    resolve_account_status
+    resolve_account_status,
+    normalize_provider,
 )
 from app.services.asset_urls import asset_import_map_json, asset_url
 
@@ -90,19 +91,6 @@ PROVIDER_DEFAULT_COLORS = {
 }
 
 
-
-
-def normalize_provider(provider: str) -> str:
-    value = (provider or "").strip().lower()
-    if value in {"outlook", "office365", "ms", "msft", "microsoft"}:
-        return "microsoft"
-    if value in {"gmail", "google"}:
-        return "google"
-    if value in {"icloud", "caldav", "apple"}:
-        return "apple"
-    if value in {"local", "internal"}:
-        return "local"
-    return value or "other"
 
 
 def default_account_color(provider: str) -> str:

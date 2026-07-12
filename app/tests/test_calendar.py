@@ -237,9 +237,11 @@ def test_fetch_all_events_clears_stale_account_error(mock_token, mock_fetch, db)
     account = OAuthAccount(
         user_id=user.id,
         provider="google",
-        account_email="sherrychip@example.com",
+        account_email="sherrychip@gmail.com",
         access_token="token",
         refresh_token="refresh",
+        sync_enabled=True,
+        is_service_provider=False,
         token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         status="error",
         last_sync_failure=datetime.now(timezone.utc) - timedelta(minutes=5),

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.database import get_db
+from app.deps import get_current_user
 from app.models import Event, Note
 
 
@@ -20,13 +21,13 @@ router = APIRouter(prefix="/events", tags=["events"])
 ## ✅ GET EVENTS (WITH NOTES)
 ## ===============================
 @router.get("/")
-def get_events(db: Session = Depends(get_db)):
+def get_events(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """
-    ✅ Returns all events
+    ✅ Returns events for the authenticated user only
     ✅ Includes notes for UI icons + hover
     """
 
-    events = db.query(Event).all()
+    events = db.query(Event).filter(Event.owner_id == current_user.id).all()
 
     def to_iso(val):
         if not val:
