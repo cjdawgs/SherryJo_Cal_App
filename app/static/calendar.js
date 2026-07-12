@@ -1830,7 +1830,7 @@ async function preloadEventCache({ silent = false } = {}) {
 
   const res = await apiFetch(
     
-    `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}`
+    `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}${isDedupEnabled() ? "" : "&dedup=false"}`
   );
 
   if (!res) {

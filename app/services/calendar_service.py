@@ -1122,7 +1122,7 @@ class CalendarService:
 
     
 
-    def get_events_from_db(self, db, user, start_date, end_date):
+    def get_events_from_db(self, db, user, start_date, end_date, dedup_enabled: bool = True):
 
 
 
@@ -1138,27 +1138,13 @@ class CalendarService:
 
 
 
-        per_account_counts = {}
+        def _serialize_event(ev, provider_override=None, account_email_override=None):
 
-        for ev in events:
+            source = normalize_provider(provider_override or ev.source or "local")
 
-            provider = normalize_provider(getattr(ev, "source", None) or "local")
+            account_email = (account_email_override or getattr(ev, "account_email", None) or "local").lower().strip()
 
-            email = (getattr(ev, "account_email", None) or "local").lower().strip()
-
-            key = f"{provider}:{email}"
-
-            per_account_counts[key] = per_account_counts.get(key, 0) + 1
-
-
-
-        log_info(f"ðŸ§ª DB VIEW ACCOUNT TOTALS | {per_account_counts}")
-
-        
-
-        return [
-
-            {
+            return {
 
                 "id": ev.id,
 
@@ -1184,35 +1170,77 @@ class CalendarService:
 
                 "updated_at": ev.updated_at.isoformat() if getattr(ev, "updated_at", None) else None,
 
+                "source": source,
 
+                "account_email": account_email,
 
-                # âœ… CANONICAL SOURCE
-
-                "source": ev.source or "local",
-
-
-
-                # âœ… KEEP FOR LEGACY COMPAT
-
-                "account_email": getattr(ev, "account_email", "local"),
-
-
-
-                # âœ… GOLD STANDARD: SINGLE SOURCE OF TRUTH
-
-                "account_key": build_account_key(
-
-                    ev.source or "local",
-
-                    getattr(ev, "account_email", "local")
-
-                )
+                "account_key": build_account_key(source, account_email)
 
             }
 
-            for ev in events
 
-        ]
+
+        serialized_events = []
+
+        for ev in events:
+
+            external_ids = dict(getattr(ev, "external_ids", None) or {})
+
+            if not dedup_enabled and external_ids:
+
+                emitted_keys = set()
+
+                for account_key in external_ids.keys():
+
+                    if not isinstance(account_key, str) or ":" not in account_key:
+
+                        continue
+
+                    provider, account_email = account_key.split(":", 1)
+
+                    provider = normalize_provider(provider)
+
+                    account_email = (account_email or "local").lower().strip()
+
+                    normalized_key = build_account_key(provider, account_email)
+
+                    if normalized_key in emitted_keys:
+
+                        continue
+
+                    serialized_events.append(
+
+                        _serialize_event(ev, provider_override=provider, account_email_override=account_email)
+
+                    )
+
+                    emitted_keys.add(normalized_key)
+
+                if emitted_keys:
+
+                    continue
+
+
+
+            serialized_events.append(_serialize_event(ev))
+
+
+
+        per_account_counts = {}
+
+        for ev in serialized_events:
+
+            key = ev["account_key"]
+
+            per_account_counts[key] = per_account_counts.get(key, 0) + 1
+
+
+
+        log_info(f"ðŸ§ª DB VIEW ACCOUNT TOTALS | {per_account_counts}")
+
+
+
+        return serialized_events
 
         
 

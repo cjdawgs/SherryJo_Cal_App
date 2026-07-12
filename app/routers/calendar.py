@@ -682,6 +682,7 @@ def get_unified_calendar(
     range_days: int = Query(30),
     start: str = Query(None),
     end: str = Query(None),
+    dedup: bool = Query(True),
 
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
@@ -740,7 +741,8 @@ def get_unified_calendar(
             db,
             current_user,
             start_date,
-            end_date
+            end_date,
+            dedup_enabled=dedup,
         )
 
         for ev in events:

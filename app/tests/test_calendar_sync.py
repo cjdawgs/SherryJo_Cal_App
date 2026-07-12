@@ -3,10 +3,12 @@
 # ==================================================
 
 from unittest.mock import patch
+from datetime import datetime, timezone
 from fastapi.testclient import TestClient
 from app.main import app
 import jwt
 from app.routers.auth import SECRET_KEY
+from app.models import Event, User
 
 client = TestClient(app)
 
@@ -83,3 +85,46 @@ def test_unified_calendar(mock_get_tasks):
     assert "events" in data
     assert "account_status" in data
     assert "account_event_totals" in data
+
+
+def test_unified_calendar_expands_linked_accounts_when_dedup_off(client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(Event(
+        title="Shared Listing Tour",
+        start_time=datetime(2026, 7, 12, 15, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 16, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:canonical:shared-listing-tour",
+        external_ids={
+            "google:sherrychipjohansson@gmail.com": "g-1",
+            "google:sherryajohansson@gmail.com": "g-2",
+            "apple:sherryajohansson@gmail.com": "a-1",
+            "google:sherryjohanssonrealestate@gmail.com": "g-3",
+        },
+    ))
+    db.commit()
+
+    response = client.get(
+        "/calendar/unified?start=2026-07-01T00:00:00Z&end=2026-07-31T23:59:59Z&dedup=false",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    totals = data["account_event_totals"]
+    keys = {ev["account_key"] for ev in data["events"]}
+
+    assert totals["google:sherrychipjohansson@gmail.com"] == 1
+    assert totals["google:sherryajohansson@gmail.com"] == 1
+    assert totals["apple:sherryajohansson@gmail.com"] == 1
+    assert totals["google:sherryjohanssonrealestate@gmail.com"] == 1
+    assert "local:local" not in totals
+    assert "google:sherrychipjohansson@gmail.com" in keys
+    assert "google:sherryajohansson@gmail.com" in keys
+    assert "apple:sherryajohansson@gmail.com" in keys
+    assert "google:sherryjohanssonrealestate@gmail.com" in keys
