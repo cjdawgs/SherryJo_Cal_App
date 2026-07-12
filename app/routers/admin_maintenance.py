@@ -146,3 +146,27 @@ def admin_delete_orphans(
         "deleted": {key: int(value) for key, value in deleted.items()},
         "requested_entities": sorted(target_entities),
     }
+
+
+@router.post("/reset-sync-tokens")
+def reset_sync_tokens(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    """
+    Clear all incremental sync tokens so the next Sync Now performs a full
+    re-fetch from every provider account.  Use this after a dedup-logic change
+    or any situation where the local DB is missing events that exist on providers.
+    """
+    updated = (
+        db.query(OAuthAccount)
+        .filter(OAuthAccount.sync_token.isnot(None))
+        .update({"sync_token": None}, synchronize_session=False)
+    )
+    db.commit()
+
+    return {
+        "status": "ok",
+        "accounts_reset": updated,
+        "message": f"Cleared sync tokens for {updated} account(s). Next Sync Now will do a full re-fetch.",
+    }

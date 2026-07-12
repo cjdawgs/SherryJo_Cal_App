@@ -81,13 +81,14 @@ function setSidebarDrawerOpen(isOpen) {
 }
 
 function applyControlBandDensity(mode) {
-  const createBtn = document.getElementById("createBtn");
+  const createBtn   = document.getElementById("createBtn");
   const accountsBtn = document.getElementById("accountsBtn");
-  const undoBtn = document.getElementById("undoBtn");
-  const redoBtn = document.getElementById("redoBtn");
-  const syncBtn = document.getElementById("syncBtn");
-  const publishBtn = document.getElementById("publishBtn");
-  const logoutBtn = document.getElementById("logoutBtn");
+  const undoBtn     = document.getElementById("undoBtn");
+  const redoBtn     = document.getElementById("redoBtn");
+  const syncBtn     = document.getElementById("syncBtn");
+  const publishBtn  = document.getElementById("publishBtn");
+  const dedupBtn    = document.getElementById("dedupBtn");
+  const logoutBtn   = document.getElementById("logoutBtn");
 
   if (!createBtn) return;
 
@@ -107,7 +108,9 @@ function applyControlBandDensity(mode) {
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
+    withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
+    _updateDedupBtnUI();
     return;
   }
 
@@ -119,7 +122,9 @@ function applyControlBandDensity(mode) {
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
+    withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
+    _updateDedupBtnUI();
     return;
   }
 
@@ -130,7 +135,9 @@ function applyControlBandDensity(mode) {
   withIconLabel(redoBtn, "Redo");
   withIconLabel(syncBtn, "Sync Now");
   withIconLabel(publishBtn, "Publish");
+  withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
   withIconLabel(logoutBtn, "Logout");
+  _updateDedupBtnUI();
 }
 
 function applyLayoutMode({ forceViewSwitch = false } = {}) {
@@ -2800,7 +2807,10 @@ async function syncNow() {
     /**************************************************************
      * ✅ FORCE BROWSER TO PAINT BEFORE BLOCKING
      **************************************************************/
-    const res = await apiFetch("/calendar/sync", { method: "POST" });
+    const res = await apiFetch(
+      `/calendar/sync${isDedupEnabled() ? "" : "?dedup=false"}`,
+      { method: "POST" }
+    );
     if (!res) return;
 
     const raw = await res.text();

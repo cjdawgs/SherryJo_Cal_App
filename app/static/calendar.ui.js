@@ -1164,6 +1164,10 @@ function bindUIEvents() {
     if (typeof window.publishNow === "function") await window.publishNow();
   });
 
+  document.getElementById("dedupBtn")?.addEventListener("click", () => {
+    if (typeof window.toggleDedup === "function") window.toggleDedup();
+  });
+
   document.getElementById("logoutBtn")?.addEventListener("click", () => {
     if (typeof window.logout === "function") window.logout();
   });

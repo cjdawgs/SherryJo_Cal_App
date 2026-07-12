@@ -507,6 +507,7 @@ def delete_date_sticky_note(
 
 @router.post("/sync")
 def sync_calendar(
+    dedup: bool = True,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -554,6 +555,7 @@ def sync_calendar(
             current_user,
             start_date=start_date,
             end_date=end_date,
+            dedup_enabled=dedup,
         )
 
         print("🔥 SYNC RESULT:", result)

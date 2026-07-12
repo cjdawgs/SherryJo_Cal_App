@@ -1799,7 +1799,7 @@ class CalendarService:
 
     # ==================================================
 
-    def sync_all(self, db: Session, user, start_date=None, end_date=None):
+    def sync_all(self, db: Session, user, start_date=None, end_date=None, dedup_enabled: bool = True):
 
         result               = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date)
         account_sync_totals  = result.get("account_sync_totals", [])    if isinstance(result, dict) else []
@@ -1880,7 +1880,9 @@ class CalendarService:
         log_info(f"Deleted stale/cancelled events: {deleted}")
         db.commit()
 
-        deduped = self._dedup_pass(db, user.id)
+        deduped = self._dedup_pass(db, user.id) if dedup_enabled else 0
+        if not dedup_enabled:
+            log_info("Dedup DISABLED — all provider events kept separate")
 
         return {
             "created":             created,

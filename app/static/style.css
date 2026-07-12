@@ -354,6 +354,20 @@ button.primary {
   to   { transform: rotate(-360deg); }
 }
 
+/* Dedup toggle button — green when ON (default), red-tinted when OFF */
+#dedupBtn {
+  transition: color 0.2s, opacity 0.2s;
+}
+
+#dedupBtn.dedup-on {
+  color: #16a34a;
+}
+
+#dedupBtn.dedup-off {
+  color: #dc2626;
+  opacity: 0.85;
+}
+
 /* Publish button — clockwise spin (outward/send direction) */
 #publishBtn.is-publishing {
   opacity: 0.72;
