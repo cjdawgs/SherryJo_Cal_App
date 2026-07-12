@@ -1680,7 +1680,20 @@ class CalendarService:
 
                 dt_str = ""
 
-            fp = _hs.md5(f"{title_norm}|{dt_str}".encode()).hexdigest()
+            # Golden rule: title + start_time + end_time must ALL match.
+            # Two-field matching (title+start only) caused false-positive merges
+            # where different events at the same time got collapsed.
+            if ev.end_time:
+
+                end_dt = ev.end_time.replace(second=0, microsecond=0)
+
+                end_str = end_dt.isoformat()[:16]
+
+            else:
+
+                end_str = ""
+
+            fp = _hs.md5(f"{title_norm}|{dt_str}|{end_str}".encode()).hexdigest()
 
             groups[fp].append(ev)
 
