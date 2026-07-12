@@ -356,16 +356,28 @@ button.primary {
 
 /* Dedup toggle button — green when ON (default), red-tinted when OFF */
 #dedupBtn {
+  min-width: 96px;
+  gap: 6px;
+  justify-content: center;
   transition: color 0.2s, opacity 0.2s;
 }
 
 #dedupBtn.dedup-on {
   color: #16a34a;
+  background: rgba(22, 163, 74, 0.10);
+  border-color: rgba(22, 163, 74, 0.35);
 }
 
 #dedupBtn.dedup-off {
   color: #dc2626;
   opacity: 0.85;
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+#dedupBtn .btnLabel {
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 /* Publish button — clockwise spin (outward/send direction) */

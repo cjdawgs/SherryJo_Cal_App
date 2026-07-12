@@ -236,6 +236,62 @@ let isAppSyncing = false;
 //    read/write the same value without circular imports.
 window.editingEventId = window.editingEventId ?? null;
 
+const DEDUP_STORAGE_KEY = "calendar_dedup_enabled";
+window.dedupEnabled = window.dedupEnabled ?? (() => {
+  try {
+    const stored = window.localStorage?.getItem(DEDUP_STORAGE_KEY);
+    if (stored === null) return true;
+    return stored !== "0" && stored !== "false";
+  } catch {
+    return true;
+  }
+})();
+
+function isDedupEnabled() {
+  return window.dedupEnabled !== false;
+}
+
+function _updateDedupBtnUI() {
+  const btn = document.getElementById("dedupBtn");
+  if (!btn) return;
+
+  const enabled = isDedupEnabled();
+  btn.classList.toggle("dedup-on", enabled);
+  btn.classList.toggle("dedup-off", !enabled);
+  btn.setAttribute("aria-pressed", enabled ? "true" : "false");
+  btn.title = enabled
+    ? "Toggle cross-account deduplication (currently ON)"
+    : "Toggle cross-account deduplication (currently OFF)";
+
+  const labelEl = btn.querySelector(".btnLabel");
+  if (labelEl) {
+    labelEl.textContent = enabled ? "Dedup: ON" : "Dedup: OFF";
+  }
+}
+
+function setDedupEnabled(nextEnabled) {
+  window.dedupEnabled = !!nextEnabled;
+  try {
+    window.localStorage?.setItem(DEDUP_STORAGE_KEY, window.dedupEnabled ? "1" : "0");
+  } catch {
+    // Ignore storage failures; the UI state still updates immediately.
+  }
+
+  _updateDedupBtnUI();
+  if (window.layoutMode) {
+    applyControlBandDensity(window.layoutMode);
+  }
+}
+
+function toggleDedup() {
+  setDedupEnabled(!isDedupEnabled());
+  showToast(isDedupEnabled() ? "Dedup enabled" : "Dedup disabled", "info");
+}
+
+window.isDedupEnabled = isDedupEnabled;
+window.toggleDedup = toggleDedup;
+window.setDedupEnabled = setDedupEnabled;
+
 // ── Session modification tracking ───────────────────────────────────────────
 // Tracks event IDs edited/created this session so Publish is scoped only to
 // events actually changed, covering only their affected accounts and date span.
