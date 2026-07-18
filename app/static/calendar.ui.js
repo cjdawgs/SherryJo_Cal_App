@@ -53,6 +53,77 @@ function getEventExternalIds(eventRef = null) {
   };
 }
 
+function normalizeEventTitleForLinking(eventRef = null) {
+  return String(eventRef?.title || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function parseEventDateValue(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isAllDayLikeWindow(start, end) {
+  if (!start || !end) return false;
+  if (start.getHours() !== 0 || start.getMinutes() !== 0) return false;
+  if (end.getHours() !== 0 || end.getMinutes() !== 0) return false;
+  const span = end.getTime() - start.getTime();
+  return span >= 0 && span <= 24 * 60 * 60 * 1000;
+}
+
+function eventLinkSignature(eventRef = null) {
+  const title = normalizeEventTitleForLinking(eventRef);
+  if (!title) return "";
+
+  const start = parseEventDateValue(eventRef?.start || eventRef?.start_time);
+  const end = parseEventDateValue(eventRef?.end || eventRef?.end_time);
+  if (!start) return `title:${title}`;
+
+  if (isAllDayLikeWindow(start, end)) {
+    return `all-day:${title}:${toDayString(start)}`;
+  }
+
+  const startKey = new Date(start);
+  startKey.setSeconds(0, 0);
+  const endKey = end ? new Date(end) : null;
+  if (endKey) endKey.setSeconds(0, 0);
+
+  return `timed:${title}:${startKey.toISOString()}:${endKey ? endKey.toISOString() : ""}`;
+}
+
+function getLinkedKeysFromSiblingDuplicates(eventRef = null) {
+  const targetSig = eventLinkSignature(eventRef);
+  if (!targetSig) return new Set();
+
+  const linked = new Set();
+  const cache = Array.isArray(window.sessionEventCache) ? window.sessionEventCache : [];
+
+  cache.forEach((candidate) => {
+    if (!candidate) return;
+    if (eventLinkSignature(candidate) !== targetSig) return;
+
+    const key = String(candidate?.extendedProps?.account_key || candidate?.account_key || "").toLowerCase();
+    if (key && key !== "local:local") linked.add(key);
+
+    Object.keys(candidate?.external_ids || {}).forEach((externalKey) => {
+      if (!externalKey || !externalKey.includes(":")) return;
+      const [provider, email] = externalKey.split(":", 2);
+      linked.add(normalizeAccountKey(provider, email));
+    });
+
+    Object.keys(candidate?.extendedProps?.external_ids || {}).forEach((externalKey) => {
+      if (!externalKey || !externalKey.includes(":")) return;
+      const [provider, email] = externalKey.split(":", 2);
+      linked.add(normalizeAccountKey(provider, email));
+    });
+  });
+
+  return linked;
+}
+
 function getExistingLinkedAccountKeys(eventRef = null) {
   const linked = new Set();
   Object.keys(getEventExternalIds(eventRef)).forEach((key) => {
@@ -63,6 +134,8 @@ function getExistingLinkedAccountKeys(eventRef = null) {
 
   const currentKey = eventRef?.extendedProps?.account_key || eventRef?.account_key || "";
   if (currentKey && currentKey !== "local:local") linked.add(currentKey.toLowerCase());
+
+  getLinkedKeysFromSiblingDuplicates(eventRef).forEach((key) => linked.add(key));
 
   return linked;
 }

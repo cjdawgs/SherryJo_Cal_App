@@ -628,7 +628,7 @@ function getFilteredEvents({ start, end }) {
   const rangeStart = new Date(start);
   const rangeEnd   = new Date(end);
 
-  return sessionEventCache.filter(ev => {
+  const events = sessionEventCache.filter(ev => {
 
     if (!ev || !ev.start) return false;
 
@@ -647,6 +647,8 @@ function getFilteredEvents({ start, end }) {
 
     return true;
   });
+
+  return dedupeEventsForDisplay(events);
 }
 window.getFilteredEvents = getFilteredEvents;
 function normalizeProvider(provider) {
@@ -693,6 +695,34 @@ function buildAccountKey(ev) {
 }
 
 window.buildAccountKey = buildAccountKey;
+
+function getDisplayDedupKey(ev) {
+  const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const start = ev?.start ? new Date(ev.start) : null;
+
+  if (!title || !start || Number.isNaN(start.getTime())) {
+    const fallbackId = String(ev?.id || ev?.extendedProps?.backendId || "").trim();
+    return fallbackId || "missing-dedup-key";
+  }
+
+  const startMinute = new Date(start);
+  startMinute.setSeconds(0, 0);
+  return `${title}|${startMinute.toISOString().slice(0, 16)}`;
+}
+
+function dedupeEventsForDisplay(events) {
+  if (!isDedupEnabled()) return events;
+
+  const seen = new Set();
+  return events.filter(ev => {
+    const key = getDisplayDedupKey(ev);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+window.dedupeEventsForDisplay = dedupeEventsForDisplay;
 // ==================================================
 // 🧠 DEBUG TOOL — EVENT PIPELINE INSPECTOR
 // --------------------------------------------------
@@ -932,6 +962,12 @@ function getFinalAccountColor(key, provider, index) {
 // ✅ SAFE DATE PARSER (FULLY FIXED)
 function safeParseDate(dt) {
   if (!dt) return null;
+
+  // Parse date-only strings as local dates to avoid UTC day drift.
+  if (typeof dt === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dt)) {
+    const [y, m, d] = dt.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
 
   const parsed = new Date(dt);
 
@@ -1943,6 +1979,8 @@ async function preloadEventCache({ silent = false } = {}) {
     return {
       id: displayId,   // ✅ FullCalendar uses this
 
+      external_ids: ev.external_ids || {},
+
       title: ev.title || "Untitled",
       start: safeStart,
       end: safeEnd || null,
@@ -1953,6 +1991,7 @@ async function preloadEventCache({ silent = false } = {}) {
         source: provider,
         account,
         account_key,
+        external_ids: ev.external_ids || {},
         notes: ev.notes || [],
         description: ev.description || "",
         tags: ev.tags || [],
@@ -1972,11 +2011,16 @@ async function preloadEventCache({ silent = false } = {}) {
 
   // ✅ ✅ ✅ ADD DEDUPE RIGHT HERE
   const seen = new Set();
+  const dedupeEnabled = isDedupEnabled();
 
   sessionEventCache = sessionEventCache.filter(ev => {
     if (!ev || !ev.id) return false;
 
-    const key = `${ev.id}-${ev.start.toISOString()}`;
+    const startKey = ev.start?.toISOString?.() || "";
+    const accountKey = ev?.extendedProps?.account_key || "";
+    const key = dedupeEnabled
+      ? getDisplayDedupKey(ev)
+      : `${ev.id}-${accountKey}-${startKey}`;
 
     if (seen.has(key)) {
       //console.warn("🚫 DUPLICATE REMOVED:", ev.title, key);
@@ -1996,7 +2040,7 @@ async function preloadEventCache({ silent = false } = {}) {
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
 
   // ✅ FORCE SIDEBAR INITIALIZATION (PERMANENT FIX)
-  window.selectedDate = new Date().toISOString().slice(0,10);
+  window.selectedDate = toDayString(new Date());
 
   if (typeof updateDayDetails === "function") {
     console.log("🔥 INIT DAY VIEW");
@@ -2606,7 +2650,7 @@ function updateDayDetails() {
   end.setDate(start.getDate() + 1);
 
   // ✅ Filter events for this day
-  const events = (window.sessionEventCache || []).filter(ev => {
+  const events = dedupeEventsForDisplay((window.sessionEventCache || []).filter(ev => {
     const evStart = new Date(ev.start);
     const evEnd = ev.end ? new Date(ev.end) : evStart;
     if (!(evStart < end && evEnd >= start)) return false;
@@ -2617,7 +2661,7 @@ function updateDayDetails() {
     }
 
     return true;
-  });
+  }));
 
   // ✅ Sort ascending by start time
   events.sort((a, b) => new Date(a.start) - new Date(b.start));
@@ -2725,7 +2769,9 @@ function updateWeekView() {
   const weekEl = document.getElementById("weekView");
   if (!weekEl) return;
 
-  const selected = new Date(window.selectedDate);
+  const parts = (window.selectedDate || "").split("-").map(Number);
+  if (parts.length < 3 || !parts[0]) return;
+  const selected = new Date(parts[0], parts[1] - 1, parts[2]);
 
   const start = new Date(selected);
   start.setDate(start.getDate() - start.getDay());
@@ -2756,7 +2802,7 @@ function updateWeekView() {
 
     weekEl.appendChild(header);
 
-    const events = window.sessionEventCache.filter(ev => {
+    const events = dedupeEventsForDisplay(window.sessionEventCache.filter(ev => {
 
       const evStart = new Date(ev.start);
       if (evStart.toDateString() !== day.toDateString()) return false;
@@ -2767,7 +2813,7 @@ function updateWeekView() {
       }
 
       return true;
-    });
+    }));
 
     events.forEach(ev => {
 

@@ -1,6 +1,6 @@
 ﻿
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import hashlib
 
@@ -628,6 +628,46 @@ class CalendarService:
 
         self.google = GoogleCalendarService()
 
+    @staticmethod
+    def is_all_day_span(start_value, end_value) -> bool:
+        if not start_value or not end_value:
+            return False
+
+        start_naive = start_value.replace(tzinfo=None)
+        end_naive = end_value.replace(tzinfo=None)
+
+        return (
+            start_naive.hour == 0 and start_naive.minute == 0 and start_naive.second == 0 and
+            end_naive.hour == 0 and end_naive.minute == 0 and end_naive.second == 0 and
+            end_naive >= start_naive and
+            (end_naive - start_naive) <= timedelta(days=1)
+        )
+
+    @staticmethod
+    def serialize_event_datetime(value, start_value=None, end_value=None):
+        if not value:
+            return None
+
+        if isinstance(value, str):
+            return value
+
+        is_all_day = CalendarService.is_all_day_span(start_value, end_value)
+
+        if value.tzinfo is None:
+            if is_all_day:
+                return value.isoformat()
+            # Timed provider events are stored as naive UTC in SQLite; emit
+            # explicit UTC offset so the browser renders local wall time.
+            value = value.replace(tzinfo=timezone.utc)
+
+        if is_all_day:
+            # Keep all-day events anchored to wall-date across backends.
+            # For aware values (typical in Postgres), normalize to UTC,
+            # then emit a tz-free ISO midnight-style string.
+            return value.astimezone(timezone.utc).replace(tzinfo=None).isoformat()
+
+        return value.astimezone(timezone.utc).isoformat()
+
 
 
     # ==================================================
@@ -1078,7 +1118,7 @@ class CalendarService:
 
 
 
-        return dt
+        return dt.astimezone(timezone.utc)
 
 
 
@@ -1150,11 +1190,13 @@ class CalendarService:
 
                 "external_id": ev.externalId,
 
+                "external_ids": dict(getattr(ev, "external_ids", None) or {}),
+
                 "title": ev.title,
 
-                "start": ev.start_time.isoformat(),
+                "start": self.serialize_event_datetime(ev.start_time, ev.start_time, ev.end_time),
 
-                "end": ev.end_time.isoformat() if ev.end_time else None,
+                "end": self.serialize_event_datetime(ev.end_time, ev.start_time, ev.end_time),
 
                 "description": ev.description or "",
 
@@ -1166,9 +1208,9 @@ class CalendarService:
 
                 "sticky_notes": ev.sticky_notes or [],
 
-                "created_at": ev.created_at.isoformat() if ev.created_at else None,
+                "created_at": self.serialize_event_datetime(ev.created_at),
 
-                "updated_at": ev.updated_at.isoformat() if getattr(ev, "updated_at", None) else None,
+                "updated_at": self.serialize_event_datetime(getattr(ev, "updated_at", None)),
 
                 "source": source,
 
@@ -1706,6 +1748,8 @@ class CalendarService:
 
             else:
 
+                dt = None
+
                 dt_str = ""
 
             # Golden rule: title + start_time + end_time must ALL match.
@@ -1714,6 +1758,15 @@ class CalendarService:
             if ev.end_time:
 
                 end_dt = ev.end_time.replace(second=0, microsecond=0)
+
+                if (
+                    dt is not None and
+                    dt.hour == 0 and dt.minute == 0 and
+                    end_dt.hour == 0 and end_dt.minute == 0
+                ):
+                    span = end_dt - dt
+                    if timedelta(0) <= span <= timedelta(days=1):
+                        end_dt = dt + timedelta(days=1)
 
                 end_str = end_dt.isoformat()[:16]
 
@@ -1806,6 +1859,8 @@ class CalendarService:
             # Write-back propagates to ALL accounts via external_ids.
 
             canonical.external_ids = merged_ids
+            canonical.source = "local"
+            canonical.account_email = "local"
 
 
 

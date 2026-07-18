@@ -41,6 +41,7 @@ from . import (
     admin_providers,
     admin_maintenance,
     tv,          # ✅ Apple TV / TV Mode
+    ai,
 )  # noqa: F401
 
 
@@ -64,6 +65,7 @@ from .admin_users import router as admin_users_router
 from .admin_providers import router as admin_providers_router
 from .admin_maintenance import router as admin_maintenance_router
 from .tv import router as tv_router              # ✅ Apple TV / TV Mode
+from .ai import router as ai_router
 
 
 # ✅ Central router registry
@@ -83,6 +85,7 @@ all_routers = [
     tasks_router,
     calendar_router,
     notes_router,
+    ai_router,
 
     display_router,
     websocket_router,

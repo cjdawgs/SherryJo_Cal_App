@@ -2,6 +2,19 @@
 	"version": "2.0.0",
 	"tasks": [
 		{
+			"label": "fix-cline-ollama",
+			"type": "shell",
+			"command": "powershell",
+			"args": [
+				"-NoProfile",
+				"-ExecutionPolicy",
+				"Bypass",
+				"-File",
+				"scripts\\fix_cline_ollama.ps1"
+			],
+			"isBackground": false
+		},
+		{
 			"label": "test-date-sticky-api",
 			"type": "shell",
 			"command": "pytest",

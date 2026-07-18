@@ -1269,9 +1269,58 @@ export function initFullCalendar() {
         return evStart <= rangeEnd && evEnd >= rangeStart;
       });
 
-      console.log("✅ EVENTS SENT:", events.length);
+      // Guardrail: never render duplicate rows for the same account at the same
+      // minute with the same title, even when Dedupe OFF is enabled.
+      const seenSameAccount = new Set();
+      const eventsUniqueWithinAccount = events.filter((ev) => {
+        const provider = normalizeProvider(ev?.extendedProps?.source || ev?.source || "local");
+        const account = String(
+          ev?.extendedProps?.account ||
+          ev?.extendedProps?.account_email ||
+          ev?.account_email ||
+          "local"
+        ).toLowerCase().trim();
+        const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
+        const start = ev?.start ? new Date(ev.start) : null;
+        if (!start || Number.isNaN(start.getTime())) return true;
 
-      successCallback(events);
+        const startMinute = new Date(start);
+        startMinute.setSeconds(0, 0);
+        const dedupeKey = `${provider}:${account}|${title}|${startMinute.toISOString()}`;
+        if (seenSameAccount.has(dedupeKey)) return false;
+        seenSameAccount.add(dedupeKey);
+        return true;
+      });
+
+      const dedupeOn = typeof window.isDedupEnabled === "function"
+        ? window.isDedupEnabled()
+        : true;
+
+      const finalEvents = dedupeOn
+        ? (() => {
+            const seenCrossAccount = new Set();
+            return eventsUniqueWithinAccount.filter((ev) => {
+              const key = (() => {
+                if (typeof window.getDisplayDedupKey === "function") {
+                  return window.getDisplayDedupKey(ev);
+                }
+                const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
+                const start = ev?.start ? new Date(ev.start) : null;
+                const startKey = start && !Number.isNaN(start.getTime())
+                  ? start.toISOString().slice(0, 16)
+                  : String(ev?.id || ev?.extendedProps?.backendId || "missing-dedup-key");
+                return `${title}|${startKey}`;
+              })();
+              if (seenCrossAccount.has(key)) return false;
+              seenCrossAccount.add(key);
+              return true;
+            });
+          })()
+        : eventsUniqueWithinAccount;
+
+      console.log("✅ EVENTS SENT:", finalEvents.length);
+
+      successCallback(finalEvents);
     },
     eventDidMount: function(info) {
 

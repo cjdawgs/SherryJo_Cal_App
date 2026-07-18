@@ -83,6 +83,16 @@ def test_filtered_events_engine_uses_account_key_for_all_main_views():
     assert "function getFilteredEvents({ start, end })" in text
     assert "const key = getCalendarEventAccountKey(ev);" in text
     assert "if (activeAccountFilters.size && !activeAccountFilters.has(key)) {" in text
+    assert "return dedupeEventsForDisplay(events);" in text
+
+
+def test_dedup_on_collapses_display_duplicates():
+    text = _js_text()
+
+    assert "function getDisplayDedupKey(ev)" in text
+    assert "function dedupeEventsForDisplay(events)" in text
+    assert "if (!isDedupEnabled()) return events;" in text
+    assert "return `${title}|${startMinute.toISOString().slice(0, 16)}`;" in text
 
 
 def test_apply_client_side_filters_uses_live_calendar_instance():
@@ -106,7 +116,7 @@ def test_day_sidebar_honors_active_account_filters():
     assert day_fn, "updateDayDetails function missing"
     body = day_fn.group("body")
 
-    assert "const events = (window.sessionEventCache || []).filter(ev => {" in body
+    assert "const events = dedupeEventsForDisplay((window.sessionEventCache || []).filter(ev => {" in body
     assert "const key = getCalendarEventAccountKey(ev);" in body
     assert "if (activeAccountFilters.size && !activeAccountFilters.has(key)) {" in body
 
@@ -122,6 +132,6 @@ def test_week_sidebar_honors_active_account_filters():
     assert week_fn, "updateWeekView function missing"
     body = week_fn.group("body")
 
-    assert "const events = window.sessionEventCache.filter(ev => {" in body
+    assert "const events = dedupeEventsForDisplay(window.sessionEventCache.filter(ev => {" in body
     assert "const key = getCalendarEventAccountKey(ev);" in body
     assert "if (activeAccountFilters.size && !activeAccountFilters.has(key)) {" in body

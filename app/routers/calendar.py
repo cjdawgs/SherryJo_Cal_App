@@ -44,12 +44,14 @@ def to_dt(val):
         return None
 
     if isinstance(val, datetime):
-        return val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        dt = val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     if isinstance(val, str):
         try:
             dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
         except:
             return None
 
@@ -59,7 +61,11 @@ def to_dt(val):
 def to_iso(val):
     if not val:
         return None
-    return val if isinstance(val, str) else val.isoformat()
+    return calendar_service.serialize_event_datetime(val)
+
+
+def to_iso_event_time(start_val, end_val, value):
+    return calendar_service.serialize_event_datetime(value, start_val, end_val)
 
 
 def normalize_tags(value):
@@ -141,10 +147,10 @@ def serialize_event(event: Event):
         "external_ids": event.external_ids or {},
         "title": event.title,
         "description": event.description or "",
-        "start": to_iso(event.start_time),
-        "end": to_iso(event.end_time),
-        "start_time": to_iso(event.start_time),
-        "end_time": to_iso(event.end_time),
+        "start": to_iso_event_time(event.start_time, event.end_time, event.start_time),
+        "end": to_iso_event_time(event.start_time, event.end_time, event.end_time),
+        "start_time": to_iso_event_time(event.start_time, event.end_time, event.start_time),
+        "end_time": to_iso_event_time(event.start_time, event.end_time, event.end_time),
         "color": event.color,
         "tags": event.tags or [],
         "sticky_note": sticky_notes[0] if sticky_notes else None,

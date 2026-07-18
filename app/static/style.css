@@ -622,6 +622,8 @@ button.primary {
   max-height: 92vh;
   overflow: auto;
   resize: both;
+  scrollbar-width: auto;
+  -ms-overflow-style: auto;
 
   opacity: 0;
   pointer-events: none;
@@ -668,6 +670,15 @@ button.primary {
   overflow: auto;
   padding: 14px 24px 10px;
   max-height: min(62vh, calc(84vh - 132px));
+  scrollbar-width: auto;
+  -ms-overflow-style: auto;
+}
+
+.modal::-webkit-scrollbar,
+.modalBody::-webkit-scrollbar,
+.stickyChooserDialog::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
 }
 
 .modalSection {

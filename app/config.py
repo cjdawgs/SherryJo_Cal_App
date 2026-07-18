@@ -74,6 +74,14 @@ class Settings(BaseSettings):
     # App metadata
     app_name: str = "SherryJo Calendar API"
 
+    # Local AI settings (Ollama / LM Studio)
+    AI_PROVIDER: str = "ollama"
+    AI_MODEL: str = "qwen2.5:7b"
+    AI_OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
+    AI_LMSTUDIO_BASE_URL: str = "http://127.0.0.1:1234/v1"
+    AI_LMSTUDIO_API_KEY: str = "lm-studio"
+    AI_REQUEST_TIMEOUT_SECONDS: int = 60
+
 
 # Instantiate settings object
 settings = Settings()
