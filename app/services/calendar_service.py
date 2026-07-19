@@ -1286,7 +1286,7 @@ class CalendarService:
 
         
 
-    def fetch_all_events(self, db, user, start_date=None, end_date=None):
+    def fetch_all_events(self, db, user, start_date=None, end_date=None, account_key: str = None):
 
         """
 
@@ -1325,6 +1325,12 @@ class CalendarService:
 
 
         accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, user.id)
+        account_key = (account_key or "").lower().strip() or None
+        if account_key:
+            accounts = [
+                acc for acc in accounts
+                if f"{normalize_provider(acc.provider)}:{(acc.account_email or '').lower().strip()}" == account_key
+            ]
 
         log_info(f"ðŸ“… Fetch window: {safe_start.date()} â†’ {safe_end.date()}")
 
@@ -1882,9 +1888,10 @@ class CalendarService:
 
     # ==================================================
 
-    def sync_all(self, db: Session, user, start_date=None, end_date=None, dedup_enabled: bool = True):
+    def sync_all(self, db: Session, user, start_date=None, end_date=None, dedup_enabled: bool = True, account_key: str = None):
 
-        result               = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date)
+        account_key          = (account_key or "").lower().strip() or None
+        result               = self.fetch_all_events(db, user, start_date=start_date, end_date=end_date, account_key=account_key)
         account_sync_totals  = result.get("account_sync_totals", [])    if isinstance(result, dict) else []
         cancelled_eids       = result.get("cancelled_external_ids", []) if isinstance(result, dict) else []
         incremental_keys     = result.get("incremental_account_keys", set()) if isinstance(result, dict) else set()
@@ -1937,6 +1944,11 @@ class CalendarService:
                 updated += 1
 
         all_evs      = db.query(Event).filter(Event.owner_id == user.id).all()
+        if account_key:
+            all_evs = [
+                ev for ev in all_evs
+                if f"{normalize_provider(getattr(ev, 'source', None) or '')}:{(getattr(ev, 'account_email', None) or '').lower().strip()}" == account_key
+            ]
         incoming_ids = set(build_event_id(e) for e in events if e.get("external_id"))
         deleted      = 0
 

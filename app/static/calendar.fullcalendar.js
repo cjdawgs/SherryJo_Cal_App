@@ -1239,9 +1239,12 @@ export function initFullCalendar() {
         email = email.toLowerCase().trim();
 
         const key = `${provider}:${email}`;
-        const raw =
+        const accountRaw =
           (window.getColorByKey && window.getColorByKey(key)) ||
           "#4285f4";
+        const raw = window.resolveEventRenderColor
+          ? window.resolveEventRenderColor(ev, accountRaw)
+          : accountRaw;
 
         const soft =
           (window.applySoftColor && window.applySoftColor(raw)) ||
@@ -1338,8 +1341,11 @@ export function initFullCalendar() {
 
       const key = `${provider}:${email}`;
 
-      const raw =
+      const accountRaw =
         (window.getColorByKey && window.getColorByKey(key)) || "#4285f4";
+      const raw = window.resolveEventRenderColor
+        ? window.resolveEventRenderColor(info.event, accountRaw)
+        : accountRaw;
 
       const soft =
         (window.applySoftColor && window.applySoftColor(raw)) || raw;

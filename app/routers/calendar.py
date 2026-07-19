@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
-from app.models import Event, Note, OAuthAccount, DateStickyNote
+from app.models import Event, Note, OAuthAccount, DateStickyNote, EventTagColorSetting
 from app.deps import get_current_user, require_admin
 
 from app.services.calendar_service import CalendarService, normalize_provider
@@ -78,6 +78,33 @@ def normalize_tags(value):
     return []
 
 
+def normalize_hex_color(value, fallback="#4F8EF7"):
+    color = str(value or "").strip()
+    if len(color) == 7 and color.startswith("#"):
+        try:
+            int(color[1:], 16)
+            return color
+        except ValueError:
+            return fallback
+    return fallback
+
+
+def normalize_tag_label(value):
+    return " ".join(str(value or "").strip().split())
+
+
+def normalize_tag_key(value):
+    return normalize_tag_label(value).lower()
+
+
+def serialize_tag_color_setting(setting):
+    return {
+        "label": setting.label,
+        "color": normalize_hex_color(setting.color),
+        "enabled": bool(setting.enabled),
+    }
+
+
 def normalize_sticky_note(payload):
     if not isinstance(payload, dict):
         return None
@@ -120,6 +147,77 @@ def normalize_sticky_notes(payload):
     return out
 
 
+@router.get("/tag-colors")
+async def get_tag_color_settings(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    rows = db.query(EventTagColorSetting).filter(
+        EventTagColorSetting.owner_id == current_user.id
+    ).all()
+    return {
+        "settings": {
+            row.tag_key: serialize_tag_color_setting(row)
+            for row in rows
+            if row.tag_key
+        }
+    }
+
+
+@router.put("/tag-colors")
+async def upsert_tag_color_settings(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    data = await request.json()
+    incoming = data.get("settings") if isinstance(data, dict) else None
+    if not isinstance(incoming, dict):
+        raise HTTPException(status_code=422, detail="settings object is required")
+
+    existing = {
+        row.tag_key: row
+        for row in db.query(EventTagColorSetting).filter(
+            EventTagColorSetting.owner_id == current_user.id
+        ).all()
+    }
+
+    now = datetime.now(timezone.utc)
+    for raw_key, raw_entry in incoming.items():
+        if not isinstance(raw_entry, dict):
+            continue
+
+        label = normalize_tag_label(raw_entry.get("label") or raw_key)
+        key = normalize_tag_key(label or raw_key)
+        if not key:
+            continue
+
+        row = existing.get(key)
+        if not row:
+            row = EventTagColorSetting(owner_id=current_user.id, tag_key=key, label=label)
+            db.add(row)
+            existing[key] = row
+
+        row.label = label
+        row.color = normalize_hex_color(raw_entry.get("color"))
+        row.enabled = bool(raw_entry.get("enabled"))
+        row.updated_at = now
+
+    db.commit()
+
+    rows = db.query(EventTagColorSetting).filter(
+        EventTagColorSetting.owner_id == current_user.id
+    ).all()
+    return {
+        "status": "ok",
+        "settings": {
+            row.tag_key: serialize_tag_color_setting(row)
+            for row in rows
+            if row.tag_key
+        }
+    }
+
+
 def serialize_date_sticky(item: DateStickyNote):
     sticky_notes = normalize_sticky_notes(getattr(item, "sticky_notes", None))
     return {
@@ -152,6 +250,7 @@ def serialize_event(event: Event):
         "start_time": to_iso_event_time(event.start_time, event.end_time, event.start_time),
         "end_time": to_iso_event_time(event.start_time, event.end_time, event.end_time),
         "color": event.color,
+        "color_enabled": bool(getattr(event, "color_enabled", False)),
         "tags": event.tags or [],
         "sticky_note": sticky_notes[0] if sticky_notes else None,
         "sticky_notes": sticky_notes,
@@ -169,6 +268,7 @@ def serialize_event(event: Event):
             "description": event.description or "",
             "tags": event.tags or [],
             "eventColor": event.color,
+            "eventColorEnabled": bool(getattr(event, "color_enabled", False)),
             "stickyNote": sticky_notes[0] if sticky_notes else None,
             "stickyNotes": sticky_notes,
             "createdAt": to_iso(event.created_at),
@@ -269,6 +369,7 @@ async def create_event(
         source=data.get("source") or "local",
         account_email=data.get("account_email") or "local",
         color=data.get("color"),
+        color_enabled=bool(data.get("color_enabled")),
         tags=normalize_tags(data.get("tags")),
         sticky_note=sticky_note,
         sticky_notes=sticky_notes
@@ -343,6 +444,9 @@ async def update_event(
 
     if "color" in data:
         event.color = data.get("color")
+
+    if "color_enabled" in data:
+        event.color_enabled = bool(data.get("color_enabled"))
 
     if "tags" in data:
         event.tags = normalize_tags(data.get("tags"))
@@ -516,6 +620,7 @@ def delete_date_sticky_note(
 @router.post("/sync")
 def sync_calendar(
     dedup: bool = True,
+    account: str = Query(None),
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user)
 ):
@@ -545,6 +650,16 @@ def sync_calendar(
 
         # Use the user-configured sync window to keep requests bounded and avoid upstream timeouts.
         sync_accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)
+        account_key = (account or "").lower().strip() or None
+        if account_key:
+            sync_accounts = [
+                acc for acc in sync_accounts
+                if f"{normalize_provider(acc.provider)}:{(acc.account_email or '').lower().strip()}" == account_key
+            ]
+
+        if account_key and not sync_accounts:
+            raise HTTPException(status_code=404, detail="Sync account not found")
+
         configured_days = [
             int(getattr(acc, "sync_range_days", 30) or 30)
             for acc in sync_accounts
@@ -564,6 +679,7 @@ def sync_calendar(
             start_date=start_date,
             end_date=end_date,
             dedup_enabled=dedup,
+            account_key=account_key,
         )
 
         print("🔥 SYNC RESULT:", result)
@@ -574,6 +690,7 @@ def sync_calendar(
             "range_days": window_days,
             "range_start": start_date.isoformat(),
             "range_end": end_date.isoformat(),
+            "account": account_key,
         }
 
     except Exception as e:

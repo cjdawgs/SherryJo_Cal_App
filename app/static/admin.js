@@ -53,6 +53,93 @@ const el = {
   copyOverviewBtn: document.getElementById("copyOverviewBtn"),
 };
 
+let adminWindowControlsReady = false;
+
+function resetWindowFrame(frame) {
+  if (!frame) return;
+  frame.classList.remove("windowFrameMinimized", "windowFrameMaximized");
+  frame.querySelectorAll(".windowControlBtn[data-window-action='maximize']").forEach((btn) => {
+    btn.setAttribute("aria-label", "Maximize window");
+    btn.title = "Maximize";
+    btn.textContent = "□";
+  });
+}
+
+function toggleWindowMinimized(frame) {
+  if (!frame) return;
+  const minimized = frame.classList.toggle("windowFrameMinimized");
+  if (minimized) frame.classList.remove("windowFrameMaximized");
+}
+
+function toggleWindowMaximized(frame, button) {
+  if (!frame) return;
+  const maximized = frame.classList.toggle("windowFrameMaximized");
+  if (maximized) frame.classList.remove("windowFrameMinimized");
+  if (button) {
+    button.setAttribute("aria-label", maximized ? "Restore window" : "Maximize window");
+    button.title = maximized ? "Restore" : "Maximize";
+    button.textContent = maximized ? "❐" : "□";
+  }
+}
+
+function closeWindowFrame(frame) {
+  if (!frame) return;
+  if (typeof frame.close === "function" && frame.open) {
+    frame.close();
+    return;
+  }
+  frame.classList.remove("show");
+}
+
+function installWindowControls(frame) {
+  const form = frame?.querySelector("form");
+  const title = form?.querySelector("h3");
+  if (!frame || !form || !title || form.querySelector(".windowControls")) return;
+
+  frame.classList.add("windowFrame");
+  const header = document.createElement("div");
+  header.className = "adminDialogHeader";
+  form.insertBefore(header, form.firstElementChild);
+  header.appendChild(title);
+
+  const controls = document.createElement("div");
+  controls.className = "windowControls";
+  controls.innerHTML = `
+    <button type="button" class="windowControlBtn" data-window-action="minimize" aria-label="Minimize window" title="Minimize">−</button>
+    <button type="button" class="windowControlBtn" data-window-action="maximize" aria-label="Maximize window" title="Maximize">□</button>
+    <button type="button" class="windowControlBtn close" data-window-action="close" aria-label="Close window" title="Close">×</button>
+  `;
+  header.appendChild(controls);
+}
+
+function initAdminWindowControls() {
+  if (adminWindowControlsReady) return;
+  adminWindowControlsReady = true;
+
+  document.querySelectorAll("dialog.entity-dialog").forEach((dialog) => {
+    installWindowControls(dialog);
+    dialog.addEventListener("close", () => resetWindowFrame(dialog));
+  });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.(".windowControlBtn[data-window-action]");
+    if (!button) return;
+
+    const frame = button.closest(".windowFrame");
+    const action = button.dataset.windowAction;
+    if (!frame || !action) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (action === "minimize") toggleWindowMinimized(frame);
+    if (action === "maximize") toggleWindowMaximized(frame, button);
+    if (action === "close") closeWindowFrame(frame);
+  });
+}
+
+initAdminWindowControls();
+
 function setStatus(message, isError = false) {
   [el.controlStatusLine, el.statusLine].forEach((node) => {
     if (!node) return;
@@ -841,6 +928,8 @@ function openDialog(mode, item = null) {
   const config = activeConfig();
   const titleBase = state.entity === "users" ? "User" : "Provider";
 
+  initAdminWindowControls();
+  resetWindowFrame(el.dialog);
   el.dialogTitle.textContent = `${mode === "create" ? "Create" : "Edit"} ${titleBase}`;
   el.formFields.innerHTML = config.buildForm(item, mode);
   el.dialog.showModal();

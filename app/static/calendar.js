@@ -283,8 +283,15 @@ function setDedupEnabled(nextEnabled) {
   }
 }
 
+function refreshAfterDedupChange() {
+  applyClientSideFilters();
+  updateDayDetails();
+  updateWeekView();
+}
+
 function toggleDedup() {
   setDedupEnabled(!isDedupEnabled());
+  refreshAfterDedupChange();
   showToast(isDedupEnabled() ? "Dedup enabled" : "Dedup disabled", "info");
 }
 
@@ -403,6 +410,33 @@ let sessionCacheRange = {
 };
 window.sessionCacheRange = window.sessionCacheRange || sessionCacheRange;
 let isInitialLoadComplete = false;
+const QUICK_CACHE_MONTHS_BACK = 1;
+const QUICK_CACHE_MONTHS_FORWARD = 1;
+const FULL_CACHE_MONTHS_BACK = 6;
+const FULL_CACHE_MONTHS_FORWARD = 6;
+let backgroundCacheExpandTimer = null;
+
+function scheduleFullCacheExpansion(reason = "background_cache_expand") {
+  if (backgroundCacheExpandTimer) {
+    clearTimeout(backgroundCacheExpandTimer);
+  }
+
+  backgroundCacheExpandTimer = setTimeout(async () => {
+    backgroundCacheExpandTimer = null;
+
+    try {
+      await preloadEventCache({
+        silent: true,
+        monthsBack: FULL_CACHE_MONTHS_BACK,
+        monthsForward: FULL_CACHE_MONTHS_FORWARD,
+        preserveSelectedDate: true
+      });
+      smartRefresh({ reason, force: true });
+    } catch (err) {
+      console.warn("⚠️ Background cache expansion failed:", err);
+    }
+  }, 300);
+}
 
 /**************************************************************
  * ✅ SMART REFRESH ENGINE (REPLACES refetchEvents)
@@ -1102,6 +1136,52 @@ function openSidebarStickyMenu(x, y, onOpen, onDelete, onEdit) {
   });
 }
 
+function getSidebarEventId(ev) {
+  return String(ev?.extendedProps?.backendId || ev?.id || "");
+}
+
+function selectSidebarEvent(ev) {
+  const id = getSidebarEventId(ev);
+  if (!id) return;
+
+  if (ev?.start) {
+    window.selectedDate = toDayString(new Date(ev.start));
+    window.highlightSelectedDay?.(window.selectedDate);
+    window.dispatchEvent(new Event("selectedDateChanged"));
+  }
+
+  window.setSelectedEvent?.(id);
+  updateDayDetails();
+  updateWeekView();
+}
+
+function bindSidebarEventRow(div, ev) {
+  const id = getSidebarEventId(ev);
+  if (!div || !id) return;
+
+  div.style.cursor = "pointer";
+  div.title = "Click to select. Double-click to edit event.";
+  div.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (window._eventClickTimer && window._lastClickedEventId === id) {
+      clearTimeout(window._eventClickTimer);
+      window._eventClickTimer = null;
+      window._lastClickedEventId = null;
+      window.openCreateModal?.(null, ev);
+      return;
+    }
+
+    window._lastClickedEventId = id;
+    window._eventClickTimer = setTimeout(() => {
+      window._eventClickTimer = null;
+      window._lastClickedEventId = null;
+      selectSidebarEvent(ev);
+    }, 280);
+  });
+}
+
 function renderDateStickyHeaderIcon(dateKey, mode = "day") {
   const count = Number(window.getDateStickyCount?.(dateKey) || 0);
   if (!count) return null;
@@ -1401,7 +1481,10 @@ async function init() {
     console.log("🔄 Refreshing cache (needed)");
 
     try {
-      await preloadEventCache();          // ✅ ADD THIS BACK
+      await preloadEventCache({
+        monthsBack: QUICK_CACHE_MONTHS_BACK,
+        monthsForward: QUICK_CACHE_MONTHS_FORWARD
+      });
     } catch (err) {
       console.error("❌ preloadEventCache failed:", err);
       showToast("Calendar failed to load. Please refresh.", "error");
@@ -1416,6 +1499,7 @@ async function init() {
   initFullCalendar();
   // Keep legacy local reference aligned with the initialized global calendar.
   calendar = getCalendar();
+  scheduleFullCacheExpansion("startup_cache_expand");
   initializeResponsiveLayout();
   renderRangePill(); // ✅ ensure initial render
 
@@ -1828,9 +1912,16 @@ function applyChipStyle(row, key, isActive) {
   }
 }
 
-async function preloadEventCache({ silent = false } = {}) {
+async function preloadEventCache({
+  silent = false,
+  monthsBack = FULL_CACHE_MONTHS_BACK,
+  monthsForward = FULL_CACHE_MONTHS_FORWARD,
+  preserveSelectedDate = false
+} = {}) {
   console.log("🧠 PRELOADING CACHE");
-  document.body.style.cursor = "wait";
+  if (!silent) {
+    document.body.style.cursor = "wait";
+  }
   isAppSyncing = true;
   
   console.log("🟡 SYNC MODE ON");
@@ -1859,16 +1950,15 @@ async function preloadEventCache({ silent = false } = {}) {
   renderAccountsSafe();
   } // end if (!silent)
 
-  const now = new Date();
-  const start = new Date(now);
-  const end = new Date(now);
+  const centerDate = safeParseDate(window.selectedDate) || getCalendar()?.getDate?.() || new Date();
+  const start = new Date(centerDate);
+  const end = new Date(centerDate);
 
-  start.setMonth(start.getMonth() - 6);
-  end.setMonth(end.getMonth() + 6);
+  start.setMonth(start.getMonth() - monthsBack);
+  end.setMonth(end.getMonth() + monthsForward);
 
   const res = await apiFetch(
-    
-    `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}${isDedupEnabled() ? "" : "&dedup=false"}`
+    `/calendar/unified?start=${start.toISOString()}&end=${end.toISOString()}&dedup=false`
   );
 
   if (!res) {
@@ -1985,6 +2075,7 @@ async function preloadEventCache({ silent = false } = {}) {
       start: safeStart,
       end: safeEnd || null,
       color: ev.color || null,
+      color_enabled: ev.color_enabled === true,
 
       extendedProps: {
         backendId,      // ✅ THIS IS THE KEY FIX
@@ -1996,6 +2087,7 @@ async function preloadEventCache({ silent = false } = {}) {
         description: ev.description || "",
         tags: ev.tags || [],
         eventColor: ev.color || null,
+        eventColorEnabled: ev.color_enabled === true || ev.extendedProps?.eventColorEnabled === true,
         stickyNote: (ev.sticky_notes && ev.sticky_notes[0]) || ev.sticky_note || null,
         stickyNotes: ev.sticky_notes || (ev.sticky_note ? [ev.sticky_note] : []),
         createdAt: ev.created_at || null,
@@ -2009,27 +2101,6 @@ async function preloadEventCache({ silent = false } = {}) {
   sessionCacheRange = { start, end };
   window.sessionCacheRange = { start, end };
 
-  // ✅ ✅ ✅ ADD DEDUPE RIGHT HERE
-  const seen = new Set();
-  const dedupeEnabled = isDedupEnabled();
-
-  sessionEventCache = sessionEventCache.filter(ev => {
-    if (!ev || !ev.id) return false;
-
-    const startKey = ev.start?.toISOString?.() || "";
-    const accountKey = ev?.extendedProps?.account_key || "";
-    const key = dedupeEnabled
-      ? getDisplayDedupKey(ev)
-      : `${ev.id}-${accountKey}-${startKey}`;
-
-    if (seen.has(key)) {
-      //console.warn("🚫 DUPLICATE REMOVED:", ev.title, key);
-      return false;
-    }
-
-    seen.add(key);
-    return true;
-  });
   isInitialLoadComplete = true;
 
   // ✅ Sync window reference so calendar.fullcalendar.js events callback and
@@ -2040,7 +2111,9 @@ async function preloadEventCache({ silent = false } = {}) {
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
 
   // ✅ FORCE SIDEBAR INITIALIZATION (PERMANENT FIX)
-  window.selectedDate = toDayString(new Date());
+  if (!preserveSelectedDate || !window.selectedDate) {
+    window.selectedDate = toDayString(centerDate);
+  }
 
   if (typeof updateDayDetails === "function") {
     console.log("🔥 INIT DAY VIEW");
@@ -2058,7 +2131,9 @@ async function preloadEventCache({ silent = false } = {}) {
   
   console.log("✅ SYNC MODE OFF");  
   syncingAccounts.clear();
-  document.body.style.cursor = "default";
+  if (!silent) {
+    document.body.style.cursor = "default";
+  }
   console.log("🧼 CLEARED syncingAccounts:", syncingAccounts);
   renderAccountsSafe();
   // ✅ ADD THIS LINE (CRITICAL — ONLY PLACE IT NEEDS TO RUN)
@@ -2682,8 +2757,11 @@ function updateDayDetails() {
   }
 
   events.forEach(ev => {
-    const key = ev?.extendedProps?.account_key || "";
-    const raw = getColorByKey(key);
+    const key = getCalendarEventAccountKey(ev);
+    const accountRaw = getColorByKey(key);
+    const raw = window.resolveEventRenderColor
+      ? window.resolveEventRenderColor(ev, accountRaw)
+      : accountRaw;
     const soft = applySoftColor(raw);
 
     // ✅ Format start time compact: "8a", "12:30p", "2p"
@@ -2707,6 +2785,7 @@ function updateDayDetails() {
     div.style.background     = soft;
     div.style.borderRadius   = "5px";
     div.style.overflow       = "hidden";
+    bindSidebarEventRow(div, ev);
 
     const timeSpan = document.createElement("span");
     timeSpan.textContent     = timeStr;
@@ -2818,7 +2897,10 @@ function updateWeekView() {
     events.forEach(ev => {
 
       const key = getCalendarEventAccountKey(ev);
-      const raw = getColorByKey(key);
+      const accountRaw = getColorByKey(key);
+      const raw = window.resolveEventRenderColor
+        ? window.resolveEventRenderColor(ev, accountRaw)
+        : accountRaw;
       const soft = applySoftColor(raw)
       const div = document.createElement("div");
       div.style.padding = "4px";
@@ -2829,6 +2911,7 @@ function updateWeekView() {
       div.style.display = "flex";
       div.style.alignItems = "center";
       div.style.gap = "6px";
+      bindSidebarEventRow(div, ev);
 
       const titleSpan = document.createElement("span");
       titleSpan.textContent = ev.title;
@@ -2990,9 +3073,15 @@ async function syncNow() {
     // Force a paint so the browser commits "no spinner" before heavy work
     await new Promise(resolve => requestAnimationFrame(resolve));
     document.body.style.cursor = "progress"; // subtle indicator while cache reloads
-    await preloadEventCache({ silent: true });
+    await preloadEventCache({
+      silent: true,
+      monthsBack: QUICK_CACHE_MONTHS_BACK,
+      monthsForward: QUICK_CACHE_MONTHS_FORWARD,
+      preserveSelectedDate: true
+    });
     document.body.style.cursor = "default";
     smartRefresh({ reason: "event_saved", force: true });
+    scheduleFullCacheExpansion("post_sync_cache_expand");
 
     
     setTimeout(() => {

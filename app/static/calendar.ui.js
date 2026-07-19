@@ -26,8 +26,508 @@ let isSavingEvent = false;
 let isSavingSticky = false;
 let isPublishingEvent = false;
 let activeRichEditorId = null;
+let modalWindowControlsReady = false;
+let modalResizeReady = false;
 
 const PUBLISHABLE_PROVIDERS = new Set(["google", "microsoft"]);
+const MODAL_VIEWPORT_GUTTER = 14;
+const DEFAULT_EVENT_COLOR = "#4F8EF7";
+const TAG_COLOR_STORAGE_KEY = "sj_event_tag_color_settings_v1";
+const EVENT_COLOR_ENABLED_STORAGE_KEY = "sj_event_color_enabled_v1";
+let tagColorSettingsCache = loadJsonMap(TAG_COLOR_STORAGE_KEY);
+let tagColorSettingsReady = false;
+let tagColorSettingsServerAvailable = false;
+
+function clampModalValue(value, min, max) {
+  if (max < min) return min;
+  return Math.min(Math.max(value, min), max);
+}
+
+function getModalResizeLimits(frame, rect = null) {
+  const styles = window.getComputedStyle(frame);
+  const parsedMinWidth = Number.parseFloat(styles.minWidth);
+  const parsedMinHeight = Number.parseFloat(styles.minHeight);
+  const minWidth = Number.isFinite(parsedMinWidth) && parsedMinWidth > 0 ? parsedMinWidth : 320;
+  const minHeight = Number.isFinite(parsedMinHeight) && parsedMinHeight > 0 ? parsedMinHeight : 300;
+  const left = rect ? rect.left : frame.getBoundingClientRect().left;
+  const top = rect ? rect.top : frame.getBoundingClientRect().top;
+
+  return {
+    minWidth,
+    minHeight,
+    maxWidth: Math.max(minWidth, window.innerWidth - left - MODAL_VIEWPORT_GUTTER),
+    maxHeight: Math.max(minHeight, window.innerHeight - top - MODAL_VIEWPORT_GUTTER),
+    maxLeft: Math.max(MODAL_VIEWPORT_GUTTER, window.innerWidth - minWidth - MODAL_VIEWPORT_GUTTER),
+    maxTop: Math.max(MODAL_VIEWPORT_GUTTER, window.innerHeight - minHeight - MODAL_VIEWPORT_GUTTER)
+  };
+}
+
+function constrainModalToViewport(frame) {
+  if (!frame || !frame.classList.contains("modalUserResized")) return;
+  const rect = frame.getBoundingClientRect();
+  const limits = getModalResizeLimits(frame, rect);
+  const left = clampModalValue(rect.left, MODAL_VIEWPORT_GUTTER, limits.maxLeft);
+  const top = clampModalValue(rect.top, MODAL_VIEWPORT_GUTTER, limits.maxTop);
+  const maxWidth = Math.max(limits.minWidth, window.innerWidth - left - MODAL_VIEWPORT_GUTTER);
+  const maxHeight = Math.max(limits.minHeight, window.innerHeight - top - MODAL_VIEWPORT_GUTTER);
+
+  frame.style.left = `${left}px`;
+  frame.style.top = `${top}px`;
+  frame.style.width = `${clampModalValue(rect.width, limits.minWidth, maxWidth)}px`;
+  frame.style.height = `${clampModalValue(rect.height, limits.minHeight, maxHeight)}px`;
+}
+
+function installModalResizeHandle(frame) {
+  if (!frame || frame.querySelector(".modalResizeHandle")) return;
+
+  const handle = document.createElement("div");
+  handle.className = "modalResizeHandle";
+  handle.setAttribute("role", "presentation");
+  handle.title = "Resize window";
+  frame.appendChild(handle);
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (frame.classList.contains("windowFrameMinimized") || frame.classList.contains("windowFrameMaximized")) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const startRect = frame.getBoundingClientRect();
+    const limits = getModalResizeLimits(frame, startRect);
+    const startX = event.clientX;
+    const startY = event.clientY;
+
+    frame.classList.add("modalUserResized");
+    frame.style.left = `${startRect.left}px`;
+    frame.style.top = `${startRect.top}px`;
+    frame.style.width = `${startRect.width}px`;
+    frame.style.height = `${startRect.height}px`;
+    document.body.classList.add("modalResizing");
+    handle.setPointerCapture?.(event.pointerId);
+
+    const onPointerMove = (moveEvent) => {
+      const nextWidth = clampModalValue(startRect.width + moveEvent.clientX - startX, limits.minWidth, limits.maxWidth);
+      const nextHeight = clampModalValue(startRect.height + moveEvent.clientY - startY, limits.minHeight, limits.maxHeight);
+      frame.style.width = `${nextWidth}px`;
+      frame.style.height = `${nextHeight}px`;
+    };
+
+    const onPointerUp = (upEvent) => {
+      document.body.classList.remove("modalResizing");
+      constrainModalToViewport(frame);
+      if (handle.hasPointerCapture?.(upEvent.pointerId)) {
+        handle.releasePointerCapture(upEvent.pointerId);
+      }
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+    };
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    window.addEventListener("pointercancel", onPointerUp, { once: true });
+  });
+}
+
+function normalizeColorValue(value, fallback = DEFAULT_EVENT_COLOR) {
+  const color = String(value || "").trim();
+  return /^#[0-9a-f]{6}$/i.test(color) ? color : fallback;
+}
+
+function normalizeTagLabel(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeTagKey(value) {
+  return normalizeTagLabel(value).toLowerCase();
+}
+
+function parseTagsValue(value) {
+  return String(value || "")
+    .split(",")
+    .map(normalizeTagLabel)
+    .filter(Boolean);
+}
+
+function loadJsonMap(storageKey) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(storageKey) || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveJsonMap(storageKey, value) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value || {}));
+  } catch (err) {
+    console.warn("Unable to save calendar color settings", err);
+  }
+}
+
+function loadTagColorSettings() {
+  return tagColorSettingsCache;
+}
+
+function saveTagColorSettings(settings) {
+  tagColorSettingsCache = settings || {};
+  saveJsonMap(TAG_COLOR_STORAGE_KEY, tagColorSettingsCache);
+}
+
+async function loadTagColorSettingsFromServer() {
+  if (tagColorSettingsReady) return tagColorSettingsCache;
+  try {
+    const res = await apiFetch("/calendar/tag-colors");
+    if (!res || !res.ok) throw new Error("Tag color settings unavailable");
+    const data = await res.json();
+    tagColorSettingsServerAvailable = true;
+    tagColorSettingsReady = true;
+    saveTagColorSettings(data.settings || {});
+  } catch (err) {
+    tagColorSettingsReady = true;
+    tagColorSettingsServerAvailable = false;
+    console.warn("Tag color settings API unavailable; using local fallback", err);
+  }
+  refreshTagDatalist();
+  renderTagColorRows();
+  refreshCalendarEventColors();
+  return tagColorSettingsCache;
+}
+
+async function persistTagColorSettings(settings) {
+  saveTagColorSettings(settings);
+  if (!tagColorSettingsServerAvailable) return;
+  try {
+    const res = await apiFetch("/calendar/tag-colors", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings })
+    });
+    if (!res || !res.ok) throw new Error("Tag color save failed");
+    const data = await res.json();
+    saveTagColorSettings(data.settings || settings);
+  } catch (err) {
+    console.warn("Tag color settings save failed; retained local fallback", err);
+    window.showToast?.("Tag color settings saved locally only", "warning");
+  }
+}
+
+function isEventColorEnabled(eventRef = null) {
+  if (!eventRef) return false;
+  if (eventRef?.extendedProps && "eventColorEnabled" in eventRef.extendedProps) {
+    return eventRef.extendedProps.eventColorEnabled === true;
+  }
+  if ("color_enabled" in eventRef) return eventRef.color_enabled === true;
+  const backendId = eventRef?.extendedProps?.backendId || eventRef?.id || null;
+  return backendId != null && loadJsonMap(EVENT_COLOR_ENABLED_STORAGE_KEY)[String(backendId)] === true;
+}
+
+function getKnownTagLabels() {
+  const labels = new Map();
+  Object.values(loadTagColorSettings()).forEach((entry) => {
+    const label = normalizeTagLabel(entry?.label);
+    if (label) labels.set(normalizeTagKey(label), label);
+  });
+  (window.sessionEventCache || []).forEach((eventRef) => {
+    const tags = eventRef?.extendedProps?.tags || eventRef?.tags || [];
+    (Array.isArray(tags) ? tags : parseTagsValue(tags)).forEach((tag) => {
+      labels.set(normalizeTagKey(tag), normalizeTagLabel(tag));
+    });
+  });
+  return [...labels.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function ensureTagsInRegistry(tags) {
+  const settings = loadTagColorSettings();
+  let changed = false;
+  tags.forEach((tag) => {
+    const label = normalizeTagLabel(tag);
+    const key = normalizeTagKey(label);
+    if (!key || settings[key]) return;
+    settings[key] = { label, color: DEFAULT_EVENT_COLOR, enabled: false };
+    changed = true;
+  });
+  if (changed) persistTagColorSettings(settings);
+  return settings;
+}
+
+function refreshTagDatalist() {
+  const list = document.getElementById("eventTagOptions");
+  if (!list) return;
+  list.innerHTML = getKnownTagLabels()
+    .map((label) => `<option value="${escapeHtml(label)}"></option>`)
+    .join("");
+}
+
+function refreshCalendarEventColors() {
+  window.calendar?.refetchEvents?.();
+  window.updateDayDetails?.();
+  window.updateWeekView?.();
+}
+
+function syncEventColorControl() {
+  const enabled = document.getElementById("eventColorEnabled");
+  const color = document.getElementById("eventColor");
+  if (!enabled || !color) return;
+  color.disabled = !enabled.checked;
+  color.classList.toggle("colorInputDisabled", !enabled.checked);
+}
+
+function getCurrentModalTags() {
+  return parseTagsValue(document.getElementById("eventTags")?.value || "");
+}
+
+function getEnabledTagEntriesForCurrentEvent(settings = loadTagColorSettings()) {
+  return getCurrentModalTags()
+    .map((tag) => {
+      const key = normalizeTagKey(tag);
+      const entry = settings[key];
+      return entry?.enabled ? { key, entry } : null;
+    })
+    .filter(Boolean);
+}
+
+function setEventColorControlValue(color, enabled = true) {
+  const enabledInput = document.getElementById("eventColorEnabled");
+  const colorInput = document.getElementById("eventColor");
+  if (enabledInput) enabledInput.checked = enabled;
+  if (colorInput) colorInput.value = normalizeColorValue(color);
+  syncEventColorControl();
+}
+
+function syncEventColorToPrimaryEnabledTag() {
+  const enabledTags = getEnabledTagEntriesForCurrentEvent();
+  if (!enabledTags.length) return;
+  setEventColorControlValue(enabledTags[0].entry.color, true);
+}
+
+function syncCurrentTagColorInputs(settings = loadTagColorSettings()) {
+  document.querySelectorAll(".tagColorRow[data-tag-key]").forEach((row) => {
+    const entry = settings[row.dataset.tagKey];
+    const colorInput = row.querySelector("[data-tag-color]");
+    const enabledInput = row.querySelector("[data-tag-color-enabled]");
+    if (!entry || !colorInput || !enabledInput) return;
+    enabledInput.checked = entry.enabled === true;
+    colorInput.disabled = !entry.enabled;
+    colorInput.value = normalizeColorValue(entry.color);
+  });
+}
+
+function previewEventColorOnEnabledTagInputs(nextColor) {
+  const normalized = normalizeColorValue(nextColor);
+  getEnabledTagEntriesForCurrentEvent().forEach(({ key }) => {
+    const row = document.querySelector(`.tagColorRow[data-tag-key="${CSS.escape(key)}"]`);
+    const colorInput = row?.querySelector?.("[data-tag-color]");
+    if (colorInput) colorInput.value = normalized;
+  });
+}
+
+function buildColorChip(color) {
+  const normalized = normalizeColorValue(color);
+  return `
+    <span class="tagColorConfirmChip">
+      <span class="tagColorConfirmSwatch" style="background:${escapeHtml(normalized)}"></span>
+      <code>${escapeHtml(normalized)}</code>
+    </span>
+  `;
+}
+
+function confirmTagColorChange({ labelText, currentColors, nextColor }) {
+  const normalizedNext = normalizeColorValue(nextColor);
+  const currentList = [...new Set((currentColors || []).map((color) => normalizeColorValue(color)))];
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "tagColorConfirmOverlay";
+    overlay.innerHTML = `
+      <div class="tagColorConfirmDialog" role="dialog" aria-modal="true" aria-labelledby="tagColorConfirmTitle">
+        <button type="button" class="tagColorConfirmClose" data-confirm-action="cancel" aria-label="Cancel color change">×</button>
+        <h3 id="tagColorConfirmTitle">Change Tag Color?</h3>
+        <p>Changing <strong>${escapeHtml(labelText)}</strong> updates the render color for all events with the same tag.</p>
+        <div class="tagColorConfirmRows">
+          <div><span>Current</span><div>${currentList.map(buildColorChip).join("")}</div></div>
+          <div><span>New</span><div>${buildColorChip(normalizedNext)}</div></div>
+        </div>
+        <div class="tagColorConfirmActions">
+          <button type="button" class="secondaryBtn" data-confirm-action="cancel">Cancel</button>
+          <button type="button" class="primaryBtn" data-confirm-action="ok">Change Color</button>
+        </div>
+      </div>
+    `;
+
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") finish(false);
+    };
+
+    const finish = (ok) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKeyDown);
+      resolve(ok);
+    };
+
+    overlay.addEventListener("click", (event) => {
+      const action = event.target?.closest?.("[data-confirm-action]")?.dataset.confirmAction;
+      if (action === "ok") finish(true);
+      if (action === "cancel" || event.target === overlay) finish(false);
+    });
+    document.addEventListener("keydown", onKeyDown);
+    document.body.appendChild(overlay);
+    overlay.querySelector("[data-confirm-action='ok']")?.focus();
+  });
+}
+
+async function applyEventColorToEnabledTags(nextColor) {
+  const settings = loadTagColorSettings();
+  const enabledTags = getEnabledTagEntriesForCurrentEvent(settings);
+  if (!enabledTags.length) return true;
+
+  const normalized = normalizeColorValue(nextColor);
+  const changing = enabledTags.filter(({ entry }) => normalizeColorValue(entry.color).toLowerCase() !== normalized.toLowerCase());
+  if (!changing.length) return true;
+
+  const labels = changing.map(({ entry, key }) => entry.label || key).join(", ");
+  const currentColors = changing.map(({ entry }) => normalizeColorValue(entry.color));
+  const ok = await confirmTagColorChange({ labelText: labels, currentColors, nextColor: normalized });
+  if (!ok) {
+    syncEventColorToPrimaryEnabledTag();
+    return false;
+  }
+
+  changing.forEach(({ entry }) => {
+    entry.color = normalized;
+  });
+  persistTagColorSettings(settings);
+  syncCurrentTagColorInputs(settings);
+  refreshCalendarEventColors();
+  return true;
+}
+
+function renderTagColorRows() {
+  const holder = document.getElementById("eventTagColorRows");
+  const tagsInput = document.getElementById("eventTags");
+  if (!holder || !tagsInput) return;
+
+  const tags = parseTagsValue(tagsInput.value);
+  const settings = ensureTagsInRegistry(tags);
+  refreshTagDatalist();
+
+  holder.innerHTML = tags.map((tag) => {
+    const key = normalizeTagKey(tag);
+    const entry = settings[key] || { label: tag, color: DEFAULT_EVENT_COLOR, enabled: false };
+    return `
+      <div class="tagColorRow" data-tag-key="${escapeHtml(key)}">
+        <span class="tagColorName">${escapeHtml(entry.label || tag)}</span>
+        <label class="inlineToggle"><input type="checkbox" data-tag-color-enabled ${entry.enabled ? "checked" : ""} /> Color</label>
+        <input type="color" data-tag-color value="${escapeHtml(normalizeColorValue(entry.color))}" ${entry.enabled ? "" : "disabled"} />
+      </div>
+    `;
+  }).join("");
+  syncEventColorToPrimaryEnabledTag();
+}
+
+function resolveEventRenderColor(eventLike = null, accountColor = "#4285f4") {
+  const settings = loadTagColorSettings();
+  const rawTags = eventLike?.extendedProps?.tags || eventLike?.tags || [];
+  const tags = Array.isArray(rawTags) ? rawTags : parseTagsValue(rawTags);
+  for (const tag of tags) {
+    const entry = settings[normalizeTagKey(tag)];
+    if (entry?.enabled) return normalizeColorValue(entry.color, accountColor);
+  }
+
+  if (isEventColorEnabled(eventLike)) {
+    const eventColor = eventLike?.extendedProps?.eventColor || eventLike?.color || null;
+    if (eventColor) return normalizeColorValue(eventColor, accountColor);
+  }
+
+  return normalizeColorValue(accountColor, "#4285f4");
+}
+
+window.resolveEventRenderColor = resolveEventRenderColor;
+
+function resetWindowFrame(frame) {
+  if (!frame) return;
+  frame.classList.remove("windowFrameMinimized", "windowFrameMaximized");
+  frame.querySelectorAll(".windowControlBtn[data-window-action='maximize']").forEach((btn) => {
+    btn.setAttribute("aria-label", "Maximize window");
+    btn.title = "Maximize";
+    btn.textContent = "□";
+  });
+}
+
+function closeWindowFrame(frame) {
+  if (!frame) return;
+  if (frame.id === "createEventModal") {
+    closeCreateModal();
+    return;
+  }
+  if (frame.id === "publishConfirmDialog") {
+    closePublishConfirmationDialog();
+    return;
+  }
+  frame.classList.remove("show");
+}
+
+function toggleWindowMinimized(frame) {
+  if (!frame) return;
+  const minimized = frame.classList.toggle("windowFrameMinimized");
+  if (minimized) frame.classList.remove("windowFrameMaximized");
+}
+
+function toggleWindowMaximized(frame, button) {
+  if (!frame) return;
+  const maximized = frame.classList.toggle("windowFrameMaximized");
+  if (maximized) frame.classList.remove("windowFrameMinimized");
+  if (button) {
+    button.setAttribute("aria-label", maximized ? "Restore window" : "Maximize window");
+    button.title = maximized ? "Restore" : "Maximize";
+    button.textContent = maximized ? "❐" : "□";
+  }
+}
+
+function installWindowControls(frame, header) {
+  if (!frame || !header || header.querySelector(".windowControls")) return;
+  frame.classList.add("windowFrame");
+  header.classList.add("windowHeaderWithControls");
+  const controls = document.createElement("div");
+  controls.className = "windowControls";
+  controls.innerHTML = `
+    <button type="button" class="windowControlBtn" data-window-action="minimize" aria-label="Minimize window" title="Minimize">−</button>
+    <button type="button" class="windowControlBtn" data-window-action="maximize" aria-label="Maximize window" title="Maximize">□</button>
+    <button type="button" class="windowControlBtn close" data-window-action="close" aria-label="Close window" title="Close">×</button>
+  `;
+  header.appendChild(controls);
+}
+
+function initModalWindowControls() {
+  if (modalWindowControlsReady) return;
+  modalWindowControlsReady = true;
+
+  const createEventModal = document.getElementById("createEventModal");
+  installWindowControls(createEventModal, document.querySelector("#createEventModal .modalHeader"));
+  installModalResizeHandle(createEventModal);
+  installWindowControls(document.getElementById("publishConfirmDialog"), document.querySelector("#publishConfirmDialog .publishConfirmHeader"));
+
+  if (!modalResizeReady) {
+    modalResizeReady = true;
+    window.addEventListener("resize", () => constrainModalToViewport(document.getElementById("createEventModal")));
+  }
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest?.(".windowControlBtn[data-window-action]");
+    if (!button) return;
+
+    const frame = button.closest(".windowFrame");
+    const action = button.dataset.windowAction;
+    if (!frame || !action) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (action === "minimize") toggleWindowMinimized(frame);
+    if (action === "maximize") toggleWindowMaximized(frame, button);
+    if (action === "close") closeWindowFrame(frame);
+  });
+}
 
 function normalizeAccountKey(provider, email) {
   return `${String(provider || "local").toLowerCase().trim()}:${String(email || "local").toLowerCase().trim()}`;
@@ -254,12 +754,15 @@ function openPublishConfirmationDialog() {
   const dialog = document.getElementById("publishConfirmDialog");
   const overlay = document.getElementById("publishConfirmOverlay");
   if (!dialog || !overlay) return;
+  initModalWindowControls();
+  resetWindowFrame(dialog);
   renderPublishConfirmationContents();
   overlay.classList.add("show");
   dialog.classList.add("show");
 }
 
 function closePublishConfirmationDialog() {
+  resetWindowFrame(document.getElementById("publishConfirmDialog"));
   document.getElementById("publishConfirmOverlay")?.classList.remove("show");
   document.getElementById("publishConfirmDialog")?.classList.remove("show");
 }
@@ -772,6 +1275,7 @@ function fillModalFields(date = null, eventRef = null) {
   const desc = document.getElementById("eventDescriptionEditor");
   const tags = document.getElementById("eventTags");
   const color = document.getElementById("eventColor");
+  const colorEnabled = document.getElementById("eventColorEnabled");
   const stickyContent = document.getElementById("eventStickyContentEditor");
   const stickyColor = document.getElementById("eventStickyColor");
   const created = document.getElementById("eventMetaCreated");
@@ -795,7 +1299,10 @@ function fillModalFields(date = null, eventRef = null) {
     tags.value = Array.isArray(rawTags) ? rawTags.join(", ") : String(rawTags || "");
   }
 
-  if (color) color.value = eventRef?.extendedProps?.eventColor || eventRef?.color || "#4F8EF7";
+  if (color) color.value = normalizeColorValue(eventRef?.extendedProps?.eventColor || eventRef?.color || DEFAULT_EVENT_COLOR);
+  if (colorEnabled) colorEnabled.checked = isEventColorEnabled(eventRef);
+  syncEventColorControl();
+  renderTagColorRows();
 
   modalState.stickyNotes = parseStickyNotes(eventRef);
   modalState.stickyIndex = 0;
@@ -817,6 +1324,10 @@ function fillModalFields(date = null, eventRef = null) {
 function openModal(type = "event", date = null, eventRef = null) {
   const modal = document.getElementById("createEventModal");
   if (!modal) return;
+
+  initModalWindowControls();
+  resetWindowFrame(modal);
+  constrainModalToViewport(modal);
 
   window.isModalOpen = true;
   modalState.eventRef = eventRef || null;
@@ -865,6 +1376,9 @@ function openDateStickyModal(dateInput = null, stickyIndex = 0) {
 
   const modal = document.getElementById("createEventModal");
   if (!modal) return;
+  initModalWindowControls();
+  resetWindowFrame(modal);
+  constrainModalToViewport(modal);
   window.isModalOpen = true;
 
   fillModalFields(new Date(`${dateKey}T12:00:00`), null);
@@ -900,6 +1414,7 @@ function openStickyModalForNew(event = null) {
 function closeCreateModal() {
   window.isModalOpen = false;
   closePublishConfirmationDialog();
+  resetWindowFrame(document.getElementById("createEventModal"));
   document.getElementById("createEventModal")?.classList.remove("show");
   document.getElementById("modalOverlay")?.classList.remove("show");
 }
@@ -919,6 +1434,7 @@ function normalizeEventForCache(eventData, fallback = null) {
     start: startVal ? new Date(startVal) : null,
     end: endVal ? new Date(endVal) : null,
     color: eventData?.color || fallback?.color || null,
+    color_enabled: eventData?.color_enabled === true || ext.eventColorEnabled === true || fallback?.color_enabled === true || fallback?.extendedProps?.eventColorEnabled === true,
     extendedProps: {
       backendId: eventData?.id || ext.backendId || fallback?.extendedProps?.backendId || null,
       source: ext.source || eventData?.source || fallback?.extendedProps?.source || "local",
@@ -928,6 +1444,7 @@ function normalizeEventForCache(eventData, fallback = null) {
       description: ext.description || eventData?.description || fallback?.extendedProps?.description || "",
       tags: ext.tags || eventData?.tags || fallback?.extendedProps?.tags || [],
       eventColor: ext.eventColor || eventData?.color || fallback?.extendedProps?.eventColor || "#4F8EF7",
+      eventColorEnabled: eventData?.color_enabled === true || ext.eventColorEnabled === true || fallback?.color_enabled === true || fallback?.extendedProps?.eventColorEnabled === true,
       stickyNote,
       stickyNotes,
       createdAt: ext.createdAt || eventData?.created_at || fallback?.extendedProps?.createdAt || null,
@@ -970,7 +1487,9 @@ function buildEventPayload() {
 
   const description = getEditorHtml("eventDescriptionEditor");
   const tags = (document.getElementById("eventTags")?.value || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const eventColor = document.getElementById("eventColor")?.value || "#4F8EF7";
+  const eventColorEnabled = document.getElementById("eventColorEnabled")?.checked === true;
+  const eventColor = eventColorEnabled ? normalizeColorValue(document.getElementById("eventColor")?.value) : null;
+  ensureTagsInRegistry(tags);
 
   saveCurrentStickyIntoState();
   const sticky_notes = modalState.stickyNotes.filter((n) => String(n.content || "").trim());
@@ -985,6 +1504,7 @@ function buildEventPayload() {
     start_time: start ? new Date(`${date}T${start}`).toISOString() : new Date(`${date}T00:00`).toISOString(),
     end_time: end ? new Date(`${date}T${end}`).toISOString() : null,
     color: eventColor,
+    color_enabled: eventColorEnabled,
     tags,
     sticky_notes,
     sticky_note,
@@ -1433,6 +1953,79 @@ function bindUIEvents() {
   document.getElementById("appleBtn")?.addEventListener("click", connectApple);
 
   document.getElementById("addTaskBtn")?.addEventListener("click", addTask);
+
+  refreshTagDatalist();
+  loadTagColorSettingsFromServer();
+  document.getElementById("eventColorEnabled")?.addEventListener("change", async () => {
+    syncEventColorControl();
+    if (document.getElementById("eventColorEnabled")?.checked) {
+      previewEventColorOnEnabledTagInputs(document.getElementById("eventColor")?.value || DEFAULT_EVENT_COLOR);
+      await applyEventColorToEnabledTags(document.getElementById("eventColor")?.value || DEFAULT_EVENT_COLOR);
+    }
+  });
+  document.getElementById("eventColor")?.addEventListener("input", (event) => {
+    previewEventColorOnEnabledTagInputs(event.target.value);
+  });
+  document.getElementById("eventColor")?.addEventListener("change", async (event) => {
+    await applyEventColorToEnabledTags(event.target.value);
+  });
+  document.getElementById("eventTags")?.addEventListener("input", renderTagColorRows);
+  document.getElementById("eventTagColorRows")?.addEventListener("input", (event) => {
+    if (!event.target?.matches?.("[data-tag-color]")) return;
+    const row = event.target.closest?.(".tagColorRow[data-tag-key]");
+    const enabledInput = row?.querySelector?.("[data-tag-color-enabled]");
+    if (enabledInput?.checked) {
+      setEventColorControlValue(event.target.value, true);
+    }
+  });
+  document.getElementById("eventTagColorRows")?.addEventListener("change", async (event) => {
+    const row = event.target?.closest?.(".tagColorRow[data-tag-key]");
+    if (!row) return;
+
+    const key = row.dataset.tagKey;
+    const settings = loadTagColorSettings();
+    const entry = settings[key] || { label: row.querySelector(".tagColorName")?.textContent || key, color: DEFAULT_EVENT_COLOR, enabled: false };
+    const enabledInput = row.querySelector("[data-tag-color-enabled]");
+    const colorInput = row.querySelector("[data-tag-color]");
+
+    if (event.target.matches("[data-tag-color-enabled]")) {
+      entry.enabled = enabledInput.checked;
+      if (entry.enabled) {
+        const eventColor = normalizeColorValue(document.getElementById("eventColor")?.value || entry.color);
+        entry.color = eventColor;
+        colorInput.value = eventColor;
+        setEventColorControlValue(eventColor, true);
+      }
+      colorInput.disabled = !entry.enabled;
+      settings[key] = entry;
+      persistTagColorSettings(settings);
+      refreshCalendarEventColors();
+      return;
+    }
+
+    if (event.target.matches("[data-tag-color]")) {
+      const previousColor = normalizeColorValue(entry.color);
+      const nextColor = normalizeColorValue(colorInput.value);
+      if (entry.enabled && previousColor.toLowerCase() !== nextColor.toLowerCase()) {
+        const ok = await confirmTagColorChange({
+          labelText: entry.label || key,
+          currentColors: [previousColor],
+          nextColor
+        });
+        if (!ok) {
+          colorInput.value = previousColor;
+          return;
+        }
+      }
+      entry.color = nextColor;
+      settings[key] = entry;
+      persistTagColorSettings(settings);
+      if (entry.enabled) {
+        setEventColorControlValue(nextColor, true);
+      }
+      refreshCalendarEventColors();
+    }
+  });
 
   document.getElementById("saveEventBtn")?.addEventListener("click", saveEvent);
   document.getElementById("publishEventBtn")?.addEventListener("click", publishCurrentEvent);

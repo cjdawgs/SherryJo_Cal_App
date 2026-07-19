@@ -5,6 +5,13 @@
 		}
 	],
 	"settings": {
-		"claudeCodeChat.permissions.yoloMode": true
+		"claudeCodeChat.permissions.yoloMode": true,
+		"terminal.integrated.defaultProfile.windows": "Windows PowerShell",
+		"terminal.integrated.profiles.windows": {
+			"Windows PowerShell": {
+				"path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+				"args": ["-NoLogo"]
+			}
+		}
 	}
 }

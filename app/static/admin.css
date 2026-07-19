@@ -403,6 +403,17 @@ th {
   padding: 0;
 }
 
+.entity-dialog.windowFrameMaximized {
+  width: auto;
+  max-width: none;
+  max-height: none;
+  inset: 14px;
+}
+
+.entity-dialog.windowFrameMinimized {
+  width: min(460px, 92vw);
+}
+
 .entity-dialog::backdrop {
   background: rgba(17, 24, 39, 0.35);
 }
@@ -411,8 +422,53 @@ th {
   padding: 14px;
 }
 
-#entityForm h3 {
-  margin-top: 0;
+.adminDialogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.adminDialogHeader h3 {
+  margin: 0;
+}
+
+.windowControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.windowControlBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #c8d4e6;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #233b5f;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.windowControlBtn:hover {
+  background: #eaf1fb;
+}
+
+.windowControlBtn.close:hover {
+  border-color: #f1a7a7;
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.windowFrameMinimized form > :not(.adminDialogHeader) {
+  display: none;
 }
 
 .form-fields {

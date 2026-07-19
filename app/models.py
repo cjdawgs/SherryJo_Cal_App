@@ -50,6 +50,11 @@ class User(Base):
     # ✅ RELATIONSHIPS
     events = relationship("Event", back_populates="owner")
     tasks = relationship("Task", back_populates="owner")
+    tag_color_settings = relationship(
+        "EventTagColorSetting",
+        back_populates="owner",
+        cascade="all, delete-orphan"
+    )
 
     # ⚠️ LEGACY TOKEN STORAGE (NO LONGER USED — SAFE TO REMOVE LATER)
     google_access_token = Column(String, nullable=True)
@@ -243,6 +248,7 @@ class Event(Base):
     # ✅ EVENT COLOR (PALETTE SUPPORT)
     # ==================================================
     color = Column(String, nullable=True)
+    color_enabled = Column(Boolean, default=False, nullable=False)
 
     # ✅ UX metadata for event form enhancements
     tags = Column(JSON, nullable=True)
@@ -262,6 +268,27 @@ class Event(Base):
     # Google:    {"primary": "nextSyncToken_abc", "cal2@gmail.com": "nextSyncToken_xyz"}
     # Microsoft: {"delta_link": "https://graph.microsoft.com/v1.0/me/calendarView/delta?$deltatoken=..."}
     # Apple:     not used (CalDAV has no delta API)
+
+
+class EventTagColorSetting(Base):
+    __tablename__ = "event_tag_color_settings"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "tag_key", name="uq_event_tag_color_owner_tag"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    owner = relationship("User", back_populates="tag_color_settings")
+    tag_key = Column(String, index=True, nullable=False)
+    label = Column(String, nullable=False)
+    color = Column(String, nullable=True)
+    enabled = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 
 class DateStickyNote(Base):

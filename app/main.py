@@ -82,6 +82,7 @@ REQUIRED_TABLES = {
     "tasks",
     "notes",
     "date_sticky_notes",
+    "event_tag_color_settings",
 }
 
 
@@ -213,6 +214,7 @@ if engine.url.drivername.startswith("postgresql"):
         event_columns = {col["name"] for col in inspector.get_columns("events")}
         required_event_columns = {
             "color",
+            "color_enabled",
             "tags",
             "sticky_note",
             "sticky_notes",
@@ -224,10 +226,12 @@ if engine.url.drivername.startswith("postgresql"):
             print(f"⚠️ PostgreSQL events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS color VARCHAR"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS color_enabled BOOLEAN DEFAULT FALSE"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS tags JSONB"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_note JSONB"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_notes JSONB"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+                conn.execute(text("UPDATE events SET color_enabled = FALSE WHERE color_enabled IS NULL"))
                 conn.commit()
             print("✅ PostgreSQL events schema upgrade complete.")
 
@@ -301,6 +305,7 @@ if engine.url.drivername.startswith("sqlite"):
         event_columns = {col["name"] for col in inspector.get_columns("events")}
         required_event_columns = {
             "color",
+            "color_enabled",
             "tags",
             "sticky_note",
             "sticky_notes",
@@ -314,6 +319,8 @@ if engine.url.drivername.startswith("sqlite"):
                 for col in missing_event_columns:
                     if col == "color":
                         conn.execute(text("ALTER TABLE events ADD COLUMN color VARCHAR"))
+                    elif col == "color_enabled":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN color_enabled BOOLEAN DEFAULT 0"))
                     elif col == "tags":
                         conn.execute(text("ALTER TABLE events ADD COLUMN tags JSON"))
                     elif col == "sticky_note":
@@ -322,6 +329,7 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE events ADD COLUMN sticky_notes JSON"))
                     elif col == "updated_at":
                         conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
+                conn.execute(text("UPDATE events SET color_enabled = 0 WHERE color_enabled IS NULL"))
                 conn.commit()
             print("✅ SQLite events schema upgrade complete.")
 

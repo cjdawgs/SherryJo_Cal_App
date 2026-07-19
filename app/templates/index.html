@@ -266,13 +266,18 @@
 
     <section class="modalSection eventOnly eventGrid2">
       <div>
-        <label class="fieldLabel" for="eventColor">Event Color</label>
-        <input id="eventColor" type="color" value="#4F8EF7" />
+        <div class="fieldLabelRow">
+          <label class="fieldLabel" for="eventColor">Event Color</label>
+          <label class="inlineToggle"><input id="eventColorEnabled" type="checkbox" /> Enable</label>
+        </div>
+        <input id="eventColor" type="color" value="#4F8EF7" disabled />
       </div>
       <div>
         <label class="fieldLabel" for="eventTags">Tags</label>
-        <input id="eventTags" placeholder="home, family, errands" />
+        <input id="eventTags" list="eventTagOptions" placeholder="home, family, errands" />
+        <datalist id="eventTagOptions"></datalist>
       </div>
+      <div id="eventTagColorRows" class="tagColorRows"></div>
     </section>
 
     <section class="modalSection stickySection">
@@ -370,6 +375,7 @@
 <script src="{{ asset_url('calendar.colors.js') }}"></script>
 <script type="module" src="{{ asset_url('calendar.js') }}"></script>
 <script type="module" src="{{ asset_url('dev_role_badge.js') }}"></script>
+<script src="{{ asset_url('window_controls.js') }}"></script>
 <script src="{{ asset_url('button_hints.js') }}"></script>
 
 <div id="editorContextMenu" class="editorContextMenu" aria-hidden="true">
