@@ -111,6 +111,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
+    updatePublishButtonState();
     return;
   }
 
@@ -125,6 +126,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
+    updatePublishButtonState();
     return;
   }
 
@@ -138,6 +140,7 @@ function applyControlBandDensity(mode) {
   withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
   withIconLabel(logoutBtn, "Logout");
   _updateDedupBtnUI();
+  updatePublishButtonState();
 }
 
 function applyLayoutMode({ forceViewSwitch = false } = {}) {
@@ -289,8 +292,41 @@ function refreshAfterDedupChange() {
   updateWeekView();
 }
 
-function toggleDedup() {
-  setDedupEnabled(!isDedupEnabled());
+async function materializeDedupedEventsToLocal() {
+  const res = await apiFetch("/calendar/dedup-materialize", {
+    method: "POST"
+  });
+  if (!res) return null;
+
+  const raw = await res.text();
+  const data = raw ? JSON.parse(raw) : {};
+  if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+    throw new Error(data?.message || `Dedup materialize failed (${res.status})`);
+  }
+  return data;
+}
+
+async function toggleDedup() {
+  const nextEnabled = !isDedupEnabled();
+  setDedupEnabled(nextEnabled);
+
+  if (nextEnabled) {
+    try {
+      showToast("Materializing deduped events into Local...", "info");
+      await materializeDedupedEventsToLocal();
+      await preloadEventCache({
+        silent: true,
+        monthsBack: QUICK_CACHE_MONTHS_BACK,
+        monthsForward: QUICK_CACHE_MONTHS_FORWARD,
+        preserveSelectedDate: true
+      });
+      scheduleFullCacheExpansion("dedup_materialize_expand");
+    } catch (err) {
+      console.error("❌ Dedup materialize failed", err);
+      showToast("Dedup is on, but Local materialization failed", "error");
+    }
+  }
+
   refreshAfterDedupChange();
   showToast(isDedupEnabled() ? "Dedup enabled" : "Dedup disabled", "info");
 }
@@ -304,10 +340,146 @@ window.setDedupEnabled = setDedupEnabled;
 // events actually changed, covering only their affected accounts and date span.
 // Sync NEVER clears this — only an explicit Publish does.
 window.sessionModifiedEventIds = window.sessionModifiedEventIds ?? new Set();
+window.sessionDeletedProviderEvents = window.sessionDeletedProviderEvents ?? [];
+window.pendingPublishChanges = window.pendingPublishChanges ?? new Map();
 
-window.trackModifiedEvent = function(id) {
-  if (id != null) window.sessionModifiedEventIds.add(Number(id));
+function describePendingEvent(eventRef, fallback = "Event updated") {
+  const title = String(eventRef?.title || eventRef?.extendedProps?.title || "Untitled event").trim();
+  return `${fallback}: ${title || "Untitled event"}`;
+}
+
+function getPendingPublishChanges() {
+  return [...(window.pendingPublishChanges?.values?.() || [])];
+}
+
+function hasPendingPublishChanges() {
+  return getPendingPublishChanges().length > 0;
+}
+
+function renderPublishBadge(btn, count) {
+  if (!btn) return;
+
+  let badge = btn.querySelector(".publishCountBadge");
+  if (count <= 0) {
+    badge?.remove();
+    return;
+  }
+
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "publishCountBadge";
+    badge.setAttribute("aria-label", "Pending publish items");
+    btn.appendChild(badge);
+  }
+
+  badge.textContent = String(count);
+}
+
+function updatePublishButtonState() {
+  const btn = document.getElementById("publishBtn");
+  if (!btn) return;
+
+  const pendingCount = getPendingPublishChanges().length;
+  const hasChanges = pendingCount > 0;
+  btn.disabled = !hasChanges;
+  btn.classList.toggle("publish-disabled", !hasChanges);
+  btn.setAttribute("aria-disabled", hasChanges ? "false" : "true");
+  btn.dataset.pendingCount = String(pendingCount);
+  btn.title = hasChanges
+    ? `${pendingCount} pending publish item${pendingCount === 1 ? "" : "s"}. Click or right-click to review.`
+    : "No event, sticky note, or calendar-view changes pending publish.";
+  renderPublishBadge(btn, pendingCount);
+}
+
+function registerPendingPublishChange(change = {}) {
+  const category = String(change.category || "event").trim() || "event";
+  const eventId = change.eventId != null ? Number(change.eventId) : null;
+  const key = String(change.key || `${category}:${eventId ?? change.dateKey ?? Date.now()}:${Math.random().toString(16).slice(2)}`);
+  const summary = String(change.summary || "Pending calendar change").trim();
+
+  window.pendingPublishChanges.set(key, {
+    key,
+    category,
+    summary,
+    eventId,
+    dateKey: change.dateKey || null,
+    deletedEvent: change.deletedEvent || null,
+    localOnly: change.localOnly === true,
+    createdAt: change.createdAt || new Date().toISOString()
+  });
+
+  if (eventId != null) {
+    window.sessionModifiedEventIds.add(eventId);
+  }
+
+  updatePublishButtonState();
+}
+
+function removePendingPublishChanges(changeKeys = []) {
+  const keys = new Set(changeKeys.map(String));
+  if (!keys.size) return;
+
+  keys.forEach((key) => window.pendingPublishChanges.delete(key));
+
+  const remainingEventIds = new Set(
+    getPendingPublishChanges()
+      .map((change) => change.eventId)
+      .filter((id) => id != null)
+      .map(Number)
+  );
+  window.sessionModifiedEventIds = new Set(
+    [...(window.sessionModifiedEventIds || [])].filter((id) => remainingEventIds.has(Number(id)))
+  );
+
+  window.sessionDeletedProviderEvents = getPendingPublishChanges()
+    .map((change) => change.deletedEvent)
+    .filter(Boolean);
+
+  updatePublishButtonState();
+}
+
+function clearPendingPublishChanges() {
+  window.pendingPublishChanges.clear();
+  window.sessionModifiedEventIds.clear();
+  window.sessionDeletedProviderEvents = [];
+  updatePublishButtonState();
+}
+
+window.trackModifiedEvent = function(id, details = {}) {
+  if (id == null) return;
+  registerPendingPublishChange({
+    key: details.key || `${details.category || "event"}:${Number(id)}`,
+    category: details.category || "event",
+    summary: details.summary || `Event: updated event #${id}`,
+    eventId: Number(id),
+    localOnly: details.localOnly === true
+  });
 };
+
+window.trackDeletedProviderEvent = function(eventRef) {
+  const externalIds = {
+    ...(eventRef?.external_ids || {}),
+    ...(eventRef?.extendedProps?.external_ids || {})
+  };
+
+  if (!Object.keys(externalIds).length) return;
+
+  const deletedEvent = {
+    title: eventRef?.title || "",
+    external_ids: externalIds
+  };
+  window.sessionDeletedProviderEvents.push(deletedEvent);
+
+  registerPendingPublishChange({
+    key: `event-delete:${eventRef?.extendedProps?.backendId || eventRef?.id || Date.now()}`,
+    category: "event",
+    summary: describePendingEvent(eventRef, "Delete event"),
+    deletedEvent
+  });
+};
+
+window.trackPendingPublishChange = registerPendingPublishChange;
+window.updatePublishButtonState = updatePublishButtonState;
 // ────────────────────────────────────────────────────────────────────────────
 let editingEventId = null;   // kept for backward-compat within this module
 let editingNoteId = null;
@@ -3116,11 +3288,34 @@ window.syncNow = syncNow;
 /**************************************************************
  * ✅ PUBLISH NOW — push local canonical events to all provider accounts
  **************************************************************/
-async function publishNow() {
-  const modifiedIds = [...(window.sessionModifiedEventIds || new Set())];
+async function publishNow(options = {}) {
+  const requestedKeys = Array.isArray(options.changeKeys) ? new Set(options.changeKeys.map(String)) : null;
+  const pendingChanges = getPendingPublishChanges();
+  const selectedChanges = requestedKeys
+    ? pendingChanges.filter((change) => requestedKeys.has(String(change.key)))
+    : pendingChanges;
 
-  if (modifiedIds.length === 0) {
+  const modifiedIds = selectedChanges.length
+    ? [...new Set(selectedChanges.map((change) => change.eventId).filter((id) => id != null).map(Number))]
+    : [...(window.sessionModifiedEventIds || new Set())];
+  const deletedEvents = selectedChanges.length
+    ? selectedChanges.map((change) => change.deletedEvent).filter(Boolean)
+    : [...(window.sessionDeletedProviderEvents || [])];
+  const localOnlyChanges = selectedChanges.filter((change) => change.localOnly);
+
+  if (modifiedIds.length === 0 && deletedEvents.length === 0 && localOnlyChanges.length === 0) {
     showToast("ℹ️ No local changes to publish — edit events first", "info");
+    updatePublishButtonState();
+    return;
+  }
+
+  if (modifiedIds.length === 0 && deletedEvents.length === 0 && localOnlyChanges.length > 0) {
+    if (selectedChanges.length) {
+      removePendingPublishChanges(selectedChanges.map((change) => change.key));
+    } else {
+      clearPendingPublishChanges();
+    }
+    showToast(`✅ Cleared ${localOnlyChanges.length} local calendar change${localOnlyChanges.length === 1 ? "" : "s"}`);
     return;
   }
 
@@ -3137,7 +3332,7 @@ async function publishNow() {
     const res = await apiFetch("/calendar/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event_ids: modifiedIds }),
+      body: JSON.stringify({ event_ids: modifiedIds, deleted_events: deletedEvents }),
     });
     if (!res) return;
 
@@ -3152,6 +3347,7 @@ async function publishNow() {
     }
 
     const published = data.published ?? 0;
+    const deleted   = data.deleted   ?? 0;
     const failed    = data.failed   ?? 0;
     const accounts  = (data.affected_accounts || []);
     const rangeStart = data.range_start;
@@ -3167,12 +3363,15 @@ async function publishNow() {
 
     if (failed > 0) {
       showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed`, "error");
-    } else if (published === 0) {
+    } else if (published === 0 && deleted === 0 && localOnlyChanges.length === 0) {
       showToast("ℹ️ Nothing published — events may not be linked to provider accounts yet", "info");
     } else {
-      showToast(`✅ Published ${published} events → ${accountSummary}${rangeSummary}`);
-      // Clear tracking only on full success
-      window.sessionModifiedEventIds.clear();
+      showToast(`✅ Published ${published} updates, ${deleted} deletes → ${accountSummary}${rangeSummary}`);
+      if (selectedChanges.length) {
+        removePendingPublishChanges(selectedChanges.map((change) => change.key));
+      } else {
+        clearPendingPublishChanges();
+      }
     }
 
   } catch (err) {
@@ -3186,10 +3385,95 @@ async function publishNow() {
       const labelEl = btn.querySelector(".btnLabel");
       if (labelEl) labelEl.textContent = "Publish";
     }
+    updatePublishButtonState();
   }
 }
 
 window.publishNow = publishNow;
+
+function closePublishReviewMenu() {
+  document.getElementById("publishReviewMenu")?.remove();
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function openPublishReviewMenu(x, y) {
+  closePublishReviewMenu();
+  const changes = getPendingPublishChanges();
+  if (!changes.length) {
+    showToast("No pending publish changes", "info");
+    updatePublishButtonState();
+    return;
+  }
+
+  const menu = document.createElement("div");
+  menu.id = "publishReviewMenu";
+  menu.className = "publishReviewMenu";
+
+  const rowsHtml = changes.map((change) => `
+    <label class="publishReviewItem">
+      <input type="checkbox" data-publish-change-key="${escapeHtml(change.key)}" checked />
+      <span class="publishReviewText"><strong>${escapeHtml(change.category)}:</strong> ${escapeHtml(change.summary)}</span>
+    </label>
+  `).join("");
+
+  menu.innerHTML = `
+    <div class="publishReviewTitle">Pending Publish Changes</div>
+    <div class="publishReviewList">${rowsHtml}</div>
+    <div class="publishReviewActions">
+      <button type="button" data-publish-review-cancel>Cancel</button>
+      <button type="button" data-publish-review-accept>Accept</button>
+    </div>
+  `;
+
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - rect.width - 12))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, window.innerHeight - rect.height - 12))}px`;
+
+  const acceptBtn = menu.querySelector("[data-publish-review-accept]");
+  const syncAcceptState = () => {
+    const selected = menu.querySelectorAll("input[data-publish-change-key]:checked").length;
+    acceptBtn.disabled = selected === 0;
+  };
+  menu.addEventListener("change", syncAcceptState);
+  syncAcceptState();
+
+  menu.querySelector("[data-publish-review-cancel]")?.addEventListener("click", closePublishReviewMenu);
+  acceptBtn?.addEventListener("click", async () => {
+    const selectedKeys = [...menu.querySelectorAll("input[data-publish-change-key]:checked")]
+      .map((input) => input.dataset.publishChangeKey)
+      .filter(Boolean);
+    closePublishReviewMenu();
+    await publishNow({ changeKeys: selectedKeys });
+  });
+
+  setTimeout(() => {
+    document.addEventListener("click", closePublishReviewMenu, { once: true });
+  }, 0);
+}
+
+window.openPublishReviewMenu = openPublishReviewMenu;
+
+function openPublishReviewMenuForButton() {
+  const btn = document.getElementById("publishBtn");
+  if (!btn) {
+    openPublishReviewMenu(window.innerWidth / 2, window.innerHeight / 2);
+    return;
+  }
+
+  const rect = btn.getBoundingClientRect();
+  openPublishReviewMenu(rect.left, rect.bottom + 8);
+}
+
+window.openPublishReviewMenuForButton = openPublishReviewMenuForButton;
 
 /**************************************************************
  * ✅ LOGOUT
@@ -3215,6 +3499,11 @@ async function deleteEvent() {
   if (!confirmDelete) return;
 
   console.log("SAVE EVENT TRIGGERED (delete)", targetId);
+
+  const eventToDelete = (window.sessionEventCache || []).find((ev) => {
+    return String(ev?.extendedProps?.backendId) === String(targetId) || String(ev?.id) === String(targetId);
+  });
+  window.trackDeletedProviderEvent?.(eventToDelete);
 
   const res = await apiFetch(`/calendar/event/${targetId}`, {
     method: "DELETE"

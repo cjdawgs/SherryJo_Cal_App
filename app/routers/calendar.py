@@ -705,6 +705,23 @@ def sync_calendar(
             "message": str(e)
         }
 
+
+@router.post("/dedup-materialize")
+def materialize_deduped_events(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        changed = calendar_service._dedup_pass(db, current_user.id)
+        return {"status": "success", "changed": changed}
+    except Exception as e:
+        print("❌ DEDUP MATERIALIZE FAILED:", str(e))
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {"status": "error", "message": str(e)}
+
 # ==================================================
 # ✅ PUBLISH — push all canonical local events to provider accounts
 # ==================================================
@@ -728,7 +745,11 @@ async def publish_to_providers(
 
     event_ids_raw = body.get("event_ids", None)  # None = key absent (publish all)
     publish_targets = body.get("publish_targets") or {}
-    if event_ids_raw is not None and len(event_ids_raw) == 0:
+    deleted_events = body.get("deleted_events") or []
+    if not isinstance(deleted_events, list):
+        deleted_events = []
+
+    if event_ids_raw is not None and len(event_ids_raw) == 0 and not deleted_events:
         # Client sent an explicit empty list — no edits tracked, nothing to do
         return {"status": "success", "published": 0, "failed": 0,
                 "message": "No modified events to publish — make edits first"}
@@ -756,7 +777,7 @@ async def publish_to_providers(
             .all()
         )
 
-    if not events_to_publish:
+    if not events_to_publish and not deleted_events:
         return {"status": "success", "published": 0, "failed": 0,
                 "message": "No modified events with provider links to publish"}
 
@@ -776,8 +797,29 @@ async def publish_to_providers(
 
     published = 0
     created   = 0
+    deleted   = 0
     failed    = 0
     warnings  = []
+
+    for deleted_entry in deleted_events:
+        if not isinstance(deleted_entry, dict):
+            continue
+        try:
+            delete_result = _event_actions.delete_external_targets(
+                db,
+                current_user,
+                deleted_entry.get("external_ids") or {},
+                _google_service,
+                _graph_client,
+            )
+            deleted += int(delete_result.get("deleted") or 0)
+            for key in (delete_result.get("affected_accounts") or []):
+                affected_accounts.add(key)
+            warnings.extend(delete_result.get("warnings") or [])
+        except Exception as e:
+            print(f"⚠️ Delete publish failed: {e}")
+            failed += 1
+            warnings.append(f"Delete publish failed: {e}")
 
     for event in events_to_publish:
         try:
@@ -801,6 +843,7 @@ async def publish_to_providers(
         "status": "success",
         "published":          published,
         "created":            created,
+        "deleted":            deleted,
         "failed":             failed,
         "total_events":       len(events_to_publish),
         "affected_accounts":  sorted(affected_accounts),

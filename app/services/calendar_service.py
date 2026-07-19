@@ -1787,6 +1787,8 @@ class CalendarService:
 
 
         merged_count = 0
+        promoted_count = 0
+        deleted_event_ids = set()
 
         for fp, group in groups.items():
 
@@ -1850,6 +1852,10 @@ class CalendarService:
 
                     canonical.color = dup.color
 
+                if dup.id is not None:
+
+                    deleted_event_ids.add(dup.id)
+
                 db.delete(dup)
 
                 merged_count += 1
@@ -1870,15 +1876,35 @@ class CalendarService:
 
 
 
-        if merged_count:
+        for ev in all_events:
+
+            if ev.id in deleted_event_ids:
+
+                continue
+
+            if ev.source == "local" and (ev.account_email or "").lower().strip() == "local":
+
+                continue
+
+            if not getattr(ev, "external_ids", None):
+
+                continue
+
+            ev.source = "local"
+            ev.account_email = "local"
+            promoted_count += 1
+
+
+
+        if merged_count or promoted_count:
 
             db.commit()
 
-            log_info(f"ðŸ”€ Dedup: promoted {merged_count} provider events into local canonical rows")
+            log_info(f"ðŸ”€ Dedup: merged={merged_count} promoted={promoted_count} provider events into local canonical rows")
 
 
 
-        return merged_count
+        return merged_count + promoted_count
 
 
 

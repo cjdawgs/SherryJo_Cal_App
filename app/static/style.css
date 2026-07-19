@@ -386,9 +386,182 @@ button.primary {
   cursor: default;
 }
 
+#publishBtn {
+  position: relative;
+}
+
+.publishCountBadge {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #dc2626;
+  color: #fff;
+  border: 2px solid #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 2px 7px rgba(15, 23, 42, 0.22);
+  pointer-events: none;
+}
+
+#publishBtn.publish-disabled,
+#publishBtn:disabled {
+  opacity: 0.45;
+  filter: grayscale(1);
+  cursor: not-allowed;
+}
+
 #publishBtn.is-publishing svg {
   animation: publishIconSpin 0.75s linear infinite;
   transform-origin: center;
+}
+
+.publishReviewMenu {
+  position: fixed;
+  width: min(420px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 24px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.22);
+  padding: 10px;
+  z-index: 1000001;
+  color: #172033;
+  font-size: 13px;
+}
+
+.publishReviewTitle {
+  font-weight: 800;
+  margin: 2px 2px 8px;
+}
+
+.publishReviewList {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.publishReviewItem {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.publishReviewItem input {
+  margin-top: 2px;
+}
+
+.publishReviewText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+.publishReviewActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.publishReviewActions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  color: #1e293b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.publishReviewActions button[data-publish-review-accept] {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
+}
+
+.publishReviewActions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.unsavedEditGuardOverlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.38);
+  z-index: 1000003;
+}
+
+.unsavedEditGuardDialog {
+  width: min(420px, calc(100vw - 32px));
+  background: #fff;
+  color: #172033;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 18px 46px rgba(15, 23, 42, 0.28);
+  padding: 16px;
+}
+
+.unsavedEditGuardDialog h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.unsavedEditGuardDialog p {
+  margin: 0 0 14px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.unsavedEditGuardActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.unsavedEditGuardActions button {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 7px 11px;
+  background: #fff;
+  color: #1e293b;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.unsavedEditGuardActions button[data-unsaved-action="discard"] {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.unsavedEditGuardActions button[data-unsaved-action="resume"] {
+  background: #f8fafc;
+}
+
+.unsavedEditGuardActions button[data-unsaved-action="save"] {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #fff;
 }
 
 @keyframes publishIconSpin {

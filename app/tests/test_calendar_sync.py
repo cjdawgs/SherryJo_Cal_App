@@ -130,6 +130,51 @@ def test_unified_calendar_expands_linked_accounts_when_dedup_off(client, auth_he
     assert "google:sherryjohanssonrealestate@gmail.com" in keys
 
 
+def test_dedup_materialize_promotes_provider_event_to_local(client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    event = Event(
+        title="Provider Editable Canonical",
+        start_time=datetime(2026, 7, 13, 15, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 13, 16, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="google",
+        account_email="editable@example.com",
+        externalId="google:editable@example.com:g-editable-1",
+        external_ids={"google:editable@example.com": "g-editable-1"},
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    response = client.post("/calendar/dedup-materialize", headers=auth_headers)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert response.json()["changed"] >= 1
+
+    db.refresh(event)
+    assert event.source == "local"
+    assert event.account_email == "local"
+    assert event.external_ids == {"google:editable@example.com": "g-editable-1"}
+
+    dedup_on = client.get(
+        "/calendar/unified?start=2026-07-01T00:00:00Z&end=2026-07-31T23:59:59Z&dedup=true",
+        headers=auth_headers,
+    )
+    assert dedup_on.status_code == 200
+    keys_on = {ev["account_key"] for ev in dedup_on.json()["events"] if ev["title"] == "Provider Editable Canonical"}
+    assert keys_on == {"local:local"}
+
+    dedup_off = client.get(
+        "/calendar/unified?start=2026-07-01T00:00:00Z&end=2026-07-31T23:59:59Z&dedup=false",
+        headers=auth_headers,
+    )
+    assert dedup_off.status_code == 200
+    keys_off = {ev["account_key"] for ev in dedup_off.json()["events"] if ev["title"] == "Provider Editable Canonical"}
+    assert keys_off == {"google:editable@example.com"}
+
+
 @patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
 @patch("app.services.google_calendar_service.GoogleCalendarService.create_event", return_value="google-new-1")
 def test_publish_single_event_to_selected_account_creates_missing_link(mock_google_create, _mock_token, client, auth_headers, db):
@@ -181,3 +226,44 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
     db.refresh(event)
     assert event.external_ids["google:publish@example.com"] == "google-new-1"
     mock_google_create.assert_called_once()
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
+@patch("app.services.google_calendar_service.GoogleCalendarService.delete_event")
+def test_publish_deleted_event_targets_provider_accounts(mock_google_delete, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="delete@example.com",
+        access_token="token-1",
+        refresh_token="refresh-1",
+    ))
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [],
+            "deleted_events": [
+                {
+                    "title": "Delete Me",
+                    "external_ids": {"google:delete@example.com": "g-delete-1"},
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["deleted"] == 1
+    assert data["failed"] == 0
+    assert data["affected_accounts"] == ["google:delete@example.com"]
+    mock_google_delete.assert_called_once_with(
+        token="token-1",
+        event_id="g-delete-1",
+        account_email="delete@example.com",
+    )

@@ -195,3 +195,37 @@ class EventActions:
             "affected_accounts": sorted(set(affected_accounts)),
             "warnings": warnings,
         }
+
+    def delete_external_targets(self, db: Session, user, external_ids: dict, google_service, graph_client) -> dict:
+        deleted = 0
+        affected_accounts = []
+        warnings = []
+
+        for provider, acct_email, raw_id in _iter_write_back_targets(external_ids or {}, ""):
+            target_key = f"{provider}:{(acct_email or '').lower().strip()}"
+
+            try:
+                token = _get_token(db, user.id, provider, acct_email)
+                if not token:
+                    warnings.append(f"No valid token for {target_key}")
+                    continue
+
+                if provider == "google":
+                    google_service.delete_event(token=token, event_id=raw_id, account_email=acct_email or None)
+                elif provider == "microsoft":
+                    graph_client.delete_event(token=token, event_id=raw_id)
+                else:
+                    warnings.append(f"Delete publish not supported for {target_key}")
+                    continue
+
+                deleted += 1
+                affected_accounts.append(target_key)
+            except Exception as e:
+                print(f"WARNING: delete publish failed for {target_key}: {e}")
+                warnings.append(f"Delete failed for {target_key}: {e}")
+
+        return {
+            "deleted": deleted,
+            "affected_accounts": sorted(set(affected_accounts)),
+            "warnings": warnings,
+        }

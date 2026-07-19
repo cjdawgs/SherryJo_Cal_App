@@ -1885,6 +1885,10 @@ export function initFullCalendar() {
         // (execute() will be called by undo/redo manager on redo)
         const data = await command.execute();
         console.log(`[eventChange] Execution successful, registering with undo/redo manager`);
+        window.trackModifiedEvent?.(eventId, {
+          category: "date change",
+          summary: `Date changed: ${event.title || "Untitled event"}`
+        });
 
         // Add to undo/redo history (already executed above)
         await window.undoRedoManager.registerExecuted(command);

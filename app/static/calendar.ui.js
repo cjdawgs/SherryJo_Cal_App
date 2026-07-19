@@ -19,7 +19,8 @@ const modalState = {
   eventRef: null,
   stickyNotes: [],
   stickyIndex: 0,
-  publishTargetKeys: []
+  publishTargetKeys: [],
+  initialSnapshot: null
 };
 
 let isSavingEvent = false;
@@ -1321,6 +1322,80 @@ function fillModalFields(date = null, eventRef = null) {
   renderEventPublishControls();
 }
 
+function getModalEditSnapshot() {
+  if (modalState.type === "sticky") {
+    saveCurrentStickyIntoState();
+    return JSON.stringify({
+      type: "sticky",
+      scope: modalState.stickyScope,
+      dateKey: modalState.dateStickyKey,
+      eventId: modalState.eventId,
+      stickyNotes: modalState.stickyNotes.map((note) => ({
+        content: String(note?.content || ""),
+        color: String(note?.color || "#F7E68A")
+      }))
+    });
+  }
+
+  return JSON.stringify({
+    type: "event",
+    eventId: modalState.eventId,
+    title: (document.getElementById("eventTitle")?.value || "").trim(),
+    date: document.getElementById("eventDate")?.value || "",
+    start: document.getElementById("eventStart")?.value || "",
+    end: document.getElementById("eventEnd")?.value || "",
+    description: getEditorHtml("eventDescriptionEditor"),
+    tags: (document.getElementById("eventTags")?.value || "").trim(),
+    color: document.getElementById("eventColor")?.value || "",
+    colorEnabled: document.getElementById("eventColorEnabled")?.checked === true,
+    publishTargets: getSelectedPublishTargetKeys()
+  });
+}
+
+function markModalCleanSnapshot() {
+  modalState.initialSnapshot = getModalEditSnapshot();
+}
+
+function modalHasUnsavedEdits() {
+  if (!window.isModalOpen || !modalState.initialSnapshot) return false;
+  return getModalEditSnapshot() !== modalState.initialSnapshot;
+}
+
+function closeUnsavedEditGuard() {
+  document.getElementById("unsavedEditGuardOverlay")?.remove();
+}
+
+function openUnsavedEditGuard() {
+  if (document.getElementById("unsavedEditGuardOverlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "unsavedEditGuardOverlay";
+  overlay.className = "unsavedEditGuardOverlay";
+  const subject = modalState.type === "sticky" ? "sticky note" : "event";
+  overlay.innerHTML = `
+    <div class="unsavedEditGuardDialog" role="dialog" aria-modal="true" aria-labelledby="unsavedEditGuardTitle">
+      <h3 id="unsavedEditGuardTitle">Unsaved ${subject} edits</h3>
+      <p>You have changes that have not been saved yet.</p>
+      <div class="unsavedEditGuardActions">
+        <button type="button" data-unsaved-action="discard">Cancel</button>
+        <button type="button" data-unsaved-action="resume">Resume edit</button>
+        <button type="button" data-unsaved-action="save">Save</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.querySelector('[data-unsaved-action="discard"]')?.addEventListener("click", () => {
+    closeUnsavedEditGuard();
+    closeCreateModal({ force: true });
+  });
+  overlay.querySelector('[data-unsaved-action="resume"]')?.addEventListener("click", closeUnsavedEditGuard);
+  overlay.querySelector('[data-unsaved-action="save"]')?.addEventListener("click", async () => {
+    closeUnsavedEditGuard();
+    await saveEvent();
+  });
+}
+
 function openModal(type = "event", date = null, eventRef = null) {
   const modal = document.getElementById("createEventModal");
   if (!modal) return;
@@ -1342,6 +1417,7 @@ function openModal(type = "event", date = null, eventRef = null) {
 
   modal.classList.add("show");
   document.getElementById("modalOverlay")?.classList.add("show");
+  markModalCleanSnapshot();
 
   if (type === "sticky") {
     focusEditor("eventStickyContentEditor");
@@ -1391,6 +1467,7 @@ function openDateStickyModal(dateInput = null, stickyIndex = 0) {
   setModalType("sticky");
   modal.classList.add("show");
   document.getElementById("modalOverlay")?.classList.add("show");
+  markModalCleanSnapshot();
   focusEditor("eventStickyContentEditor");
 }
 
@@ -1409,14 +1486,23 @@ function openStickyModalForNew(event = null) {
     hydrateStickyEditorFromState();
   }
   focusEditor("eventStickyContentEditor");
+  markModalCleanSnapshot();
 }
 
-function closeCreateModal() {
+function closeCreateModal(options = {}) {
+  if (!options.force && modalHasUnsavedEdits()) {
+    openUnsavedEditGuard();
+    return false;
+  }
+
   window.isModalOpen = false;
+  modalState.initialSnapshot = null;
+  closeUnsavedEditGuard();
   closePublishConfirmationDialog();
   resetWindowFrame(document.getElementById("createEventModal"));
   document.getElementById("createEventModal")?.classList.remove("show");
   document.getElementById("modalOverlay")?.classList.remove("show");
+  return true;
 }
 
 function normalizeEventForCache(eventData, fallback = null) {
@@ -1554,8 +1640,15 @@ async function saveStickyOnly() {
       // Register to undo/redo history (already executed)
       await window.undoRedoManager.registerExecuted(command);
 
-      closeCreateModal();
+      closeCreateModal({ force: true });
       refreshStickyVisuals();
+      window.trackPendingPublishChange?.({
+        key: `sticky-date:${dateKey}`,
+        category: "sticky Note",
+        summary: `Date sticky note saved for ${dateKey}`,
+        dateKey,
+        localOnly: true
+      });
       window.showToast?.("📝 Date sticky note saved");
       updateUndoRedoButtonStates();
     } catch (err) {
@@ -1608,13 +1701,18 @@ async function saveStickyOnly() {
     const nextEvent = normalizeEventForCache(data.event, modalState.eventRef);
     modalState.eventRef = nextEvent;
     upsertCacheEvent(nextEvent);
+    const stickySavedId = nextEvent.extendedProps?.backendId ?? modalState.eventId;
+    window.trackModifiedEvent?.(stickySavedId, {
+      category: "sticky Note",
+      summary: `Sticky note updated: ${nextEvent.title || "Untitled event"}`
+    });
 
     // Register to undo/redo history (already executed)
     await window.undoRedoManager.registerExecuted(command);
 
     window.updateDayDetails?.();
     window.updateWeekView?.();
-    closeCreateModal();
+    closeCreateModal({ force: true });
     window.showToast?.("📝 Sticky note saved");
     window.smartRefresh?.({ reason: "sticky_saved", force: true });
     updateUndoRedoButtonStates();
@@ -1677,7 +1775,10 @@ async function persistEventRecord({ closeAfterSave = false, showSuccessToast = f
     upsertCacheEvent(nextEvent);
 
     const savedId = nextEvent.extendedProps?.backendId ?? modalState.eventId;
-    window.trackModifiedEvent?.(savedId);
+    window.trackModifiedEvent?.(savedId, {
+      category: "event",
+      summary: `${isEdit ? "Event updated" : "Event created"}: ${nextEvent.title || "Untitled event"}`
+    });
 
     if (nextEvent.start) {
       window.selectedDate = toDayString(nextEvent.start);
@@ -1695,7 +1796,7 @@ async function persistEventRecord({ closeAfterSave = false, showSuccessToast = f
     updateUndoRedoButtonStates();
 
     if (closeAfterSave) {
-      closeCreateModal();
+      closeCreateModal({ force: true });
     }
     if (showSuccessToast) {
       window.showToast?.("✅ Event saved");
@@ -1787,7 +1888,7 @@ async function confirmPublishCurrentEvent() {
     window.smartRefresh?.({ reason: "single_event_publish", force: true });
 
     closePublishConfirmationDialog();
-    closeCreateModal();
+    closeCreateModal({ force: true });
 
     if (warnings.length) {
       window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` , "error");
@@ -1818,6 +1919,7 @@ async function deleteEvent() {
   });
   
   const previousEvent = eventToDelete ? JSON.parse(JSON.stringify(eventToDelete)) : null;
+  window.trackDeletedProviderEvent?.(eventToDelete);
 
   try {
     // Create undo/redo command
@@ -1861,7 +1963,7 @@ async function deleteEvent() {
     // Register to undo/redo history (already executed)
     await window.undoRedoManager.registerExecuted(command);
 
-    closeCreateModal();
+    closeCreateModal({ force: true });
     window.showToast?.("🗑 Event deleted");
     window.smartRefresh?.({ reason: "event_deleted", force: true });
     updateUndoRedoButtonStates();
@@ -1929,6 +2031,9 @@ function bindUIEvents() {
     if (event.key === "Escape") {
       gearMenuShell?.classList.remove("open");
       accountsBtn?.setAttribute("aria-expanded", "false");
+      if (window.isModalOpen) {
+        closeCreateModal();
+      }
     }
   });
 
@@ -2123,8 +2228,18 @@ function bindUIEvents() {
     if (typeof window.syncNow === "function") await window.syncNow();
   });
 
-  document.getElementById("publishBtn")?.addEventListener("click", async () => {
-    if (typeof window.publishNow === "function") await window.publishNow();
+  document.getElementById("publishBtn")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (typeof window.openPublishReviewMenuForButton === "function") {
+      window.openPublishReviewMenuForButton();
+    }
+  });
+
+  document.getElementById("publishBtn")?.addEventListener("contextmenu", (event) => {
+    event.preventDefault();
+    if (typeof window.openPublishReviewMenu === "function") {
+      window.openPublishReviewMenu(event.clientX, event.clientY);
+    }
   });
 
   document.getElementById("dedupBtn")?.addEventListener("click", () => {
@@ -2891,6 +3006,13 @@ async function deleteSelectedStickyInModal() {
     modalState.stickyIndex = Math.max(0, Math.min(idx, remaining.length - 1));
     hydrateStickyEditorFromState();
     refreshStickyVisuals();
+    window.trackPendingPublishChange?.({
+      key: `sticky-date:${modalState.dateStickyKey}`,
+      category: "sticky Note",
+      summary: `Date sticky note deleted for ${modalState.dateStickyKey}`,
+      dateKey: modalState.dateStickyKey,
+      localOnly: true
+    });
     window.showToast?.("🗒 Date sticky note deleted");
     return;
   }
@@ -2917,6 +3039,11 @@ async function deleteSelectedStickyInModal() {
     modalState.stickyNotes = parseStickyNotes(nextEvent);
     modalState.stickyIndex = Math.max(0, Math.min(idx, modalState.stickyNotes.length - 1));
     upsertCacheEvent(nextEvent);
+    const stickyDeleteId = nextEvent.extendedProps?.backendId ?? modalState.eventId;
+    window.trackModifiedEvent?.(stickyDeleteId, {
+      category: "sticky Note",
+      summary: `Sticky note deleted: ${nextEvent.title || "Untitled event"}`
+    });
 
     hydrateStickyEditorFromState();
     refreshStickyVisuals();
@@ -2957,6 +3084,11 @@ window.deleteEventStickyNote = async (eventRef) => {
     const data = await res.json();
     const nextEvent = normalizeEventForCache(data.event, eventRef);
     upsertCacheEvent(nextEvent);
+    const stickyDeleteId = nextEvent.extendedProps?.backendId || backendId;
+    window.trackModifiedEvent?.(stickyDeleteId, {
+      category: "sticky Note",
+      summary: `Sticky note deleted: ${nextEvent.title || eventRef.title || "Untitled event"}`
+    });
     refreshStickyVisuals();
     window.showToast?.("🗒 Sticky note deleted");
   } catch (err) {
@@ -2978,6 +3110,13 @@ window.deleteDateStickyNote = async (dateKey) => {
   const remaining = notes.filter((_, idx) => idx !== removeIndex);
   const ok = await setDateStickyNotes(dateKey, remaining);
   if (!ok) return;
+  window.trackPendingPublishChange?.({
+    key: `sticky-date:${dateKey}`,
+    category: "sticky Note",
+    summary: `Date sticky note deleted for ${dateKey}`,
+    dateKey,
+    localOnly: true
+  });
   refreshStickyVisuals();
   window.showToast?.("🗒 Date sticky note deleted");
 };
