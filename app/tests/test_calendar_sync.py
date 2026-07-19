@@ -228,6 +228,113 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
     mock_google_create.assert_called_once()
 
 
+@patch("app.services.google_calendar_service.GoogleCalendarService.update_event")
+def test_publish_prefers_healthy_duplicate_oauth_account(mock_google_update, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="duplicate@example.com",
+        access_token="__REAUTH_REQUIRED__",
+        refresh_token=None,
+        status="error",
+        last_error="No valid token available",
+    ))
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="duplicate@example.com",
+        access_token="token-good",
+        refresh_token="refresh-good",
+        status="ok",
+        last_sync_success=datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc),
+    ))
+    db.add(Event(
+        title="Publish Duplicate Token Event",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="google:duplicate@example.com:g-duplicate-1",
+        external_ids={"google:duplicate@example.com": "g-duplicate-1"},
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Duplicate Token Event").first()
+    assert event is not None
+
+    def valid_token_for_healthy_row(_db, account):
+        return "token-good" if account.access_token == "token-good" else None
+
+    with patch("app.services.event_actions.ensure_valid_token", side_effect=valid_token_for_healthy_row):
+        response = client.post(
+            "/calendar/publish",
+            headers=auth_headers,
+            json={"event_ids": [event.id]},
+        )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["published"] == 1
+    assert data["failed"] == 0
+    mock_google_update.assert_called_once()
+    assert mock_google_update.call_args.kwargs["token"] == "token-good"
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
+@patch("app.services.google_calendar_service.GoogleCalendarService.create_event", return_value="google-new-after-missing")
+@patch("app.services.google_calendar_service.GoogleCalendarService.update_event", return_value=404)
+def test_publish_recreates_missing_provider_event(mock_google_update, mock_google_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="missing@example.com",
+        access_token="token-1",
+        refresh_token="refresh-1",
+        status="ok",
+    ))
+    db.add(Event(
+        title="Publish Missing Provider Event",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="google:missing@example.com:stale-google-id",
+        external_ids={"google:missing@example.com": "stale-google-id"},
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Missing Provider Event").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={"event_ids": [event.id]},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["published"] == 1
+    assert data["created"] == 1
+    assert data["failed"] == 0
+    assert data["affected_accounts"] == ["google:missing@example.com"]
+
+    db.refresh(event)
+    assert event.external_ids["google:missing@example.com"] == "google-new-after-missing"
+    mock_google_update.assert_called_once()
+    mock_google_create.assert_called_once()
+
+
 @patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
 @patch("app.services.google_calendar_service.GoogleCalendarService.delete_event")
 def test_publish_deleted_event_targets_provider_accounts(mock_google_delete, _mock_token, client, auth_headers, db):

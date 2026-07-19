@@ -831,9 +831,13 @@ async def publish_to_providers(
             for key in (push_result.get("affected_accounts") or []):
                 affected_accounts.add(key)
             warnings.extend(push_result.get("warnings") or [])
-            created += int(push_result.get("created") or 0)
-            if (int(push_result.get("updated") or 0) + int(push_result.get("created") or 0)) > 0:
+            updated_count = int(push_result.get("updated") or 0)
+            created_count = int(push_result.get("created") or 0)
+            created += created_count
+            if (updated_count + created_count) > 0:
                 published += 1
+            elif push_result.get("warnings"):
+                failed += 1
         except Exception as e:
             print(f"⚠️ Publish failed for event {event.id}: {e}")
             failed += 1

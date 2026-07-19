@@ -157,6 +157,8 @@ class GraphClient:
         if response.status_code not in [200, 202]:
             print("❌ Outlook update failed:", response.text)
 
+        return response.status_code
+
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================

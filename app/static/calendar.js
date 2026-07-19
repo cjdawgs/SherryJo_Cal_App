@@ -3349,6 +3349,7 @@ async function publishNow(options = {}) {
     const published = data.published ?? 0;
     const deleted   = data.deleted   ?? 0;
     const failed    = data.failed   ?? 0;
+    const warnings  = data.warnings || [];
     const accounts  = (data.affected_accounts || []);
     const rangeStart = data.range_start;
     const rangeEnd   = data.range_end;
@@ -3362,7 +3363,8 @@ async function publishNow(options = {}) {
       : rangeStart ? ` (${rangeStart})` : "";
 
     if (failed > 0) {
-      showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed`, "error");
+      const warningText = warnings.length ? `: ${warnings[0]}` : "";
+      showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed${warningText}`, "error");
     } else if (published === 0 && deleted === 0 && localOnlyChanges.length === 0) {
       showToast("ℹ️ Nothing published — events may not be linked to provider accounts yet", "info");
     } else {

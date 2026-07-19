@@ -449,6 +449,8 @@ class GoogleCalendarService:
         if response.status_code not in [200, 204]:
             print("❌ Google update failed:", response.text)
 
+        return response.status_code
+
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================

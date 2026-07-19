@@ -6,19 +6,39 @@ from app.services.multi_account_oauth_service import ensure_valid_token, normali
 def _get_token(db: Session, user_id: int, provider: str, account_email: str):
     """Return a valid access token for the given provider + account, or None."""
     account_email_lower = (account_email or "").lower().strip()
-    account = db.query(OAuthAccount).filter(
+    query = db.query(OAuthAccount).filter(
         OAuthAccount.user_id == user_id,
         OAuthAccount.provider == provider,
-        OAuthAccount.account_email == account_email_lower,
-    ).first()
-    if not account:
-        account = db.query(OAuthAccount).filter(
+    )
+
+    candidates = []
+    if account_email_lower:
+        candidates = query.filter(OAuthAccount.account_email == account_email_lower).all()
+
+    if account_email_lower and not candidates:
+        return None
+
+    if not candidates:
+        candidates = db.query(OAuthAccount).filter(
             OAuthAccount.user_id == user_id,
             OAuthAccount.provider == provider,
-        ).first()
-    if not account:
-        return None
-    return ensure_valid_token(db, account)
+        ).all()
+
+    def _rank(account: OAuthAccount):
+        token_value = (getattr(account, "access_token", "") or "").strip()
+        return (
+            1 if getattr(account, "status", None) == "ok" else 0,
+            1 if token_value and token_value != "__REAUTH_REQUIRED__" else 0,
+            1 if getattr(account, "last_sync_success", None) else 0,
+            int(getattr(account, "id", 0) or 0),
+        )
+
+    for account in sorted(candidates, key=_rank, reverse=True):
+        token = ensure_valid_token(db, account)
+        if token:
+            return token
+
+    return None
 
 
 def _iter_write_back_targets(external_ids: dict, fallback_account_email: str):
@@ -73,6 +93,20 @@ def _build_publish_updates(event):
     if event.end_time:
         updates["end_time"] = event.end_time
     return updates
+
+
+def _is_update_success(result):
+    if isinstance(result, bool):
+        return result
+    if isinstance(result, int):
+        return 200 <= result < 300
+    if result is None:
+        return True
+    return bool(result)
+
+
+def _is_missing_provider_event(result):
+    return isinstance(result, int) and result in {404, 410}
 
 
 class EventActions:
@@ -160,13 +194,22 @@ class EventActions:
 
                 if raw_id:
                     if provider == "google":
-                        google_service.update_event(token=token, event_id=raw_id,
-                                                    updates=updates, account_email=acct_email or None)
+                        update_result = google_service.update_event(token=token, event_id=raw_id,
+                                                                    updates=updates, account_email=acct_email or None)
                     elif provider == "microsoft":
-                        graph_client.update_event(token=token, event_id=raw_id, updates=updates)
-                    pushed += 1
-                    affected_accounts.append(target_key)
-                    continue
+                        update_result = graph_client.update_event(token=token, event_id=raw_id, updates=updates)
+
+                    if _is_update_success(update_result):
+                        pushed += 1
+                        affected_accounts.append(target_key)
+                        continue
+
+                    if not _is_missing_provider_event(update_result):
+                        warnings.append(f"Update failed for {target_key}")
+                        continue
+
+                    external_ids.pop(target_key, None)
+                    raw_id = None
 
                 new_raw_id = None
                 if provider == "google":
