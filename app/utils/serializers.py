@@ -1,11 +1,15 @@
 """Shared API serializers."""
 
-from app.models import OAuthAccount
+from typing import TYPE_CHECKING
+
 from app.utils.colors import default_account_color
 from app.utils.datetimes import iso_or_none
 
+if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.models
+    from app.models import OAuthAccount
 
-def account_sync_summary(account: OAuthAccount) -> dict:
+
+def account_sync_summary(account: "OAuthAccount") -> dict:
     """Sync-related fields shared by the account list and sync-status payloads."""
     from app.services.multi_account_oauth_service import resolve_account_status
 
@@ -27,7 +31,7 @@ def account_sync_summary(account: OAuthAccount) -> dict:
     }
 
 
-def account_summary(account: OAuthAccount) -> dict:
+def account_summary(account: "OAuthAccount") -> dict:
     """Full account payload returned by the account list endpoint."""
     return {
         **account_sync_summary(account),

@@ -2,7 +2,6 @@
 # ==================================================
 # IMPORTS
 # ==================================================
-from sqlalchemy import func   # ✅ add this import at top if not already there
 import os
 
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
@@ -276,37 +275,9 @@ def serialize_event(event: Event):
 
 
 # ==================================================
-# ✅ DEBUG ROUTE — DB COUNT BY USER (TEMP)
+# ✅ MAINTENANCE — WIPE THE CALLER'S OWN EVENTS
 # ==================================================
 
-@router.get("/debug/db-count")
-def debug_db_count(
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user)
-):
-    try:
-        total = db.query(Event).count()
-
-        by_user = (
-            db.query(Event.owner_id, func.count())
-            .group_by(Event.owner_id)
-            .all()
-        )
-
-        print("🧪 TOTAL EVENTS IN DB:", total)
-        print("🧪 EVENTS BY USER:", by_user)
-
-        return {
-            "total": total,
-            "by_user": by_user
-        }
-
-    except Exception as e:
-        print("❌ DEBUG ROUTE ERROR:", str(e))
-        return {
-            "error": str(e)
-        }
-        
 @router.post("/debug/wipe-user-events")
 def wipe_user_events(
     db: Session = Depends(get_db),

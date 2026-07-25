@@ -16,6 +16,36 @@ from app.services.asset_urls import asset_url
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
+# Columns that must never leave the database through the table browser,
+# whatever table they appear in: stored credentials and password hashes.
+REDACTED_COLUMNS = frozenset(
+    {
+        "access_token",
+        "refresh_token",
+        "hashed_password",
+        "password",
+        "app_password",
+        "sync_token",
+        "google_access_token",
+        "google_refresh_token",
+        "ms_access_token",
+        "ms_refresh_token",
+    }
+)
+
+REDACTED_PLACEHOLDER = "***"
+
+# The browser is a read-only inspection aid, not an export tool.
+MAX_TABLE_ROWS = 200
+
+
+def redact_row(row: dict) -> dict:
+    return {
+        key: (REDACTED_PLACEHOLDER if key in REDACTED_COLUMNS and value is not None else value)
+        for key, value in row.items()
+    }
+
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 templates.env.globals.update(asset_url=asset_url)
@@ -85,6 +115,8 @@ def admin_system_overview(
 @router.get("/system/table/{table_name}/rows")
 def admin_table_rows(
     table_name: str,
+    limit: int = MAX_TABLE_ROWS,
+    offset: int = 0,
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
@@ -96,14 +128,26 @@ def admin_table_rows(
     if table_name not in existing_tables:
         return {"table": table_name, "columns": [], "rows": [], "count": 0, "error": "Table not found"}
 
-    query = text(f'SELECT * FROM "{table_name}"')
-    rows = db.execute(query).mappings().all()
+    query = text(f'SELECT * FROM "{table_name}" LIMIT :limit OFFSET :offset')
+    bounded_limit = max(1, min(limit, MAX_TABLE_ROWS))
+    rows = db.execute(
+        query, {"limit": bounded_limit, "offset": max(0, offset)}
+    ).mappings().all()
+
+    columns = (
+        list(rows[0].keys())
+        if rows
+        else [col["name"] for col in inspector.get_columns(table_name)]
+    )
 
     return {
         "table": table_name,
-        "columns": list(rows[0].keys()) if rows else [col["name"] for col in inspector.get_columns(table_name)],
-        "rows": [dict(row) for row in rows],
+        "columns": columns,
+        "redacted_columns": sorted(set(columns) & REDACTED_COLUMNS),
+        "rows": [redact_row(dict(row)) for row in rows],
         "count": len(rows),
+        "limit": bounded_limit,
+        "offset": max(0, offset),
     }
 
 

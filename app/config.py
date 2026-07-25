@@ -38,6 +38,10 @@ def is_production_environment() -> bool:
     if os.getenv("WEBSITE_SITE_NAME") or os.getenv("AZURE_HTTP_USER_AGENT"):
         return True
 
+    # Render sets these on every service instance.
+    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+        return True
+
     return False
 
 
@@ -81,6 +85,10 @@ class Settings(BaseSettings):
     # Security settings
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
+
+    # Credential encryption at rest (see app/utils/crypto.py).
+    # Comma-separated Fernet keys; the first one encrypts, the rest decrypt.
+    token_encryption_key: str | None = None
 
     # App metadata
     app_name: str = "SherryJo Calendar API"
@@ -152,23 +160,57 @@ def get_ms_redirect_uri(request: Any = None) -> str:
     return f"{resolve_runtime_base_url(request)}/ms/callback"
 
 
+REQUIRED_PRODUCTION_SETTINGS = [
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "MS_CLIENT_ID",
+    "MS_CLIENT_SECRET",
+    "MS_TENANT_ID",
+    "jwt_secret_key",
+    # Without this, OAuth tokens and iCloud app passwords are stored in clear text.
+    "token_encryption_key",
+]
+
+REQUIRED_PRODUCTION_ENV_VARS = [
+    # Blocks self-service admin registration.
+    "ADMIN_SETUP_CODE",
+]
+
+REQUIRED_PRODUCTION_ENV_VALUES = {
+    # A production outage must not silently degrade into an ephemeral local
+    # SQLite database that quietly loses every write on the next redeploy.
+    "DISABLE_SQLITE_FALLBACK": {"1", "true", "yes", "on"},
+    "REQUIRE_DB_KIND": {"postgres"},
+}
+
+
+def missing_production_configuration() -> list:
+    """Names of required production settings that are unset or misconfigured."""
+    missing = [
+        key for key in REQUIRED_PRODUCTION_SETTINGS if not getattr(settings, key, None)
+    ]
+
+    missing.extend(
+        name for name in REQUIRED_PRODUCTION_ENV_VARS if not (os.getenv(name) or "").strip()
+    )
+
+    for name, allowed in REQUIRED_PRODUCTION_ENV_VALUES.items():
+        value = (os.getenv(name) or "").strip().lower()
+        if value not in allowed:
+            expected = "|".join(sorted(allowed))
+            missing.append(f"{name} (must be one of: {expected})")
+
+    return sorted(missing)
+
+
 def validate_runtime_configuration() -> None:
     """Fail fast for production deployments missing required env vars."""
     if not is_production_environment():
         return
 
-    required_keys = [
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
-        "MS_CLIENT_ID",
-        "MS_CLIENT_SECRET",
-        "MS_TENANT_ID",
-        "jwt_secret_key",
-    ]
-
-    missing = [key for key in required_keys if not getattr(settings, key, None)]
+    missing = missing_production_configuration()
     if missing:
-        joined = ", ".join(sorted(missing))
+        joined = ", ".join(missing)
         raise RuntimeError(f"Missing required production environment variables: {joined}")
 
 
