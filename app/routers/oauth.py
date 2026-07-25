@@ -2,6 +2,7 @@
 # MICROSOFT OAUTH ROUTER (FULLY FIXED ✅)
 # ==================================================
 
+import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import RedirectResponse
 from urllib.parse import urlencode
@@ -23,6 +24,8 @@ from app.config import get_ms_redirect_uri
 
 # ✅ THIS IS THE KEY: multi-account support
 from app.services.multi_account_oauth_service import MultiAccountOAuthService
+
+logger = logging.getLogger(__name__)
 
 
 # ==================================================
@@ -52,14 +55,10 @@ TOKEN_URL = f"{AUTHORITY}/oauth2/v2.0/token"
 if not CLIENT_ID or not CLIENT_SECRET or not TENANT_ID:
     raise HTTPException(status_code=500, detail="Missing environment variables")
 
-print("✅ CLIENT_SECRET LOADED:", bool(CLIENT_SECRET))
-
-print("✅ CLIENT_ID:", CLIENT_ID)
-print("✅ REDIRECT_URI env (legacy):", REDIRECT_URI)
-print("✅ REDIRECT_URI runtime template: {base_url}/ms/callback")
-
-print("✅ TENANT_ID:", TENANT_ID)
-print("✅ AUTHORITY:", AUTHORITY)
+logger.debug(
+    "Microsoft OAuth configured: client_id=%s tenant=%s redirect=%s secret_present=%s",
+    CLIENT_ID, TENANT_ID, REDIRECT_URI, bool(CLIENT_SECRET),
+)
 
 # ==================================================
 # SCOPES (what data we request from Microsoft)
@@ -145,7 +144,7 @@ def callback(
     error_subcode: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
-    print("✅ CALLBACK HIT:", f"/ms/callback?code_present={bool(code)}")
+    logger.info("✅ CALLBACK HIT: %s", f"/ms/callback?code_present={bool(code)}")
 
     """
     ✅ Handles Microsoft OAuth response
@@ -158,7 +157,7 @@ def callback(
     # ✅ HANDLE OAUTH FAILURE (SAFE + ROBUST ✅)
     # ==================================================
     if error:
-        print("❌ MICROSOFT OAUTH ERROR:", error, error_subcode)
+        logger.error("❌ MICROSOFT OAUTH ERROR: %s %s", error, error_subcode)
 
         user_id = None
 
@@ -167,7 +166,7 @@ def callback(
             try:
                 user_id, _ = decode_oauth_state(state, SECRET_KEY)
             except Exception:
-                print("⚠️ Could not decode state during error")
+                logger.warning("⚠️ Could not decode state during error")
 
         # ✅ Redirect cleanly regardless
         return RedirectResponse(
@@ -206,7 +205,7 @@ def callback(
     # ✅ Convert response safely
     token_json = token_response.json()
 
-    print("✅ TOKEN RESPONSE received:", token_response.status_code)
+    logger.info("✅ TOKEN RESPONSE received: %s", token_response.status_code)
 
     # ✅ Extract tokens
     access_token = token_json.get("access_token")
@@ -214,7 +213,7 @@ def callback(
 
     # ✅ ERROR HANDLING (THIS FIXES YOUR CRASH)
     if not access_token:
-        print("❌ MICROSOFT TOKEN EXCHANGE FAILED:", token_json.get("error"))
+        logger.error("❌ MICROSOFT TOKEN EXCHANGE FAILED: %s", token_json.get("error"))
         raise HTTPException(
             status_code=400,
             detail="Failed to get access token from Microsoft"
@@ -241,7 +240,7 @@ def callback(
 
     # ✅ Error check
     if "error" in user_info:
-        print("❌ MICROSOFT PROFILE FETCH FAILED:", user_info.get("error"))
+        logger.error("❌ MICROSOFT PROFILE FETCH FAILED: %s", user_info.get("error"))
         raise HTTPException(
             status_code=400,
             detail="Failed to fetch Microsoft user profile"
@@ -278,7 +277,7 @@ def callback(
         return RedirectResponse(f"/accounts/ui?{mismatch}")
 
     
-    print("✅ SAVING ACCOUNT:", {
+    logger.info("✅ SAVING ACCOUNT: %s", {
         "user_id": user_id,
         "email": normalized_email
     })

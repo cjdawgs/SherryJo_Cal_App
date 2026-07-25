@@ -2,6 +2,7 @@
 # ==================================================
 # IMPORTS
 # ==================================================
+import logging
 import os
 
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
@@ -29,9 +30,11 @@ from app.utils import (
     safe_rollback,
 )
 
+logger = logging.getLogger(__name__)
 
 
-print("✅ CALENDAR ROUTER FILE LOADED")
+
+logger.info("✅ CALENDAR ROUTER FILE LOADED")
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
 
@@ -291,8 +294,8 @@ def wipe_user_events(
 
     remaining = db.query(Event).count()
 
-    print("🔥 DELETED ROWS:", deleted)
-    print("🧪 TOTAL AFTER WIPE:", remaining)
+    logger.debug("🔥 DELETED ROWS: %s", deleted)
+    logger.debug("🧪 TOTAL AFTER WIPE: %s", remaining)
 
     return {
         "deleted": deleted,
@@ -466,7 +469,7 @@ def list_date_sticky_notes(
         }
     except Exception as e:
         # Keep frontend stable when migration is not yet applied in production.
-        print("⚠️ [DATE_STICKY] list failed, returning empty set:", e)
+        logger.warning("⚠️ [DATE_STICKY] list failed, returning empty set: %s", e)
         return {
             "status": "ok",
             "items": []
@@ -490,7 +493,7 @@ def get_date_sticky_note(
 
         return {"status": "ok", "item": serialize_date_sticky(row)}
     except Exception as e:
-        print("⚠️ [DATE_STICKY] get failed, returning empty item:", e)
+        logger.warning("⚠️ [DATE_STICKY] get failed, returning empty item: %s", e)
         return {"status": "ok", "item": {"date": date_key, "sticky_notes": [], "count": 0}}
 
 
@@ -531,7 +534,7 @@ async def upsert_date_sticky_note(
         db.refresh(row)
         return {"status": "ok", "item": serialize_date_sticky(row)}
     except Exception as e:
-        print("❌ [DATE_STICKY] upsert failed:", e)
+        logger.error("❌ [DATE_STICKY] upsert failed: %s", e)
         safe_rollback(db)
         return {
             "status": "error",
@@ -558,7 +561,7 @@ def delete_date_sticky_note(
 
         return {"status": "ok", "deleted": date_key}
     except Exception as e:
-        print("⚠️ [DATE_STICKY] delete failed:", e)
+        logger.error("⚠️ [DATE_STICKY] delete failed: %s", e)
         try:
             db.rollback()
         except Exception:
@@ -588,17 +591,9 @@ def sync_calendar(
     """
 
     try:
-        print("🔥 FULL SYNC TRIGGERED")
+        logger.debug("🔥 FULL SYNC TRIGGERED")
 
-        db_url = str(getattr(db.bind, "url", "UNKNOWN"))
-        print("🧪 [SYNC] DB FILE:", db_url)
-        print("🧪 [SYNC] WORKING DIR:", os.getcwd())
-
-        try:
-            print("🧪 [SYNC] DB COUNT AT START:", db.query(Event).count())
-        except Exception as count_err:
-            print("⚠️ [SYNC] DB count check failed:", count_err)
-            safe_rollback(db, "SYNC")
+        logger.debug("[SYNC] db=%s cwd=%s", getattr(db.bind, "url", "UNKNOWN"), os.getcwd())
 
         # Use the user-configured sync window to keep requests bounded and avoid upstream timeouts.
         sync_accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)
@@ -622,8 +617,8 @@ def sync_calendar(
         start_date = now_utc - timedelta(days=window_days)
         end_date = now_utc + timedelta(days=window_days)
 
-        print(f"🧪 [SYNC] USING WINDOW DAYS: {window_days}")
-        print(f"🧪 [SYNC] RANGE: {start_date.isoformat()} -> {end_date.isoformat()}")
+        logger.debug(f"🧪 [SYNC] USING WINDOW DAYS: {window_days}")
+        logger.debug(f"🧪 [SYNC] RANGE: {start_date.isoformat()} -> {end_date.isoformat()}")
 
         result = calendar_service.sync_all(
             db,
@@ -634,7 +629,7 @@ def sync_calendar(
             account_key=account_key,
         )
 
-        print("🔥 SYNC RESULT:", result)
+        logger.debug("🔥 SYNC RESULT: %s", result)
 
         return {
             "status": "success",
@@ -646,7 +641,7 @@ def sync_calendar(
         }
 
     except Exception as e:
-        print("❌ SYNC FAILED:", str(e))
+        logger.error("❌ SYNC FAILED: %s", str(e))
         safe_rollback(db)
 
         return {
@@ -664,7 +659,7 @@ def materialize_deduped_events(
         changed = calendar_service._dedup_pass(db, current_user.id)
         return {"status": "success", "changed": changed}
     except Exception as e:
-        print("❌ DEDUP MATERIALIZE FAILED:", str(e))
+        logger.error("❌ DEDUP MATERIALIZE FAILED: %s", str(e))
         safe_rollback(db)
         return {"status": "error", "message": str(e)}
 
@@ -763,7 +758,7 @@ async def publish_to_providers(
                 affected_accounts.add(key)
             warnings.extend(delete_result.get("warnings") or [])
         except Exception as e:
-            print(f"⚠️ Delete publish failed: {e}")
+            logger.error(f"⚠️ Delete publish failed: {e}")
             failed += 1
             warnings.append(f"Delete publish failed: {e}")
 
@@ -785,7 +780,7 @@ async def publish_to_providers(
             elif push_result.get("warnings"):
                 failed += 1
         except Exception as e:
-            print(f"⚠️ Publish failed for event {event.id}: {e}")
+            logger.warning(f"⚠️ Publish failed for event {event.id}: {e}")
             failed += 1
             warnings.append(f"Event {event.id}: {e}")
 
@@ -819,15 +814,7 @@ def get_unified_calendar(
 ):
     now = datetime.now(timezone.utc)
 
-    db_url = str(getattr(db.bind, "url", "UNKNOWN"))
-    print("🧪 [SYNC] DB FILE:", db_url)
-    print("🧪 [UNIFIED] WORKING DIR:", os.getcwd())
-
-    try:
-        print("🧪 [UNIFIED] DB ROW COUNT:", db.query(Event).count())
-    except Exception as e:
-        print("⚠️ [UNIFIED] DB row count check failed:", e)
-        safe_rollback(db, "UNIFIED")
+    logger.debug("[UNIFIED] db=%s cwd=%s", getattr(db.bind, "url", "UNKNOWN"), os.getcwd())
 
     # ==================================================
     # ✅ SUPPORT FULLCALENDAR RANGE (WITH SAFE PARSING)
@@ -839,14 +826,14 @@ def get_unified_calendar(
         start_date = parse_iso_datetime(start)
         end_date = parse_iso_datetime(end)
         if start_date and end_date:
-            print(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
+            logger.debug(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
         else:
-            print("❌ Invalid start/end, falling back")
+            logger.error("❌ Invalid start/end, falling back")
 
     if not start_date or not end_date:
         start_date = now - timedelta(days=range_days)
         end_date = now + timedelta(days=range_days)
-        print(f"✅ RANGE WINDOW: ±{range_days} days")
+        logger.debug(f"✅ RANGE WINDOW: ±{range_days} days")
 
     events = []
     account_event_totals = {}
@@ -868,10 +855,10 @@ def get_unified_calendar(
                 continue
             account_event_totals[key] = account_event_totals.get(key, 0) + 1
 
-        print(f"⚡ FAST DB EVENTS: {len(events)}")
+        logger.debug(f"⚡ FAST DB EVENTS: {len(events)}")
 
     except Exception as e:
-        print("❌ [UNIFIED] events fetch failed:", e)
+        logger.error("❌ [UNIFIED] events fetch failed: %s", e)
         events = []
         account_event_totals = {}
 
@@ -884,10 +871,10 @@ def get_unified_calendar(
                 key = f"{provider}:{(acc.account_email or '').lower().strip()}"
                 account_status[key] = resolve_account_status(acc)
             except Exception as inner:
-                print("⚠️ [UNIFIED] account status failed:", inner)
+                logger.error("⚠️ [UNIFIED] account status failed: %s", inner)
 
     except Exception as e:
-        print("❌ [UNIFIED] account status block failed:", e)
+        logger.error("❌ [UNIFIED] account status block failed: %s", e)
         account_status = {}
 
     return {

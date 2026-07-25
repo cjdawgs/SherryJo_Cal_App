@@ -18,15 +18,18 @@ and updates everyone's calendar 🧸
 # IMPORTS
 # ==================================================
 
+import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import redirect_stdout
 import io
 import os
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
-from app.models import User, OAuthAccount   # ✅ VERY IMPORTANT (we loop users)
+from app.models import User, OAuthAccount, TVDiagLog   # ✅ VERY IMPORTANT (we loop users)
 from datetime import datetime, timezone
 from datetime import datetime, timezone, timedelta
+
+logger = logging.getLogger(__name__)
 
 
 # ==================================================
@@ -95,16 +98,22 @@ def run_event_sync():
     last_global_sync_started_at = datetime.now(timezone.utc)
     last_global_sync_error = None
 
+    synced = skipped = failed = 0
+
     try:
-        # ✅ STEP 1: Get all users
-        users = db.query(User).all()
+        # Only users that actually have a sync-enabled account can be due, so
+        # the wakeup costs one join instead of a query per registered user.
+        users = (
+            db.query(User)
+            .join(OAuthAccount, OAuthAccount.user_id == User.id)
+            .filter(OAuthAccount.sync_enabled == True)
+            .distinct()
+            .all()
+        )
 
         if not users:
-            if verbose:
-                print("[SYNC] No users found")
             return
 
-        # ✅ STEP 2: Loop each user
         for user in users:
             try:
                 user_accounts = db.query(OAuthAccount).filter(
@@ -112,33 +121,73 @@ def run_event_sync():
                     OAuthAccount.sync_enabled == True
                 ).all()
 
-                if not user_accounts:
-                    continue
-
                 due, cadence = _is_user_sync_due(user_accounts, datetime.now(timezone.utc))
                 if not due:
-                    if verbose:
-                        print(f"[SYNC] User {user.id}: skipped (cadence {cadence} min not due yet)")
+                    skipped += 1
+                    logger.debug("[SYNC] user=%s skipped, cadence %s min not due", user.id, cadence)
                     continue
 
                 # ✅ THIS IS THE FIX (was sync_events before)
                 if verbose:
                     result = calendar_service.sync_all(db, user)
-                    print(f"[SYNC] User {user.id}: {result}")
+                    logger.info("[SYNC] user=%s %s", user.id, result)
                 else:
                     # Quiet mode: suppress noisy provider sync print spam.
                     with redirect_stdout(io.StringIO()):
                         calendar_service.sync_all(db, user)
+                synced += 1
 
             except Exception as user_error:
-                print(f"[SYNC] User {user.id} FAILED: {user_error}")
+                failed += 1
+                logger.error("[SYNC] user=%s FAILED: %s", user.id, user_error)
+
+        # One line per cycle instead of one per user; only when something ran.
+        if synced or failed:
+            logger.info("[SYNC] cycle complete synced=%s skipped=%s failed=%s", synced, skipped, failed)
+        else:
+            logger.debug("[SYNC] cycle complete, nothing due (skipped=%s)", skipped)
 
     except Exception as e:
         last_global_sync_error = str(e)
-        print(f"[SYNC] Global Failure: {e}")
+        logger.error("[SYNC] Global Failure: %s", e)
 
     finally:
         last_global_sync_finished_at = datetime.now(timezone.utc)
+        db.close()
+
+
+# ==================================================
+# TV DIAGNOSTICS RETENTION
+# ==================================================
+
+def _diag_retention_days() -> int:
+    try:
+        return max(1, int(os.getenv("TV_DIAG_RETENTION_DAYS", "14")))
+    except ValueError:
+        return 14
+
+
+def prune_tv_diag_log():
+    """
+    Bound tv_diag_log. It is the only table that grows without user action —
+    a kiosk beacons around the clock — so without this it fills the database
+    quota on its own.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_diag_retention_days())
+    db = SessionLocal()
+    try:
+        deleted = (
+            db.query(TVDiagLog)
+            .filter(TVDiagLog.ts_server < cutoff)
+            .delete(synchronize_session=False)
+        )
+        db.commit()
+        if deleted:
+            logger.info("[DIAG] pruned %s tv_diag_log rows older than %s", deleted, cutoff.date())
+    except Exception as exc:
+        db.rollback()
+        logger.warning("[DIAG] tv_diag_log prune failed: %s", exc)
+    finally:
         db.close()
 
 
@@ -161,10 +210,17 @@ def start_scheduler():
         replace_existing=True
     )
 
+    scheduler.add_job(
+        prune_tv_diag_log,
+        "interval",
+        hours=24,
+        id="tv_diag_prune_job",
+        replace_existing=True
+    )
+
     scheduler.start()
 
-    if _verbose_sync_console():
-        print("[SCHEDULER] Background sync started (every 5 min)")
+    logger.info("[SCHEDULER] Background sync started (every 5 min); diag prune daily")
 
 
 def get_scheduler_health():

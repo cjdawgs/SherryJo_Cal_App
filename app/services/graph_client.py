@@ -3,7 +3,10 @@
 # ✅ IMPORTS
 # ==================================================
 
+import logging
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 # ==================================================
@@ -69,7 +72,7 @@ class GraphClient:
             response = requests.get(url, headers=headers, params=params)
 
             if response.status_code != 200:
-                print("❌ Microsoft calendarView failed:", response.text)
+                logger.error("❌ Microsoft calendarView failed: %s", response.text)
                 break
 
             data = response.json()
@@ -155,7 +158,7 @@ class GraphClient:
         )
 
         if response.status_code not in [200, 202]:
-            print("❌ Outlook update failed:", response.text)
+            logger.error("❌ Outlook update failed: %s", response.text)
 
         return response.status_code
 
@@ -196,13 +199,13 @@ class GraphClient:
         )
 
         if response.status_code not in [200, 201]:
-            print("❌ Outlook create failed:", response.text)
+            logger.error("❌ Outlook create failed: %s", response.text)
             return None
 
         try:
             return (response.json() or {}).get("id")
         except (ValueError, AttributeError) as exc:
-            print("⚠️ Outlook create succeeded but response id could not be parsed:", exc)
+            logger.warning("⚠️ Outlook create succeeded but response id could not be parsed: %s", exc)
             return None
 
     # ==================================================
@@ -223,4 +226,4 @@ class GraphClient:
         )
 
         if response.status_code not in [200, 204]:
-            print("❌ Outlook delete failed:", response.text)
+            logger.error("❌ Outlook delete failed: %s", response.text)

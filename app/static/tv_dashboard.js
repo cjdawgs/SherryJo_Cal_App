@@ -357,6 +357,16 @@ tvDiag = (() => {
   const MAX = 60;
   const _buf = [];
 
+  // Beacons are batched: a kiosk runs for weeks, so one request per event
+  // turns routine telemetry into the busiest endpoint in the app.
+  // High-signal events flush immediately; the rest ride the next flush.
+  const FLUSH_MS = 300000;
+  const IMMEDIATE_EVENTS = new Set([
+    'session_start', 'raf_gap', 'page_freeze', 'pagehide', 'beforeunload',
+    'wake_lock_released',
+  ]);
+  let _pending = [];
+
   function _elapsed() {
     if (!state.sessionStartAt) return '—';
     return `${Math.floor((Date.now() - state.sessionStartAt) / 60000)}m`;
@@ -397,28 +407,39 @@ tvDiag = (() => {
   }
 
   function _beacon(entry) {
+    _pending.push({
+      event:            entry.event,
+      details:          entry.details,
+      ts:               entry.t,
+      sessionElapsedMin: state.sessionStartAt ? Math.floor((Date.now() - state.sessionStartAt) / 60000) : null,
+      visibilityState:  entry.vis,
+      guardEnabled:     entry.guard,
+      guardTimeout:     entry.timeout,
+      device_id:        TV_DEVICE_ID,
+    });
+    if (_pending.length >= 50 || IMMEDIATE_EVENTS.has(entry.event)) flush();
+  }
+
+  function flush() {
+    if (!_pending.length) return;
     const token = state.token || (IS_KIOSK ? window.KIOSK_TOKEN : null);
     if (!token) return;
+    const entries = _pending;
+    _pending = [];
     fetch('/tv/diag', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-      body: JSON.stringify({
-        event:            entry.event,
-        details:          entry.details,
-        ts:               entry.t,
-        sessionElapsedMin: state.sessionStartAt ? Math.floor((Date.now() - state.sessionStartAt) / 60000) : null,
-        visibilityState:  entry.vis,
-        guardEnabled:     entry.guard,
-        guardTimeout:     entry.timeout,
-        device_id:        TV_DEVICE_ID,
-      }),
+      body: JSON.stringify({ entries }),
       keepalive: true,   // delivers even when page is unloading
     }).catch(() => {});  // never block on diagnostics
   }
 
+  setInterval(flush, FLUSH_MS);
+  window.addEventListener('pagehide', flush);
+
   function getLog() { return [..._buf]; }
 
-  return { log, getLog };
+  return { log, getLog, flush };
 })();
 
 // Wire the RAF frame-gap callback now that tvDiag is ready
@@ -817,7 +838,8 @@ function startPolling() {
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.clockHandle = setInterval(tickClock, 1000);
-  // Heartbeat every 60 s — confirms guard is alive between visible events
+  // Heartbeat confirms the guard is alive between visible events. Every 15 min
+  // proves that just as well as every minute at a fraction of the traffic.
   state.heartbeatHandle = setInterval(() => {
     if (tvDiag) tvDiag.log('heartbeat',
       `elapsed=${Math.floor((Date.now()-state.sessionStartAt)/60000)}m` +
@@ -826,7 +848,7 @@ function startPolling() {
       ` rafActive=${window.__ANTI_SLEEP_ACTIVE__}` +
       ` wakeLock=${window.__WAKE_LOCK_ACTIVE__}` +
       ` videoActive=${antiSleep.isVideoActive()}`);
-  }, 60000);
+  }, 900000);
   tickClock();
   // Layer 1: Screen Wake Lock API
   wakeLock.request();

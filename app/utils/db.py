@@ -1,9 +1,12 @@
 """Database lookup helpers shared by routers."""
 
+import logging
 from typing import Any, Optional, Type, TypeVar
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 ModelType = TypeVar("ModelType")
 
@@ -51,4 +54,4 @@ def safe_rollback(db: Session, context: Optional[str] = None) -> None:
         db.rollback()
     except Exception as rollback_error:  # pragma: no cover - defensive
         if context:
-            print(f"⚠️ [{context}] Rollback failed:", rollback_error)
+            logger.error("[%s] Rollback failed: %s", context, rollback_error)

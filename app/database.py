@@ -1,3 +1,4 @@
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -6,6 +7,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 from app.config import DATABASE_URL, mask_database_url
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------
@@ -49,15 +52,15 @@ def _create_sqlite_engine_with_fallback(primary_url: str):
             )
             with engine.connect() as conn:
                 conn.exec_driver_sql("SELECT 1")
-            print(f"✅ SQLite engine ready: {candidate}")
+            logger.info(f"✅ SQLite engine ready: {candidate}")
             return engine, candidate
         except Exception as exc:
             last_error = exc
-            print(f"⚠️ SQLite path failed ({candidate}): {exc}")
+            logger.warning(f"⚠️ SQLite path failed ({candidate}): {exc}")
 
     raise last_error
 
-print("🔌 Attempting DB connection...")
+logger.info("🔌 Attempting DB connection...")
 
 required_db_kind = os.getenv("REQUIRE_DB_KIND", "").strip().lower()
 disable_sqlite_fallback = os.getenv("DISABLE_SQLITE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -77,10 +80,10 @@ try:
 
     # ✅ Force immediate connection test
     with engine.connect() as conn:
-        print("✅ Connected to database successfully!")
+        logger.info("✅ Connected to database successfully!")
 
 except Exception as e:
-    print("❌ DB connection failed:", str(e))
+    logger.error("❌ DB connection failed: %s", str(e))
 
     if disable_sqlite_fallback:
         raise RuntimeError("Database connection failed and DISABLE_SQLITE_FALLBACK is enabled") from e
@@ -88,7 +91,7 @@ except Exception as e:
     if required_db_kind == "postgres":
         raise RuntimeError("Database connection failed while REQUIRE_DB_KIND=postgres is enforced") from e
 
-    print("⚠️ Falling back to SQLite...")
+    logger.warning("⚠️ Falling back to SQLite...")
 
     fallback_sqlite_url = f"sqlite:///{os.getenv('SQLITE_PATH', './app.db')}"
     engine, DATABASE_URL = _create_sqlite_engine_with_fallback(fallback_sqlite_url)
@@ -98,11 +101,11 @@ if required_db_kind and _determine_db_kind(DATABASE_URL) != required_db_kind:
         f"Runtime database kind {_determine_db_kind(DATABASE_URL)} does not satisfy REQUIRE_DB_KIND={required_db_kind}."
     )
 
-print("✅ DATABASE_URL:", mask_database_url(DATABASE_URL))
+logger.info("✅ DATABASE_URL: %s", mask_database_url(DATABASE_URL))
 
 if DATABASE_URL.startswith("sqlite"):
     db_file = DATABASE_URL.replace("sqlite:///", "")
-    print("✅ FULL DB PATH:", os.path.abspath(db_file))
+    logger.info("✅ FULL DB PATH: %s", os.path.abspath(db_file))
 
 
 

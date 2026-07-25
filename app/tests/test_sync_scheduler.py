@@ -30,6 +30,12 @@ class FakeQuery:
     def filter(self, *args, **kwargs):
         return self
 
+    def join(self, *args, **kwargs):
+        return self
+
+    def distinct(self, *args, **kwargs):
+        return self
+
     def all(self):
         return self._rows
 
@@ -222,7 +228,7 @@ def test_run_event_sync_syncs_due_users_and_skips_accountless(monkeypatch, reset
     assert sync_scheduler.last_global_sync_error is None
 
 
-def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_state, capsys):
+def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_state, caplog):
     failing_user = SimpleNamespace(id=1)
     ok_user = SimpleNamespace(id=2)
     session = RoutingSession(
@@ -238,9 +244,10 @@ def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_sta
 
     monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
 
-    sync_scheduler.run_event_sync()
+    with caplog.at_level("ERROR", logger="app.services.sync_scheduler"):
+        sync_scheduler.run_event_sync()
 
-    assert "User 1 FAILED: provider down" in capsys.readouterr().out
+    assert "user=1 FAILED: provider down" in caplog.text
     assert sync_scheduler.last_global_sync_error is None
 
 
@@ -254,7 +261,7 @@ def test_run_event_sync_records_global_failure(monkeypatch, reset_sync_state):
     assert session.closed is True
 
 
-def test_run_event_sync_verbose_prints_results(monkeypatch, reset_sync_state, capsys):
+def test_run_event_sync_verbose_prints_results(monkeypatch, reset_sync_state, caplog):
     monkeypatch.setenv("SYNC_CONSOLE_VERBOSE", "1")
     user = SimpleNamespace(id=7)
     session = RoutingSession(users=[user], accounts_by_user_id={7: [make_account()]})
@@ -263,9 +270,10 @@ def test_run_event_sync_verbose_prints_results(monkeypatch, reset_sync_state, ca
         sync_scheduler.calendar_service, "sync_all", MagicMock(return_value={"synced": 2})
     )
 
-    sync_scheduler.run_event_sync()
+    with caplog.at_level("INFO", logger="app.services.sync_scheduler"):
+        sync_scheduler.run_event_sync()
 
-    assert "[SYNC] User 7: {'synced': 2}" in capsys.readouterr().out
+    assert "[SYNC] user=7 {'synced': 2}" in caplog.text
 
 
 # ==================================================
@@ -278,11 +286,10 @@ def test_start_scheduler_registers_job(monkeypatch):
 
     sync_scheduler.start_scheduler()
 
-    scheduler.add_job.assert_called_once()
-    kwargs = scheduler.add_job.call_args[1]
-    assert kwargs["minutes"] == 5
-    assert kwargs["id"] == "event_sync_job"
-    assert kwargs["replace_existing"] is True
+    jobs = {call[1]["id"]: call[1] for call in scheduler.add_job.call_args_list}
+    assert jobs["event_sync_job"]["minutes"] == 5
+    assert jobs["event_sync_job"]["replace_existing"] is True
+    assert jobs["tv_diag_prune_job"]["hours"] == 24
     scheduler.start.assert_called_once()
 
 

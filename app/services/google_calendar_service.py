@@ -2,11 +2,14 @@
 # ==================================================
 # ✅ IMPORTS
 # ==================================================
+import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 import requests
 from app.config import settings
 from app.config import get_google_redirect_uri
+
+logger = logging.getLogger(__name__)
 
 
 # ==================================================
@@ -72,7 +75,7 @@ class GoogleCalendarService:
                 f"&state={state}"
             )
 
-        print("✅ GOOGLE AUTH URL:", url)
+        logger.info("✅ GOOGLE AUTH URL: %s", url)
 
         return url
 
@@ -113,8 +116,8 @@ class GoogleCalendarService:
 
         # ✅ CRITICAL DEBUG
         if "refresh_token" not in data:
-            print("🚨 WARNING: Google did NOT return refresh_token")
-            print("➡️ User may need to reconnect with consent")
+            logger.warning("🚨 WARNING: Google did NOT return refresh_token")
+            logger.info("➡️ User may need to reconnect with consent")
 
         return data
 
@@ -140,7 +143,7 @@ class GoogleCalendarService:
         response = requests.post(self.TOKEN_URL, data=payload)
 
         if response.status_code != 200:
-            print("❌ Google refresh failed:", response.text)
+            logger.error("❌ Google refresh failed: %s", response.text)
             return {}
 
         return response.json()
@@ -199,7 +202,7 @@ class GoogleCalendarService:
         if cal_list_resp.status_code == 200:
             calendars = cal_list_resp.json().get("items", [])
         else:
-            print("⚠️ Calendar list failed — falling back to direct calendars")
+            logger.warning("⚠️ Calendar list failed — falling back to direct calendars")
 
         # ✅ ALWAYS include these (critical)
         calendar_ids = ["primary"]
@@ -223,13 +226,13 @@ class GoogleCalendarService:
                 "@group.v.calendar.google.com" in cid or
                 "#" in cid   # ✅ catches regional calendars like en.usa#
             ):
-                print(f"⏭ Skipping system calendar at source: {cid}")
+                logger.debug(f"⏭ Skipping system calendar at source: {cid}")
                 continue
 
             if cid not in calendar_ids:
                 calendar_ids.append(cid)        
                 
-        print("🧪 CALENDAR IDS USED:", calendar_ids)
+        logger.debug("🧪 CALENDAR IDS USED: %s", calendar_ids)
 
         all_events = []
 
@@ -242,10 +245,10 @@ class GoogleCalendarService:
                 "@group.v.calendar.google.com" in cid or
                 "#" in cid
             ):
-                print(f"⏭ Skipping bad calendar at request time: {cid}")
+                logger.debug(f"⏭ Skipping bad calendar at request time: {cid}")
                 continue
 
-            print(f"📆 CALENDAR ID ({account_email}):", cal_id)
+            logger.debug("CALENDAR ID (%s): %s", account_email, cal_id)
             url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
 
             
@@ -257,10 +260,10 @@ class GoogleCalendarService:
                 )
 
             if response.status_code != 200:
-                print(f"❌ Failed ({response.status_code}): {cal_id}")
+                logger.error(f"❌ Failed ({response.status_code}): {cal_id}")
 
                 try:
-                    print("↳ Response:", response.text[:200])
+                    logger.debug("Google error body: %s", response.text[:200])
                 except Exception:
                     pass
 
@@ -268,12 +271,12 @@ class GoogleCalendarService:
 
             items = response.json().get("items", [])
 
-            print(f"📦 Events in {cal_id}:", len(items))
+            logger.debug("Events in %s: %s", cal_id, len(items))
 
             all_events.extend(items)
 
 
-        print(f"🟢 Google TOTAL events fetched ({account_email}):", len(all_events))
+        logger.debug("Google TOTAL events fetched (%s): %s", account_email, len(all_events))
 
         return all_events
         
@@ -339,7 +342,7 @@ class GoogleCalendarService:
                     if cid not in calendar_ids:
                         calendar_ids.append(cid)
         except Exception as e:
-            print(f"⚠️ Google calendarList failed: {e}")
+            logger.error(f"⚠️ Google calendarList failed: {e}")
 
         # ── fetch each calendar (incremental when token available) ──────
         start_iso = start_date.isoformat() if start_date else None
@@ -382,7 +385,7 @@ class GoogleCalendarService:
                         break
 
                     if resp.status_code != 200:
-                        print(f"❌ Google events failed ({resp.status_code}): {cal_id}")
+                        logger.error(f"❌ Google events failed ({resp.status_code}): {cal_id}")
                         break
 
                     data = resp.json()
@@ -447,7 +450,7 @@ class GoogleCalendarService:
         )
 
         if response.status_code not in [200, 204]:
-            print("❌ Google update failed:", response.text)
+            logger.error("❌ Google update failed: %s", response.text)
 
         return response.status_code
 
@@ -481,13 +484,13 @@ class GoogleCalendarService:
         )
 
         if response.status_code not in [200, 201]:
-            print("❌ Google create failed:", response.text)
+            logger.error("❌ Google create failed: %s", response.text)
             return None
 
         try:
             return (response.json() or {}).get("id")
         except (ValueError, AttributeError) as exc:
-            print("⚠️ Google create succeeded but response id could not be parsed:", exc)
+            logger.warning("⚠️ Google create succeeded but response id could not be parsed: %s", exc)
             return None
 
     # ==================================================
@@ -503,7 +506,7 @@ class GoogleCalendarService:
         )
 
         if response.status_code not in [200, 204]:
-            print("❌ Google delete failed:", response.text)
+            logger.error("❌ Google delete failed: %s", response.text)
 
     # ==================================================
     # ✅ GET USER EMAIL
