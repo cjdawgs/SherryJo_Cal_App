@@ -385,6 +385,11 @@ try:
                         _ev.external_ids = {_key: _raw_id}
                         _filled += 1
             except Exception:
+                logging.getLogger(__name__).warning(
+                    "external_ids backfill skipped event %s",
+                    getattr(_ev, "id", "?"),
+                    exc_info=True,
+                )
                 continue
 
         # Also upgrade any previously-backfilled rows that used the old

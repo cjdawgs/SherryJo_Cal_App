@@ -201,7 +201,8 @@ class GraphClient:
 
         try:
             return (response.json() or {}).get("id")
-        except Exception:
+        except (ValueError, AttributeError) as exc:
+            print("⚠️ Outlook create succeeded but response id could not be parsed:", exc)
             return None
 
     # ==================================================

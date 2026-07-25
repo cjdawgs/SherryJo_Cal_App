@@ -261,7 +261,7 @@ class GoogleCalendarService:
 
                 try:
                     print("↳ Response:", response.text[:200])
-                except:
+                except Exception:
                     pass
 
                 continue
@@ -486,7 +486,8 @@ class GoogleCalendarService:
 
         try:
             return (response.json() or {}).get("id")
-        except Exception:
+        except (ValueError, AttributeError) as exc:
+            print("⚠️ Google create succeeded but response id could not be parsed:", exc)
             return None
 
     # ==================================================
