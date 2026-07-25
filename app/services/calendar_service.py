@@ -1,5 +1,6 @@
 ﻿
 
+import logging
 from datetime import datetime, timezone, timedelta
 
 import hashlib
@@ -41,6 +42,8 @@ from app.utils import ensure_utc, parse_iso_datetime
 
 import pytz
 
+logger = logging.getLogger(__name__)
+
 
 
 SAFE_DELETE = False
@@ -71,7 +74,6 @@ import os
 
 
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")  # DEBUG | INFO | ERROR
 
 
 
@@ -157,9 +159,7 @@ def build_fallback_external_id(provider: str, account_email: str, title: str, st
 
 def log_debug(msg: str):
 
-    if LOG_LEVEL == "DEBUG":
-
-        print(f"[DEBUG] {msg}")
+    logger.debug("%s", msg)
 
 
 
@@ -167,7 +167,7 @@ def log_debug(msg: str):
 
 def log_info(msg: str):
 
-    print(f"[INFO] {msg}")
+    logger.info("%s", msg)
 
 
 
@@ -175,7 +175,7 @@ def log_info(msg: str):
 
 def log_error(msg: str):
 
-    print(f"[ERROR] {msg}")
+    logger.error("%s", msg)
 
 
 
@@ -807,12 +807,13 @@ class CalendarService:
 
         
 
-        print("ðŸ§  NORMALIZE INPUT COUNT:",
+        logger.debug(
 
-            len(google_events), "primary |",
+            "NORMALIZE INPUT COUNT: google=%s ms=%s",
 
-            len(ms_events), "ms")
+            len(google_events), len(ms_events),
 
+        )
 
 
         # âœ… combine everything FIRST

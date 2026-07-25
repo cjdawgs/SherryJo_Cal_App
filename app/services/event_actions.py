@@ -1,6 +1,9 @@
 ﻿from sqlalchemy.orm import Session
+import logging
 from app.models import OAuthAccount
 from app.services.multi_account_oauth_service import ensure_valid_token, normalize_provider
+
+logger = logging.getLogger(__name__)
 
 
 def _get_token(db: Session, user_id: int, provider: str, account_email: str):
@@ -136,7 +139,7 @@ class EventActions:
                 elif provider == "microsoft":
                     graph_client.update_event(token=token, event_id=raw_id, updates=updates)
             except Exception as e:
-                print(f"WARNING: {provider} write-back update failed for {acct_email}: {e}")
+                logger.warning(f"WARNING: {provider} write-back update failed for {acct_email}: {e}")
         return event
 
     def delete_event(self, db: Session, event, google_service, graph_client, user):
@@ -156,7 +159,7 @@ class EventActions:
                 elif provider == "microsoft":
                     graph_client.delete_event(token=token, event_id=raw_id)
             except Exception as e:
-                print(f"WARNING: {provider} write-back delete failed for {acct_email}: {e}")
+                logger.warning(f"WARNING: {provider} write-back delete failed for {acct_email}: {e}")
         db.delete(event)
         db.commit()
         return True
@@ -225,7 +228,7 @@ class EventActions:
                 else:
                     warnings.append(f"Create failed for {target_key}")
             except Exception as e:
-                print(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
+                logger.warning(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
                 warnings.append(f"Publish failed for {target_key}: {e}")
 
         if external_ids != (getattr(event, "external_ids", None) or {}):
@@ -264,7 +267,7 @@ class EventActions:
                 deleted += 1
                 affected_accounts.append(target_key)
             except Exception as e:
-                print(f"WARNING: delete publish failed for {target_key}: {e}")
+                logger.warning(f"WARNING: delete publish failed for {target_key}: {e}")
                 warnings.append(f"Delete failed for {target_key}: {e}")
 
         return {

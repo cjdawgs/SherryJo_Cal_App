@@ -9,9 +9,12 @@ connects as the table owner and therefore bypasses RLS, so the running
 application is unaffected; the public data API (PostgREST / anon key) is not.
 """
 
+import logging
 from sqlalchemy import inspect, text
 
 from app.utils.crypto import encryption_enabled, seal
+
+logger = logging.getLogger(__name__)
 
 RLS_TABLES = (
     "users",
@@ -67,13 +70,13 @@ def enforce_row_level_security(engine) -> dict:
                 conn.execute(text(statement))
             conn.commit()
 
-        print(f"🔒 [RLS] Row Level Security enforced on {len(RLS_TABLES)} tables.")
+        logger.info(f"🔒 [RLS] Row Level Security enforced on {len(RLS_TABLES)} tables.")
         return {"status": "ok", "applied": len(statements)}
 
     except Exception as exc:
         # Never crash startup: a deployment whose DB role lacks ownership must
         # still boot, but the operator needs to see this loudly.
-        print(
+        logger.error(
             "❌ [RLS] Could not enforce Row Level Security — the database is "
             f"exposed to the public data API until this is fixed: {exc}"
         )
@@ -125,9 +128,9 @@ def seal_stored_credentials(engine) -> dict:
             conn.commit()
 
         if sealed:
-            print(f"🔐 [CRYPTO] Sealed credentials for {sealed} oauth_accounts row(s).")
+            logger.info(f"🔐 [CRYPTO] Sealed credentials for {sealed} oauth_accounts row(s).")
         return {"status": "ok", "sealed": sealed}
 
     except Exception as exc:
-        print(f"❌ [CRYPTO] Credential sealing sweep failed: {exc}")
+        logger.error(f"❌ [CRYPTO] Credential sealing sweep failed: {exc}")
         return {"status": "error", "error": str(exc), "sealed": 0}

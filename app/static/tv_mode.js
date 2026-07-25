@@ -363,7 +363,11 @@ if (diagAutoRefresh) {
   diagAutoRefresh.addEventListener("change", () => {
     if (diagAutoRefresh.checked) {
       loadTvDiag();
-      _diagAutoHandle = setInterval(loadTvDiag, 10000);
+      // 30 s, and never while the tab is hidden: an admin panel left open in a
+      // background tab used to poll all day.
+      _diagAutoHandle = setInterval(() => {
+        if (document.visibilityState === 'visible') loadTvDiag();
+      }, 30000);
     } else {
       if (_diagAutoHandle) clearInterval(_diagAutoHandle);
       _diagAutoHandle = null;

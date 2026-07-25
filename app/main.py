@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from app.database import engine, Base
 from app.db_security import enforce_row_level_security, seal_stored_credentials
+from app.logging_config import configure_logging
 from app.services.asset_urls import asset_import_map_json, asset_url
 
 # ✅ Import ALL routers from your central router registry
@@ -25,44 +26,11 @@ from app.routers import all_routers
 # ✅ NEW: Import background scheduler
 from app.services.sync_scheduler import start_scheduler
 
-
-def apply_log_noise_filters():
-    """
-    Keep app debug logs readable by muting verbose third-party ICS/CALDAV internals.
-    """
-    noisy_loggers = [
-        "caldav",
-        "vobject",
-        "icalendar",
-        "recurring_ical_events",
-        "urllib3.connectionpool",
-    ]
-
-    for name in noisy_loggers:
-        logging.getLogger(name).setLevel(logging.WARNING)
-
-    class _NoisyIcalFilter(logging.Filter):
-        def filter(self, record):
-            msg = record.getMessage() if record else ""
-            blocked_snippets = (
-                "Ical data was modified to avoid compatibility issues",
-                "Your calendar server breaks the icalendar standard",
-                "error count:",
-            )
-
-            if any(snip in msg for snip in blocked_snippets):
-                return False
-
-            if msg.startswith("--- ") or msg.startswith("+++ ") or msg.startswith("@@ "):
-                return False
-
-            return True
-
-    root_logger = logging.getLogger()
-    root_logger.addFilter(_NoisyIcalFilter())
+logger = logging.getLogger(__name__)
 
 
-apply_log_noise_filters()
+LOG_LEVEL = configure_logging()
+logger.info("Logging configured at level %s", LOG_LEVEL)
 
 
 
@@ -99,8 +67,8 @@ def evaluate_schema_health(db_engine=engine):
                 "Missing required tables. Run database migrations before handling sticky/date routes "
                 "(for example: alembic upgrade head)."
             )
-            print(f"⚠️ [SCHEMA CHECK] Missing tables: {missing_tables}")
-            print("⚠️ [SCHEMA CHECK] Migration warning:", message)
+            logger.warning(f"⚠️ [SCHEMA CHECK] Missing tables: {missing_tables}")
+            logger.warning("⚠️ [SCHEMA CHECK] Migration warning: %s", message)
             return {
                 "status": "warning",
                 "checked_at": checked_at,
@@ -109,7 +77,7 @@ def evaluate_schema_health(db_engine=engine):
                 "message": message,
             }
 
-        print("✅ [SCHEMA CHECK] All required tables are present.")
+        logger.info("✅ [SCHEMA CHECK] All required tables are present.")
         return {
             "status": "ok",
             "checked_at": checked_at,
@@ -119,7 +87,7 @@ def evaluate_schema_health(db_engine=engine):
         }
 
     except Exception as e:
-        print("❌ [SCHEMA CHECK] Failed to inspect schema:", str(e))
+        logger.error("❌ [SCHEMA CHECK] Failed to inspect schema: %s", str(e))
         return {
             "status": "error",
             "checked_at": checked_at,
@@ -172,7 +140,7 @@ if engine.url.drivername.startswith("postgresql"):
                 _patch_conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_token JSONB"))
                 _patch_conn.commit()
         except Exception as _e:
-            print(f"⚠️ [PATCH] sync_token column patch failed (non-fatal): {_e}")
+            logger.warning(f"⚠️ [PATCH] sync_token column patch failed (non-fatal): {_e}")
 
         required_columns = {
             "last_sync_success",
@@ -190,7 +158,7 @@ if engine.url.drivername.startswith("postgresql"):
         }
         missing = required_columns - columns
         if missing:
-            print(f"⚠️ PostgreSQL oauth_accounts schema missing columns: {missing}. Applying ALTER TABLE fixes.")
+            logger.warning(f"⚠️ PostgreSQL oauth_accounts schema missing columns: {missing}. Applying ALTER TABLE fixes.")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_sync_success TIMESTAMPTZ"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_sync_failure TIMESTAMPTZ"))
@@ -209,7 +177,7 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = TRUE WHERE access_token = 'admin-placeholder-token'"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = FALSE WHERE is_service_provider IS NULL"))
                 conn.commit()
-            print("✅ PostgreSQL oauth_accounts schema upgrade complete.")
+            logger.info("✅ PostgreSQL oauth_accounts schema upgrade complete.")
 
     if "events" in inspector.get_table_names():
         event_columns = {col["name"] for col in inspector.get_columns("events")}
@@ -224,7 +192,7 @@ if engine.url.drivername.startswith("postgresql"):
         missing_event_columns = required_event_columns - event_columns
 
         if missing_event_columns:
-            print(f"⚠️ PostgreSQL events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
+            logger.warning(f"⚠️ PostgreSQL events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS color VARCHAR"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS color_enabled BOOLEAN DEFAULT FALSE"))
@@ -234,18 +202,18 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
                 conn.execute(text("UPDATE events SET color_enabled = FALSE WHERE color_enabled IS NULL"))
                 conn.commit()
-            print("✅ PostgreSQL events schema upgrade complete.")
+            logger.info("✅ PostgreSQL events schema upgrade complete.")
 
     if "date_sticky_notes" in inspector.get_table_names():
         date_sticky_columns = {col["name"] for col in inspector.get_columns("date_sticky_notes")}
         if "sticky_notes" not in date_sticky_columns:
-            print("⚠️ PostgreSQL date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
+            logger.warning("⚠️ PostgreSQL date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE date_sticky_notes ADD COLUMN IF NOT EXISTS sticky_notes JSONB"))
                 conn.commit()
-            print("✅ PostgreSQL date_sticky_notes schema upgrade complete.")
+            logger.info("✅ PostgreSQL date_sticky_notes schema upgrade complete.")
         else:
-            print("✅ PostgreSQL date_sticky_notes.sticky_notes present.")
+            logger.info("✅ PostgreSQL date_sticky_notes.sticky_notes present.")
 
 # ✅ Ensure local SQLite schema is up to date for optional columns
 if engine.url.drivername.startswith("sqlite"):
@@ -268,7 +236,7 @@ if engine.url.drivername.startswith("sqlite"):
         }
         missing = required_columns - columns
         if missing:
-            print(f"⚠️ SQLite schema missing columns: {missing}. Applying ALTER TABLE fixes.")
+            logger.warning(f"⚠️ SQLite schema missing columns: {missing}. Applying ALTER TABLE fixes.")
             with engine.connect() as conn:
                 for col in missing:
                     if col == "last_sync_success":
@@ -300,7 +268,7 @@ if engine.url.drivername.startswith("sqlite"):
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 1 WHERE access_token = 'admin-placeholder-token'"))
                 conn.execute(text("UPDATE oauth_accounts SET is_service_provider = 0 WHERE is_service_provider IS NULL"))
                 conn.commit()
-            print("✅ SQLite schema upgrade complete.")
+            logger.info("✅ SQLite schema upgrade complete.")
 
     if "events" in inspector.get_table_names():
         event_columns = {col["name"] for col in inspector.get_columns("events")}
@@ -315,7 +283,7 @@ if engine.url.drivername.startswith("sqlite"):
         missing_event_columns = required_event_columns - event_columns
 
         if missing_event_columns:
-            print(f"⚠️ SQLite events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
+            logger.warning(f"⚠️ SQLite events schema missing columns: {missing_event_columns}. Applying ALTER TABLE fixes.")
             with engine.connect() as conn:
                 for col in missing_event_columns:
                     if col == "color":
@@ -332,20 +300,20 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
                 conn.execute(text("UPDATE events SET color_enabled = 0 WHERE color_enabled IS NULL"))
                 conn.commit()
-            print("✅ SQLite events schema upgrade complete.")
+            logger.info("✅ SQLite events schema upgrade complete.")
 
     if "date_sticky_notes" in inspector.get_table_names():
         date_sticky_columns = {col["name"] for col in inspector.get_columns("date_sticky_notes")}
         if "sticky_notes" not in date_sticky_columns:
-            print("⚠️ SQLite date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
+            logger.warning("⚠️ SQLite date_sticky_notes schema missing sticky_notes. Applying ALTER TABLE fix.")
             with engine.connect() as conn:
                 conn.execute(text("ALTER TABLE date_sticky_notes ADD COLUMN sticky_notes JSON"))
                 conn.commit()
-            print("✅ SQLite date_sticky_notes schema upgrade complete.")
+            logger.info("✅ SQLite date_sticky_notes schema upgrade complete.")
         else:
-            print("✅ SQLite date_sticky_notes.sticky_notes present.")
+            logger.info("✅ SQLite date_sticky_notes.sticky_notes present.")
 
-print("✅ Tables registered:", Base.metadata.tables.keys())
+logger.info("✅ Tables registered: %s", Base.metadata.tables.keys())
 
 
 # ==================================================
@@ -435,12 +403,12 @@ try:
 
         if _filled or _upgraded:
             _sess.commit()
-            print(f"✅ [BACKFILL] external_ids: filled={_filled} upgraded={_upgraded}")
+            logger.info(f"✅ [BACKFILL] external_ids: filled={_filled} upgraded={_upgraded}")
         else:
-            print("✅ [BACKFILL] external_ids: nothing to backfill")
+            logger.info("✅ [BACKFILL] external_ids: nothing to backfill")
 
 except Exception as _bf_err:
-    print(f"⚠️ [BACKFILL] external_ids backfill failed (non-fatal): {_bf_err}")
+    logger.warning(f"⚠️ [BACKFILL] external_ids backfill failed (non-fatal): {_bf_err}")
 
 
 # ==================================================
@@ -506,7 +474,7 @@ def start_background_jobs():
     try:
         start_scheduler()
     except Exception as e:
-        print("⚠️ Scheduler failed to start:", str(e))
+        logger.warning("⚠️ Scheduler failed to start: %s", str(e))
 
 
 # ==================================================

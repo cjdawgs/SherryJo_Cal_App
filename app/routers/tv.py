@@ -376,27 +376,55 @@ class TVDiagEntry(BaseModel):
     device_id:         Optional[str] = None       # stable UUID from localStorage
 
 
-@router.post("/diag", status_code=200)
-def post_tv_diag(
-    body: TVDiagEntry,
-    request: Request,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Receives a diagnostic event beaconed by the TV dashboard JS.
-    Fire-and-forget from the client — uses fetch keepalive so it
-    survives page unload.  Never blocks the TV UI.
+class TVDiagBatch(BaseModel):
+    """Batched beacon. The client flushes several entries in one request."""
+    entries: list[TVDiagEntry] = Field(max_length=50)
 
-    Writes to both the in-memory ring buffer (fast, current-session display)
-    AND to the tv_diag_log table in Supabase/Postgres so the log is
-    permanently accessible from any device over the network.
-    """
+
+# A TV kiosk runs 24/7, so anything it repeats on a timer must not become a
+# permanent row. Routine liveness events are kept in memory and persisted at
+# most once per device per interval; everything else (session lifecycle,
+# renderer stalls, freezes) is persisted immediately because it is why the
+# table exists.
+ROUTINE_DIAG_EVENTS = frozenset({"heartbeat", "poll", "tick"})
+
+
+def _diag_persistence_enabled() -> bool:
+    return (os.getenv("TV_DIAG_PERSIST", "1") or "").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _routine_persist_interval() -> timedelta:
+    try:
+        minutes = int(os.getenv("TV_DIAG_ROUTINE_PERSIST_MINUTES", "60"))
+    except ValueError:
+        minutes = 60
+    return timedelta(minutes=max(1, minutes))
+
+
+# device_id -> last time a routine event from that device was written to the DB.
+_routine_persist_seen: dict[str, datetime] = {}
+
+
+def _should_persist(event: str, device_id: str) -> bool:
+    if not _diag_persistence_enabled():
+        return False
+    if event not in ROUTINE_DIAG_EVENTS:
+        return True
+
+    now = datetime.now(timezone.utc)
+    key = device_id or "unknown"
+    last = _routine_persist_seen.get(key)
+    if last and now - last < _routine_persist_interval():
+        return False
+    _routine_persist_seen[key] = now
+    return True
+
+
+def _record_diag_entry(body: TVDiagEntry, user_id: int, ua: str, db: Session) -> None:
     global _diag_buffer
-    ua = (request.headers.get("user-agent") or "")[:512]
     entry = {
         "ts_server":      datetime.now(timezone.utc).isoformat(),
-        "user_id":        current_user.id,
+        "user_id":        user_id,
         "device_id":      (body.device_id or "")[:64],
         "device_ua":      ua,
         "event":          (body.event or "")[:64],
@@ -411,27 +439,53 @@ def post_tv_diag(
     _diag_buffer.append(entry)
     if len(_diag_buffer) > _DIAG_MAX:
         del _diag_buffer[:-_DIAG_MAX]
-    # Persistent DB write — survives server restarts, accessible from anywhere
+
+    if not _should_persist(entry["event"], entry["device_id"]):
+        return
+
+    db.add(TVDiagLog(
+        user_id       = user_id,
+        device_id     = entry["device_id"] or None,
+        device_ua     = ua or None,
+        event         = entry["event"],
+        details       = entry["details"] or None,
+        ts_client     = entry["ts_client"] or None,
+        elapsed_min   = entry["elapsed_min"],
+        visibility    = entry["visibility"],
+        guard_enabled = entry["guard_enabled"],
+        guard_timeout = entry["guard_timeout"],
+    ))
+
+
+@router.post("/diag", status_code=200)
+def post_tv_diag(
+    body: TVDiagEntry | TVDiagBatch,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Receives diagnostic events beaconed by the TV dashboard JS, either singly
+    (legacy clients) or as a batch. Fire-and-forget from the client — uses
+    fetch keepalive so it survives page unload. Never blocks the TV UI.
+
+    Entries always land in the in-memory ring buffer. They reach the
+    tv_diag_log table only when they carry signal: see ``_should_persist``.
+    """
+    ua = (request.headers.get("user-agent") or "")[:512]
+    entries = body.entries if isinstance(body, TVDiagBatch) else [body]
+
+    for item in entries:
+        _record_diag_entry(item, current_user.id, ua, db)
+
     try:
-        db_row = TVDiagLog(
-            user_id       = current_user.id,
-            device_id     = entry["device_id"] or None,
-            device_ua     = ua or None,
-            event         = entry["event"],
-            details       = entry["details"] or None,
-            ts_client     = entry["ts_client"] or None,
-            elapsed_min   = entry["elapsed_min"],
-            visibility    = entry["visibility"],
-            guard_enabled = entry["guard_enabled"],
-            guard_timeout = entry["guard_timeout"],
-        )
-        db.add(db_row)
         db.commit()
     except Exception as exc:
         db.rollback()
         logger.warning("TV_DIAG db write failed (memory buffer still updated): %s", exc)
-    logger.info("TV_DIAG user_id=%s device=%s event=%s", current_user.id, entry["device_id"], entry["event"])
-    return {"ok": True}
+
+    logger.debug("TV_DIAG user_id=%s entries=%s", current_user.id, len(entries))
+    return {"ok": True, "accepted": len(entries)}
 
 
 @router.get("/diag")

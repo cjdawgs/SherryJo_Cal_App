@@ -16,12 +16,15 @@ Multi-Account OAuth Service (FINAL - HARDENED + UTC SAFE)
 CalendarService → ensure_valid_token → API client
 """
 
+import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from app.models import OAuthAccount
 import requests
 from datetime import datetime, timedelta, timezone
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 ADMIN_PLACEHOLDER_TOKEN = "admin-placeholder-token"
@@ -75,11 +78,11 @@ def safe_commit(db: Session):
     try:
         db.commit()
     except Exception as e:
-        print("❌ DB commit failed:", e)
+        logger.error("❌ DB commit failed: %s", e)
 
         # ✅ EMERGENCY Fix — detect NULL access token issue
         if "access_token" in str(e):
-            print("🚫 FIXING NULL ACCESS TOKEN BEFORE RETRY")
+            logger.error("🚫 FIXING NULL ACCESS TOKEN BEFORE RETRY")
 
             for obj in db.dirty:
                 if hasattr(obj, "access_token") and obj.access_token is None:
@@ -89,9 +92,9 @@ def safe_commit(db: Session):
 
         try:
             db.commit()
-            print("✅ Commit recovered successfully")
+            logger.info("✅ Commit recovered successfully")
         except Exception as e2:
-            print("❌ Commit retry failed:", e2)
+            logger.error("❌ Commit retry failed: %s", e2)
             raise
 
 
@@ -142,7 +145,7 @@ class MultiAccountOAuthService:
         
         # ✅ FLOAT → DATETIME
         if isinstance(token_expires_at, (int, float)):
-            print("⚠️ Converting float expires_at → datetime")
+            logger.warning("⚠️ Converting float expires_at → datetime")
             token_expires_at = datetime.fromtimestamp(
                 token_expires_at,
                 tz=timezone.utc
@@ -150,7 +153,7 @@ class MultiAccountOAuthService:
 
         # ✅ FORCE UTC (core rule)
         if isinstance(token_expires_at, datetime) and token_expires_at.tzinfo is None:
-            print("⚠️ Converting naive expires_at → UTC")
+            logger.warning("⚠️ Converting naive expires_at → UTC")
             token_expires_at = token_expires_at.replace(tzinfo=timezone.utc)
 
         existing = db.query(OAuthAccount).filter(
@@ -160,7 +163,7 @@ class MultiAccountOAuthService:
         ).first()
 
         if existing:
-            print(f"🔄 Updating account: {account_email}")
+            logger.info(f"🔄 Updating account: {account_email}")
             # ✅ APPLE SUPPORT (update credentials)
 
             # ✅ APPLE SUPPORT (update credentials correctly)
@@ -197,7 +200,7 @@ class MultiAccountOAuthService:
             safe_commit(db)
             return existing
 
-        print(f"✅ Adding account: {account_email}")
+        logger.info(f"✅ Adding account: {account_email}")
 
         account_count = db.query(OAuthAccount).filter(
             OAuthAccount.user_id == user_id,
@@ -260,11 +263,11 @@ class MultiAccountOAuthService:
         except Exception as e:
             # Recover from aborted transaction state (e.g. Postgres InFailedSqlTransaction)
             # and retry once for read-only account lookups.
-            print("⚠️ get_user_accounts failed, attempting rollback+retry:", e)
+            logger.warning("⚠️ get_user_accounts failed, attempting rollback+retry: %s", e)
             try:
                 db.rollback()
             except Exception as rb_err:
-                print("⚠️ get_user_accounts rollback failed:", rb_err)
+                logger.error("⚠️ get_user_accounts rollback failed: %s", rb_err)
                 raise
 
             query = _exclude_service_provider_rows(
@@ -287,11 +290,11 @@ class MultiAccountOAuthService:
                 )
             ).all()
         except Exception as e:
-            print("⚠️ get_all_sync_enabled_accounts failed, attempting rollback+retry:", e)
+            logger.warning("⚠️ get_all_sync_enabled_accounts failed, attempting rollback+retry: %s", e)
             try:
                 db.rollback()
             except Exception as rb_err:
-                print("⚠️ get_all_sync_enabled_accounts rollback failed:", rb_err)
+                logger.error("⚠️ get_all_sync_enabled_accounts rollback failed: %s", rb_err)
                 raise
 
             return _exclude_service_provider_rows(
@@ -434,7 +437,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     """
 
     now = datetime.now(timezone.utc)
-    print(f"[TOKEN CHECK] {account.provider} | {account.account_email}")
+    logger.debug(f"[TOKEN CHECK] {account.provider} | {account.account_email}")
     expires = account.token_expires_at
 
     # ==================================================
@@ -442,7 +445,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # ✅ ONLY BLOCK TRUE INVALID TOKENS
     # ==================================================
     if account.access_token == "__REAUTH_REQUIRED__":
-        print(f"🚫 Token flagged invalid → skipping: {account.account_email}")
+        logger.error(f"🚫 Token flagged invalid → skipping: {account.account_email}")
 
         if hasattr(account, "status") and account.status != "error":
             account.status = "error"
@@ -454,13 +457,13 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # ✅ FIX 1: FLOAT → DATETIME
     # --------------------------------------------------
     if isinstance(expires, (int, float)):
-        print(f"⚠️ Fixing float timestamp ({account.account_email})")
+        logger.warning(f"⚠️ Fixing float timestamp ({account.account_email})")
         try:
             expires = datetime.fromtimestamp(expires, tz=timezone.utc)
             account.token_expires_at = expires
             safe_commit(db)
         except Exception as e:
-            print("❌ Float conversion failed:", e)
+            logger.error("❌ Float conversion failed: %s", e)
             db.rollback()
             return None
 
@@ -468,13 +471,13 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # ✅ FIX 2: NAIVE → UTC (THIS SOLVES YOUR ISSUE)
     # --------------------------------------------------
     if isinstance(expires, datetime) and expires.tzinfo is None:
-        print(f"⚠️ Fixing naive datetime → UTC ({account.account_email})")
+        logger.warning(f"⚠️ Fixing naive datetime → UTC ({account.account_email})")
         try:
             expires = expires.replace(tzinfo=timezone.utc)
             account.token_expires_at = expires
             safe_commit(db)
         except Exception as e:
-            print("❌ Naive conversion failed:", e)
+            logger.error("❌ Naive conversion failed: %s", e)
             db.rollback()
             return None
 
@@ -492,7 +495,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # ✅ RECOVERY MODE (FIXES YOUR BUG)
     # --------------------------------------------------
     if not expires:
-        print(f"⚠️ Missing expires_at → attempting recovery: {account.account_email}")
+        logger.warning(f"⚠️ Missing expires_at → attempting recovery: {account.account_email}")
 
 
         # ✅ Try refresh if possible
@@ -512,11 +515,11 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
                     return _refresh_ms_token(db, account)
 
             except Exception as e:
-                print("❌ Recovery refresh failed:", e)
+                logger.error("❌ Recovery refresh failed: %s", e)
                 db.rollback()
                 return None
 
-        print(f"🚫 No refresh token → cannot recover: {account.account_email}")
+        logger.error(f"🚫 No refresh token → cannot recover: {account.account_email}")
         return None
 
     # --------------------------------------------------
@@ -533,7 +536,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # --------------------------------------------------
     # 🔄 REFRESH TOKEN
     # --------------------------------------------------
-    print(f"🔄 Refreshing token: {account.account_email}")
+    logger.debug("Refreshing token for account_id=%s", account.id)
 
     try:
         if account.provider == "google":
@@ -550,7 +553,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
             return _refresh_ms_token(db, account)
 
     except Exception as e:
-        print("❌ Refresh failed:", e)
+        logger.error("❌ Refresh failed: %s", e)
         db.rollback()
 
     return None
@@ -563,7 +566,7 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
 def _refresh_google_token(db: Session, account: OAuthAccount):
 
     if not account.refresh_token:
-        print(f"❌ No Google refresh_token: {account.account_email}")
+        logger.error(f"❌ No Google refresh_token: {account.account_email}")
         return None
 
     res = requests.post(
@@ -584,13 +587,13 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
 
         error = error_data.get("error")
 
-        print("❌ Google refresh failed:", res.text)
+        logger.error("❌ Google refresh failed: %s", res.text)
 
         # ==================================================
         # ✅ GOLD STANDARD FIX — HANDLE REVOKED TOKEN
         # ==================================================
         if error == "invalid_grant":
-            print(f"🚫 TOKEN REVOKED → marking error: {account.account_email}")
+            logger.error(f"🚫 TOKEN REVOKED → marking error: {account.account_email}")
 
             # ✅ SAFE ATTRIBUTE SET (no crash if column missing)
             if hasattr(account, "status"):
@@ -611,10 +614,10 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
     data = res.json()
 
     if "access_token" not in data:
-        print("❌ Invalid Google response:", data.get("error"))
+        logger.error("❌ Invalid Google response: %s", data.get("error"))
         return None
 
-    print("🔍 ACCOUNT STATUS:", getattr(account, "status", None))
+    logger.debug("🔍 ACCOUNT STATUS: %s", getattr(account, "status", None))
 
     account.access_token = data["access_token"]
 
@@ -639,7 +642,7 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
 
     safe_commit(db)
 
-    print(f"✅ Google refreshed: {account.account_email}")
+    logger.info(f"✅ Google refreshed: {account.account_email}")
     return account.access_token
 
 
@@ -650,7 +653,7 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
 def _refresh_ms_token(db: Session, account: OAuthAccount):
 
     if not account.refresh_token:
-        print(f"❌ No MS refresh_token: {account.account_email}")
+        logger.error(f"❌ No MS refresh_token: {account.account_email}")
         return None
 
     res = requests.post(
@@ -664,13 +667,13 @@ def _refresh_ms_token(db: Session, account: OAuthAccount):
     )
 
     if res.status_code != 200:
-        print("❌ Microsoft refresh failed:", res.text)
+        logger.error("❌ Microsoft refresh failed: %s", res.text)
         return None
 
     data = res.json()
 
     if "access_token" not in data:
-        print("❌ Invalid Microsoft response:", data)
+        logger.error("❌ Invalid Microsoft response: %s", data)
         return None
 
     account.access_token = data["access_token"]
@@ -685,5 +688,5 @@ def _refresh_ms_token(db: Session, account: OAuthAccount):
 
     safe_commit(db)
 
-    print(f"✅ Microsoft refreshed: {account.account_email}")
+    logger.info(f"✅ Microsoft refreshed: {account.account_email}")
     return account.access_token

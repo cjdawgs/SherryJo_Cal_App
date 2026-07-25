@@ -2,6 +2,7 @@
 # GOOGLE OAUTH ROUTER
 # ==================================================
 
+import logging
 from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -24,6 +25,8 @@ from app.config import get_google_redirect_uri
 
 from app.database import get_db
 from app.services.google_calendar_service import GoogleCalendarService
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/auth/google", tags=["Google Auth"])
@@ -77,7 +80,7 @@ def google_callback(
     state: str,
     db: Session = Depends(get_db)
 ):
-    print("✅ CALLBACK HIT:", str(request.url))
+    logger.info("✅ CALLBACK HIT: %s", str(request.url))
 
     # ==================================================
     # ✅ DECODE STATE (extract user_id from JWT)
@@ -103,7 +106,7 @@ def google_callback(
             "error": "google_oauth_failed",
             "token": new_token,
         })
-        print("❌ GOOGLE CALLBACK token exchange failed:", str(exc))
+        logger.error("❌ GOOGLE CALLBACK token exchange failed: %s", str(exc))
         return RedirectResponse(f"/accounts/ui?{params}")
 
     access_token = token_data.get("access_token")
@@ -115,7 +118,7 @@ def google_callback(
             "error": "google_token_missing",
             "token": new_token,
         })
-        print("❌ GOOGLE CALLBACK missing access_token in token response")
+        logger.error("❌ GOOGLE CALLBACK missing access_token in token response")
         return RedirectResponse(f"/accounts/ui?{params}")
 
     # ==================================================
@@ -128,7 +131,7 @@ def google_callback(
         email = user_info.get("email")
         normalized_email = (email or "").strip().lower()
     except Exception as exc:
-        print("❌ GOOGLE CALLBACK user info failed:", str(exc))
+        logger.error("❌ GOOGLE CALLBACK user info failed: %s", str(exc))
 
         # Reconnect safety: if Google userinfo endpoint fails transiently,
         # allow known reconnect target from state to complete account recovery.
@@ -150,7 +153,7 @@ def google_callback(
                     )
                     normalized_email = (id_payload.get("email") or "").strip().lower()
                 except Exception as id_exc:
-                    print("⚠️ GOOGLE CALLBACK id_token decode failed:", str(id_exc))
+                    logger.error("⚠️ GOOGLE CALLBACK id_token decode failed: %s", str(id_exc))
 
     if not normalized_email:
         new_token = create_token(user_id)
@@ -158,7 +161,7 @@ def google_callback(
             "error": "google_email_missing",
             "token": new_token,
         })
-        print("❌ GOOGLE CALLBACK missing email in user info payload")
+        logger.error("❌ GOOGLE CALLBACK missing email in user info payload")
         return RedirectResponse(f"/accounts/ui?{params}")
 
     if expected_reconnect and normalized_email != expected_reconnect:
@@ -171,7 +174,7 @@ def google_callback(
         })
         return RedirectResponse(f"/accounts/ui?{mismatch}")
 
-    print("✅ GOOGLE EMAIL:", normalized_email)
+    logger.info("✅ GOOGLE EMAIL: %s", normalized_email)
 
     # ==================================================
     # ✅ SAVE ACCOUNT (MULTI-ACCOUNT SAFE ✅✅✅)
@@ -198,7 +201,7 @@ def google_callback(
     )
 
 
-    print("✅ GOOGLE ACCOUNT SAVED")
+    logger.info("✅ GOOGLE ACCOUNT SAVED")
 
     # ==================================================
     # ✅ REDIRECT BACK TO UI (AUTO REFRESH ✅)

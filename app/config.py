@@ -1,6 +1,7 @@
 # --------------------------------------------------
 # Standard Library Imports
 # --------------------------------------------------
+import logging
 import os
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -12,6 +13,8 @@ import psycopg2
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
+
+logger = logging.getLogger(__name__)
 
 
 def mask_database_url(url: str | None) -> str:
@@ -243,7 +246,7 @@ def can_connect_postgres():
         return True
 
     except Exception as e:
-        print(f"[CONFIG] Postgres connection failed: {e}")
+        logger.error(f"[CONFIG] Postgres connection failed: {e}")
         return False
 
 
@@ -256,7 +259,7 @@ DB_TYPE = os.getenv("DB_TYPE", "auto")
 
 if DATABASE_URL_ENV:
     # ✅ PRIORITY: Use external DB (Supabase / Render / etc.)
-    print("✅ Using DATABASE_URL from environment")
+    logger.info("✅ Using DATABASE_URL from environment")
     DATABASE_URL = DATABASE_URL_ENV
 
     # Optional parse type just for logging
@@ -284,7 +287,7 @@ else:
         if can_connect_postgres():
             resolved_db = "postgres"
         else:
-            print("⚠️ PostgreSQL requested but login failed → using SQLite")
+            logger.warning("⚠️ PostgreSQL requested but login failed → using SQLite")
             resolved_db = "sqlite"
 
     elif DB_TYPE == "sqlite":
@@ -294,7 +297,7 @@ else:
         if can_connect_postgres():
             resolved_db = "postgres"
         else:
-            print("ℹ️ PostgreSQL not usable → falling back to SQLite")
+            logger.info("ℹ️ PostgreSQL not usable → falling back to SQLite")
             resolved_db = "sqlite"
 
     # Build fallback connection string
@@ -313,7 +316,7 @@ else:
 # --------------------------------------------------
 # Debug / Visibility Output (Safe to Keep)
 # --------------------------------------------------
-print(f"[CONFIG] Environment: {settings.env}")
-print(f"[CONFIG] DB_TYPE requested: {DB_TYPE}")
-print(f"[CONFIG] DB_TYPE resolved to: {resolved_db}")
-print(f"[CONFIG] Using database: {mask_database_url(DATABASE_URL)}")
+logger.info(f"[CONFIG] Environment: {settings.env}")
+logger.info(f"[CONFIG] DB_TYPE requested: {DB_TYPE}")
+logger.info(f"[CONFIG] DB_TYPE resolved to: {resolved_db}")
+logger.info(f"[CONFIG] Using database: {mask_database_url(DATABASE_URL)}")

@@ -13,6 +13,7 @@ Endpoints for users to:
 Multi-Account OAuth Management Router
 """
 
+import logging
 from app.services.sync_scheduler import scheduler, get_scheduler_health
 from app.services.calendar_service import CalendarService
 from fastapi import APIRouter, Depends, Query, Request
@@ -37,6 +38,8 @@ from app.utils import (
     get_owned_or_404,
     sanitize_hex_color,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -157,7 +160,7 @@ def connect_apple_account(
 
     except Exception as e:
         # ✅ NEVER THROW → prevents 500 & 400 mismatch
-        print("❌ Apple connect error:", e)
+        logger.error("❌ Apple connect error: %s", e)
 
         return {
             "success": False,
@@ -188,7 +191,7 @@ def retry_account_sync(
     retry_started_at = datetime.now(timezone.utc)
 
     try:
-        print(
+        logger.info(
             f"🔁 RETRY START account_id={account.id} provider={account.provider} email={account.account_email} "
             f"prev_status={account.status} prev_success={account.last_sync_success} prev_failure={account.last_sync_failure}"
         )
@@ -212,7 +215,7 @@ def retry_account_sync(
         safe_commit(db)
 
         resolved_status = resolve_account_status(account)
-        print(
+        logger.info(
             f"✅ RETRY SUCCESS account_id={account.id} provider={account.provider} email={account.account_email} "
             f"status={resolved_status} success={account.last_sync_success} failure={account.last_sync_failure}"
         )
@@ -237,7 +240,7 @@ def retry_account_sync(
 
         safe_commit(db)
 
-        print(
+        logger.error(
             f"❌ RETRY FAILED account_id={account.id} provider={account.provider} email={account.account_email} "
             f"error={e}"
         )
