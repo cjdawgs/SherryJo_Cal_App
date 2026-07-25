@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-from app.config import DATABASE_URL
+from app.config import DATABASE_URL, mask_database_url
 
 
 # --------------------------------------------------
@@ -98,7 +98,7 @@ if required_db_kind and _determine_db_kind(DATABASE_URL) != required_db_kind:
         f"Runtime database kind {_determine_db_kind(DATABASE_URL)} does not satisfy REQUIRE_DB_KIND={required_db_kind}."
     )
 
-print("✅ DATABASE_URL:", DATABASE_URL)
+print("✅ DATABASE_URL:", mask_database_url(DATABASE_URL))
 
 if DATABASE_URL.startswith("sqlite"):
     db_file = DATABASE_URL.replace("sqlite:///", "")

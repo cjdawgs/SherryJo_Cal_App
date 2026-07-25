@@ -3,6 +3,7 @@
 # --------------------------------------------------
 
 import os
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
@@ -41,22 +42,6 @@ ALGORITHM = settings.jwt_algorithm
 from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-@router.get("/debug/create-user")
-def create_test_user(db: Session = Depends(get_db)):
-
-    hashed_password = hash_password("test123")  # ✅ USE YOUR SYSTEM
-
-    user = User(
-        email="test@example.com",
-        username="test",
-        hashed_password=hashed_password,
-        role="staff"
-    )
-
-    db.add(user)
-    db.commit()
-
-    return {"status": "created"}
 
 class UserCreate(BaseModel):
     username: str
@@ -90,13 +75,14 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if role not in {Roles.ADMIN, Roles.STAFF}:
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'staff'")
 
-    # ✅ New requirement: admin accounts require setup passphrase.
-    ADMIN_SETUP_CODE = "mintmule99999"
+    # ✅ Admin accounts require the setup passphrase configured for the deployment.
     if role == Roles.ADMIN:
-        provided_code = (user.admin_setup_code or "").strip()
         is_pytest_run = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        if provided_code != ADMIN_SETUP_CODE and not is_pytest_run:
-            raise HTTPException(status_code=403, detail="Invalid admin setup code")
+        if not is_pytest_run:
+            expected_code = (os.getenv("ADMIN_SETUP_CODE") or "").strip()
+            provided_code = (user.admin_setup_code or "").strip()
+            if not expected_code or not secrets.compare_digest(provided_code, expected_code):
+                raise HTTPException(status_code=403, detail="Invalid admin setup code")
 
     new_user = User(
         username=user.username,
@@ -173,27 +159,3 @@ def get_current_user(
         raise HTTPException(status_code=404, detail="User not found")
 
     return user
-
-# ==================================================
-# ✅ TEMP: MAKE FIRST USER ADMIN
-# ==================================================
-@router.get("/debug/become-admin")
-def become_admin(db: Session = Depends(get_db)):
-    """
-    ✅ TEMP TOOL:
-    Makes the FIRST user in DB an admin
-
-    Use ONCE, then delete it
-    """
-
-    user = db.query(User).first()
-
-    if not user:
-        return {"error": "No users found"}
-
-    user.role = "admin"
-    db.commit()
-
-    return {
-        "message": f"{user.email} is now admin ✅"
-    }

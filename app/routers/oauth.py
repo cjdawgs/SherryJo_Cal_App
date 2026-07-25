@@ -52,10 +52,9 @@ TOKEN_URL = f"{AUTHORITY}/oauth2/v2.0/token"
 if not CLIENT_ID or not CLIENT_SECRET or not TENANT_ID:
     raise HTTPException(status_code=500, detail="Missing environment variables")
 
-print("✅ CLIENT_SECRET LOADED:", CLIENT_SECRET)
+print("✅ CLIENT_SECRET LOADED:", bool(CLIENT_SECRET))
 
 print("✅ CLIENT_ID:", CLIENT_ID)
-print("✅ CLIENT_SECRET LENGTH:", len(CLIENT_SECRET) if CLIENT_SECRET else "None")
 print("✅ REDIRECT_URI env (legacy):", REDIRECT_URI)
 print("✅ REDIRECT_URI runtime template: {base_url}/ms/callback")
 
@@ -207,8 +206,7 @@ def callback(
     # ✅ Convert response safely
     token_json = token_response.json()
 
-    # ✅ DEBUG PRINT (VERY IMPORTANT)
-    print("✅ TOKEN RESPONSE:", token_json)
+    print("✅ TOKEN RESPONSE received:", token_response.status_code)
 
     # ✅ Extract tokens
     access_token = token_json.get("access_token")
@@ -216,9 +214,10 @@ def callback(
 
     # ✅ ERROR HANDLING (THIS FIXES YOUR CRASH)
     if not access_token:
+        print("❌ MICROSOFT TOKEN EXCHANGE FAILED:", token_json.get("error"))
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to get access token: {token_json}"
+            detail="Failed to get access token from Microsoft"
         )
 
 
@@ -240,14 +239,12 @@ def callback(
 
     user_info = user_info_response.json()
 
-    # ✅ DEBUG PRINT
-    print("✅ MS USER:", user_info)
-
     # ✅ Error check
     if "error" in user_info:
+        print("❌ MICROSOFT PROFILE FETCH FAILED:", user_info.get("error"))
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to fetch user profile: {user_info}"
+            detail="Failed to fetch Microsoft user profile"
         )
     
     # ==================================================
@@ -263,14 +260,11 @@ def callback(
     email = user_info.get("mail") or user_info.get("userPrincipalName")
     normalized_email = (email or "").strip().lower()
 
-    # ✅ DEBUG
-    print("✅ EXTRACTED EMAIL:", normalized_email)
-
     # ✅ VALIDATION (prevents crashes)
     if not normalized_email:
         raise HTTPException(
             status_code=400,
-            detail=f"Could not extract email from Microsoft response: {user_info}"
+            detail="Could not extract email from Microsoft response"
         )
 
     if expected_reconnect and normalized_email != expected_reconnect:

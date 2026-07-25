@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.deps import get_current_user
+from app.models import User
 from app.services.local_ai_service import (
     LocalAIServiceError,
     generate_local_ai_response,
@@ -19,12 +21,15 @@ class LocalChatRequest(BaseModel):
 
 
 @router.get("/local/config")
-def local_ai_config():
+def local_ai_config(current_user: User = Depends(get_current_user)):
     return get_local_ai_config()
 
 
 @router.post("/local/chat")
-def local_ai_chat(payload: LocalChatRequest):
+def local_ai_chat(
+    payload: LocalChatRequest,
+    current_user: User = Depends(get_current_user),
+):
     try:
         return generate_local_ai_response(
             prompt=payload.prompt,

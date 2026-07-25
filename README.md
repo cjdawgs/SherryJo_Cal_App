@@ -47,6 +47,9 @@ The system includes authentication, role-based access control, event management,
 
 ## Configuration Safety Rules
 
+- `ADMIN_SETUP_CODE` must be set (host env or secret store) before any admin account can be registered via `POST /auth/register`. Admin registration is rejected when it is unset.
+- `/ws` requires a JWT: connect to `/ws?token=<access_token>`.
+
 - Local development can use .env.
 - Production and staging must use host environment variables or secret store values.
 - Local .env is never allowed to override production runtime values.
