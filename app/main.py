@@ -625,13 +625,3 @@ def custom_openapi():
 # ✅ Attach custom OpenAPI function
 app.openapi = custom_openapi
 
-
-# ==========================================
-# TEMPORARY TEST ROUTE
-# Used to verify the FastAPI application is running correctly.
-# Safe to remove once integration (OAuth / Graph API) is completed.
-# ==========================================
-@app.get("/copilot-test")
-def copilot_test():
-    return {"message": "Copilot test route working!"}
-

@@ -32,7 +32,7 @@ def test_create_note(client, sample_event, auth_headers):
     res = client.post("/events/note", json={
         "event_id": sample_event,
         "content": "Test note"
-    })
+    }, headers=auth_headers)
 
     assert res.status_code == 200
     assert res.json()["ok"] == True
@@ -47,7 +47,7 @@ def test_update_note_content(client, sample_event, auth_headers):
     client.post("/events/note", json={
         "event_id": sample_event,
         "content": "Initial content"
-    })
+    }, headers=auth_headers)
 
     events = client.get("/events/", headers=auth_headers).json()
 
@@ -57,7 +57,7 @@ def test_update_note_content(client, sample_event, auth_headers):
     res = client.post("/events/note", json={
         "note_id": note_id,
         "content": "Updated content"
-    })
+    }, headers=auth_headers)
 
     assert res.status_code == 200
     assert res.json()["ok"] == True
@@ -71,7 +71,7 @@ def test_save_note_position(client, sample_event, auth_headers):
     client.post("/events/note", json={
         "event_id": sample_event,
         "content": "Move me"
-    })
+    }, headers=auth_headers)
 
     events = client.get("/events/", headers=auth_headers).json()
     note = events[0]["notes"][0]
@@ -80,7 +80,7 @@ def test_save_note_position(client, sample_event, auth_headers):
         "note_id": note["id"],
         "x": 300,
         "y": 400
-    })
+    }, headers=auth_headers)
 
     assert res.status_code == 200
 
@@ -95,7 +95,7 @@ def test_note_position_persisted(client, sample_event, auth_headers):
         "content": "Position test",
         "x": 250,
         "y": 275
-    })
+    }, headers=auth_headers)
 
     events = client.get("/events/", headers=auth_headers).json()
     note = events[0]["notes"][0]
@@ -112,12 +112,12 @@ def test_multiple_notes(client, sample_event, auth_headers):
     client.post("/events/note", json={
         "event_id": sample_event,
         "content": "Note 1"
-    })
+    }, headers=auth_headers)
 
     client.post("/events/note", json={
         "event_id": sample_event,
         "content": "Note 2"
-    })
+    }, headers=auth_headers)
 
     events = client.get("/events/", headers=auth_headers).json()
 

@@ -3,6 +3,7 @@
 # --------------------------------------------------
 import os
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 # --------------------------------------------------
 # Third-Party Imports
@@ -11,6 +12,16 @@ import psycopg2
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
+
+
+def mask_database_url(url: str | None) -> str:
+    """Render a connection string without its credentials for safe logging."""
+    parts = urlsplit(str(url or ""))
+    if not parts.netloc or "@" not in parts.netloc:
+        return str(url or "")
+
+    host = parts.netloc.rsplit("@", 1)[1]
+    return urlunsplit((parts.scheme, f"***:***@{host}", parts.path, parts.query, parts.fragment))
 
 
 def _is_truthy(value: str | None) -> bool:
@@ -263,4 +274,4 @@ else:
 print(f"[CONFIG] Environment: {settings.env}")
 print(f"[CONFIG] DB_TYPE requested: {DB_TYPE}")
 print(f"[CONFIG] DB_TYPE resolved to: {resolved_db}")
-print(f"[CONFIG] Using database: {DATABASE_URL}")
+print(f"[CONFIG] Using database: {mask_database_url(DATABASE_URL)}")

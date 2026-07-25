@@ -15,17 +15,17 @@ router = APIRouter(prefix="/display", tags=["display"])
 
 
 @router.get("/office")
-def office():
+def office(current_user: User = Depends(get_current_user)):
     return {"view": "today tasks + team schedule"}
 
 
 @router.get("/team/{user_id}")
-def team(user_id: int):
+def team(user_id: int, current_user: User = Depends(get_current_user)):
     return {"view": f"user {user_id} tasks"}
 
 
 @router.get("/manager")
-def manager():
+def manager(current_user: User = Depends(get_current_user)):
     return {"view": "full overview dashboard"}
 
 

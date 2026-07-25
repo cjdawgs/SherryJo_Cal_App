@@ -611,11 +611,10 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
     data = res.json()
 
     if "access_token" not in data:
-        print("❌ Invalid Google response:", data)
+        print("❌ Invalid Google response:", data.get("error"))
         return None
-    
-    print("🔍 ACCESS TOKEN:", account.access_token)
-    print("🔍 ACCOUNT STATUS:", getattr(account, "status", None))   
+
+    print("🔍 ACCOUNT STATUS:", getattr(account, "status", None))
 
     account.access_token = data["access_token"]
 

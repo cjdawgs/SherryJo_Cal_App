@@ -2,13 +2,13 @@
 ## ===============================
 ## IMPORTS
 ## ===============================
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Event, Note
+from app.models import Event, Note, User
 
 
 ## ===============================
@@ -81,7 +81,11 @@ def get_events(db: Session = Depends(get_db), current_user=Depends(get_current_u
 ## ✅ SMART CREATE / UPDATE EVENT (ONE ENDPOINT)
 ## ==================================================
 @router.post("/update-event")
-def update_event(payload: dict, db: Session = Depends(get_db)):
+def update_event(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     ✅ This handles BOTH:
        - Create new event (no id)
@@ -111,9 +115,7 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
             description=description,
             start_time=start_dt,
             end_time=end_dt,
-
-            # ✅ You can change this if you have auth users later
-            owner_id=payload.get("owner_id", 1)
+            owner_id=current_user.id,
         )
 
         db.add(new_event)
@@ -132,7 +134,11 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
     # ==================================================
     event_id = int(event_id)
 
-    e = db.query(Event).filter(Event.id == event_id).first()
+    e = (
+        db.query(Event)
+        .filter(Event.id == event_id, Event.owner_id == current_user.id)
+        .first()
+    )
 
     if not e:
         return {"ok": False, "error": "Event not found"}
@@ -159,17 +165,25 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/")
-def create_or_update_event_legacy(payload: dict, db: Session = Depends(get_db)):
+def create_or_update_event_legacy(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     Legacy compatibility endpoint for tests/clients posting to /events/.
     Delegates to the unified update-event logic and returns event fields.
     """
-    result = update_event(payload=payload, db=db)
+    result = update_event(payload=payload, db=db, current_user=current_user)
 
     event_id = result.get("id") or payload.get("id")
     event_obj = None
     if event_id:
-        event_obj = db.query(Event).filter(Event.id == int(event_id)).first()
+        event_obj = (
+            db.query(Event)
+            .filter(Event.id == int(event_id), Event.owner_id == current_user.id)
+            .first()
+        )
 
     if event_obj is None:
         return {
@@ -193,7 +207,11 @@ def create_or_update_event_legacy(payload: dict, db: Session = Depends(get_db)):
 ## ✅ NOTES (CREATE / UPDATE / POSITION)
 ## ==================================================
 @router.post("/note")
-def upsert_note(payload: dict, db: Session = Depends(get_db)):
+def upsert_note(
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """
     ✅ Handles:
     - Create note
@@ -205,22 +223,39 @@ def upsert_note(payload: dict, db: Session = Depends(get_db)):
 
     # ✅ UPDATE EXISTING NOTE
     if note_id:
-        note = db.query(Note).filter(Note.id == note_id).first()
+        note = (
+            db.query(Note)
+            .join(Event, Note.event_id == Event.id)
+            .filter(Note.id == note_id, Event.owner_id == current_user.id)
+            .first()
+        )
 
-        if note:
-            note.content = payload.get("content", note.content)
+        if not note:
+            raise HTTPException(status_code=404, detail="Note not found")
 
-            # ✅ Update position if provided
-            if "x" in payload:
-                note.x = payload["x"]
+        note.content = payload.get("content", note.content)
 
-            if "y" in payload:
-                note.y = payload["y"]
+        # ✅ Update position if provided
+        if "x" in payload:
+            note.x = payload["x"]
+
+        if "y" in payload:
+            note.y = payload["y"]
 
     else:
+        event_id = int(payload["event_id"])
+        event = (
+            db.query(Event)
+            .filter(Event.id == event_id, Event.owner_id == current_user.id)
+            .first()
+        )
+
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+
         # ✅ CREATE NEW NOTE
         note = Note(
-            event_id=int(payload["event_id"]),
+            event_id=event_id,
             content=payload.get("content", ""),
             color="yellow",
 
