@@ -138,5 +138,11 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        # Roll back any partially-applied transaction so a failed request
+        # never leaves the session in a broken/dirty state, and re-raise so
+        # the error propagates instead of being silently discarded.
+        db.rollback()
+        raise
     finally:
         db.close()

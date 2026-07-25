@@ -9,10 +9,15 @@ from sqlalchemy.orm import Session
 
 import requests
 import os
-import jwt
 
 from app.database import get_db
 from app.routers.auth import SECRET_KEY
+from app.utils.oauth_state import (
+    decode_oauth_state,
+    decode_user_token,
+    encode_oauth_state,
+    normalize_reconnect_email,
+)
 from app.security import create_token
 from app.config import get_ms_redirect_uri
 
@@ -85,8 +90,7 @@ def login(request: Request, token: str = None, reconnect: str = None):
     user_id = None
     if token:
         try:
-            payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-            user_id = payload.get("user_id")
+            user_id = decode_user_token(token, SECRET_KEY)
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid token")
 
@@ -97,17 +101,10 @@ def login(request: Request, token: str = None, reconnect: str = None):
     # ==================================================
     # ✅ CREATE STATE TOKEN (IMPORTANT)
     # ==================================================
-    reconnect_email = (reconnect or "").strip().lower() or None
+    reconnect_email = normalize_reconnect_email(reconnect)
 
     if user_id:
-        state = jwt.encode(
-            {
-                "user_id": user_id,
-                "reconnect": reconnect_email
-            },
-            SECRET_KEY,
-            algorithm="HS256"
-        )
+        state = encode_oauth_state(user_id, reconnect_email, SECRET_KEY)
     else:
         state = "legacy"
 
@@ -168,8 +165,7 @@ def callback(
         # ✅ Try to decode state IF it exists (optional)
         if state:
             try:
-                payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
-                user_id = payload.get("user_id")
+                user_id, _ = decode_oauth_state(state, SECRET_KEY)
             except Exception:
                 print("⚠️ Could not decode state during error")
 
@@ -187,9 +183,7 @@ def callback(
 
     if state:
         try:
-            payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
-            user_id = payload.get("user_id")
-            expected_reconnect = (payload.get("reconnect") or "").strip().lower()
+            user_id, expected_reconnect = decode_oauth_state(state, SECRET_KEY)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid state")
 

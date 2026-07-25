@@ -1,5 +1,3 @@
-from datetime import datetime
-
 from sqlalchemy import or_
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +8,7 @@ from app.database import get_db
 from app.deps import require_admin
 from app.models import Event, Note, OAuthAccount, User
 from app.services.multi_account_oauth_service import resolve_account_status
+from app.utils import get_or_404, iso_or_none
 
 
 router = APIRouter(prefix="/admin/providers", tags=["admin-providers"])
@@ -45,9 +44,7 @@ class AdminBulkDeleteProvidersRequest(BaseModel):
 
 
 def serialize_provider(account: OAuthAccount) -> dict:
-    created_at = account.created_at
-    if isinstance(created_at, datetime):
-        created_at = created_at.isoformat()
+    created_at = iso_or_none(account.created_at)
 
     owner_email = account.user.email if getattr(account, "user", None) else None
 
@@ -69,7 +66,7 @@ def serialize_provider(account: OAuthAccount) -> dict:
             "user_id": account.user_id,
             "owner_email": owner_email,
             "is_service_provider": bool(account.is_service_provider),
-            "updated_at": account.updated_at.isoformat() if account.updated_at else None,
+            "updated_at": iso_or_none(account.updated_at),
         },
     }
 
@@ -125,9 +122,7 @@ def admin_create_provider(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    owner = db.query(User).filter(User.id == payload.user_id).first()
-    if not owner:
-        raise HTTPException(status_code=404, detail="Owner user not found")
+    get_or_404(db, User, payload.user_id, "Owner user not found")
 
     if payload.is_primary:
         db.query(OAuthAccount).filter(
@@ -193,9 +188,7 @@ def admin_get_provider_related_data(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     aliases = _provider_aliases(provider.provider)
     event_count = db.query(Event).filter(
@@ -222,9 +215,7 @@ def admin_purge_provider_related_data(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     deleted = _delete_provider_related_records(db, provider)
     db.commit()
@@ -242,9 +233,7 @@ def admin_get_provider(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     return serialize_provider(provider)
 
@@ -256,9 +245,7 @@ def admin_update_provider(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     if payload.provider_name is not None:
         provider.display_name = payload.provider_name
@@ -301,9 +288,7 @@ def admin_delete_provider(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     db.delete(provider)
     db.commit()
@@ -361,9 +346,7 @@ def admin_set_provider_status(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    provider = db.query(OAuthAccount).filter(OAuthAccount.id == provider_id).first()
-    if not provider:
-        raise HTTPException(status_code=404, detail="Provider account not found")
+    provider = get_or_404(db, OAuthAccount, provider_id, "Provider account not found")
 
     next_status = payload.status.strip().lower()
     if next_status not in {"active", "inactive"}:
