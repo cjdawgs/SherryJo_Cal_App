@@ -2,13 +2,19 @@
 ## ===============================
 ## IMPORTS
 ## ===============================
-from fastapi import APIRouter, Depends
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from datetime import datetime
 
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Event, Note
+
+
+logger = logging.getLogger(__name__)
 
 
 ## ===============================
@@ -41,7 +47,8 @@ def get_events(db: Session = Depends(get_db), current_user=Depends(get_current_u
         # ✅ Safe note extraction
         try:
             notes_list = e.notes if e.notes else []
-        except:
+        except Exception:
+            logger.warning("Failed to load notes for event %s", e.id, exc_info=True)
             notes_list = []
 
         safe_notes = []
@@ -55,7 +62,10 @@ def get_events(db: Session = Depends(get_db), current_user=Depends(get_current_u
                     "x": getattr(n, "x", 120),
                     "y": getattr(n, "y", 120),
                 })
-            except:
+            except Exception:
+                logger.warning(
+                    "Skipping malformed note on event %s", e.id, exc_info=True
+                )
                 continue
 
         out.append({
@@ -97,9 +107,15 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
     start_time = payload.get("start_time")
     end_time = payload.get("end_time")
 
-    # ✅ Convert times safely
-    start_dt = datetime.fromisoformat(start_time) if start_time else None
-    end_dt = datetime.fromisoformat(end_time) if end_time else None
+    # ✅ Convert times safely — surface a clear 400 instead of an opaque 500
+    try:
+        start_dt = datetime.fromisoformat(start_time) if start_time else None
+        end_dt = datetime.fromisoformat(end_time) if end_time else None
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid start_time/end_time format: {exc}",
+        )
 
 
     # ==================================================
@@ -117,7 +133,12 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
         )
 
         db.add(new_event)
-        db.commit()
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Failed to create event")
+            raise HTTPException(status_code=500, detail="Failed to create event")
         db.refresh(new_event)
 
         return {
@@ -130,12 +151,15 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
     # ==================================================
     # ✅ UPDATE EXISTING EVENT
     # ==================================================
-    event_id = int(event_id)
+    try:
+        event_id = int(event_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid event id")
 
     e = db.query(Event).filter(Event.id == event_id).first()
 
     if not e:
-        return {"ok": False, "error": "Event not found"}
+        raise HTTPException(status_code=404, detail="Event not found")
 
     # ✅ Only update fields if provided
     if title is not None:
@@ -150,7 +174,12 @@ def update_event(payload: dict, db: Session = Depends(get_db)):
     if end_dt is not None:
         e.end_time = end_dt
 
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Failed to update event %s", event_id)
+        raise HTTPException(status_code=500, detail="Failed to update event")
 
     return {
         "ok": True,

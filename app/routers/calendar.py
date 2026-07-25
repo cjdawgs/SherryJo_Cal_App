@@ -47,7 +47,22 @@ _graph_client = GraphClient()
 
 
 def to_dt(val):
-    return ensure_utc(val)
+    if not val:
+        return None
+
+    if isinstance(val, datetime):
+        dt = val if val.tzinfo else val.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    if isinstance(val, str):
+        try:
+            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+            dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except (ValueError, TypeError):
+            return None
+
+    return None
 
 
 def to_iso(val):
@@ -573,8 +588,15 @@ def delete_date_sticky_note(
         return {"status": "ok", "deleted": date_key}
     except Exception as e:
         print("⚠️ [DATE_STICKY] delete failed:", e)
-        safe_rollback(db)
-        return {"status": "ok", "deleted": date_key}
+        try:
+            db.rollback()
+        except Exception:
+            pass
+        return {
+            "status": "error",
+            "message": "Date sticky delete failed on server",
+            "deleted": None,
+        }
 
 # ==================================================
 # ✅ SYNC ENDPOINT (SEPARATE FUNCTION)
