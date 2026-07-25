@@ -4,10 +4,12 @@
 # --------------------------------------------------
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 
 from app.database import Base
+from app.utils.crypto import seal, unseal
 import uuid
 
 
@@ -107,9 +109,39 @@ class OAuthAccount(Base):
     # ✅ ACCOUNT IDENTITY
     account_email = Column(String, nullable=False)
 
-    # ✅ TOKEN STORAGE
-    access_token = Column(String, nullable=False)
-    refresh_token = Column(String, nullable=True)
+    # ✅ TOKEN STORAGE (encrypted at rest — see app/utils/crypto.py)
+    # The physical columns keep their original names; the `access_token` /
+    # `refresh_token` attributes seal on write and unseal on read, so every
+    # existing call site works unchanged.
+    access_token_encrypted = Column("access_token", String, nullable=False)
+    refresh_token_encrypted = Column("refresh_token", String, nullable=True)
+
+    @hybrid_property
+    def access_token(self):
+        return unseal(self.access_token_encrypted)
+
+    @access_token.setter
+    def access_token(self, value):
+        self.access_token_encrypted = seal(value)
+
+    @access_token.expression
+    def access_token(cls):
+        # SQL-level comparisons only ever target the plaintext sentinels
+        # ("admin-placeholder-token", "__REAUTH_REQUIRED__"), which are never
+        # sealed, so comparing against the raw column stays correct.
+        return cls.access_token_encrypted
+
+    @hybrid_property
+    def refresh_token(self):
+        return unseal(self.refresh_token_encrypted)
+
+    @refresh_token.setter
+    def refresh_token(self, value):
+        self.refresh_token_encrypted = seal(value)
+
+    @refresh_token.expression
+    def refresh_token(cls):
+        return cls.refresh_token_encrypted
 
     # ✅ ✅ CRITICAL FIX (THIS FIXES YOUR ERROR)
     token_expires_at = Column(DateTime(timezone=True), nullable=True)

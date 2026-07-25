@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import DateStickyNote, Event, OAuthAccount, TVDiagLog, User
+from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, User
 from app.security import create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 from app.utils import ensure_utc, parse_iso_datetime
@@ -436,17 +436,32 @@ def post_tv_diag(
 
 @router.get("/diag")
 def get_tv_diag(
+    scope: str = "own",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Returns the last 100 diagnostic entries (most-recent first).
-    Reads from Supabase/Postgres so it reflects all devices and survives restarts.
-    Falls back to the in-memory buffer if the DB is unavailable.
+    Reads from Supabase/Postgres so it reflects all of the caller's devices and
+    survives restarts.  Falls back to the in-memory buffer if the DB is
+    unavailable.
+
+    Entries are scoped to the caller.  Admins may pass ``scope=all`` for the
+    fleet-wide view; diagnostics carry device IDs and user agents, so they are
+    not shared between users.
     """
+    fleet_wide = scope == "all"
+
+    if fleet_wide and current_user.role != Roles.ADMIN:
+        raise HTTPException(status_code=403, detail="Admin only")
+
     try:
+        query = db.query(TVDiagLog)
+        if not fleet_wide:
+            query = query.filter(TVDiagLog.user_id == current_user.id)
+
         rows = (
-            db.query(TVDiagLog)
+            query
             .order_by(TVDiagLog.ts_server.desc())
             .limit(100)
             .all()
@@ -467,10 +482,19 @@ def get_tv_diag(
             }
             for r in rows
         ]
-        return {"entries": entries, "source": "db"}
+        return {"entries": entries, "scope": scope if fleet_wide else "own", "source": "db"}
     except Exception as exc:
         logger.warning("TV_DIAG db read failed, falling back to memory buffer: %s", exc)
-        return {"entries": list(reversed(_diag_buffer[-100:])), "source": "memory"}
+        buffered = [
+            entry
+            for entry in reversed(_diag_buffer[-500:])
+            if fleet_wide or entry.get("user_id") == current_user.id
+        ][:100]
+        return {
+            "entries": buffered,
+            "scope": scope if fleet_wide else "own",
+            "source": "memory",
+        }
 
 
 # ─────────────────────────────────────────────────

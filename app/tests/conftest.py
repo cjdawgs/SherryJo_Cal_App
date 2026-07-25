@@ -116,31 +116,54 @@ def client(db):
 # ✅ AUTH HEADERS FIXTURE (JWT)
 # ==================================================
 
-@pytest.fixture
-def auth_headers(client):
-    """
-    Creates a fresh test user + returns JWT token.
-    """
+def register_and_login(client, role="staff"):
+    """Create a user with the given role and return (user_id, auth headers)."""
 
     unique_id = uuid.uuid4()
 
     register_data = {
         "username": f"user_{unique_id}",
         "email": f"user_{unique_id}@test.com",
-        "password": "pass123"
+        "password": "pass123",
+        "role": role,
     }
 
-    # ✅ Register
-    client.post("/auth/register", json=register_data)
+    registered = client.post("/auth/register", json=register_data).json()
 
-    # ✅ Login
     response = client.post("/auth/login", json={
         "email": register_data["email"],
-        "password": register_data["password"]
+        "password": register_data["password"],
     })
 
     token = response.json()["access_token"]
 
-    return {
-        "Authorization": f"Bearer {token}"
-    }
+    return registered["id"], {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def auth_headers(client):
+    """
+    Creates a fresh test user + returns JWT token.
+    """
+
+    _user_id, headers = register_and_login(client)
+    return headers
+
+
+@pytest.fixture
+def user_a(client):
+    """First staff user: (user_id, auth headers)."""
+    return register_and_login(client)
+
+
+@pytest.fixture
+def user_b(client):
+    """Second staff user, for cross-user access tests."""
+    return register_and_login(client)
+
+
+@pytest.fixture
+def admin_headers(client):
+    """Auth headers for an admin user."""
+    _user_id, headers = register_and_login(client, role="admin")
+    return headers

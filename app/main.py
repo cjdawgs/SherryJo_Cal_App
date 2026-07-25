@@ -15,6 +15,7 @@ from sqlalchemy import inspect, text
 from datetime import datetime, timezone
 
 from app.database import engine, Base
+from app.db_security import enforce_row_level_security, seal_stored_credentials
 from app.services.asset_urls import asset_import_map_json, asset_url
 
 # ✅ Import ALL routers from your central router registry
@@ -345,6 +346,18 @@ if engine.url.drivername.startswith("sqlite"):
             print("✅ SQLite date_sticky_notes.sticky_notes present.")
 
 print("✅ Tables registered:", Base.metadata.tables.keys())
+
+
+# ==================================================
+# 🔒 DATABASE SECURITY BASELINE
+# --------------------------------------------------
+# Row Level Security is enabled (and the public data-API grants revoked) on
+# every startup, mirroring the Alembic revision, so the schema is protected
+# whichever migration path a deployment uses. Idempotent.
+# Any credential still stored in clear text is sealed in the same pass.
+# ==================================================
+enforce_row_level_security(engine)
+seal_stored_credentials(engine)
 
 
 # ==================================================
