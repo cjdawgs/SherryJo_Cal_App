@@ -22,6 +22,13 @@ from app.services.multi_account_oauth_service import (
 from app.services.event_actions import EventActions
 from app.services.google_calendar_service import GoogleCalendarService
 from app.services.graph_client import GraphClient
+from app.utils import (
+    ensure_utc,
+    get_owned_or_404,
+    normalize_hex_color,
+    parse_iso_datetime,
+    safe_rollback,
+)
 
 
 
@@ -40,22 +47,7 @@ _graph_client = GraphClient()
 
 
 def to_dt(val):
-    if not val:
-        return None
-
-    if isinstance(val, datetime):
-        dt = val if val.tzinfo else val.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
-    if isinstance(val, str):
-        try:
-            dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
-            dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-            return dt.astimezone(timezone.utc)
-        except:
-            return None
-
-    return None
+    return ensure_utc(val)
 
 
 def to_iso(val):
@@ -76,17 +68,6 @@ def normalize_tags(value):
     if isinstance(value, str):
         return [v.strip() for v in value.split(",") if v.strip()]
     return []
-
-
-def normalize_hex_color(value, fallback="#4F8EF7"):
-    color = str(value or "").strip()
-    if len(color) == 7 and color.startswith("#"):
-        try:
-            int(color[1:], 16)
-            return color
-        except ValueError:
-            return fallback
-    return fallback
 
 
 def normalize_tag_label(value):
@@ -389,13 +370,7 @@ async def update_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    event = db.query(Event).filter(
-        Event.id == event_id,
-        Event.owner_id == current_user.id
-    ).first()
-
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
+    event = get_owned_or_404(db, Event, event_id, current_user.id, "Event not found", owner_field="owner_id")
 
     data = await request.json()
 
@@ -478,13 +453,7 @@ def delete_event(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user)
 ):
-    event = db.query(Event).filter(
-        Event.id == event_id,
-        Event.owner_id == current_user.id
-    ).first()
-
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
+    event = get_owned_or_404(db, Event, event_id, current_user.id, "Event not found", owner_field="owner_id")
 
     # Write-back to providers is intentionally NOT done here.
     # Deletions stay local until the user explicitly clicks Publish.
@@ -577,10 +546,7 @@ async def upsert_date_sticky_note(
         return {"status": "ok", "item": serialize_date_sticky(row)}
     except Exception as e:
         print("❌ [DATE_STICKY] upsert failed:", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         return {
             "status": "error",
             "message": "Date sticky persistence unavailable on server",
@@ -607,10 +573,7 @@ def delete_date_sticky_note(
         return {"status": "ok", "deleted": date_key}
     except Exception as e:
         print("⚠️ [DATE_STICKY] delete failed:", e)
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         return {"status": "ok", "deleted": date_key}
 
 # ==================================================
@@ -642,11 +605,7 @@ def sync_calendar(
             print("🧪 [SYNC] DB COUNT AT START:", db.query(Event).count())
         except Exception as count_err:
             print("⚠️ [SYNC] DB count check failed:", count_err)
-            try:
-                db.rollback()
-                print("🧯 [SYNC] Session rollback after count failure")
-            except Exception as rb_err:
-                print("⚠️ [SYNC] Rollback after count failure failed:", rb_err)
+            safe_rollback(db, "SYNC")
 
         # Use the user-configured sync window to keep requests bounded and avoid upstream timeouts.
         sync_accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)
@@ -695,10 +654,7 @@ def sync_calendar(
 
     except Exception as e:
         print("❌ SYNC FAILED:", str(e))
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
 
         return {
             "status": "error",
@@ -716,10 +672,7 @@ def materialize_deduped_events(
         return {"status": "success", "changed": changed}
     except Exception as e:
         print("❌ DEDUP MATERIALIZE FAILED:", str(e))
-        try:
-            db.rollback()
-        except Exception:
-            pass
+        safe_rollback(db)
         return {"status": "error", "message": str(e)}
 
 # ==================================================
@@ -881,30 +834,17 @@ def get_unified_calendar(
         print("🧪 [UNIFIED] DB ROW COUNT:", db.query(Event).count())
     except Exception as e:
         print("⚠️ [UNIFIED] DB row count check failed:", e)
-        try:
-            db.rollback()
-            print("🧯 [UNIFIED] Session rollback after row-count failure")
-        except Exception as rb_err:
-            print("⚠️ [UNIFIED] Rollback after row-count failure failed:", rb_err)
+        safe_rollback(db, "UNIFIED")
 
     # ==================================================
     # ✅ SUPPORT FULLCALENDAR RANGE (WITH SAFE PARSING)
     # ==================================================
-    def _parse_iso(val: str):
-        if not val:
-            return None
-        try:
-            parsed = datetime.fromisoformat(val.replace("Z", "+00:00"))
-            return parsed.astimezone(timezone.utc)
-        except Exception:
-            return None
-
     start_date = None
     end_date = None
 
     if start and end:
-        start_date = _parse_iso(start)
-        end_date = _parse_iso(end)
+        start_date = parse_iso_datetime(start)
+        end_date = parse_iso_datetime(end)
         if start_date and end_date:
             print(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
         else:

@@ -36,6 +36,7 @@ from app.deps import get_current_user
 from app.models import DateStickyNote, Event, OAuthAccount, TVDiagLog, User
 from app.security import create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
+from app.utils import ensure_utc, parse_iso_datetime
 
 logger = logging.getLogger(__name__)
 
@@ -271,27 +272,6 @@ def _normalize_sticky_notes(payload) -> list[dict]:
     return out
 
 
-def _parse_iso_datetime_or_none(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-def _coerce_datetime_utc(value) -> Optional[datetime]:
-    """Best-effort conversion into aware UTC datetimes for legacy DB rows."""
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str):
-        return _parse_iso_datetime_or_none(value)
-    return None
-
-
 def _parse_iso_date_or_none(value: Optional[str]):
     if not value:
         return None
@@ -337,7 +317,7 @@ def _group_events_by_date(events: list[Event]) -> list[dict]:
     buckets: dict[str, list] = defaultdict(list)
 
     for event in events:
-        start = _coerce_datetime_utc(getattr(event, "start_time", None))
+        start = ensure_utc(getattr(event, "start_time", None))
         if not start:
             continue
 
@@ -354,7 +334,7 @@ def _events_in_window(events: list[Event], start: datetime, end: datetime) -> li
     """Fallback in-memory filtering when DB datetime comparisons fail."""
     in_range: list[tuple[datetime, Event]] = []
     for event in events:
-        event_start = _coerce_datetime_utc(getattr(event, "start_time", None))
+        event_start = ensure_utc(getattr(event, "start_time", None))
         if event_start and start <= event_start <= end:
             in_range.append((event_start, event))
     in_range.sort(key=lambda pair: pair[0])
@@ -807,11 +787,11 @@ def create_tv_event(
         raise HTTPException(status_code=422, detail="selectedDate is required to create an event")
 
     now_utc = datetime.now(timezone.utc)
-    start_dt = _parse_iso_datetime_or_none(body.start)
+    start_dt = parse_iso_datetime(body.start)
     if start_dt is None:
         start_dt = datetime.combine(date_obj, datetime.min.time()).replace(tzinfo=timezone.utc) + timedelta(hours=9)
 
-    end_dt = _parse_iso_datetime_or_none(body.end)
+    end_dt = parse_iso_datetime(body.end)
     if end_dt is None:
         end_dt = start_dt + timedelta(minutes=max(15, int(body.durationMinutes or 60)))
 
@@ -860,13 +840,13 @@ def update_tv_event(
         event.description = body.description.strip()
 
     if body.start is not None:
-        start_dt = _parse_iso_datetime_or_none(body.start)
+        start_dt = parse_iso_datetime(body.start)
         if start_dt is None:
             raise HTTPException(status_code=422, detail="start is invalid")
         event.start_time = start_dt
 
     if body.end is not None:
-        end_dt = _parse_iso_datetime_or_none(body.end)
+        end_dt = parse_iso_datetime(body.end)
         if body.end and end_dt is None:
             raise HTTPException(status_code=422, detail="end is invalid")
         event.end_time = end_dt

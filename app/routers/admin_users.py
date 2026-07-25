@@ -1,4 +1,3 @@
-from datetime import datetime
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,6 +9,7 @@ from app.database import get_db
 from app.deps import require_admin
 from app.models import DateStickyNote, Event, Note, OAuthAccount, Roles, Task, User
 from app.security import hash_password
+from app.utils import get_or_404, iso_or_none
 
 
 router = APIRouter(prefix="/admin/users", tags=["admin-users"])
@@ -39,9 +39,7 @@ class AdminBulkDeleteUsersRequest(BaseModel):
 
 
 def serialize_user(user: User) -> dict:
-    created_at = user.created_at
-    if isinstance(created_at, datetime):
-        created_at = created_at.isoformat()
+    created_at = iso_or_none(user.created_at)
 
     return {
         "id": user.id,
@@ -192,9 +190,7 @@ def admin_get_user(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     return serialize_user(user)
 
@@ -206,9 +202,7 @@ def admin_update_user(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     email_owner = db.query(User).filter(User.email == payload.email, User.id != user_id).first()
     if email_owner:
@@ -238,9 +232,7 @@ def admin_delete_user(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     if user.id == admin_user.id:
         raise HTTPException(status_code=400, detail="Admin cannot delete current session user")
@@ -258,9 +250,7 @@ def admin_reset_user_password(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     user.hashed_password = hash_password(payload.new_password)
 
@@ -276,9 +266,7 @@ def admin_get_user_related_data(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
     account_emails = _collect_user_account_emails(user, account_rows)
@@ -325,9 +313,7 @@ def admin_purge_user_related_data(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    user = get_or_404(db, User, user_id, "User not found")
 
     try:
         deleted = _delete_user_related_records(db, user)

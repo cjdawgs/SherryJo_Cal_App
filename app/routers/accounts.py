@@ -15,7 +15,7 @@ Multi-Account OAuth Management Router
 
 from app.services.sync_scheduler import scheduler, get_scheduler_health
 from app.services.calendar_service import CalendarService
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -29,9 +29,14 @@ from app.models import User, OAuthAccount
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     resolve_account_status,
-    normalize_provider,
 )
 from app.services.asset_urls import asset_import_map_json, asset_url
+from app.utils import (
+    account_summary,
+    account_sync_summary,
+    get_owned_or_404,
+    sanitize_hex_color,
+)
 
 
 # ============================================================
@@ -71,7 +76,6 @@ calendar_service = CalendarService()
 # ============================================================
 
 from pydantic import BaseModel, EmailStr
-import re
 
 class AppleConnectRequest(BaseModel):
     email: EmailStr
@@ -80,28 +84,6 @@ class AppleConnectRequest(BaseModel):
 
 
 from app.services.external_calendar_service import ExternalCalendarService
-
-
-PROVIDER_DEFAULT_COLORS = {
-    "google": "#34a853",
-    "microsoft": "#2563eb",
-    "apple": "#ef4444",
-    "local": "#7ca3af",
-    "other": "#999999",
-}
-
-
-
-
-def default_account_color(provider: str) -> str:
-    return PROVIDER_DEFAULT_COLORS.get(normalize_provider(provider), PROVIDER_DEFAULT_COLORS["other"])
-
-
-def sanitize_hex_color(value: str) -> str:
-    color = (value or "").strip().lower()
-    if not re.fullmatch(r"#[0-9a-f]{6}", color):
-        raise HTTPException(status_code=422, detail="Color must be a 6-digit hex value like #34a853")
-    return color
 
 
 class AccountColorUpdateRequest(BaseModel):
@@ -200,13 +182,7 @@ def retry_account_sync(
     from app.services.calendar_service import CalendarService
     from app.services.multi_account_oauth_service import safe_commit
 
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(404, "Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     service = CalendarService()
     retry_started_at = datetime.now(timezone.utc)
@@ -360,29 +336,7 @@ def get_my_accounts(
         db, current_user.id, provider
     )
 
-    return [
-        {
-            "id": acc.id,
-            "provider": acc.provider,
-            "account_email": acc.account_email,
-            "display_name": acc.display_name,
-            "provider_id": acc.provider_id,
-            "is_primary": acc.is_primary,
-            "sync_enabled": acc.sync_enabled,
-            "last_sync": acc.last_sync.isoformat() if acc.last_sync else None,
-            "last_sync_success": getattr(acc, "last_sync_success", None).isoformat() if getattr(acc, "last_sync_success", None) else None,
-            "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
-            "last_error": getattr(acc, "last_error", None),
-            "status": resolve_account_status(acc),
-            "color": acc.color or default_account_color(acc.provider),
-            "sync_frequency_minutes": getattr(acc, "sync_frequency_minutes", 5) or 5,
-            "sync_range_days": getattr(acc, "sync_range_days", 30) or 30,
-            "last_manual_refresh_at": getattr(acc, "last_manual_refresh_at", None).isoformat() if getattr(acc, "last_manual_refresh_at", None) else None,
-            "created_at": acc.created_at.isoformat(),
-            "updated_at": acc.updated_at.isoformat() if acc.updated_at else None,
-        }
-        for acc in accounts
-    ]
+    return [account_summary(acc) for acc in accounts]
 
 
 @router.get("/sync-status")
@@ -392,23 +346,7 @@ def get_sync_status(
 ):
     accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
 
-    account_summaries = [
-        {
-            "id": acc.id,
-            "provider": acc.provider,
-            "account_email": acc.account_email,
-            "sync_enabled": acc.sync_enabled,
-            "status": resolve_account_status(acc),
-            "last_sync": acc.last_sync.isoformat() if acc.last_sync else None,
-            "last_sync_success": getattr(acc, "last_sync_success", None).isoformat() if getattr(acc, "last_sync_success", None) else None,
-            "last_sync_failure": getattr(acc, "last_sync_failure", None).isoformat() if getattr(acc, "last_sync_failure", None) else None,
-            "last_error": getattr(acc, "last_error", None),
-            "sync_frequency_minutes": getattr(acc, "sync_frequency_minutes", 5) or 5,
-            "sync_range_days": getattr(acc, "sync_range_days", 30) or 30,
-            "last_manual_refresh_at": getattr(acc, "last_manual_refresh_at", None).isoformat() if getattr(acc, "last_manual_refresh_at", None) else None,
-        }
-        for acc in accounts
-    ]
+    account_summaries = [account_sync_summary(acc) for acc in accounts]
 
     return {
         "scheduler": get_scheduler_health(),
@@ -423,13 +361,7 @@ def update_account_sync_settings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     if payload.sync_frequency_minutes is not None:
         account.sync_frequency_minutes = max(1, min(int(payload.sync_frequency_minutes), 1440))
@@ -459,13 +391,7 @@ def refresh_account_sync(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     account.last_manual_refresh_at = datetime.now(timezone.utc)
     db.commit()
@@ -493,13 +419,7 @@ def update_account_color(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     new_color = sanitize_hex_color(payload.color)
     account.color = new_color
@@ -524,13 +444,7 @@ def set_account_as_primary(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     updated = MultiAccountOAuthService.set_primary(
         db, account_id, current_user.id
@@ -555,13 +469,7 @@ def toggle_sync(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     account.sync_enabled = enabled
     db.commit()
@@ -584,13 +492,7 @@ def disconnect_account(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    account = db.query(OAuthAccount).filter(
-        OAuthAccount.id == account_id,
-        OAuthAccount.user_id == current_user.id
-    ).first()
-
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     provider = account.provider
     email = account.account_email

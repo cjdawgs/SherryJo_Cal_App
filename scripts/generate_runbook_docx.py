@@ -1,68 +1,7 @@
 import os
-import zipfile
 from datetime import datetime
-from xml.sax.saxutils import escape
 
-
-def make_document_xml(paragraphs):
-    body_parts = []
-    for p in paragraphs:
-        text = escape(p)
-        body_parts.append(
-            f"<w:p><w:r><w:t xml:space=\"preserve\">{text}</w:t></w:r></w:p>"
-        )
-
-    body_xml = "".join(body_parts)
-
-    return (
-        "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
-        "<w:document xmlns:wpc=\"http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas\" "
-        "xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" "
-        "xmlns:o=\"urn:schemas-microsoft-com:office:office\" "
-        "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" "
-        "xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\" "
-        "xmlns:v=\"urn:schemas-microsoft-com:vml\" "
-        "xmlns:wp14=\"http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing\" "
-        "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" "
-        "xmlns:w10=\"urn:schemas-microsoft-com:office:word\" "
-        "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" "
-        "xmlns:w14=\"http://schemas.microsoft.com/office/word/2010/wordml\" "
-        "xmlns:w15=\"http://schemas.microsoft.com/office/word/2012/wordml\" "
-        "xmlns:wpg=\"http://schemas.microsoft.com/office/word/2010/wordprocessingGroup\" "
-        "xmlns:wpi=\"http://schemas.microsoft.com/office/word/2010/wordprocessingInk\" "
-        "xmlns:wne=\"http://schemas.microsoft.com/office/word/2006/wordml\" "
-        "xmlns:wps=\"http://schemas.microsoft.com/office/word/2010/wordprocessingShape\" "
-        "mc:Ignorable=\"w14 w15 wp14\">"
-        f"<w:body>{body_xml}<w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/>"
-        "<w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" "
-        "w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>"
-        "<w:cols w:space=\"708\"/><w:docGrid w:linePitch=\"360\"/></w:sectPr></w:body></w:document>"
-    )
-
-
-def build_docx(output_path, paragraphs):
-    content_types = """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
-<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\">
-  <Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/>
-  <Default Extension=\"xml\" ContentType=\"application/xml\"/>
-  <Override PartName=\"/word/document.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml\"/>
-</Types>
-""".strip()
-
-    rels = """<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>
-<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">
-  <Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"word/document.xml\"/>
-</Relationships>
-""".strip()
-
-    document_xml = make_document_xml(paragraphs)
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-
-    with zipfile.ZipFile(output_path, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        z.writestr("[Content_Types].xml", content_types)
-        z.writestr("_rels/.rels", rels)
-        z.writestr("word/document.xml", document_xml)
+from docx_builder import build_docx
 
 
 if __name__ == "__main__":

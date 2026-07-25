@@ -36,6 +36,9 @@ from app.services.multi_account_oauth_service import (
 
 )
 
+from app.utils import ensure_utc, parse_iso_datetime
+
+
 import pytz
 
 
@@ -326,25 +329,9 @@ def _fetch_account_http(config: dict, start_date, end_date) -> dict:
 
             for e in raw_events:
 
-                dt = e.get("start")
+                dt = ensure_utc(e.get("start"))
 
-                if isinstance(dt, datetime):
-
-                    dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-                elif isinstance(dt, str):
-
-                    try:
-
-                        dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
-
-                        dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-                    except Exception:
-
-                        continue
-
-                else:
+                if dt is None:
 
                     continue
 
@@ -684,35 +671,7 @@ class CalendarService:
 
         """
 
-        if not dt_str:
-
-            return None
-
-
-
-        try:
-
-            # handle Z properly
-
-            if dt_str.endswith("Z"):
-
-                dt_str = dt_str.replace("Z", "+00:00")
-
-
-
-            dt = datetime.fromisoformat(dt_str)
-
-
-
-            return self._ensure_utc(dt)
-
-
-
-
-
-        except Exception:
-
-            return None
+        return parse_iso_datetime(dt_str)
 
 
 
@@ -1104,21 +1063,7 @@ class CalendarService:
 
 
 
-        if not dt:
-
-            return None
-
-
-
-        # âœ… Convert naive â†’ UTC
-
-        if dt.tzinfo is None:
-
-            return dt.replace(tzinfo=timezone.utc)
-
-
-
-        return dt.astimezone(timezone.utc)
+        return ensure_utc(dt)
 
 
 
