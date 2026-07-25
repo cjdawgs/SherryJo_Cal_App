@@ -11,9 +11,11 @@ SAFE DESIGN:
 - Can be plugged into routers/services later
 """
     
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Any
 import logging
+
+from app.utils import ensure_utc
 
 # Optional dependencies (install if not already present)
 try:
@@ -323,62 +325,16 @@ class ExternalCalendarService:
 
 
     def _parse_date(self, date_obj):
+        """Normalize caldav/vobject values (native or ``.value`` wrapped) to UTC."""
         if not date_obj:
             return None
 
         try:
-            # Some vobject/caldav versions return native datetime/date directly.
-            if isinstance(date_obj, datetime):
-                if date_obj.tzinfo is None:
-                    return date_obj.replace(tzinfo=timezone.utc)
-                return date_obj.astimezone(timezone.utc)
+            parsed = ensure_utc(date_obj)
+            if parsed is not None:
+                return parsed
 
-            if isinstance(date_obj, date):
-                return datetime(
-                    date_obj.year,
-                    date_obj.month,
-                    date_obj.day,
-                    0, 0, 0,
-                    tzinfo=timezone.utc
-                )
-
-            if isinstance(date_obj, str):
-                value = date_obj.replace("Z", "+00:00")
-                parsed = datetime.fromisoformat(value)
-                if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
-
-            value = getattr(date_obj, "value", None)
-            if value is None:
-                return None
-
-            # ✅ CASE 1: datetime (normal timed events)
-            if isinstance(value, datetime):
-                if value.tzinfo is None:
-                    value = value.replace(tzinfo=timezone.utc)
-                else:
-                    value = value.astimezone(timezone.utc)
-                return value
-
-            # ✅ CASE 2: date (ALL-DAY events — VERY COMMON IN APPLE)
-            if isinstance(value, date):
-                return datetime(
-                    value.year,
-                    value.month,
-                    value.day,
-                    0, 0, 0,
-                    tzinfo=timezone.utc
-                )
-
-            if isinstance(value, str):
-                as_iso = value.replace("Z", "+00:00")
-                parsed = datetime.fromisoformat(as_iso)
-                if parsed.tzinfo is None:
-                    return parsed.replace(tzinfo=timezone.utc)
-                return parsed.astimezone(timezone.utc)
-
-            return None
+            return ensure_utc(getattr(date_obj, "value", None))
 
         except Exception as e:
             logger.warning(f"⚠️ Apple date parse failed for {type(date_obj)}: {e}")

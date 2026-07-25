@@ -12,6 +12,12 @@ import jwt
 
 from app.deps import get_current_user
 from app.routers.auth import SECRET_KEY
+from app.utils.oauth_state import (
+    decode_oauth_state,
+    decode_user_token,
+    encode_oauth_state,
+    normalize_reconnect_email,
+)
 from app.security import create_token
 from app.config import get_google_redirect_uri
 
@@ -37,8 +43,7 @@ def google_login(request: Request, token: str, reconnect: str = Query(None)):
     ✅ Receive JWT token from URL (not header)
     """
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("user_id")
+        user_id = decode_user_token(token, SECRET_KEY)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
     """
@@ -47,16 +52,9 @@ def google_login(request: Request, token: str, reconnect: str = Query(None)):
     """
 
     # ✅ Store user ID in state (VERY important)
-    reconnect_email = (reconnect or "").strip().lower() or None
+    reconnect_email = normalize_reconnect_email(reconnect)
 
-    state = jwt.encode(
-        {
-            "user_id": user_id,
-            "reconnect": reconnect_email
-        },
-        SECRET_KEY,
-        algorithm="HS256"
-    )
+    state = encode_oauth_state(user_id, reconnect_email, SECRET_KEY)
 
     # Prefer service helper so tests can patch build_auth_url directly.
     url = service.build_auth_url(state)
@@ -85,9 +83,7 @@ def google_callback(
     # ✅ DECODE STATE (extract user_id from JWT)
     # ==================================================
     try:
-        payload = jwt.decode(state, SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("user_id")
-        expected_reconnect = (payload.get("reconnect") or "").strip().lower()
+        user_id, expected_reconnect = decode_oauth_state(state, SECRET_KEY)
     except Exception:
         # Legacy fallback: older tests pass numeric state only.
         if state and str(state).isdigit():
