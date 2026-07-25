@@ -52,7 +52,7 @@ def to_dt(val):
             dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
             dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(timezone.utc)
-        except:
+        except (ValueError, TypeError):
             return None
 
     return None
@@ -611,7 +611,11 @@ def delete_date_sticky_note(
             db.rollback()
         except Exception:
             pass
-        return {"status": "ok", "deleted": date_key}
+        return {
+            "status": "error",
+            "message": "Date sticky delete failed on server",
+            "deleted": None,
+        }
 
 # ==================================================
 # ✅ SYNC ENDPOINT (SEPARATE FUNCTION)

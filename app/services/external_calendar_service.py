@@ -44,6 +44,7 @@ class ExternalCalendarService:
             try:
                 vobj = vobj()
             except Exception:
+                logger.debug("vobject_instance() call failed; trying raw ICS", exc_info=True)
                 vobj = None
 
         if vobj is not None and hasattr(vobj, "vevent"):
