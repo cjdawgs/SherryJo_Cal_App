@@ -83,6 +83,65 @@
         background: #dbeafe;
         border-color: #93c5fd;
       }
+
+      /* Dark-theme (TV / kiosk) variant: pinned top-right, muted until hovered. */
+      .appWindowControls.dark {
+        position: fixed;
+        top: 7px;
+        right: 14px;
+        margin-left: 0;
+        gap: 7px;
+        opacity: 0.34;
+        transition: opacity 200ms ease;
+        z-index: 9500;
+      }
+      .appWindowControls.dark:hover,
+      .appWindowControls.dark:focus-within {
+        opacity: 1;
+      }
+      .appWindowControls.dark .appWindowControlBtn {
+        width: 26px;
+        height: 26px;
+        border-radius: 8px;
+        border: 1px solid rgba(240, 240, 245, 0.10);
+        background: rgba(255, 255, 255, 0.045);
+        color: rgba(240, 240, 245, 0.55);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .appWindowControls.dark .appWindowControlBtn:hover {
+        background: rgba(255, 255, 255, 0.09);
+        border-color: rgba(240, 240, 245, 0.2);
+        color: rgba(240, 240, 245, 0.88);
+      }
+      .appWindowControls.dark .appWindowControlBtn.close:hover {
+        background: rgba(255, 69, 58, 0.14);
+        border-color: rgba(255, 69, 58, 0.32);
+        color: rgba(255, 159, 149, 0.95);
+      }
+      body.appWindowMaximized .appWindowControls.dark .appWindowControlBtn[data-app-window-action="maximize"] {
+        background: rgba(79, 140, 255, 0.16);
+        border-color: rgba(79, 140, 255, 0.32);
+        color: rgba(226, 236, 255, 0.9);
+      }
+      body.appWindowControlsPinned #tv-account-legend {
+        padding-right: 128px;
+      }
+      body.appWindowControlsPinned .appWindowMiniBar,
+      body.appWindowControlsPinned .appWindowClosedPanel {
+        border-color: rgba(240, 240, 245, 0.12);
+        background: rgba(19, 19, 24, 0.96);
+        color: rgba(240, 240, 245, 0.82);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+      }
+      body.appWindowControlsPinned .appWindowRestoreBtn {
+        border-color: rgba(240, 240, 245, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(240, 240, 245, 0.8);
+      }
+      body.appWindowControlsPinned .appWindowRestoreBtn:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
     `;
     document.head.appendChild(style);
   }
@@ -107,6 +166,10 @@
     panel.innerHTML = `<strong>Window closed</strong><button type="button" class="appWindowRestoreBtn" data-app-window-restore="close">Restore</button>`;
     document.body.appendChild(panel);
     return panel;
+  }
+
+  function isDarkKiosk() {
+    return Boolean(document.getElementById("screen-dashboard"));
   }
 
   function getHeaderTarget() {
@@ -157,17 +220,19 @@
     ensureMiniBar();
     ensureClosedPanel();
 
-    const target = getHeaderTarget();
+    const dark = isDarkKiosk();
+    const target = dark ? document.body : getHeaderTarget();
     if (!target) return;
 
     const controls = document.createElement("div");
-    controls.className = "appWindowControls";
+    controls.className = dark ? "appWindowControls dark" : "appWindowControls";
     controls.innerHTML = `
       <button type="button" class="appWindowControlBtn" data-app-window-action="minimize" aria-label="Minimize window" title="Minimize">−</button>
       <button type="button" class="appWindowControlBtn" data-app-window-action="maximize" aria-label="Maximize window" title="Maximize">□</button>
       <button type="button" class="appWindowControlBtn close" data-app-window-action="close" aria-label="Close window" title="Close">×</button>
     `;
     target.appendChild(controls);
+    if (dark) document.body.classList.add("appWindowControlsPinned");
   }
 
   document.addEventListener("click", (event) => {
