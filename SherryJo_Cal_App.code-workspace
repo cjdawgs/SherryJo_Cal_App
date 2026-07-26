@@ -10,8 +10,21 @@
 		"terminal.integrated.profiles.windows": {
 			"Windows PowerShell": {
 				"path": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-				"args": ["-NoLogo"]
+				"args": [
+					"-NoLogo"
+				]
 			}
-		}
+		},
+		"geminicodeassist.outlines.automaticOutlineGeneration": true,
+		// --- Python Specific Settings ---
+		// It's a good practice to specify a default interpreter for the project.
+		// This often points to a virtual environment's Python executable.
+		"python.defaultInterpreterPath": "antenv\\Scripts\\python.exe",
+		// Enable and configure a linter (e.g., pylint)
+		"python.linting.enabled": true,
+		"python.linting.pylintEnabled": true,
+		// Enable a formatter (e.g., black) and format on save
+		"editor.formatOnSave": true,
+		"python.formatting.provider": "black"
 	}
 }

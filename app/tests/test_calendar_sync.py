@@ -3,7 +3,7 @@
 # ==================================================
 
 from unittest.mock import patch
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from app.main import app
 import jwt
@@ -283,6 +283,84 @@ def test_publish_prefers_healthy_duplicate_oauth_account(mock_google_update, cli
     assert data["failed"] == 0
     mock_google_update.assert_called_once()
     assert mock_google_update.call_args.kwargs["token"] == "token-good"
+
+
+@patch("app.services.event_actions.ensure_valid_token")
+@patch("app.services.graph_client.GraphClient.update_event")
+def test_publish_does_not_check_or_update_reauth_required_account(
+    mock_ms_update, mock_ensure_token, client, auth_headers, db
+):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="disconnected@example.com",
+        access_token="__REAUTH_REQUIRED__",
+        status="error",
+        sync_enabled=True,
+    ))
+    db.add(Event(
+        title="Disconnected Publish Target",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="microsoft:disconnected@example.com:ms-1",
+        external_ids={"microsoft:disconnected@example.com": "ms-1"},
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Disconnected Publish Target").first()
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={"event_ids": [event.id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["published"] == 0
+    assert response.json()["failed"] == 1
+    mock_ensure_token.assert_not_called()
+    mock_ms_update.assert_not_called()
+
+
+@patch("app.services.calendar_service.requests.get")
+def test_microsoft_access_denied_marks_account_reauth_required(
+    mock_get, client, auth_headers, db
+):
+    token = auth_headers["Authorization"].split(" ", 1)[1]
+    user_id = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])["user_id"]
+    user = db.query(User).filter(User.id == user_id).first()
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="denied@contoso.test",
+        access_token="current-access-token",
+        refresh_token="refresh-token",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        status="ok",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    mock_get.return_value.status_code = 403
+    mock_get.return_value.json.return_value = {
+        "error": {
+            "code": "ErrorAccessDenied",
+            "message": "Access is denied.",
+        }
+    }
+    mock_get.return_value.text = "ErrorAccessDenied"
+
+    response = client.post("/calendar/sync", headers=auth_headers)
+
+    assert response.status_code == 200
+    db.refresh(account)
+    assert account.access_token == "__REAUTH_REQUIRED__"
+    assert account.status == "error"
+    assert "ErrorAccessDenied" in account.last_error
 
 
 @patch("app.services.event_actions.ensure_valid_token", return_value="token-1")

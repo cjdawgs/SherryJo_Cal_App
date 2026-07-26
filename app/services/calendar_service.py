@@ -189,6 +189,10 @@ def log_error(msg: str):
 
 # ==================================================
 
+class ProviderAuthorizationError(RuntimeError):
+    pass
+
+
 def _fetch_account_http(config: dict, start_date, end_date) -> dict:
 
     """
@@ -230,6 +234,8 @@ def _fetch_account_http(config: dict, start_date, end_date) -> dict:
         "raw_count":        0,
 
         "error":            None,
+
+        "reauth_required":  False,
 
     }
 
@@ -383,6 +389,12 @@ def _fetch_account_http(config: dict, start_date, end_date) -> dict:
 
 
 
+    except ProviderAuthorizationError as exc:
+
+        result["error"] = str(exc)
+
+        result["reauth_required"] = True
+
     except Exception as exc:
 
         result["error"] = str(exc)
@@ -487,7 +499,25 @@ def _fetch_ms_incremental(token: str, start_date, end_date, delta_link: str = No
 
         if resp.status_code != 200:
 
-            break
+            try:
+
+                error_payload = resp.json() or {}
+
+            except Exception:
+
+                error_payload = {}
+
+            graph_error = error_payload.get("error") or {}
+
+            error_code = graph_error.get("code") or f"HTTP {resp.status_code}"
+
+            error_message = graph_error.get("message") or resp.text or "Microsoft Graph request failed"
+
+            if resp.status_code in (401, 403):
+
+                raise ProviderAuthorizationError(f"{error_code}: {error_message}")
+
+            raise RuntimeError(f"Microsoft Graph {error_code}: {error_message}")
 
 
 
@@ -1475,6 +1505,10 @@ class CalendarService:
                 })
 
                 if acc:
+
+                    if r.get("reauth_required"):
+
+                        acc.access_token = "__REAUTH_REQUIRED__"
 
                     acc.last_sync         = sync_time
 

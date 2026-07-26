@@ -214,6 +214,12 @@ def callback(
     # ✅ ERROR HANDLING (THIS FIXES YOUR CRASH)
     if not access_token:
         logger.error("❌ MICROSOFT TOKEN EXCHANGE FAILED: %s", token_json.get("error"))
+        if user_id is not None:
+            params = urlencode({
+                "error": "microsoft_token_missing",
+                "token": create_token(user_id),
+            })
+            return RedirectResponse(f"/accounts/ui?{params}")
         raise HTTPException(
             status_code=400,
             detail="Failed to get access token from Microsoft"
@@ -241,10 +247,11 @@ def callback(
     # ✅ Error check
     if "error" in user_info:
         logger.error("❌ MICROSOFT PROFILE FETCH FAILED: %s", user_info.get("error"))
-        raise HTTPException(
-            status_code=400,
-            detail="Failed to fetch Microsoft user profile"
-        )
+        params = urlencode({
+            "error": "microsoft_profile_failed",
+            "token": create_token(user_id),
+        })
+        return RedirectResponse(f"/accounts/ui?{params}")
     
     # ==================================================
     # ✅ STEP 3.5: EXTRACT EMAIL (THIS WAS MISSING ✅✅✅)
@@ -261,10 +268,11 @@ def callback(
 
     # ✅ VALIDATION (prevents crashes)
     if not normalized_email:
-        raise HTTPException(
-            status_code=400,
-            detail="Could not extract email from Microsoft response"
-        )
+        params = urlencode({
+            "error": "microsoft_email_missing",
+            "token": create_token(user_id),
+        })
+        return RedirectResponse(f"/accounts/ui?{params}")
 
     if expected_reconnect and normalized_email != expected_reconnect:
         new_token = create_token(user_id)
@@ -299,8 +307,6 @@ def callback(
     # ==================================================
     # ✅ STEP 5: REDIRECT BACK TO UI (AUTO REFRESH ✅)
     # ==================================================
-    
-    from app.security import create_token  # ADD THIS IMPORT AT TOP IF MISSING
 
     # ✅ Create NEW app JWT
     new_token = create_token(user_id)

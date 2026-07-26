@@ -37,6 +37,8 @@ def _get_token(db: Session, user_id: int, provider: str, account_email: str):
         )
 
     for account in sorted(candidates, key=_rank, reverse=True):
+        if (getattr(account, "access_token", "") or "").strip() == "__REAUTH_REQUIRED__":
+            continue
         token = ensure_valid_token(db, account)
         if token:
             return token

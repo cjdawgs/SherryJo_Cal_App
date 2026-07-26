@@ -2,6 +2,8 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from unittest.mock import patch
+from app.routers.auth import SECRET_KEY
+from app.utils.oauth_state import encode_oauth_state
 
 client = TestClient(app)
 
@@ -57,3 +59,21 @@ def test_callback_success(mock_post, auth_headers):
 
     # ✅ FIXED ASSERTION
     assert data["message"] == "Microsoft connected"
+
+
+@patch("app.routers.oauth.requests.post")
+def test_stateful_callback_missing_token_returns_to_accounts(mock_post):
+    mock_post.return_value.status_code = 400
+    mock_post.return_value.json.return_value = {"error": "invalid_grant"}
+    state = encode_oauth_state(1, "disconnected@example.com", SECRET_KEY)
+
+    response = client.get(
+        "/ms/callback",
+        params={"code": "bad-code", "state": state},
+        follow_redirects=False,
+    )
+
+    assert response.status_code in (302, 307)
+    assert response.headers["location"].startswith("/accounts/ui?")
+    assert "error=microsoft_token_missing" in response.headers["location"]
+    assert "token=" in response.headers["location"]

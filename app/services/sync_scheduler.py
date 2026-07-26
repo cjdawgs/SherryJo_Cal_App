@@ -59,6 +59,10 @@ def _latest_account_sync_marker(account):
     return best
 
 
+def _is_reauth_required(account):
+    return (getattr(account, "access_token", "") or "").strip() == "__REAUTH_REQUIRED__"
+
+
 def _is_user_sync_due(accounts, now):
     if not accounts:
         return False, None
@@ -106,7 +110,10 @@ def run_event_sync():
         users = (
             db.query(User)
             .join(OAuthAccount, OAuthAccount.user_id == User.id)
-            .filter(OAuthAccount.sync_enabled == True)
+            .filter(
+                OAuthAccount.sync_enabled == True,
+                OAuthAccount.access_token != "__REAUTH_REQUIRED__",
+            )
             .distinct()
             .all()
         )
@@ -118,8 +125,13 @@ def run_event_sync():
             try:
                 user_accounts = db.query(OAuthAccount).filter(
                     OAuthAccount.user_id == user.id,
-                    OAuthAccount.sync_enabled == True
+                    OAuthAccount.sync_enabled == True,
+                    OAuthAccount.access_token != "__REAUTH_REQUIRED__",
                 ).all()
+                user_accounts = [
+                    account for account in user_accounts
+                    if not _is_reauth_required(account)
+                ]
 
                 due, cadence = _is_user_sync_due(user_accounts, datetime.now(timezone.utc))
                 if not due:

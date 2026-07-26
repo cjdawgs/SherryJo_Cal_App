@@ -12,6 +12,7 @@ NOW = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
 
 def make_account(**kwargs):
     defaults = {
+        "access_token": "healthy-token",
         "sync_frequency_minutes": 5,
         "last_sync": None,
         "last_sync_success": None,
@@ -200,6 +201,25 @@ def test_run_event_sync_skips_users_not_due(monkeypatch, reset_sync_state):
         users=[user],
         accounts_by_user_id={
             1: [make_account(sync_frequency_minutes=60, last_sync=datetime.now(timezone.utc))]
+        },
+    )
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
+    sync_all = MagicMock()
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
+
+    sync_scheduler.run_event_sync()
+
+    sync_all.assert_not_called()
+
+
+def test_run_event_sync_skips_user_with_only_reauth_required_accounts(
+    monkeypatch, reset_sync_state
+):
+    user = SimpleNamespace(id=1)
+    session = RoutingSession(
+        users=[user],
+        accounts_by_user_id={
+            1: [make_account(access_token="__REAUTH_REQUIRED__")]
         },
     )
     monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)

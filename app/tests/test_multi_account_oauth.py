@@ -14,7 +14,11 @@ from unittest.mock import Mock, patch
 from sqlalchemy.orm import Session
 
 from app.models import User, OAuthAccount
-from app.services.multi_account_oauth_service import MultiAccountOAuthService, resolve_account_status
+from app.services.multi_account_oauth_service import (
+    MultiAccountOAuthService,
+    ensure_valid_token,
+    resolve_account_status,
+)
 from app.database import get_db
 
 
@@ -269,6 +273,33 @@ def test_disable_account_sync(db: Session, multi_account_user: User, oauth_accou
     assert len(all_enabled) == 2  # Only primary google + microsoft
 
 
+def test_sync_enabled_accounts_exclude_reauth_required(db: Session, multi_account_user: User):
+    db.add_all([
+        OAuthAccount(
+            user_id=multi_account_user.id,
+            provider="google",
+            account_email="healthy@gmail.com",
+            access_token="healthy-token",
+            sync_enabled=True,
+        ),
+        OAuthAccount(
+            user_id=multi_account_user.id,
+            provider="microsoft",
+            account_email="disconnected@example.com",
+            access_token="__REAUTH_REQUIRED__",
+            status="error",
+            sync_enabled=True,
+        ),
+    ])
+    db.commit()
+
+    accounts = MultiAccountOAuthService.get_all_sync_enabled_accounts(
+        db, multi_account_user.id
+    )
+
+    assert [account.account_email for account in accounts] == ["healthy@gmail.com"]
+
+
 def test_delete_account(db: Session, multi_account_user: User, oauth_accounts_setup):
     """Test deleting an OAuth account."""
     
@@ -315,6 +346,28 @@ def test_resolve_account_status_flags_reauth_required_token(db: Session, multi_a
     )
 
     assert resolve_account_status(account) == "error"
+
+
+def test_reauth_required_token_logs_only_on_state_transition(
+    db: Session, multi_account_user: User, caplog
+):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="microsoft",
+        account_email="disconnected@example.com",
+        access_token="__REAUTH_REQUIRED__",
+        status="ok",
+    )
+    db.add(account)
+    db.commit()
+
+    with caplog.at_level("WARNING", logger="app.services.multi_account_oauth_service"):
+        assert ensure_valid_token(db, account) is None
+        assert ensure_valid_token(db, account) is None
+
+    assert caplog.text.count("Account entered REAUTH_REQUIRED state") == 1
+    db.refresh(account)
+    assert account.status == "error"
 
 
 # ============================================================

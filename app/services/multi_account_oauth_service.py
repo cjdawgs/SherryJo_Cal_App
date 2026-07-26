@@ -286,7 +286,8 @@ class MultiAccountOAuthService:
             return _exclude_service_provider_rows(
                 db.query(OAuthAccount).filter(
                     OAuthAccount.user_id == user_id,
-                    OAuthAccount.sync_enabled == True
+                    OAuthAccount.sync_enabled == True,
+                    OAuthAccount.access_token != "__REAUTH_REQUIRED__"
                 )
             ).all()
         except Exception as e:
@@ -300,7 +301,8 @@ class MultiAccountOAuthService:
             return _exclude_service_provider_rows(
                 db.query(OAuthAccount).filter(
                     OAuthAccount.user_id == user_id,
-                    OAuthAccount.sync_enabled == True
+                    OAuthAccount.sync_enabled == True,
+                    OAuthAccount.access_token != "__REAUTH_REQUIRED__"
                 )
             ).all()
 
@@ -445,11 +447,13 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
     # ✅ ONLY BLOCK TRUE INVALID TOKENS
     # ==================================================
     if account.access_token == "__REAUTH_REQUIRED__":
-        logger.error(f"🚫 Token flagged invalid → skipping: {account.account_email}")
-
         if hasattr(account, "status") and account.status != "error":
             account.status = "error"
             safe_commit(db)
+            logger.warning(
+                "Account entered REAUTH_REQUIRED state: %s",
+                account.account_email,
+            )
 
         return None
     
@@ -667,7 +671,29 @@ def _refresh_ms_token(db: Session, account: OAuthAccount):
     )
 
     if res.status_code != 200:
-        logger.error("❌ Microsoft refresh failed: %s", res.text)
+        try:
+            error_data = res.json()
+            error_code = error_data.get("error")
+            error_desc = error_data.get("error_description")
+            logger.error(
+                "❌ Microsoft refresh failed for %s: %s - %s",
+                account.account_email, error_code, error_desc
+            )
+
+            # Handle cases where the refresh token is expired or revoked.
+            # See: https://docs.microsoft.com/en-us/azure/active-directory/develop/v2-oauth2-error-codes
+            if error_code in ("invalid_grant", "unauthorized_client"):
+                logger.error("🚫 MS TOKEN REVOKED → marking error: %s", account.account_email)
+                if hasattr(account, "status"):
+                    account.status = "error"
+                account.access_token = "__REAUTH_REQUIRED__"
+                account.updated_at = datetime.now(timezone.utc)
+                safe_commit(db)
+                return "__REAUTH_REQUIRED__"
+
+        except Exception:
+            logger.error("❌ Microsoft refresh failed with non-JSON response: %s", res.text)
+
         return None
 
     data = res.json()

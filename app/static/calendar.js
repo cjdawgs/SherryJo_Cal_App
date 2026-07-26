@@ -81,14 +81,14 @@ function setSidebarDrawerOpen(isOpen) {
 }
 
 function applyControlBandDensity(mode) {
-  const createBtn   = document.getElementById("createBtn");
+  const createBtn = document.getElementById("createBtn");
   const accountsBtn = document.getElementById("accountsBtn");
-  const undoBtn     = document.getElementById("undoBtn");
-  const redoBtn     = document.getElementById("redoBtn");
-  const syncBtn     = document.getElementById("syncBtn");
-  const publishBtn  = document.getElementById("publishBtn");
-  const dedupBtn    = document.getElementById("dedupBtn");
-  const logoutBtn   = document.getElementById("logoutBtn");
+  const undoBtn = document.getElementById("undoBtn");
+  const redoBtn = document.getElementById("redoBtn");
+  const syncBtn = document.getElementById("syncBtn");
+  const publishBtn = document.getElementById("publishBtn");
+  const dedupBtn = document.getElementById("dedupBtn");
+  const logoutBtn = document.getElementById("logoutBtn");
 
   if (!createBtn) return;
 
@@ -445,7 +445,7 @@ function clearPendingPublishChanges() {
   updatePublishButtonState();
 }
 
-window.trackModifiedEvent = function(id, details = {}) {
+window.trackModifiedEvent = function (id, details = {}) {
   if (id == null) return;
   registerPendingPublishChange({
     key: details.key || `${details.category || "event"}:${Number(id)}`,
@@ -456,7 +456,7 @@ window.trackModifiedEvent = function(id, details = {}) {
   });
 };
 
-window.trackDeletedProviderEvent = function(eventRef) {
+window.trackDeletedProviderEvent = function (eventRef) {
   const externalIds = {
     ...(eventRef?.external_ids || {}),
     ...(eventRef?.extendedProps?.external_ids || {})
@@ -557,7 +557,7 @@ let accountStatusMap = {};
 window.currentRangeDays = window.currentRangeDays || 30;
 // ✅ Default = Monthly
 let currentRangeStart = null;
-let currentRangeEnd = null; 
+let currentRangeEnd = null;
 
 // ✅ NEW: account filter
 let activeAccountFilters = new Set();
@@ -832,14 +832,14 @@ function getFilteredEvents({ start, end }) {
   }
 
   const rangeStart = new Date(start);
-  const rangeEnd   = new Date(end);
+  const rangeEnd = new Date(end);
 
   const events = sessionEventCache.filter(ev => {
 
     if (!ev || !ev.start) return false;
 
     const evStart = new Date(ev.start);
-    const evEnd   = ev.end ? new Date(ev.end) : evStart;
+    const evEnd = ev.end ? new Date(ev.end) : evStart;
 
     // ✅ STRICT OVERLAP ONLY
     if (evEnd < rangeStart) return false;
@@ -1408,15 +1408,15 @@ function updateCustomRangeTooltip() {
   const format = (d) =>
     d
       ? d.toLocaleDateString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric"
-        })
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      })
       : "N/A";
 
   if (!start || !end) {
     btn.title =
-`📦 Cached Event Range
+      `📦 Cached Event Range
 
 From: ${format(start)}
 To:   ${format(end)}
@@ -1426,7 +1426,7 @@ Client-side filtering enabled`;
   }
 
   btn.title =
-`Loaded Data Range
+    `Loaded Data Range
 ${format(start)} → ${format(end)}
 
 (Full dataset cached for this session)`;
@@ -1456,7 +1456,7 @@ function createSourceIcon(source) {
   icon.style.display = "flex";
   icon.style.alignItems = "center";
   icon.style.justifyContent = "center";
-  
+
   icon.style.width = "16px";
   icon.style.height = "16px";
 
@@ -1486,7 +1486,7 @@ function createSourceIcon(source) {
   // ✅ MICROSOFT (OFFICIAL 4-SQUARE GRID)
   // ==================================================
   else if (source === "microsoft") {
-      icon.innerHTML = `
+    icon.innerHTML = `
         <svg width="12" height="12" viewBox="0 0 24 24">
           <rect x="1" y="1" width="10" height="10" fill="#F25022"/>
           <rect x="13" y="1" width="10" height="10" fill="#7FBA00"/>
@@ -1503,7 +1503,7 @@ function createSourceIcon(source) {
   // - Use simplified glyph for clarity
   // ==================================================
   else if (source === "apple") {
-      icon.innerHTML = `
+    icon.innerHTML = `
         <svg width="12" height="12" viewBox="0 0 24 24" fill="#111">
           <path d="M16.3 1.4c0 1.1-.4 2.2-1.1 2.9-.7.8-1.9 1.4-3 1.3-.1-1.1.4-2.2 1.1-2.9.7-.8 2-1.4 3-1.3zM20.6 17.9c-.9 2-1.3 2.9-2.4 4.5-1.5 2.3-3.6 5.2-6.2 5.2-2.3 0-2.9-1.5-6-1.5s-3.7 1.5-6 1.5c-2.6 0-4.6-2.6-6.1-4.9-2.1-3.2-3.6-7.3-1.4-10.3 1.6-2.2 4.2-3.4 6.7-3.4 2.3 0 4.4 1.5 6 1.5 1.4 0 4.2-1.9 7.1-1.6 1.2.1 4.6.5 6.7 3.6-.2.1-4 2.3-3.9 7 .1 5.5 4.9 7.4 5 7.4z"/>
         </svg>
@@ -1547,7 +1547,7 @@ async function syncSingleAccount(accountKey) {
    **************************************************************/
   syncingAccounts.add(accountKey);
   console.log("✅ ADD SYNC accountKey:", accountKey);
-  
+
 
   try {
     /**************************************************************
@@ -1661,12 +1661,12 @@ async function init() {
       console.error("❌ preloadEventCache failed:", err);
       showToast("Calendar failed to load. Please refresh.", "error");
     }
-    
+
   } else {
     console.log("⚡ Using existing session cache");
   }
 
-  
+
   // ✅ THIS IS THE ONLY CALENDAR INIT YOU NEED
   initFullCalendar();
   // Keep legacy local reference aligned with the initialized global calendar.
@@ -1687,7 +1687,7 @@ async function init() {
       showToast("Reconnect succeeded, but auto-sync failed. Click Sync Now.", "error");
     }
   }
-  
+
   applyRangeTooltips();
 
   bindUIEvents();
@@ -2010,7 +2010,7 @@ async function loadAccounts() {
 function handleOAuthRedirect() {
   const params = new URLSearchParams(window.location.search);
   const connected = params.get("connected");
-    
+
   if (connected) {
     console.log("✅ Connected:", connected);
     syncSingleAccount(connected);
@@ -2070,7 +2070,7 @@ function applyChipStyle(row, key, isActive) {
     const dotBorderColor = getBestTextColor(raw) === "#fff"
       ? "rgba(255,255,255,0.7)"
       : "rgba(0,0,0,0.4)";
-    dot.style.border  = `1px solid ${dotBorderColor}`;
+    dot.style.border = `1px solid ${dotBorderColor}`;
     dot.style.outline = `1px solid ${getBestTextColor(raw)}`;
 
     console.log("DOT COLOR SOURCE:", key, raw, "→ dot.background =", raw);
@@ -2095,7 +2095,7 @@ async function preloadEventCache({
     document.body.style.cursor = "wait";
   }
   isAppSyncing = true;
-  
+
   console.log("🟡 SYNC MODE ON");
   /****************************************************************
    * ✅ FORCE SYNC STATE FOR DOTS DURING PRELOAD
@@ -2111,15 +2111,15 @@ async function preloadEventCache({
 
       const key = normalizeKey(provider, email);
 
-    syncingAccounts.add(key);
+      syncingAccounts.add(key);
 
-    console.log("✅ PRELOAD SYNC KEY:", key);
-  });
+      console.log("✅ PRELOAD SYNC KEY:", key);
+    });
 
-  /**************************************************************
-   ✅ ADD THIS LINE RIGHT HERE
-  **************************************************************/
-  renderAccountsSafe();
+    /**************************************************************
+     ✅ ADD THIS LINE RIGHT HERE
+    **************************************************************/
+    renderAccountsSafe();
   } // end if (!silent)
 
   const centerDate = safeParseDate(window.selectedDate) || getCalendar()?.getDate?.() || new Date();
@@ -2171,7 +2171,7 @@ async function preloadEventCache({
 
   sessionEventCache = rawEvents.map(ev => {
     const safeStart = safeParseDate(ev.start);
-    
+
     if (!safeStart) return null;
 
     let safeEnd = safeParseDate(ev.end);
@@ -2214,7 +2214,7 @@ async function preloadEventCache({
       source: provider,
       account_email: account
     });
-    
+
     const backendId = ev.id || null;           // ✅ ONLY DB ID
     const displayId = ev.external_id || ev.id; // ✅ used for UI
     /**************************************************************
@@ -2231,7 +2231,7 @@ async function preloadEventCache({
       );
       return null;
     }
-    
+
     // ✅ DROP events with NO usable ID
     if (!displayId) {
       console.warn("🚫 Dropping invalid event:", ev);
@@ -2278,7 +2278,7 @@ async function preloadEventCache({
   // ✅ Sync window reference so calendar.fullcalendar.js events callback and
   //    calendar.ui.js saveEvent both see the live filled array.
   window.sessionEventCache = sessionEventCache;
-  
+
   //setSyncBanner("success");
   console.log("✅ PRELOAD COMPLETE:", sessionEventCache.length);
 
@@ -2300,8 +2300,8 @@ async function preloadEventCache({
   // ✅ ✅ ✅ CRITICAL — MAKE EVENTS AVAILABLE TO FULLCALENDAR
   window.ALL_EVENTS = sessionEventCache;
   isAppSyncing = false;
-  
-  console.log("✅ SYNC MODE OFF");  
+
+  console.log("✅ SYNC MODE OFF");
   syncingAccounts.clear();
   if (!silent) {
     document.body.style.cursor = "default";
@@ -2377,7 +2377,7 @@ function applyClientSideFilters() {
 ✅ ACCOUNT LIST + COLOR MAP BUILDER (WITH HIDE SUPPORT)
 ===================================================== */
 function renderAccounts(accounts) {
-  
+
   /*
   if (syncingAccounts.size > 0) {
     setSyncBanner("syncing");
@@ -2423,13 +2423,13 @@ function renderAccounts(accounts) {
     color: null,
   });
 
-  
+
   // ✅ ✅ MOVE THIS HERE (AFTER normalizedAccounts exists)
-    allAccountKeys = new Set(
-      normalizedAccounts
-        .map(({ provider, email }) => email ? `${provider}:${email}` : null)
-        .filter(Boolean)
-    );
+  allAccountKeys = new Set(
+    normalizedAccounts
+      .map(({ provider, email }) => email ? `${provider}:${email}` : null)
+      .filter(Boolean)
+  );
 
 
   // ✅ PRE-CALCULATE COUNTS FIRST
@@ -2482,7 +2482,7 @@ function renderAccounts(accounts) {
       // ✅ SINGLE SOURCE (NO DRIFT)
       const baseColor = raw;
       badge.style.background = baseColor;
-      
+
       /**************************************************************
        * ✅ CONTRAST-SAFE BADGE TEXT
        **************************************************************/
@@ -2528,7 +2528,7 @@ function renderAccounts(accounts) {
     const colorDot = document.createElement("div");
     colorDot.classList.add("color-dot");
 
-    
+
     /**************************************************************
      * ✅ GOLD STANDARD: STATUS + ANIMATION ENGINE
      * ------------------------------------------------------------
@@ -2634,7 +2634,7 @@ function renderAccounts(accounts) {
     colorDot.style.background = raw;
     colorDot.style.marginLeft = "6px";
     colorDot.style.cursor = "pointer";
-    
+
     //colorDot.style.border = "1px solid rgba(0,0,0,0.4)";
     /*********************************************************************
      * ✅ SMART BORDER CONTRAST (PRO UX DETAIL) AUTO-ADAPT PICKER BORDER
@@ -2646,7 +2646,7 @@ function renderAccounts(accounts) {
 
     colorDot.style.border = `1px solid ${borderColor}`;
 
-    
+
     colorDot.style.outline = `1px solid ${getBestTextColor(raw)}`;
 
     colorDot.onmouseenter = () => {
@@ -2744,7 +2744,7 @@ function renderAccounts(accounts) {
 
       // ✅ DO NOT trigger when using color picker
       if (e.target.closest(".account-color-input") ||
-          e.target.closest(".color-dot")) {
+        e.target.closest(".color-dot")) {
         return;
       }
 
@@ -2780,7 +2780,7 @@ function renderAccounts(accounts) {
 
       // ✅ DO NOT trigger when using color picker
       if (e.target.closest(".account-color-input") ||
-          e.target.closest(".color-dot")) {
+        e.target.closest(".color-dot")) {
         return;
       }
 
@@ -2847,7 +2847,7 @@ function renderAccounts(accounts) {
   if (activeAccountFilters.size === 0) {
     activeAccountFilters = new Set([...allAccountKeys]);
   }
-  
+
   updateChipSelectionUI();
   setTimeout(() => {
     updateChipEventCounts();
@@ -2939,41 +2939,41 @@ function updateDayDetails() {
     // ✅ Format start time compact: "8a", "12:30p", "2p"
     const evStart = new Date(ev.start);
     const hours = evStart.getHours();
-    const mins  = evStart.getMinutes();
-    const ampm  = hours >= 12 ? "p" : "a";
-    const h12   = hours % 12 || 12;
+    const mins = evStart.getMinutes();
+    const ampm = hours >= 12 ? "p" : "a";
+    const h12 = hours % 12 || 12;
     const timeStr = mins === 0
       ? `${h12}${ampm}`
       : `${h12}:${String(mins).padStart(2, "0")}${ampm}`;
 
     // ✅ Row: [time] [title]
     const div = document.createElement("div");
-    div.style.display        = "flex";
-    div.style.alignItems     = "center";
-    div.style.gap            = "5px";
-    div.style.padding        = "3px 6px 3px 5px";
-    div.style.marginBottom   = "3px";
-    div.style.borderLeft     = `4px solid ${raw}`;
-    div.style.background     = soft;
-    div.style.borderRadius   = "5px";
-    div.style.overflow       = "hidden";
+    div.style.display = "flex";
+    div.style.alignItems = "center";
+    div.style.gap = "5px";
+    div.style.padding = "3px 6px 3px 5px";
+    div.style.marginBottom = "3px";
+    div.style.borderLeft = `4px solid ${raw}`;
+    div.style.background = soft;
+    div.style.borderRadius = "5px";
+    div.style.overflow = "hidden";
     bindSidebarEventRow(div, ev);
 
     const timeSpan = document.createElement("span");
-    timeSpan.textContent     = timeStr;
-    timeSpan.style.fontSize  = "10px";
+    timeSpan.textContent = timeStr;
+    timeSpan.style.fontSize = "10px";
     timeSpan.style.fontWeight = "700";
-    timeSpan.style.color     = "#475569";
+    timeSpan.style.color = "#475569";
     timeSpan.style.whiteSpace = "nowrap";
-    timeSpan.style.minWidth  = "26px";
+    timeSpan.style.minWidth = "26px";
     timeSpan.style.flexShrink = "0";
 
     const titleSpan = document.createElement("span");
-    titleSpan.textContent      = ev.title;
-    titleSpan.style.fontSize   = "11px";
-    titleSpan.style.flex       = "1";
-    titleSpan.style.minWidth   = "0";
-    titleSpan.style.overflow   = "hidden";
+    titleSpan.textContent = ev.title;
+    titleSpan.style.fontSize = "11px";
+    titleSpan.style.flex = "1";
+    titleSpan.style.minWidth = "0";
+    titleSpan.style.overflow = "hidden";
     titleSpan.style.textOverflow = "ellipsis";
     titleSpan.style.whiteSpace = "nowrap";
 
@@ -3132,22 +3132,20 @@ async function syncNow() {
   }
 
   try {
-    
+
     /**************************************************************
      * ✅ STEP 8.1 — START GLOBAL SYNC (SHOW BANNER)
      **************************************************************/
     //setSyncBanner("syncing");
 
-    
+
     /**************************************************************
-     * ✅ GOLD STANDARD: BUILD KEYS EXACTLY LIKE renderAccounts
-     **************************************************************/
+ * ✅ GOLD STANDARD: BUILD KEYS EXACTLY LIKE renderAccounts
+ **************************************************************/
     syncingAccounts.clear();
 
     lastLoadedAccounts.forEach(acc => {
-
       const provider = normalizeProvider(acc.provider || "other");
-
       const email = (acc.account_email || acc.email || "")
         .toLowerCase()
         .trim();
@@ -3255,7 +3253,7 @@ async function syncNow() {
     smartRefresh({ reason: "event_saved", force: true });
     scheduleFullCacheExpansion("post_sync_cache_expand");
 
-    
+
     setTimeout(() => {
       showToast("✅ Sync complete");
     }, 300);
@@ -3265,7 +3263,7 @@ async function syncNow() {
     console.error("❌ syncNow failed:", err);
     showToast("❌ Sync failed", "error");
     syncingAccounts.clear();
-    
+
     /**************************************************************
      * ✅ STEP 8.3 — HIDE BANNER ON FAILURE
      **************************************************************/
@@ -3347,12 +3345,12 @@ async function publishNow(options = {}) {
     }
 
     const published = data.published ?? 0;
-    const deleted   = data.deleted   ?? 0;
-    const failed    = data.failed   ?? 0;
-    const warnings  = data.warnings || [];
-    const accounts  = (data.affected_accounts || []);
+    const deleted = data.deleted ?? 0;
+    const failed = data.failed ?? 0;
+    const warnings = data.warnings || [];
+    const accounts = (data.affected_accounts || []);
     const rangeStart = data.range_start;
-    const rangeEnd   = data.range_end;
+    const rangeEnd = data.range_end;
 
     // Build a concise human-readable summary
     const accountSummary = accounts.length
@@ -3402,8 +3400,8 @@ function escapeHtml(value) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 function openPublishReviewMenu(x, y) {
@@ -3603,19 +3601,19 @@ document.addEventListener("keydown", (e) => {
 // Watches window.selectedDate and pushes changes to /tv/state so the TV
 // dashboard always reflects the date the web user is viewing.
 // Fire-and-forget: silently swallows all errors — zero impact on web UI.
-;(function _tvStateBridge() {
+; (function _tvStateBridge() {
   let _lastPushed = null;
 
   setInterval(async () => {
-    const date  = window.selectedDate;
+    const date = window.selectedDate;
     const token = localStorage.getItem('token');
     if (!date || !token || date === _lastPushed) return;
     _lastPushed = date;
     try {
       await fetch('/tv/state', {
-        method:  'PATCH',
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body:    JSON.stringify({ selectedDate: date }),
+        body: JSON.stringify({ selectedDate: date }),
       });
     } catch (_) { /* intentionally silent */ }
   }, 2000);

@@ -1,49 +1,43 @@
 /**
  * ==========================================================
- * ✅ ACCOUNT CONNECTION ROUTER (SINGLE SOURCE OF TRUTH)
+ * ACCOUNT CONNECTION ROUTER (SINGLE SOURCE OF TRUTH)
  * ==========================================================
  * PURPOSE:
- * Centralize ALL provider connection logic
+ * Centralize provider connection logic used by the main calendar UI.
  *
  * RULES:
- * - NO duplicate logic anywhere else
- * - Apple NEVER uses OAuth
- * - Google/Microsoft remain OAuth
- *
- * RESULT:
- * Prevents drift + guarantees consistency
+ * - Apple never uses OAuth.
+ * - Google/Microsoft use OAuth login endpoints.
  * ==========================================================
  */
 
 /**
- * ✅ GOOGLE OAUTH
- * Uses backend OAuth flow
+ * Google OAuth via backend route.
  */
 export function connectGoogle() {
     const token = localStorage.getItem("token");
 
-    console.log("🟢 Redirecting to Google OAuth flow");
+    console.log("Redirecting to Google OAuth flow");
 
     window.location.href = "/auth/google/login?token=" + token;
 }
 
 /**
- * ✅ MICROSOFT OAUTH
+ * Microsoft OAuth via backend route.
  */
 export function connectMicrosoft() {
     const token = localStorage.getItem("token");
 
-    console.log("🔵 Redirecting to Microsoft OAuth flow");
+    console.log("Redirecting to Microsoft OAuth flow");
 
     window.location.href = "/ms/login?token=" + token;
 }
 
 /**
- * ✅ APPLE (CRITICAL FIX)
- * NO OAUTH — manual CalDAV via Accounts UI
+ * Apple uses manual CalDAV flow in Accounts UI.
  */
 export function connectApple() {
-    console.log("🍎 Apple uses manual CalDAV flow. Redirecting to /accounts/ui");
+    console.log("Apple uses manual CalDAV flow. Redirecting to /accounts/ui");
 
     window.location.href = "/accounts/ui";
 }
