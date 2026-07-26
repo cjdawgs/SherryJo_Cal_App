@@ -36,6 +36,7 @@ class AdminPasswordResetRequest(BaseModel):
 class AdminBulkDeleteUsersRequest(BaseModel):
     ids: list[int] = Field(min_length=1)
     delete_related: bool = True
+    only_if_no_related: bool = False
 
 
 def serialize_user(user: User) -> dict:
@@ -94,6 +95,27 @@ def _event_has_sticky_payload(sticky_note, sticky_notes) -> bool:
         return True
 
     return False
+
+
+def _get_user_related_counts(db: Session, user: User) -> dict[str, int]:
+    account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
+    account_emails = _collect_user_account_emails(user, account_rows)
+    event_filters = _build_user_event_filters(user.id, account_emails)
+    matched_events = db.query(Event.id, Event.sticky_note, Event.sticky_notes).filter(or_(*event_filters)).all()
+    matched_event_ids = [row.id for row in matched_events]
+    notes_count = int(db.query(Note).filter(Note.event_id.in_(matched_event_ids)).count()) if matched_event_ids else 0
+    event_sticky_count = sum(1 for row in matched_events if _event_has_sticky_payload(row.sticky_note, row.sticky_notes))
+    date_sticky_count = int(db.query(DateStickyNote).filter(_date_sticky_owner_filter(user.id)).count())
+
+    return {
+        "accounts": len(account_rows),
+        "events": len(matched_event_ids),
+        "tasks": int(db.query(Task).filter(Task.owner_id == user.id).count()),
+        "sticky_notes": date_sticky_count + event_sticky_count,
+        "date_sticky_notes": date_sticky_count,
+        "event_sticky_notes": event_sticky_count,
+        "notes": notes_count,
+    }
 
 
 def _delete_user_related_records(db: Session, user: User) -> dict:
@@ -268,42 +290,9 @@ def admin_get_user_related_data(
 ):
     user = get_or_404(db, User, user_id, "User not found")
 
-    account_rows = db.query(OAuthAccount).filter(OAuthAccount.user_id == user.id).all()
-    account_emails = _collect_user_account_emails(user, account_rows)
-    event_filters = _build_user_event_filters(user.id, account_emails)
-
-    matched_events = db.query(Event.id, Event.sticky_note, Event.sticky_notes).filter(or_(*event_filters)).all()
-    matched_event_ids = [row.id for row in matched_events]
-    event_count = len(matched_event_ids)
-
-    notes_count = 0
-    if matched_event_ids:
-        notes_count = int(
-            db.query(Note)
-            .filter(Note.event_id.in_(matched_event_ids))
-            .count()
-        )
-
-    event_sticky_count = sum(
-        1
-        for row in matched_events
-        if _event_has_sticky_payload(row.sticky_note, row.sticky_notes)
-    )
-
-    date_sticky_count = int(db.query(DateStickyNote).filter(_date_sticky_owner_filter(user.id)).count())
-    sticky_total = date_sticky_count + int(event_sticky_count)
-
     return {
         "user": serialize_user(user),
-        "related": {
-            "accounts": len(account_rows),
-            "events": int(event_count),
-            "tasks": int(db.query(Task).filter(Task.owner_id == user.id).count()),
-            "sticky_notes": int(sticky_total),
-            "date_sticky_notes": int(date_sticky_count),
-            "event_sticky_notes": int(event_sticky_count),
-            "notes": int(notes_count),
-        },
+        "related": _get_user_related_counts(db, user),
     }
 
 
@@ -363,6 +352,12 @@ def admin_bulk_delete_users(
             if user.id == admin_user.id:
                 skipped.append({"id": user_id, "reason": "current_admin_session"})
                 continue
+
+            if payload.only_if_no_related:
+                related = _get_user_related_counts(db, user)
+                if any(related.values()):
+                    skipped.append({"id": user_id, "reason": "has_related_data", "related": related})
+                    continue
 
             try:
                 with db.begin_nested():

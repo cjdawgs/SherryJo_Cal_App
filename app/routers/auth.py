@@ -8,6 +8,7 @@ import secrets
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from pydantic import BaseModel, EmailStr
 from jose import jwt
 
@@ -52,7 +53,7 @@ class UserCreate(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str
 
 
@@ -110,11 +111,15 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login")
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
+    identifier = (credentials.email or "").strip().lower()
+    if not identifier:
+        raise HTTPException(status_code=401, detail="Invalid email, username, or password")
 
-    user = db.query(User).filter(User.email == credentials.email).first()
+    identity_column = User.email if "@" in identifier else User.username
+    user = db.query(User).filter(func.lower(identity_column) == identifier).first()
 
     if not user or not verify_password(credentials.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+        raise HTTPException(status_code=401, detail="Invalid email, username, or password")
 
     token = create_token(user.id)
 

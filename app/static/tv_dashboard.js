@@ -1,9 +1,14 @@
 'use strict';
 
 const TOKEN_KEY = 'tv_token';
-// TV state remains backend-driven. Use low-frequency auto poll; interactions trigger immediate refresh.
-const POLL_MS = 300000;
+// TV state remains backend-driven. Poll often enough for a wall display while
+// lifecycle recovery handles FireOS/Silk timer suspension.
+const POLL_MS = 60000;
 const LONG_PRESS_MS = 600;
+const DEFAULT_ZOOM = 1;
+const MIN_ZOOM = 0.8;
+const MAX_ZOOM = 1.3;
+const ZOOM_STEP = 0.1;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 
@@ -72,7 +77,7 @@ const wakeLock = (() => {
   // Called on clean application teardown (unpair / logout).
   function release() {
     if (_sentinel && !_sentinel.released) {
-      _sentinel.release().catch(() => {});
+      _sentinel.release().catch(() => { });
     }
     _sentinel = null;
     window.__WAKE_LOCK_ACTIVE__ = false;
@@ -95,15 +100,15 @@ const wakeLock = (() => {
 //
 // All three together reliably prevent the 20-30 min sleep on Amazon Silk.
 const antiSleep = (() => {
-  let _rafHandle  = null;
-  let _evtHandle  = null;
+  let _rafHandle = null;
+  let _evtHandle = null;
   let _tick = 0;
-  let _lastRafTs  = null;
-  let _gapCb      = null;
+  let _lastRafTs = null;
+  let _gapCb = null;
 
   // ── Layer 2: Hidden canvas (rAF loop keeps GPU renderer active) ──────────
   const _canvas = document.createElement('canvas');
-  _canvas.width  = 2;   // 2×2 so captureStream has real pixels
+  _canvas.width = 2;   // 2×2 so captureStream has real pixels
   _canvas.height = 2;
   Object.assign(_canvas.style, {
     position: 'fixed', bottom: '0', right: '0',
@@ -127,9 +132,9 @@ const antiSleep = (() => {
       if (!_videoEl) {
         const stream = _canvas.captureStream(1); // 1 fps — negligible CPU
         _videoEl = document.createElement('video');
-        _videoEl.srcObject   = stream;
-        _videoEl.muted       = true;
-        _videoEl.loop        = true;
+        _videoEl.srcObject = stream;
+        _videoEl.muted = true;
+        _videoEl.loop = true;
         _videoEl.playsInline = true;
         _videoEl.setAttribute('playsinline', '');
         Object.assign(_videoEl.style, {
@@ -151,7 +156,7 @@ const antiSleep = (() => {
 
   function _stopVideoStream() {
     if (_videoEl) {
-      try { _videoEl.pause(); } catch {}
+      try { _videoEl.pause(); } catch { }
       if (document.body.contains(_videoEl)) document.body.removeChild(_videoEl);
       _videoEl = null;
     }
@@ -182,8 +187,8 @@ const antiSleep = (() => {
   }
 
   function _stopAudio() {
-    try { if (_audioOsc) _audioOsc.stop();  } catch {}
-    try { if (_audioCtx) _audioCtx.close(); } catch {}
+    try { if (_audioOsc) _audioOsc.stop(); } catch { }
+    try { if (_audioCtx) _audioCtx.close(); } catch { }
     _audioOsc = null;
     _audioCtx = null;
   }
@@ -287,6 +292,7 @@ const state = {
   longPressTriggered: false,
   clickCount: 0,
   clickTimer: null,
+  zoomLevel: DEFAULT_ZOOM,
   centerArrowMode: false,
   cursor: {
     x: 0,
@@ -349,7 +355,7 @@ const TV_DEVICE_ID = (() => {
     id = (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    try { localStorage.setItem(KEY, id); } catch {}
+    try { localStorage.setItem(KEY, id); } catch { }
   }
   return id;
 })();
@@ -374,20 +380,20 @@ tvDiag = (() => {
 
   function log(event, details = '') {
     const entry = {
-      t:        new Date().toISOString(),
-      ms:       Date.now(),
+      t: new Date().toISOString(),
+      ms: Date.now(),
       event,
-      details:  String(details).slice(0, 200),
-      guard:    state.sleepGuardEnabled,
-      timeout:  state.sleepGuardTimeoutMinutes,
-      elapsed:  _elapsed(),
-      vis:      document.visibilityState,
+      details: String(details).slice(0, 200),
+      guard: state.sleepGuardEnabled,
+      timeout: state.sleepGuardTimeoutMinutes,
+      elapsed: _elapsed(),
+      vis: document.visibilityState,
     };
     _buf.push(entry);
     if (_buf.length > MAX) _buf.shift();
 
     // Persist last 20 entries to localStorage (survives backgrounding)
-    try { localStorage.setItem('tv_diag', JSON.stringify(_buf.slice(-20))); } catch {}
+    try { localStorage.setItem('tv_diag', JSON.stringify(_buf.slice(-20))); } catch { }
 
     // Silk console — visible in remote developer tools
     console.log(`[TVDiag] ${entry.event} | ${entry.details} | elapsed=${entry.elapsed} vis=${entry.vis}`);
@@ -408,14 +414,14 @@ tvDiag = (() => {
 
   function _beacon(entry) {
     _pending.push({
-      event:            entry.event,
-      details:          entry.details,
-      ts:               entry.t,
+      event: entry.event,
+      details: entry.details,
+      ts: entry.t,
       sessionElapsedMin: state.sessionStartAt ? Math.floor((Date.now() - state.sessionStartAt) / 60000) : null,
-      visibilityState:  entry.vis,
-      guardEnabled:     entry.guard,
-      guardTimeout:     entry.timeout,
-      device_id:        TV_DEVICE_ID,
+      visibilityState: entry.vis,
+      guardEnabled: entry.guard,
+      guardTimeout: entry.timeout,
+      device_id: TV_DEVICE_ID,
     });
     if (_pending.length >= 50 || IMMEDIATE_EVENTS.has(entry.event)) flush();
   }
@@ -431,7 +437,7 @@ tvDiag = (() => {
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
       body: JSON.stringify({ entries }),
       keepalive: true,   // delivers even when page is unloading
-    }).catch(() => {});  // never block on diagnostics
+    }).catch(() => { });  // never block on diagnostics
   }
 
   setInterval(flush, FLUSH_MS);
@@ -445,6 +451,9 @@ tvDiag = (() => {
 // Wire the RAF frame-gap callback now that tvDiag is ready
 antiSleep.setRafGapCb((deltaMs) => {
   tvDiag.log('raf_gap', `${Math.round(deltaMs / 1000)}s gap \u2014 OS may be throttling renderer`);
+  if (deltaMs >= POLL_MS && state.token && document.visibilityState === 'visible') {
+    refreshEvents(true);
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -476,7 +485,7 @@ function cacheDom() {
     debugList: document.getElementById('tv-debug-list'),
     accountLegend: document.getElementById('tv-account-legend'),
     sleepStatus: document.getElementById('tv-sleep-status'),
-    diagLine:    document.getElementById('tv-diag-line'),
+    diagLine: document.getElementById('tv-diag-line'),
   };
 }
 
@@ -785,10 +794,11 @@ function init() {
   });
 
   // window blur / focus — fires when focus shifts (e.g., FireOS overlay opens)
-  window.addEventListener('blur',  () => { if (tvDiag) tvDiag.log('window_blur',  `vis=${document.visibilityState}`); });
+  window.addEventListener('blur', () => { if (tvDiag) tvDiag.log('window_blur', `vis=${document.visibilityState}`); });
   window.addEventListener('focus', () => {
     if (tvDiag) tvDiag.log('window_focus', `vis=${document.visibilityState}`);
     if (state.token && document.visibilityState === 'visible') {
+      refreshEvents(true);
       wakeLock.reacquire();
       if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
@@ -799,6 +809,7 @@ function init() {
   window.addEventListener('pageshow', (e) => {
     if (tvDiag) tvDiag.log('pageshow', `persisted=${e.persisted}`);
     if (state.token && document.visibilityState === 'visible') {
+      refreshEvents(true);
       wakeLock.reacquire();
       if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
@@ -807,10 +818,14 @@ function init() {
   // Page Lifecycle API (Chromium 68+ / Amazon Silk)
   // 'freeze' fires when the browser decides to freeze the page (CPU saving).
   // This is the last chance to log before the page stops executing.
-  document.addEventListener('freeze',  () => { if (tvDiag) tvDiag.log('page_freeze',  'browser froze the page'); });
-  document.addEventListener('resume',  () => {
+  document.addEventListener('freeze', () => { if (tvDiag) tvDiag.log('page_freeze', 'browser froze the page'); });
+  document.addEventListener('resume', () => {
     if (tvDiag) tvDiag.log('page_resume', 'page resumed from frozen state');
-    if (state.token) { wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
+    if (state.token) { refreshEvents(true); wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
+  });
+
+  window.addEventListener('online', () => {
+    if (state.token) refreshEvents(true);
   });
 
   // beforeunload — last sync opportunity before page is torn down
@@ -842,7 +857,7 @@ function startPolling() {
   // proves that just as well as every minute at a fraction of the traffic.
   state.heartbeatHandle = setInterval(() => {
     if (tvDiag) tvDiag.log('heartbeat',
-      `elapsed=${Math.floor((Date.now()-state.sessionStartAt)/60000)}m` +
+      `elapsed=${Math.floor((Date.now() - state.sessionStartAt) / 60000)}m` +
       ` guard=${state.sleepGuardEnabled}` +
       ` timeout=${state.sleepGuardTimeoutMinutes}` +
       ` rafActive=${window.__ANTI_SLEEP_ACTIVE__}` +
@@ -857,8 +872,8 @@ function startPolling() {
 }
 
 function stopAll() {
-  if (state.pollHandle)     clearInterval(state.pollHandle);
-  if (state.clockHandle)    clearInterval(state.clockHandle);
+  if (state.pollHandle) clearInterval(state.pollHandle);
+  if (state.clockHandle) clearInterval(state.clockHandle);
   if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
   state.pollHandle = null;
   state.clockHandle = null;
@@ -890,10 +905,10 @@ function renderSleepStatus() {
     return;
   }
 
-  const totalSecs  = Math.floor((Date.now() - state.sessionStartAt) / 1000);
-  const hours      = Math.floor(totalSecs / 3600);
-  const mins       = Math.floor((totalSecs % 3600) / 60);
-  const elapsed    = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
+  const totalSecs = Math.floor((Date.now() - state.sessionStartAt) / 1000);
+  const hours = Math.floor(totalSecs / 3600);
+  const mins = Math.floor((totalSecs % 3600) / 60);
+  const elapsed = hours > 0 ? `${hours}h ${mins}m` : `${mins}m`;
 
   if (state.sleepGuardTimeoutMinutes > 0) {
     const remaining = state.sleepGuardTimeoutMinutes - Math.floor(totalSecs / 60);
@@ -1084,7 +1099,6 @@ async function refreshEvents(force = false, options = {}) {
     state.syncInProgress = true;
     applySyncVisualState();
   }
-  state.lastEventsFetchAt = nowMs;
   const res = await authFetch('/tv/events');
   try {
     if (!res) {
@@ -1098,6 +1112,7 @@ async function refreshEvents(force = false, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}));
+    state.lastEventsFetchAt = Date.now();
     if (data.selectedDate) state.selectedDate = data.selectedDate;
     if (data.currentView) state.currentView = data.currentView;
     state.days = data.days || [];
@@ -1275,6 +1290,12 @@ function onKeyDown(e) {
     return;
   }
 
+  if (key === 'ArrowUp' || key === 'ArrowDown') {
+    e.preventDefault();
+    adjustZoom(key === 'ArrowUp' ? ZOOM_STEP : -ZOOM_STEP);
+    return;
+  }
+
   if (isBackKey(key)) {
     e.preventDefault();
     handleBack();
@@ -1369,6 +1390,7 @@ function onKeyUp(e) {
   state.clickTimer = setTimeout(() => {
     const count = state.clickCount;
     state.clickCount = 0;
+    if (count === 1 && resetZoom()) return;
     if (count === 1) onSelect();
     else if (count === 2) onSecondarySelect();
     else if (count >= 3) {
@@ -1377,6 +1399,26 @@ function onKeyUp(e) {
       renderFooterHint(`Arrow mode ${state.centerArrowMode ? 'enabled' : 'disabled'}`);
     }
   }, 260);
+}
+
+function applyZoom() {
+  if (!dom.screenDash) return;
+  dom.screenDash.style.zoom = String(state.zoomLevel);
+}
+
+function adjustZoom(delta) {
+  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, state.zoomLevel + delta));
+  state.zoomLevel = Math.round(next * 10) / 10;
+  applyZoom();
+  renderFooterHint(`Zoom ${Math.round(state.zoomLevel * 100)}% · center resets`);
+}
+
+function resetZoom() {
+  if (state.zoomLevel === DEFAULT_ZOOM) return false;
+  state.zoomLevel = DEFAULT_ZOOM;
+  applyZoom();
+  renderFooterHint('Zoom reset to 100%');
+  return true;
 }
 
 function normalizeKey(e) {
@@ -1727,15 +1769,15 @@ function renderLeftSidebar() {
         </div>
         <div class="tv-sidebar-divider"></div>
         ${primary.map(item => {
-          const idx = side.findIndex(x => x.key === item.key);
-          return `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
-        }).join('')}
+    const idx = side.findIndex(x => x.key === item.key);
+    return `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
+  }).join('')}
       </div>
       <div class="tv-sidebar-footer">
         ${footer.map(item => {
-          const idx = side.findIndex(x => x.key === item.key);
-          return `<button class="tv-side-btn ${item.key === 'admin-dashboard' ? 'warn' : ''} ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
-        }).join('')}
+    const idx = side.findIndex(x => x.key === item.key);
+    return `<button class="tv-side-btn ${item.key === 'admin-dashboard' ? 'warn' : ''} ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === idx ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${idx}">${escapeHtml(item.label)}</button>`;
+  }).join('')}
       </div>
       <div class="tv-editor-anchor"></div>
     </div>`;
@@ -1812,21 +1854,21 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}</div>
       <div class="tv-right-list">
         ${selectedItems.length ? selectedItems.map(item => {
-          if (item.type === 'event') {
-            const eventColor = resolveEventColor(item.event);
-            const sticky = item.event.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-            return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
-          }
-          return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
-        }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
+    if (item.type === 'event') {
+      const eventColor = resolveEventColor(item.event);
+      const sticky = item.event.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+      return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
+    }
+    return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
+  }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
       </div>
       <div class="tv-right-subtitle">This Week</div>
       <div class="tv-right-list">
         ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
-          const eventColor = resolveEventColor(row.ev);
-          const sticky = row.ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-          return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
-        }).join('') : '<div class="tv-empty">No events this week</div>'}
+    const eventColor = resolveEventColor(row.ev);
+    const sticky = row.ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+    return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
+  }).join('') : '<div class="tv-empty">No events this week</div>'}
       </div>
       <div class="tv-right-editor-anchor"></div>
     </aside>`;
@@ -2052,6 +2094,7 @@ function render() {
   renderAccountLegend();
   renderMain();
   renderFooterHint();
+  applyZoom();
 }
 
 function syncAccountLegend() {
@@ -2212,17 +2255,17 @@ function renderDayCard(day, selected, contextDay = false) {
   const now = new Date();
   const cards = items.length
     ? items.map((item, idx) => {
-        const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
-        if (item.type === 'event') {
-          const ev = item.event;
-          const eventColor = resolveEventColor(ev);
-          const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
-          const border = softColor(eventColor, focused ? 0.7 : 0.5);
-          const eventStickyIndicator = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
-        }
-        return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
-      }).join('')
+      const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
+      if (item.type === 'event') {
+        const ev = item.event;
+        const eventColor = resolveEventColor(ev);
+        const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
+        const border = softColor(eventColor, focused ? 0.7 : 0.5);
+        const eventStickyIndicator = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+        return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
+      }
+      return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
+    }).join('')
     : `<div class="tv-empty">No events or sticky notes</div>`;
 
   const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
@@ -2473,12 +2516,12 @@ function handleMainClick(e) {
       setView('week');
       return;
     }
-      closeUtilityPanel();
+    closeUtilityPanel();
     if (control === 'view-month') {
       setView('month');
       return;
     }
-      closeUtilityPanel();
+    closeUtilityPanel();
     if (control === 'exit') {
       exitTvAction();
     }

@@ -77,3 +77,20 @@ def test_tv_dashboard_auth_fetch_handles_network_exceptions():
     assert "try {" in text
     assert "catch (err)" in text
     assert "Network issue:" in text
+
+
+def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
+    text = _tv_js_text()
+    assert "const POLL_MS = 60000" in text
+    assert "deltaMs >= POLL_MS" in text
+    assert "window.addEventListener('online'" in text
+    assert "state.lastEventsFetchAt = Date.now()" in text
+
+
+def test_tv_dashboard_remote_up_down_zoom_and_center_reset():
+    text = _tv_js_text()
+    assert "adjustZoom(key === 'ArrowUp' ? ZOOM_STEP : -ZOOM_STEP)" in text
+    assert "function applyZoom()" in text
+    assert "function resetZoom()" in text
+    assert "if (count === 1 && resetZoom()) return" in text
+    assert "center resets" in text

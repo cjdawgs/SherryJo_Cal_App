@@ -1,4 +1,6 @@
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 :root {
   --bg: #f3f6f8;
@@ -61,7 +63,7 @@ body {
   font-size: 18px;
 }
 
-.panel > details > summary {
+.panel>details>summary {
   cursor: pointer;
   font-size: 18px;
   font-weight: 700;
@@ -69,7 +71,7 @@ body {
   margin-bottom: 8px;
 }
 
-.panel > details[open] > summary {
+.panel>details[open]>summary {
   margin-bottom: 10px;
 }
 
@@ -140,7 +142,7 @@ body {
   align-items: center;
 }
 
-#controlPanel > details {
+#controlPanel>details {
   width: 100%;
 }
 
@@ -153,8 +155,128 @@ body {
 .right-controls {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
   flex-wrap: wrap;
+}
+
+.right-controls {
+  flex-direction: column;
+}
+
+.cleanup-workflow {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(360px, 1fr);
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #9ccfc5;
+  border-radius: 8px;
+  background: #f4fcfa;
+}
+
+.cleanup-workflow-header {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #173f46;
+}
+
+.cleanup-workflow-header strong {
+  font-size: 15px;
+}
+
+.cleanup-workflow-header span {
+  color: #527078;
+  font-size: 12px;
+}
+
+.cleanup-step {
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #c7dfda;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.cleanup-step-number {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: #0f766e;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cleanup-step-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.cleanup-step-label {
+  color: #193c45;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.cleanup-step-actions,
+.utility-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.cleanup-step-help {
+  color: #60747a;
+  font-size: 11px;
+}
+
+.cleanup-select-btn {
+  border-color: #0f766e;
+  color: #0b5f58;
+  font-weight: 700;
+}
+
+.selection-summary {
+  color: #38556b;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.selection-summary.has-risk {
+  color: #b42318;
+}
+
+.advanced-delete-options {
+  grid-column: 1 / -1;
+  color: #7a312b;
+  font-size: 12px;
+}
+
+.advanced-delete-options summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.danger-related-option {
+  padding: 7px 9px;
+  border: 1px solid #efc8c3;
+  border-radius: 8px;
+  background: #fff7f6;
+  color: #9f1c16;
+  font-weight: 700;
 }
 
 .inline-option {
@@ -189,6 +311,23 @@ body {
   border-color: #d92d20;
   color: #b42318;
   background: #fff;
+}
+
+.cleanup-delete-btn {
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid #b42318;
+  border-radius: 6px;
+  color: #fff;
+  background: #b42318;
+  font-weight: 800;
+}
+
+.cleanup-delete-btn:disabled {
+  border-color: #cbd5df;
+  color: #718096;
+  background: #e8edf2;
+  cursor: not-allowed;
 }
 
 .danger-btn:hover {
@@ -312,6 +451,7 @@ button:hover {
   0% {
     box-shadow: 0 0 0 0 rgba(15, 122, 63, 0.35);
   }
+
   100% {
     box-shadow: 0 0 0 10px rgba(15, 122, 63, 0);
   }
@@ -347,6 +487,126 @@ button:hover {
 table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.admin-data-table.users-table {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+.users-table th:nth-child(1),
+.users-table .user-account-row td:nth-child(1) {
+  width: 36px;
+  text-align: center;
+}
+
+.users-table th:nth-child(2),
+.users-table .user-account-row td:nth-child(2) {
+  width: 52px;
+}
+
+.users-table th:nth-child(3),
+.users-table .user-account-row td:nth-child(3) {
+  width: 250px;
+  overflow-wrap: anywhere;
+}
+
+.users-table th:nth-child(4),
+.users-table .user-account-row td:nth-child(4) {
+  width: 150px;
+  overflow-wrap: anywhere;
+}
+
+.users-table th:nth-child(5),
+.users-table .user-account-row td:nth-child(5) {
+  width: 72px;
+}
+
+.users-table th:nth-child(6),
+.users-table .user-account-row td:nth-child(6) {
+  width: 190px;
+  white-space: nowrap;
+}
+
+.users-table th:nth-child(7),
+.users-table .user-actions-cell {
+  width: 330px;
+}
+
+.users-table .user-actions-cell {
+  vertical-align: top;
+  border-bottom: 1px solid #d6e1ec;
+}
+
+.users-table .user-actions-cell .row-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(96px, 1fr));
+  align-items: stretch;
+}
+
+.users-table .user-actions-cell .row-actions button {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 9px;
+  line-height: 1.15;
+}
+
+.users-table .user-related-row td:first-child {
+  padding: 10px 8px 5px 96px;
+  border-bottom: 0;
+  background: #f8fbfe;
+}
+
+.users-table .user-account-row td {
+  padding-top: 8px;
+  padding-bottom: 14px;
+  border-bottom-color: #d6e1ec;
+}
+
+.related-data-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  flex-wrap: wrap;
+}
+
+.related-summary-label {
+  color: #52657e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.related-data-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid #8db9d8;
+  border-radius: 7px;
+  background: #e8f3fc;
+  color: #123f61;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.related-data-badge>span {
+  min-width: 21px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: #fff;
+  color: #0e4e78;
+  font-weight: 800;
+  text-align: center;
+}
+
+.related-summary-loading,
+.related-summary-empty {
+  color: #68788e;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 th,
@@ -467,7 +727,7 @@ th {
   color: #991b1b;
 }
 
-.windowFrameMinimized form > :not(.adminDialogHeader) {
+.windowFrameMinimized form> :not(.adminDialogHeader) {
   display: none;
 }
 
@@ -508,6 +768,15 @@ th {
   .right-controls {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .cleanup-workflow {
+    grid-template-columns: 1fr;
+  }
+
+  .cleanup-workflow-header,
+  .advanced-delete-options {
+    grid-column: 1;
   }
 
   .table-wrap {

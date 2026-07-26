@@ -92,13 +92,17 @@
   <div class="card">
     <h2>Login or Create Account</h2>
 
-    <input id="email" type="email" placeholder="Email" autocomplete="username"><br>
-    <input id="password" type="password" placeholder="Password" autocomplete="current-password"><br>
+    <form id="loginForm">
+      <input id="email" name="email" type="text" placeholder="Username or email" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required><br>
+      <input id="password" name="password" type="password" placeholder="Password" autocomplete="current-password" required><br>
 
-    <div class="button-row">
-      <button class="primary-btn" onclick="login()">Login</button>
-      <button onclick="showRegisterForm()">Create Account</button>
-    </div>
+      <div class="button-row">
+        <button id="loginBtn" class="primary-btn" type="submit">Login</button>
+        <button type="button" onclick="showRegisterForm()">Create Account</button>
+      </div>
+      <div id="loginStatus" class="small-text" role="alert" aria-live="polite"></div>
+      <div id="loginRecovery" class="hint" hidden></div>
+    </form>
 
     <div id="registerForm" style="display:none;">
       <input id="registerUsername" type="text" placeholder="Username" autocomplete="nickname"><br>
@@ -140,54 +144,74 @@
     /**************************************************************
      * ✅ LOGIN FUNCTION (TOKENS + API)
      **************************************************************/
-    async function login() {
+    async function login(event) {
+      event?.preventDefault();
+      const loginButton = document.getElementById("loginBtn");
+      const loginStatus = document.getElementById("loginStatus");
+      const loginRecovery = document.getElementById("loginRecovery");
+
       try {
+        const form = document.getElementById("loginForm");
+        const formData = new FormData(form);
+        const identifier = String(formData.get("email") || "").trim().toLowerCase();
+        const password = String(formData.get("password") || "");
+        loginRecovery.hidden = true;
+        loginRecovery.textContent = "";
 
-        // ✅ Get user input
-        const email = document.getElementById("email").value.trim();
-        const password = document.getElementById("password").value;
-
-        if (!email || !password) {
-          alert("Please enter email and password.");
+        if (!identifier || !password) {
+          loginStatus.textContent = "Please enter your username or email and password.";
+          document.getElementById(identifier ? "password" : "email").focus();
           return;
         }
 
-        // ✅ Call backend login endpoint
+        loginButton.disabled = true;
+        loginStatus.textContent = "Signing in...";
+
         const response = await apiRequest('/auth/login', {
           method: 'POST',
           auth: false,
-          body: JSON.stringify({
-            email: email,
-            password: password
-          })
+          body: { email: identifier, password }
         });
 
         if (!response) {
-          alert("Login failed. Check console.");
+          loginStatus.textContent = "Unable to reach the server. Please try again.";
+          loginRecovery.textContent = "Check your connection, then press Login again. Your entries are still here.";
+          loginRecovery.hidden = false;
           return;
         }
 
-        // ✅ Parse response
         const data = await response.json();
 
-        // ✅ DEBUG: See what backend returned
-        console.log("🔐 LOGIN RESPONSE:", data);
-
-        // ✅ Support BOTH formats:
-        // some backends return { token: "..." }
-        // others return { access_token: "..." }
-        const token = data.token || data.access_token;
-
-        // ✅ If no token → login failed
-        if (!token) {
-          alert("Login failed: no token returned");
+        if (!response.ok) {
+          if (response.status === 401) {
+            loginStatus.textContent = "That username or email and password did not match.";
+            loginRecovery.textContent = "Try your registered username or your full email address. Passwords are case-sensitive. If an administrator reset your password, use the newest password.";
+            loginRecovery.hidden = false;
+            document.getElementById("password").focus();
+            document.getElementById("password").select();
+          } else if (response.status === 422) {
+            loginStatus.textContent = "The login information was not in the expected format.";
+            loginRecovery.textContent = "Enter either your username or your complete email address, then enter your password and try again.";
+            loginRecovery.hidden = false;
+            document.getElementById("email").focus();
+          } else {
+            loginStatus.textContent = "Login could not be completed.";
+            loginRecovery.textContent = "Your entries are still here. Press Login to retry; if it continues, ask an administrator to verify the account is active.";
+            loginRecovery.hidden = false;
+          }
           return;
         }
 
-        // ✅ SAVE TOKEN TO BROWSER STORAGE
-        setAuthToken(token);
+        const token = data.token || data.access_token;
 
-        console.log("✅ Token saved to localStorage");
+        if (!token) {
+          loginStatus.textContent = "Login could not be completed. Please try again.";
+          loginRecovery.textContent = "The server accepted the login but could not start a session. Press Login again; your entries are still here.";
+          loginRecovery.hidden = false;
+          return;
+        }
+
+        setAuthToken(token);
 
         // ✅ Decide onboarding redirect based on existing accounts
         const accountRes = await apiRequest('/accounts', {
@@ -205,9 +229,15 @@
 
       } catch (error) {
         console.error("❌ Login error:", error);
-        alert("Login failed. Check console.");
+        loginStatus.textContent = "Login failed. Please try again.";
+        loginRecovery.textContent = "Your entries are still here. Press Login again after checking your connection.";
+        loginRecovery.hidden = false;
+      } finally {
+        loginButton.disabled = false;
       }
     }
+
+    document.getElementById("loginForm").addEventListener("submit", login);
 
     function showRegisterForm() {
       document.getElementById('registerForm').style.display = 'block';

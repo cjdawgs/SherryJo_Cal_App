@@ -19,6 +19,15 @@ def test_health():
     assert response.json()["status"] == "ok"
 
 
+def test_login_page_supports_username_or_email_recovery():
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert 'placeholder="Username or email"' in response.text
+    assert 'id="loginRecovery"' in response.text
+    assert "Try your registered username or your full email address" in response.text
+
+
 # --------------------------------------------------
 # TEST: REGISTER USER ✅
 # --------------------------------------------------
@@ -61,6 +70,22 @@ def test_login_user():
     # ✅ Validate token structure
     assert "access_token" in data
     assert data["token_type"] == "bearer"
+
+
+def test_login_user_by_username():
+    client.post("/auth/register", json={
+        "username": "username_login_user",
+        "email": "username-login@example.com",
+        "password": "password"
+    })
+
+    response = client.post("/auth/login", json={
+        "email": "USERNAME_LOGIN_USER",
+        "password": "password"
+    })
+
+    assert response.status_code == 200
+    assert "access_token" in response.json()
 
 
 # --------------------------------------------------

@@ -25,6 +25,11 @@ const el = {
   scanOrphansBtn: document.getElementById("scanOrphansBtn"),
   deleteOrphansBtn: document.getElementById("deleteOrphansBtn"),
   selectAllBtn: document.getElementById("selectAllBtn"),
+  selectEmptyUsersBtn: document.getElementById("selectEmptyUsersBtn"),
+  clearSelectionBtn: document.getElementById("clearSelectionBtn"),
+  selectionSummary: document.getElementById("selectionSummary"),
+  cleanupControls: document.getElementById("cleanupControls"),
+  cleanupTitle: document.getElementById("cleanupTitle"),
   exportBtn: document.getElementById("exportBtn"),
   goCalendar: document.getElementById("goCalendar"),
   searchInput: document.getElementById("searchInput"),
@@ -367,16 +372,40 @@ function buildPurgeLabelHtml(entity, counts, total) {
   }
 
   const badges = [];
-  if (counts.events > 0) badges.push(`<span class="purge-badge">E ${counts.events}</span>`);
-  if (counts.notes > 0) badges.push(`<span class="purge-badge">N ${counts.notes}</span>`);
-  if (entity === "users" && counts.sticky_notes > 0) badges.push(`<span class="purge-badge">S ${counts.sticky_notes}</span>`);
-  if (entity === "users" && counts.tasks > 0) badges.push(`<span class="purge-badge">T ${counts.tasks}</span>`);
-  if (entity === "users" && counts.accounts > 0) badges.push(`<span class="purge-badge">A ${counts.accounts}</span>`);
+  if (counts.events > 0) badges.push(`<span class="purge-badge">Events ${counts.events}</span>`);
+  if (counts.notes > 0) badges.push(`<span class="purge-badge">Notes ${counts.notes}</span>`);
+  if (entity === "users" && counts.sticky_notes > 0) badges.push(`<span class="purge-badge">Sticky Notes ${counts.sticky_notes}</span>`);
+  if (entity === "users" && counts.tasks > 0) badges.push(`<span class="purge-badge">Tasks ${counts.tasks}</span>`);
+  if (entity === "users" && counts.accounts > 0) badges.push(`<span class="purge-badge">Accounts ${counts.accounts}</span>`);
 
   return [
     `<span class="purge-label-text">Purge Data</span>`,
     `<span class="purge-badges">${badges.join("")}</span>`,
   ].join("");
+}
+
+function renderUserRelatedSummary(item) {
+  const purgeMeta = getPurgeMeta(item.id);
+  if (!purgeMeta || purgeMeta.loading) {
+    return `<span class="related-summary-loading">Checking related calendar data…</span>`;
+  }
+
+  const counts = purgeMeta.related || normalizeRelatedCounts("users", {});
+  const total = Number(purgeMeta.count || 0);
+  if (total <= 0) {
+    return `<span class="related-summary-empty">No related calendar data</span>`;
+  }
+
+  const badges = [
+    ["Events", counts.events],
+    ["Notes", counts.notes],
+    ["Sticky Notes", counts.sticky_notes],
+    ["Tasks", counts.tasks],
+    ["Accounts", counts.accounts],
+  ].filter((entry) => Number(entry[1]) > 0)
+    .map(([label, count]) => `<span class="related-data-badge"><strong>${escapeHtml(label)}</strong><span>${Number(count)}</span></span>`);
+
+  return `<div class="related-data-summary"><span class="related-summary-label">Related Data</span>${badges.join("")}</div>`;
 }
 
 async function primePurgeMetadata() {
@@ -436,6 +465,72 @@ async function primePurgeMetadata() {
 function getPurgeMeta(itemId) {
   const cache = state.purgeMeta[state.entity] || {};
   return cache[Number(itemId)] || null;
+}
+
+function selectedUsersWithRelatedData() {
+  if (state.entity !== "users") return [];
+  return state.items.filter((item) => {
+    if (!state.selectedIds.has(Number(item.id))) return false;
+    const meta = state.purgeMeta.users?.[Number(item.id)];
+    return Number(meta?.count || 0) > 0;
+  });
+}
+
+function updateDeleteButtonState() {
+  if (!el.bulkDeleteBtn) return;
+  const selectedCount = state.selectedIds.size;
+  const confirmed = String(el.dangerConfirmInput?.value || "").trim().toUpperCase() === "DELETE";
+  const riskySelection = selectedUsersWithRelatedData().length > 0;
+  const relatedDeletionEnabled = Boolean(el.bulkDeleteRelated?.checked);
+  const noun = state.entity === "users" ? "Account" : "Provider";
+
+  el.bulkDeleteBtn.textContent = selectedCount
+    ? `Delete ${selectedCount} Selected ${noun}${selectedCount === 1 ? "" : "s"}`
+    : `Select ${noun}s to Delete`;
+  el.bulkDeleteBtn.disabled = !selectedCount || !confirmed || (riskySelection && !relatedDeletionEnabled);
+}
+
+function updateSelectionSummary() {
+  if (!el.selectionSummary) return;
+  const selectedCount = state.selectedIds.size;
+  const protectedCount = selectedUsersWithRelatedData().length;
+  el.selectionSummary.textContent = protectedCount > 0
+    ? `${selectedCount} selected · ${protectedCount} contain related data`
+    : `${selectedCount} selected · no related data selected`;
+  el.selectionSummary.classList.toggle("has-risk", protectedCount > 0);
+  if (el.cleanupControls) el.cleanupControls.hidden = state.entity !== "users";
+  if (el.cleanupTitle) {
+    el.cleanupTitle.textContent = state.entity === "users" ? "Empty User Cleanup" : "Provider Account Cleanup";
+  }
+  updateDeleteButtonState();
+}
+
+function selectEmptyUsers() {
+  if (state.entity !== "users") return;
+  const metadataPending = state.filtered.some((item) => state.purgeMeta.users?.[Number(item.id)]?.loading);
+  if (metadataPending) {
+    setStatus("Related-data checks are still running. Try again when the badges finish loading.", true);
+    return;
+  }
+
+  state.selectedIds.clear();
+  state.filtered.forEach((item) => {
+    const meta = state.purgeMeta.users?.[Number(item.id)];
+    if (item.role !== "admin" && meta?.related && Number(meta.count || 0) === 0) {
+      state.selectedIds.add(Number(item.id));
+    }
+  });
+  if (el.bulkDeleteRelated) el.bulkDeleteRelated.checked = false;
+  renderTable();
+  renderCards();
+  setStatus(`Selected ${state.selectedIds.size} empty non-admin user account(s). Review the checkboxes, deselect any account you want to keep, then complete Step 2.`);
+}
+
+function clearSelection() {
+  state.selectedIds.clear();
+  renderTable();
+  renderCards();
+  setStatus("Selection cleared.");
 }
 
 function setRowActionRunning(button, runningLabel) {
@@ -568,6 +663,11 @@ async function bulkDeleteSelected() {
 
   const kind = state.entity === "users" ? "users" : "provider accounts";
   const deleteRelated = Boolean(el.bulkDeleteRelated?.checked);
+  const riskyUsers = selectedUsersWithRelatedData();
+  if (riskyUsers.length && !deleteRelated) {
+    setStatus(`${riskyUsers.length} selected user account(s) contain related data. Deselect them, or explicitly enable “Also delete related data.”`, true);
+    return;
+  }
   const ok = window.confirm(`Delete ${ids.length} ${kind}?${deleteRelated ? " Related data will also be deleted." : ""}`);
   if (!ok) {
     setStatus("Bulk delete canceled.");
@@ -575,7 +675,11 @@ async function bulkDeleteSelected() {
   }
 
   const endpoint = state.entity === "users" ? "/admin/users/bulk-delete" : "/admin/providers/bulk-delete";
-  const payload = { ids, delete_related: deleteRelated };
+  const payload = {
+    ids,
+    delete_related: deleteRelated,
+    only_if_no_related: state.entity === "users" && !deleteRelated,
+  };
 
   const res = await apiRequest(endpoint, { method: "POST", body: JSON.stringify(payload) });
   if (!res) {
@@ -583,18 +687,7 @@ async function bulkDeleteSelected() {
     return;
   }
 
-  let data = null;
-  try {
-    const contentType = String(res.headers.get("content-type") || "").toLowerCase();
-    if (contentType.includes("application/json")) {
-      data = await res.json();
-    } else {
-      const text = await res.text();
-      data = { detail: text || "Server returned a non-JSON response." };
-    }
-  } catch (_err) {
-    data = { detail: "Unable to parse server response." };
-  }
+  const data = await res.json().catch(() => ({ detail: "Unable to parse server response." }));
 
   if (handleAdminForbidden(res, data)) {
     return;
@@ -606,6 +699,8 @@ async function bulkDeleteSelected() {
   }
 
   state.selectedIds.clear();
+  if (el.dangerConfirmInput) el.dangerConfirmInput.value = "";
+  if (el.bulkDeleteRelated) el.bulkDeleteRelated.checked = false;
   await loadData();
   const deletedCount = Number(data.deleted_users ?? data.deleted_providers ?? 0);
   const skippedCount = Array.isArray(data.skipped) ? data.skipped.length : 0;
@@ -672,6 +767,18 @@ async function deleteOrphans() {
   await scanOrphans();
 }
 
+function compareUserAccounts(left, right) {
+  const leftCreated = Date.parse(left.created_at || "") || 0;
+  const rightCreated = Date.parse(right.created_at || "") || 0;
+  if (leftCreated !== rightCreated) return rightCreated - leftCreated;
+
+  const leftEvents = Number(state.purgeMeta.users?.[Number(left.id)]?.related?.events || 0);
+  const rightEvents = Number(state.purgeMeta.users?.[Number(right.id)]?.related?.events || 0);
+  if (leftEvents !== rightEvents) return rightEvents - leftEvents;
+
+  return Number(right.id || 0) - Number(left.id || 0);
+}
+
 function applySearch() {
   const config = activeConfig();
   const q = (el.searchInput.value || "").trim().toLowerCase();
@@ -680,6 +787,9 @@ function applySearch() {
     if (!q) return true;
     return config.searchText(item).toLowerCase().includes(q);
   });
+  if (state.entity === "users") {
+    state.filtered.sort(compareUserAccounts);
+  }
 
   renderTable();
   renderCards();
@@ -695,10 +805,18 @@ function renderTable() {
   const rows = state.filtered.map((item) => {
     const selected = state.selectedIds.has(Number(item.id));
     const cells = config.row(item).map((v) => `<td>${escapeHtml(v)}</td>`).join("");
-    return `<tr><td><input class="row-select" data-select-id="${item.id}" type="checkbox" ${selected ? "checked" : ""}></td>${cells}<td>${renderRowActions(item)}</td></tr>`;
+    if (state.entity === "users") {
+      return [
+        `<tr class="user-related-row"><td colspan="6">${renderUserRelatedSummary(item)}</td><td class="user-actions-cell" rowspan="2"><div class="row-actions">${renderRowActions(item)}</div></td></tr>`,
+        `<tr class="user-account-row"><td><input class="row-select" data-select-id="${item.id}" type="checkbox" ${selected ? "checked" : ""}></td>${cells}</tr>`,
+      ].join("");
+    }
+    return `<tr><td><input class="row-select" data-select-id="${item.id}" type="checkbox" ${selected ? "checked" : ""}></td>${cells}<td><div class="row-actions">${renderRowActions(item)}</div></td></tr>`;
   }).join("");
 
-  el.desktopGrid.innerHTML = `<table><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+  const tableClass = state.entity === "users" ? "admin-data-table users-table" : "admin-data-table providers-table";
+  el.desktopGrid.innerHTML = `<table class="${tableClass}"><thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table>`;
+  updateSelectionSummary();
 
   const selectAllRows = el.desktopGrid.querySelector("#selectAllRows");
   if (selectAllRows) {
@@ -718,6 +836,7 @@ function renderTable() {
       const id = Number(box.getAttribute("data-select-id"));
       if (box.checked) state.selectedIds.add(id);
       else state.selectedIds.delete(id);
+      updateSelectionSummary();
       renderCards();
     });
   });
@@ -741,6 +860,7 @@ function renderCards() {
       const id = Number(box.getAttribute("data-select-id"));
       if (box.checked) state.selectedIds.add(id);
       else state.selectedIds.delete(id);
+      updateSelectionSummary();
       renderTable();
     });
   });
@@ -863,7 +983,9 @@ function renderRowActions(item) {
 
   const purgeLabelHtml = purgeLoading
     ? "Checking Calendar Data…"
-    : buildPurgeLabelHtml(state.entity, purgeRelated, Number(purgeCount || 0));
+    : state.entity === "users" && Number(purgeCount || 0) > 0
+      ? `<span class="purge-label-text">Purge Data</span>`
+      : buildPurgeLabelHtml(state.entity, purgeRelated, Number(purgeCount || 0));
 
   const purgeTitle = purgeCount !== null && purgeCount >= 0
     ? formatPurgeTitle(state.entity, purgeRelated, purgeCount)
@@ -1187,6 +1309,9 @@ function setEntity(nextEntity) {
 }
 
 function bindEvents() {
+  if (el.dangerConfirmInput) el.dangerConfirmInput.value = "";
+  if (el.bulkDeleteRelated) el.bulkDeleteRelated.checked = false;
+  updateDeleteButtonState();
   el.switchUsers.addEventListener("click", () => setEntity("users"));
   el.switchProviders.addEventListener("click", () => setEntity("providers"));
   el.reloadBtn.addEventListener("click", async () => {
@@ -1194,6 +1319,10 @@ function bindEvents() {
     await loadData();
   });
   el.bulkDeleteBtn?.addEventListener("click", bulkDeleteSelected);
+  el.dangerConfirmInput?.addEventListener("input", updateDeleteButtonState);
+  el.bulkDeleteRelated?.addEventListener("change", updateDeleteButtonState);
+  el.selectEmptyUsersBtn?.addEventListener("click", selectEmptyUsers);
+  el.clearSelectionBtn?.addEventListener("click", clearSelection);
   el.scanOrphansBtn?.addEventListener("click", scanOrphans);
   el.deleteOrphansBtn?.addEventListener("click", deleteOrphans);
   el.selectAllBtn?.addEventListener("click", runSelectAllQuery);

@@ -188,18 +188,49 @@
           <input id="tableInput" type="text" placeholder="Table name (ex: users)">
         </div>
         <div class="right-controls">
-          <div class="danger-zone-inline">
-            <label for="dangerConfirmInput">Danger confirm:</label>
-            <input id="dangerConfirmInput" type="text" placeholder="Type DELETE" autocomplete="off">
+          <div class="cleanup-workflow">
+            <div class="cleanup-workflow-header">
+              <strong id="cleanupTitle">Empty User Cleanup</strong>
+              <span>Accounts with real calendar data are protected by default.</span>
+            </div>
+            <div class="cleanup-step" id="cleanupControls">
+              <span class="cleanup-step-number">1</span>
+              <div class="cleanup-step-content">
+                <span class="cleanup-step-label">Select and review</span>
+                <div class="cleanup-step-actions">
+                  <button id="selectEmptyUsersBtn" class="ghost-btn cleanup-select-btn" type="button">Select Empty Users</button>
+                  <button id="clearSelectionBtn" class="ghost-btn" type="button">Clear Selection</button>
+                  <span id="selectionSummary" class="selection-summary">0 selected</span>
+                </div>
+                <span class="cleanup-step-help">Deselect any account you want to keep using its checkbox below.</span>
+              </div>
+            </div>
+            <div class="cleanup-step cleanup-confirm-step">
+              <span class="cleanup-step-number">2</span>
+              <div class="cleanup-step-content">
+                <span class="cleanup-step-label">Confirm and delete</span>
+                <div class="cleanup-step-actions">
+                  <div class="danger-zone-inline">
+                    <label for="dangerConfirmInput">Type DELETE:</label>
+                    <input id="dangerConfirmInput" type="text" placeholder="DELETE" autocomplete="off">
+                  </div>
+                  <button id="bulkDeleteBtn" class="danger-btn cleanup-delete-btn" type="button" disabled>Select Accounts to Delete</button>
+                </div>
+              </div>
+            </div>
+            <details class="advanced-delete-options">
+              <summary>Advanced deletion option</summary>
+              <label class="inline-option danger-related-option"><input id="bulkDeleteRelated" type="checkbox"> Allow deletion of selected accounts that contain related data</label>
+            </details>
           </div>
-          <label class="inline-option"><input id="bulkDeleteRelated" type="checkbox" checked> Delete related</label>
-          <button id="bulkDeleteBtn" class="ghost-btn danger-btn" type="button">Bulk Delete Selected</button>
+          <div class="utility-controls">
           <button id="scanOrphansBtn" class="ghost-btn" type="button">Scan Orphans</button>
           <button id="deleteOrphansBtn" class="ghost-btn danger-btn" type="button">Delete Orphans</button>
-          <button id="selectAllBtn" class="ghost-btn" type="button">Select ALL</button>
+          <button id="selectAllBtn" class="ghost-btn" type="button">Query Table</button>
           <button id="exportBtn" class="ghost-btn" type="button">Export CSV</button>
           <button id="createBtn" type="button">Create</button>
           <button id="reloadBtn" class="ghost-btn" type="button">Refresh</button>
+          </div>
         </div>
         <div id="controlStatusLine" class="status-line" aria-live="polite"></div>
       </details>

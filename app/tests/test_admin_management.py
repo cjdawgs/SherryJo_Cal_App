@@ -355,6 +355,39 @@ def test_admin_bulk_delete_users_with_related(client, db):
     assert all(row["id"] != staff["id"] for row in users_after)
 
 
+def test_admin_bulk_delete_empty_only_skips_users_with_related_data(client, db):
+    headers = _admin_headers(client)
+    empty_user = _register_user(client, role="staff")
+    protected_user = _register_user(client, role="staff")
+    db.add(Task(title="Keep me", owner_id=protected_user["id"]))
+    db.commit()
+
+    res = client.post("/admin/users/bulk-delete", headers=headers, json={
+        "ids": [empty_user["id"], protected_user["id"]],
+        "delete_related": False,
+        "only_if_no_related": True,
+    })
+
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["deleted_users"] == 1
+    assert payload["skipped"] == [{
+        "id": protected_user["id"],
+        "reason": "has_related_data",
+        "related": {
+            "accounts": 0,
+            "events": 0,
+            "tasks": 1,
+            "sticky_notes": 0,
+            "date_sticky_notes": 0,
+            "event_sticky_notes": 0,
+            "notes": 0,
+        },
+    }]
+    assert db.get(User, empty_user["id"]) is None
+    assert db.get(User, protected_user["id"]) is not None
+
+
 def test_admin_provider_related_and_bulk_delete(client, db):
     headers = _admin_headers(client)
     owner = _register_user(client, role="staff")
