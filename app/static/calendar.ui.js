@@ -2234,14 +2234,42 @@ function bindUIEvents() {
 
   const accountsBtn = document.getElementById("accountsBtn");
   const gearMenuShell = document.getElementById("gearMenuShell");
+  const accountsHoverMenu = document.querySelector("#gearMenuShell .accountsHoverMenu");
   const manageAccountsMenuBtn = document.getElementById("manageAccountsMenuBtn");
   const adminMenuBtn = document.getElementById("adminMenuBtn");
+
+  const positionAccountsMenu = () => {
+    if (!gearMenuShell || !accountsHoverMenu) return;
+
+    gearMenuShell.classList.remove("menu-flip-left");
+
+    const shellRect = gearMenuShell.getBoundingClientRect();
+    const menuRect = accountsHoverMenu.getBoundingClientRect();
+    const rightGap = window.innerWidth - shellRect.right;
+    const desiredOffset = window.innerWidth <= 768 ? 6 : 8;
+    const needsFlipLeft = rightGap < (menuRect.width + desiredOffset);
+
+    gearMenuShell.classList.toggle("menu-flip-left", needsFlipLeft);
+  };
 
   accountsBtn?.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (gearMenuShell && !gearMenuShell.classList.contains("open")) {
+      positionAccountsMenu();
+    }
     gearMenuShell?.classList.toggle("open");
     accountsBtn.setAttribute("aria-expanded", gearMenuShell?.classList.contains("open") ? "true" : "false");
+  });
+
+  accountsBtn?.addEventListener("mouseenter", () => {
+    positionAccountsMenu();
+  });
+
+  window.addEventListener("resize", () => {
+    if (gearMenuShell?.classList.contains("open")) {
+      positionAccountsMenu();
+    }
   });
 
   manageAccountsMenuBtn?.addEventListener("click", () => {

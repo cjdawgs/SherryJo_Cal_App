@@ -212,11 +212,20 @@ body {
   z-index: 2000;
 }
 
+.gearMenuShell.menu-flip-left .accountsHoverMenu {
+  left: auto;
+  right: calc(100% + 8px);
+}
+
 @media (max-width: 768px) {
   .accountsHoverMenu {
     left: calc(100% + 6px);
     top: 0;
     min-width: 160px;
+  }
+
+  .gearMenuShell.menu-flip-left .accountsHoverMenu {
+    right: calc(100% + 6px);
   }
 }
 
