@@ -144,6 +144,15 @@ def test_admin_registration_blocked_when_setup_code_unset(client, monkeypatch):
     assert response.status_code == 403
 
 
+def test_runtime_token_encryption_key_endpoint_rejects_staff(client, auth_headers):
+    response = client.post(
+        "/admin/system/token-encryption-key/runtime",
+        headers=auth_headers,
+        json={"token_encryption_key": "not-a-real-key"},
+    )
+    assert response.status_code == 403
+
+
 # --------------------------------------------------
 # 4. Staff cannot escalate their own role
 # --------------------------------------------------

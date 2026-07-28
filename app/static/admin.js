@@ -8,6 +8,7 @@ const state = {
   editing: null,
   overview: null,
   currentUserFailureCheck: null,
+  tokenKeyRepairStatus: null,
   tableQuery: null,
   purgeMeta: {
     users: {},
@@ -61,6 +62,8 @@ const el = {
   runCurrentUserFailureCheckBtn: document.getElementById("runCurrentUserFailureCheckBtn"),
   currentUserFailureCheckStamp: document.getElementById("currentUserFailureCheckStamp"),
   currentUserFailureCheckResult: document.getElementById("currentUserFailureCheckResult"),
+  tokenEncryptionKeyInput: document.getElementById("tokenEncryptionKeyInput"),
+  applyTokenEncryptionKeyBtn: document.getElementById("applyTokenEncryptionKeyBtn"),
 };
 
 let adminWindowControlsReady = false;
@@ -223,6 +226,8 @@ function renderSystemOverview(data) {
 
   if (el.securityWarningBanner) {
     const hasCriticalCryptoGap = Boolean(security?.missing_key_with_encrypted_credentials);
+    const resolvedNow = Boolean(state.tokenKeyRepairStatus?.resolved) && !hasCriticalCryptoGap;
+    el.securityWarningBanner.classList.toggle("is-success", resolvedNow);
     if (hasCriticalCryptoGap) {
       const encryptedRows = Number(security?.encrypted_access_token_rows || 0);
       el.securityWarningBanner.hidden = false;
@@ -231,9 +236,14 @@ function renderSystemOverview(data) {
         `${encryptedRows} encrypted OAuth credential row${encryptedRows === 1 ? " is" : "s are"} present, ` +
         `but TOKEN_ENCRYPTION_KEY is not configured. ` +
         `Background sync and provider publish will fail until the key is restored.`;
+    } else if (resolvedNow) {
+      el.securityWarningBanner.hidden = false;
+      el.securityWarningBanner.innerHTML =
+        `<strong>Resolved:</strong> TOKEN_ENCRYPTION_KEY is now active in this running app, and the credential decryption warning cleared.`;
     } else {
       el.securityWarningBanner.hidden = true;
       el.securityWarningBanner.textContent = "";
+      el.securityWarningBanner.classList.remove("is-success");
     }
   }
 }
@@ -258,6 +268,7 @@ function renderCurrentUserFailureCheck(data) {
   const syncFailures = Array.isArray(data?.sync_failure_accounts) ? data.sync_failure_accounts : [];
   const publishFailures = Array.isArray(data?.publish_failures) ? data.publish_failures : [];
   const hasFailures = Boolean(data?.has_failures);
+  const resolvedNow = Boolean(state.tokenKeyRepairStatus?.resolved) && !hasFailures;
   const summaryItemsHtml = summaryLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
   const decryptWarningsHtml = decryptWarnings.length
     ? `<div><strong>Accounts with decrypt warnings:</strong><ul>${decryptWarnings.map((item) => `<li>${escapeHtml(item.provider)} / ${escapeHtml(item.account_email)}: ${escapeHtml(item.reason || "decrypt warning")}</li>`).join("")}</ul></div>`
@@ -273,10 +284,12 @@ function renderCurrentUserFailureCheck(data) {
     : "";
 
   el.currentUserFailureCheckResult.classList.toggle("is-error", hasFailures);
+  el.currentUserFailureCheckResult.classList.toggle("is-success", resolvedNow);
   el.currentUserFailureCheckResult.innerHTML = `
     <div><strong>Checked user:</strong> ${escapeHtml(data?.user?.email || "unknown")}</div>
     <div><strong>Database used:</strong> ${escapeHtml(database.label || "Unknown")} (${escapeHtml(database.engine || "unknown")})</div>
     <div><strong>What this means:</strong> This is a same-day check for the logged-in admin only. Counts below come from this app&apos;s current database connection.</div>
+    ${resolvedNow ? `<div><strong>Resolved:</strong> The credential decryption issue was rechecked after applying the key and is now clear in this running app.</div>` : ""}
     <ul>
       ${summaryItemsHtml}
       <li>Decrypt warnings today: ${escapeHtml(counts.decrypt_warning_accounts ?? 0)}</li>
@@ -296,7 +309,7 @@ async function loadCurrentUserFailureCheck() {
   }
 
   if (el.currentUserFailureCheckResult) {
-    el.currentUserFailureCheckResult.classList.remove("is-error");
+    el.currentUserFailureCheckResult.classList.remove("is-error", "is-success");
     el.currentUserFailureCheckResult.textContent = "Running today’s failure check...";
   }
 
@@ -326,6 +339,63 @@ async function loadCurrentUserFailureCheck() {
 
   renderCurrentUserFailureCheck(data);
   setStatus(data.has_failures ? "Current user failure check found issues." : "Current user failure check found no issues today.");
+}
+
+async function applyTokenEncryptionKey() {
+  const keyValue = String(el.tokenEncryptionKeyInput?.value || "").trim();
+  if (!keyValue) {
+    setStatus("Enter the known TOKEN_ENCRYPTION_KEY first.", true);
+    el.tokenEncryptionKeyInput?.focus();
+    return;
+  }
+
+  if (el.applyTokenEncryptionKeyBtn) {
+    el.applyTokenEncryptionKeyBtn.disabled = true;
+    el.applyTokenEncryptionKeyBtn.textContent = "Applying...";
+  }
+
+  if (el.currentUserFailureCheckResult) {
+    el.currentUserFailureCheckResult.classList.remove("is-error", "is-success");
+    el.currentUserFailureCheckResult.textContent = "Applying key and rechecking this running app...";
+  }
+
+  const res = await apiRequest("/admin/system/token-encryption-key/runtime", {
+    method: "POST",
+    body: JSON.stringify({ token_encryption_key: keyValue }),
+  });
+
+  if (el.applyTokenEncryptionKeyBtn) {
+    el.applyTokenEncryptionKeyBtn.disabled = false;
+    el.applyTokenEncryptionKeyBtn.textContent = "Apply Key And Recheck";
+  }
+
+  if (!res) {
+    setStatus("Unable to apply TOKEN_ENCRYPTION_KEY.", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    state.tokenKeyRepairStatus = null;
+    if (el.currentUserFailureCheckResult) {
+      el.currentUserFailureCheckResult.classList.add("is-error");
+      el.currentUserFailureCheckResult.textContent = data.detail || "Could not apply TOKEN_ENCRYPTION_KEY.";
+    }
+    setStatus(data.detail || "Could not apply TOKEN_ENCRYPTION_KEY.", true);
+    return;
+  }
+
+  state.tokenKeyRepairStatus = data;
+  if (el.tokenEncryptionKeyInput) {
+    el.tokenEncryptionKeyInput.value = "";
+  }
+  await loadSystemOverview();
+  await loadCurrentUserFailureCheck();
+  setStatus(data.resolved ? "TOKEN_ENCRYPTION_KEY applied and the issue is now resolved in this running app." : (data.message || "TOKEN_ENCRYPTION_KEY applied."));
 }
 
 async function loadSystemOverview() {
@@ -1469,6 +1539,7 @@ function bindEvents() {
   });
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
+  el.applyTokenEncryptionKeyBtn?.addEventListener("click", applyTokenEncryptionKey);
 }
 
 bindEvents();

@@ -1,8 +1,11 @@
 import uuid
 from datetime import datetime, timezone
 
+from cryptography.fernet import Fernet
+
 from app.config import settings
 from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, TVDiagLog, User
+from app.utils.crypto import reset_cipher_cache
 
 
 def _register_user(client, role="staff", password="pass12345"):
@@ -229,6 +232,78 @@ def test_admin_current_user_failures_today_is_scoped_to_logged_in_admin(client, 
     assert payload["user"]["email"] == admin_two["email"]
     assert payload["counts"]["sync_failures_today"] == 0
     assert payload["has_failures"] is False
+
+
+def test_admin_apply_runtime_token_encryption_key_repairs_missing_key_for_running_app(client, db, monkeypatch):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+    known_key = Fernet.generate_key().decode()
+
+    monkeypatch.setattr(settings, "token_encryption_key", known_key, raising=False)
+    reset_cipher_cache()
+    db.add(OAuthAccount(
+        user_id=owner["id"],
+        provider="google",
+        account_email="repair@test.com",
+        access_token="live-token",
+        refresh_token="live-refresh",
+    ))
+    db.commit()
+
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+    monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
+    reset_cipher_cache()
+
+    res = client.post(
+        "/admin/system/token-encryption-key/runtime",
+        headers=headers,
+        json={"token_encryption_key": known_key},
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["resolved"] is True
+    assert payload["security"]["token_encryption_key_configured"] is True
+    assert payload["security"]["missing_key_with_encrypted_credentials"] is False
+
+
+def test_admin_apply_runtime_token_encryption_key_rejects_wrong_key(client, db, monkeypatch):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+    known_key = Fernet.generate_key().decode()
+    wrong_key = Fernet.generate_key().decode()
+
+    monkeypatch.setattr(settings, "token_encryption_key", known_key, raising=False)
+    reset_cipher_cache()
+    db.add(OAuthAccount(
+        user_id=owner["id"],
+        provider="google",
+        account_email="wrong-key@test.com",
+        access_token="live-token",
+        refresh_token="live-refresh",
+    ))
+    db.commit()
+
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+    monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
+    reset_cipher_cache()
+
+    res = client.post(
+        "/admin/system/token-encryption-key/runtime",
+        headers=headers,
+        json={"token_encryption_key": wrong_key},
+    )
+    assert res.status_code == 422
+    assert "could not be decrypted" in res.json()["detail"].lower()
+
+
+def test_admin_apply_runtime_token_encryption_key_requires_admin(client):
+    staff_headers = _staff_headers(client)
+    denied = client.post(
+        "/admin/system/token-encryption-key/runtime",
+        headers=staff_headers,
+        json={"token_encryption_key": Fernet.generate_key().decode()},
+    )
+    assert denied.status_code == 403
 
 
 def test_admin_table_rows_requires_admin_role(client):

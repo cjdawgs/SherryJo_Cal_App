@@ -4,9 +4,10 @@ import logging
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from app.config import settings
 from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, User
 from app.services.asset_urls import asset_url
+from app.utils.crypto import TokenEncryptionError, reset_cipher_cache, unseal
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
@@ -40,6 +42,10 @@ REDACTED_PLACEHOLDER = "***"
 
 # The browser is a read-only inspection aid, not an export tool.
 MAX_TABLE_ROWS = 200
+
+
+class RuntimeTokenEncryptionKeyUpdate(BaseModel):
+    token_encryption_key: str
 
 
 def redact_row(row: dict) -> dict:
@@ -119,6 +125,54 @@ def _utc_day_bounds(now: datetime | None = None) -> tuple[datetime, datetime]:
 def _details_looks_like_failure(details: str | None) -> bool:
     value = str(details or "").lower()
     return any(flag in value for flag in ("status=error", "failed=1", "failed=2", "failed=3", "failed=4", "failed=5", "reason=no_targets", "warning"))
+
+
+def _apply_runtime_token_encryption_key(candidate_key: str, db: Session) -> dict:
+    previous_key = getattr(settings, "token_encryption_key", None)
+    previous_env = os.getenv("TOKEN_ENCRYPTION_KEY")
+    normalized = str(candidate_key or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=422, detail="TOKEN_ENCRYPTION_KEY is required.")
+
+    probe_value = db.execute(
+        text("SELECT access_token FROM oauth_accounts WHERE access_token LIKE 'v1:%' LIMIT 1")
+    ).scalar()
+
+    try:
+        os.environ["TOKEN_ENCRYPTION_KEY"] = normalized
+        settings.token_encryption_key = normalized
+        reset_cipher_cache()
+
+        if probe_value:
+            unseal(str(probe_value))
+
+        tables = sorted(inspect(engine).get_table_names())
+        security_info = _credential_encryption_health(db, tables)
+        return {
+            "resolved": not bool(security_info.get("missing_key_with_encrypted_credentials")),
+            "security": security_info,
+            "message": "TOKEN_ENCRYPTION_KEY applied to the running app.",
+            "persists_after_restart": False,
+        }
+    except (TokenEncryptionError, HTTPException) as exc:
+        if previous_env is None:
+            os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        else:
+            os.environ["TOKEN_ENCRYPTION_KEY"] = previous_env
+        settings.token_encryption_key = previous_key
+        reset_cipher_cache()
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/system/token-encryption-key/runtime")
+def admin_apply_runtime_token_encryption_key(
+    payload: RuntimeTokenEncryptionKeyUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    return _apply_runtime_token_encryption_key(payload.token_encryption_key, db)
 
 
 @router.get("/system/current-user-failures-today")

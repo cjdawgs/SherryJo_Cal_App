@@ -84,35 +84,49 @@
       margin: 10px 0;
       padding: 10px 12px;
       border-radius: 8px;
-      border: 1px solid rgba(255, 149, 0, 0.45);
-      background: rgba(255, 149, 0, 0.12);
-      color: #ffdfb0;
+      border: 1px solid #efc8c3;
+      background: #fff7f6;
+      color: #9f1c16;
       font-size: 12px;
       line-height: 1.45;
+      font-weight: 600;
     }
 
     .security-warning-banner strong {
-      color: #ffd28b;
+      color: #b42318;
+    }
+
+    .security-warning-banner.is-success {
+      border-color: #b7d7c0;
+      background: #edf9f0;
+      color: #17663b;
+    }
+
+    .security-warning-banner.is-success strong {
+      color: #0f5132;
     }
 
     .failure-check-panel {
       margin-top: 14px;
       padding: 14px 16px;
       border-radius: 10px;
-      border: 1px solid rgba(90, 180, 255, 0.25);
-      background: rgba(90, 180, 255, 0.07);
+      border: 1px solid #bfd6ea;
+      background: #eef6fd;
+      color: #17324d;
     }
 
     .failure-check-panel h3 {
       margin: 0 0 8px;
       font-size: 14px;
+      color: #0f2740;
     }
 
     .failure-check-panel p {
       margin: 6px 0;
       font-size: 12px;
       line-height: 1.5;
-      opacity: 0.84;
+      opacity: 1;
+      color: #264765;
     }
 
     .failure-check-actions {
@@ -127,15 +141,23 @@
       margin-top: 10px;
       padding: 12px;
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.22);
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #ffffff;
+      border: 1px solid #c7d6e4;
+      color: #162a3d;
       font-size: 12px;
       line-height: 1.55;
     }
 
     .failure-check-result.is-error {
-      border-color: rgba(255, 149, 0, 0.35);
-      background: rgba(255, 149, 0, 0.10);
+      border-color: #efc8c3;
+      background: #fff7f6;
+      color: #9f1c16;
+    }
+
+    .failure-check-result.is-success {
+      border-color: #b7d7c0;
+      background: #edf9f0;
+      color: #17663b;
     }
 
     .failure-check-result ul {
@@ -145,6 +167,39 @@
 
     .failure-check-result li {
       margin: 4px 0;
+    }
+
+    .failure-check-result strong {
+      color: inherit;
+    }
+
+    .failure-fix-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 10px 0 4px;
+    }
+
+    .failure-fix-row label {
+      font-size: 12px;
+      color: #9f1c16;
+      font-weight: 700;
+    }
+
+    .failure-fix-row input {
+      min-width: 260px;
+      padding: 9px 12px;
+      border-radius: 8px;
+      border: 1px solid #efc8c3;
+      background: #fff;
+      color: #4a1d12;
+    }
+
+    .failure-fix-help {
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: #6b7280;
     }
   </style>
 </head>
@@ -342,6 +397,12 @@
             <button id="runCurrentUserFailureCheckBtn" class="ghost-btn" type="button">Run Today&apos;s Failure Check</button>
             <span id="currentUserFailureCheckStamp" class="muted-line">Not run yet.</span>
           </div>
+          <div class="failure-fix-row">
+            <label for="tokenEncryptionKeyInput">Fix Now:</label>
+            <input id="tokenEncryptionKeyInput" type="password" placeholder="Enter the known TOKEN_ENCRYPTION_KEY">
+            <button id="applyTokenEncryptionKeyBtn" class="danger-btn" type="button">Apply Key And Recheck</button>
+          </div>
+          <p class="failure-fix-help">This applies the key to the current running app only. After it succeeds, the page rechecks automatically and marks the issue resolved in green.</p>
           <div id="currentUserFailureCheckResult" class="failure-check-result">Press “Run Today&apos;s Failure Check” to load a plain-English summary.</div>
         </div>
         <div class="system-grid">
