@@ -5,6 +5,7 @@
 
 import logging
 import requests
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,38 @@ logger = logging.getLogger(__name__)
 # ==================================================
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+
+
+def _parse_iso_utc(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            dt = datetime.fromisoformat(text)
+        except Exception:
+            return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _extract_event_id_from_location(location_value: str | None) -> str | None:
+    if not location_value:
+        return None
+    raw = str(location_value).strip().rstrip("/")
+    if not raw:
+        return None
+    if "/events/" not in raw:
+        return None
+    candidate = raw.split("/events/", 1)[-1].split("?", 1)[0].strip()
+    return candidate or None
 
 
 def _graph_error_detail(response, fallback_prefix: str) -> str:
@@ -222,16 +255,97 @@ class GraphClient:
             headers={"Authorization": f"Bearer {token}"}
         )
 
-        if response.status_code not in [200, 201]:
+        if response.status_code not in [200, 201, 202]:
             detail = _graph_error_detail(response, "Outlook create failed")
             logger.error("❌ %s", detail)
             raise RuntimeError(detail)
 
+        response_payload = {}
         try:
-            return (response.json() or {}).get("id")
+            response_payload = response.json() or {}
         except (ValueError, AttributeError) as exc:
-            logger.warning("⚠️ Outlook create succeeded but response id could not be parsed: %s", exc)
+            logger.warning("⚠️ Outlook create response payload could not be parsed: %s", exc)
+
+        event_id = None
+        if isinstance(response_payload, dict):
+            event_id = str(response_payload.get("id") or "").strip() or None
+        if event_id:
+            return event_id
+
+        header_candidates = [
+            response.headers.get("OData-EntityId"),
+            response.headers.get("Location"),
+            response.headers.get("Content-Location"),
+        ]
+        for header_value in header_candidates:
+            event_id = _extract_event_id_from_location(header_value)
+            if event_id:
+                return event_id
+
+        event_id = self._resolve_recent_created_event_id(token=token, event_payload=event_payload)
+        if event_id:
+            logger.info("Recovered Microsoft created-event id via fallback lookup.")
+            return event_id
+
+        logger.warning("⚠️ Outlook create succeeded but no event id could be resolved.")
+        return None
+
+    def _resolve_recent_created_event_id(self, token, event_payload):
+        """Fallback for cases where Graph create succeeds but returns no event id."""
+        start_dt = _parse_iso_utc(event_payload.get("start_time"))
+        end_dt = _parse_iso_utc(event_payload.get("end_time"))
+        if not start_dt:
             return None
+
+        title = str(event_payload.get("title") or "").strip()
+        window_start = (start_dt - timedelta(hours=2)).isoformat()
+        window_end = ((end_dt or start_dt) + timedelta(hours=2)).isoformat()
+
+        url = f"{GRAPH_BASE_URL}/me/calendarView"
+        params = {
+            "startDateTime": window_start,
+            "endDateTime": window_end,
+            "$top": 100,
+            "$orderby": "createdDateTime desc",
+        }
+        response = requests.get(url, params=params, headers={"Authorization": f"Bearer {token}"})
+        if response.status_code != 200:
+            logger.warning("Fallback lookup after Outlook create could not fetch calendar view: %s", response.status_code)
+            return None
+
+        try:
+            items = (response.json() or {}).get("value") or []
+        except Exception:
+            return None
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            candidate_id = str(item.get("id") or "").strip()
+            if not candidate_id:
+                continue
+
+            if title:
+                subject = str(item.get("subject") or "").strip()
+                if subject != title:
+                    continue
+
+            item_start = _parse_iso_utc((item.get("start") or {}).get("dateTime"))
+            if item_start is None:
+                continue
+            if abs((item_start - start_dt).total_seconds()) > 180:
+                continue
+
+            if end_dt is not None:
+                item_end = _parse_iso_utc((item.get("end") or {}).get("dateTime"))
+                if item_end is None:
+                    continue
+                if abs((item_end - end_dt).total_seconds()) > 180:
+                    continue
+
+            return candidate_id
+
+        return None
 
     # ==================================================
     # ✅ DELETE EVENT

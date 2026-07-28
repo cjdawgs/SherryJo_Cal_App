@@ -114,6 +114,24 @@ def _is_missing_provider_event(result):
     return isinstance(result, int) and result in {404, 410}
 
 
+def _is_retryable_microsoft_create_error(exc: Exception) -> bool:
+    message = str(exc or "").lower()
+    retryable_markers = (
+        "invalidauthenticationtoken",
+        "token expired",
+        "temporarily unavailable",
+        "gateway timeout",
+        "request timeout",
+        "timeout",
+        "service unavailable",
+        "too many requests",
+        "503",
+        "504",
+        "429",
+    )
+    return any(marker in message for marker in retryable_markers)
+
+
 class EventActions:
 
     def update_event(self, db: Session, event, updates, google_service, graph_client, user):
@@ -252,11 +270,25 @@ class EventActions:
                     target_result["action"] = "recreate"
 
                 new_raw_id = None
+                create_error = None
                 if provider == "google":
                     new_raw_id = google_service.create_event(token=token, event_payload=updates,
                                                              account_email=acct_email or None)
                 elif provider == "microsoft":
-                    new_raw_id = graph_client.create_event(token=token, event_payload=updates)
+                    try:
+                        new_raw_id = graph_client.create_event(token=token, event_payload=updates)
+                    except Exception as exc:
+                        create_error = exc
+                        if _is_retryable_microsoft_create_error(exc):
+                            retry_token = _get_token(db, user.id, provider, acct_email)
+                            if retry_token and retry_token != token:
+                                logger.info("Retrying Microsoft create for %s after token refresh.", target_key)
+                                new_raw_id = graph_client.create_event(token=retry_token, event_payload=updates)
+                                create_error = None
+                            else:
+                                logger.info("Microsoft create retry skipped for %s; no newer token available.", target_key)
+                        if create_error is not None:
+                            raise create_error
 
                 if new_raw_id:
                     external_ids[target_key] = new_raw_id
@@ -267,7 +299,7 @@ class EventActions:
                     target_result["message"] = f"Created {target_key}"
                 else:
                     target_result["status"] = "create_failed"
-                    target_result["message"] = f"Create failed for {target_key}"
+                    target_result["message"] = f"Create failed for {target_key}: provider returned no event id"
                     warnings.append(target_result["message"])
                 account_results.append(target_result)
             except Exception as e:

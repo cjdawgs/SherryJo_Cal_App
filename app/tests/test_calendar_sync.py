@@ -392,6 +392,69 @@ def test_publish_returns_detailed_microsoft_target_failure(mock_ms_create, _mock
     mock_ms_create.assert_called_once()
 
 
+@patch("app.services.event_actions.ensure_valid_token", side_effect=["token-ms-old", "token-ms-new"])
+@patch(
+    "app.services.graph_client.GraphClient.create_event",
+    side_effect=[
+        RuntimeError("Outlook create failed (401 InvalidAuthenticationToken): Access token expired."),
+        "ms-created-123",
+    ],
+)
+def test_publish_retries_microsoft_create_after_retryable_auth_error(mock_ms_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="publish-ms-retry@example.com",
+        access_token="token-ms-old",
+        refresh_token="refresh-ms-old",
+        status="ok",
+    ))
+    db.add(Event(
+        title="Publish Microsoft Retry",
+        start_time=datetime(2026, 7, 16, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 16, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:publish-ms-retry",
+        external_ids={},
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Microsoft Retry").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [event.id],
+            "publish_targets": {
+                str(event.id): ["microsoft:publish-ms-retry@example.com"]
+            }
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["published"] == 1
+    assert data["created"] == 1
+    assert data["failed"] == 0
+    assert data["warnings"] == []
+    assert any(
+        result["target_key"] == "microsoft:publish-ms-retry@example.com"
+        and result["status"] == "created"
+        for result in data["account_results"]
+    )
+
+    db.refresh(event)
+    assert event.external_ids.get("microsoft:publish-ms-retry@example.com") == "ms-created-123"
+    assert mock_ms_create.call_count == 2
+
+
 @patch("app.services.google_calendar_service.GoogleCalendarService.update_event")
 def test_publish_prefers_healthy_duplicate_oauth_account(mock_google_update, client, auth_headers, db):
     user = db.query(User).filter(User.email.like("%@test.com")).first()

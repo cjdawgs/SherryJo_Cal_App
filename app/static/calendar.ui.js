@@ -739,7 +739,7 @@ function setSelectedPublishTargetKeys(keys) {
 
 function collectSelectedKeysFromContainer(container) {
   if (!container) return [];
-  return [...container.querySelectorAll('input[data-publish-account-key]:checked')].map((input) => String(input.value || "").toLowerCase());
+  return [...container.querySelectorAll('input[data-publish-account-key]:checked:not(:disabled)')].map((input) => String(input.value || "").toLowerCase());
 }
 
 function getPublishTargetSummary() {
@@ -770,7 +770,7 @@ function renderAccountSelectionChecklist(containerId, options = {}) {
   }
 
   container.innerHTML = rows.map((row) => {
-    const checked = selected.has(row.key) ? "checked" : "";
+    const checked = (selected.has(row.key) || row.linked) ? "checked" : "";
     const disabled = row.disabled ? "disabled" : "";
     const badge = row.lockedLinked ? "Up to date" : (row.linked ? "Linked" : (row.publishable ? "Available" : "View only"));
     const hint = row.disabled
