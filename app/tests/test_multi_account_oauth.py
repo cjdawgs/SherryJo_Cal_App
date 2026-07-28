@@ -348,6 +348,21 @@ def test_resolve_account_status_flags_reauth_required_token(db: Session, multi_a
     assert resolve_account_status(account) == "error"
 
 
+def test_resolve_account_status_handles_missing_encryption_key_for_encrypted_value(
+    db: Session, multi_account_user: User
+):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="encrypted@example.com",
+        access_token_encrypted="v1:encrypted-token-placeholder",
+        refresh_token="refresh_token",
+        status="ok",
+    )
+
+    assert resolve_account_status(account) == "error"
+
+
 def test_reauth_required_token_logs_only_on_state_transition(
     db: Session, multi_account_user: User, caplog
 ):
@@ -540,6 +555,41 @@ def test_get_accounts_endpoint(client, multi_account_user: User, oauth_accounts_
     assert "created_at" in data[0]
     assert "updated_at" in data[0]
     assert "account_email" in data[0]
+
+
+def test_get_accounts_endpoint_survives_encrypted_token_without_key(client, multi_account_user: User, db: Session):
+    """GET /accounts should return data instead of 500 when decryption key is missing."""
+    import jwt
+    from app.routers.auth import SECRET_KEY
+
+    encrypted_like_account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="broken-encrypted@sample.net",
+        access_token_encrypted="v1:encrypted-token-placeholder",
+        refresh_token="refresh_token",
+        is_primary=True,
+        sync_enabled=True,
+    )
+    db.add(encrypted_like_account)
+    db.commit()
+
+    token = jwt.encode(
+        {"user_id": multi_account_user.id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    response = client.get(
+        "/accounts",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    matching = [item for item in data if item.get("account_email") == "broken-encrypted@sample.net"]
+    assert len(matching) == 1
+    assert matching[0]["status"] == "error"
 
 
 def test_get_accounts_filtered_endpoint(client, multi_account_user: User, oauth_accounts_setup, db: Session):

@@ -20,6 +20,7 @@ import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
 from app.models import OAuthAccount
+from app.utils.crypto import TokenEncryptionError
 import requests
 from datetime import datetime, timedelta, timezone
 from app.config import settings
@@ -100,7 +101,18 @@ def safe_commit(db: Session):
 
 def resolve_account_status(account: OAuthAccount):
     """Return the authoritative backend status for an account."""
-    token_val = (getattr(account, "access_token", "") or "").strip()
+    try:
+        token_val = (getattr(account, "access_token", "") or "").strip()
+    except TokenEncryptionError:
+        # Keep account listings available when encrypted credentials exist
+        # but the runtime key is missing or incorrect.
+        logger.warning(
+            "Unable to decrypt access token for account id=%s provider=%s; "
+            "marking status as error.",
+            getattr(account, "id", None),
+            getattr(account, "provider", None),
+        )
+        return "error"
 
     if token_val == "__REAUTH_REQUIRED__":
         return "error"
