@@ -132,6 +132,20 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
 
     last_error = str(getattr(account, "last_error", "") or "").strip().lower()
     if getattr(account, "status", "ok") == "error":
+        if any(flag in last_error for flag in ("erroraccessdenied", "access is denied", "insufficient privileges", "forbidden", "authorization_requestdenied")):
+            return {
+                "code": "provider_access_denied",
+                "message": "Provider denied calendar write access for this account. Reconnect this account to refresh permissions.",
+                "requires_admin": False,
+                "user_remediable": True,
+                "recommended_action": "reconnect",
+                "recommended_label": "Reconnect",
+                "resolution_steps": [
+                    "Open Account Manager for this account.",
+                    "Click Reconnect and complete Microsoft consent.",
+                    "Return to Calendar and publish the event again.",
+                ],
+            }
         if any(flag in last_error for flag in ("expired", "invalid", "revoked", "invalid_grant", "reauth", "no valid token")):
             return {
                 "code": "token_expired_or_invalid",
@@ -140,6 +154,11 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
                 "user_remediable": True,
                 "recommended_action": "reconnect",
                 "recommended_label": "Reconnect",
+                "resolution_steps": [
+                    "Click Reconnect for this account.",
+                    "Complete provider sign-in and consent.",
+                    "Run Publish again for the event.",
+                ],
             }
         return {
             "code": "sync_error",
@@ -148,6 +167,11 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
             "user_remediable": True,
             "recommended_action": "retry_sync",
             "recommended_label": "Retry Sync",
+            "resolution_steps": [
+                "Click Retry for this account.",
+                "If retry fails, click Reconnect.",
+                "Then retry Publish for your event.",
+            ],
         }
 
     return {

@@ -276,14 +276,14 @@ class EventActions:
                                                              account_email=acct_email or None)
                 elif provider == "microsoft":
                     try:
-                        new_raw_id = graph_client.create_event(token=token, event_payload=updates)
+                        new_raw_id = graph_client.create_event(token=token, event_payload=updates, raise_on_error=True)
                     except Exception as exc:
                         create_error = exc
                         if _is_retryable_microsoft_create_error(exc):
                             retry_token = _get_token(db, user.id, provider, acct_email)
                             if retry_token and retry_token != token:
                                 logger.info("Retrying Microsoft create for %s after token refresh.", target_key)
-                                new_raw_id = graph_client.create_event(token=retry_token, event_payload=updates)
+                                new_raw_id = graph_client.create_event(token=retry_token, event_payload=updates, raise_on_error=True)
                                 create_error = None
                             else:
                                 logger.info("Microsoft create retry skipped for %s; no newer token available.", target_key)

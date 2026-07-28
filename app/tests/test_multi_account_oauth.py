@@ -640,6 +640,81 @@ def test_get_accounts_endpoint_classifies_never_connected_token_issue(client, mu
     assert matching[0]["token_issue"]["user_remediable"] is True
 
 
+def test_get_accounts_endpoint_classifies_provider_access_denied_issue(client, multi_account_user: User, db: Session):
+    """AccessDenied errors should be classified with reconnect remediation guidance."""
+    import jwt
+    from app.routers.auth import SECRET_KEY
+
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="microsoft",
+        account_email="ms-access-denied@sample.net",
+        access_token="token-ms",
+        refresh_token="refresh-ms",
+        status="error",
+        last_error="Outlook create failed (403 ErrorAccessDenied): Access is denied.",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    token = jwt.encode(
+        {"user_id": multi_account_user.id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    response = client.get(
+        "/accounts",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    matching = [item for item in data if item.get("account_email") == "ms-access-denied@sample.net"]
+    assert len(matching) == 1
+    assert matching[0]["token_issue"]["code"] == "provider_access_denied"
+    assert matching[0]["token_issue"]["recommended_action"] == "reconnect"
+    assert len(matching[0]["token_issue"]["resolution_steps"]) >= 1
+
+
+@patch("app.services.calendar_service.CalendarService.fetch_all_events", return_value={"events": []})
+def test_retry_endpoint_returns_remediation_when_account_still_needs_action(_mock_fetch, client, multi_account_user: User, db: Session):
+    """Retry should return actionable remediation instead of forcing OK status."""
+    import jwt
+    from app.routers.auth import SECRET_KEY
+
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="microsoft",
+        account_email="retry-ms@sample.net",
+        access_token="token-ms",
+        refresh_token="refresh-ms",
+        status="error",
+        last_error="Outlook create failed (403 ErrorAccessDenied): Access is denied.",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    token = jwt.encode(
+        {"user_id": multi_account_user.id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    response = client.post(
+        f"/accounts/{account.id}/retry",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is False
+    assert data["remediation"]["code"] == "provider_access_denied"
+    assert data["remediation"]["recommended_action"] == "reconnect"
+
+
 def test_get_accounts_filtered_endpoint(client, multi_account_user: User, oauth_accounts_setup, db: Session):
     """Test GET /accounts?provider=google endpoint."""
     

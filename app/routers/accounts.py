@@ -30,6 +30,7 @@ from app.models import User, OAuthAccount
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     resolve_account_status,
+    normalize_provider,
 )
 from app.services.asset_urls import asset_import_map_json, asset_url
 from app.utils import (
@@ -189,6 +190,7 @@ def retry_account_sync(
 
     service = CalendarService()
     retry_started_at = datetime.now(timezone.utc)
+    target_key = f"{normalize_provider(account.provider)}:{(account.account_email or '').lower().strip()}"
 
     try:
         logger.info(
@@ -196,40 +198,46 @@ def retry_account_sync(
             f"prev_status={account.status} prev_success={account.last_sync_success} prev_failure={account.last_sync_failure}"
         )
 
-        # Reuse the sync pipeline to re-evaluate account health and refresh event state.
-        service.fetch_all_events(db, current_user)
+        # Reuse sync pipeline but scope to the selected account so retry is fast and relevant.
+        service.fetch_all_events(db, current_user, account_key=target_key)
 
         db.refresh(account)
 
-        # Rule: any recorded successful sync must force backend status to ok.
-        if account.last_sync_success:
-            account.status = "ok"
-            account.last_error = None
-            account.last_sync_failure = None
-        else:
-            account.last_sync_success = retry_started_at
-            account.last_sync_failure = None
-            account.last_error = None
-            account.status = "ok"
-
-        safe_commit(db)
-
+        # Keep persisted status aligned with resolver; never force OK when provider still fails.
         resolved_status = resolve_account_status(account)
+        account.status = resolved_status
+        safe_commit(db)
+        db.refresh(account)
+
+        summary = account_summary(account)
+        token_issue = summary.get("token_issue") or {}
+        has_actionable_issue = str(token_issue.get("code") or "") not in {"", "none"}
+
         logger.info(
             f"✅ RETRY SUCCESS account_id={account.id} provider={account.provider} email={account.account_email} "
             f"status={resolved_status} success={account.last_sync_success} failure={account.last_sync_failure}"
         )
 
+        if has_actionable_issue:
+            recommended_label = str(token_issue.get("recommended_label") or "Resolve")
+            return {
+                "success": False,
+                "message": f"Sync checked, but this account still needs action: {token_issue.get('message')}",
+                "error": token_issue.get("message") or "Account still needs attention.",
+                "account": summary,
+                "remediation": {
+                    "code": token_issue.get("code"),
+                    "recommended_action": token_issue.get("recommended_action"),
+                    "recommended_label": recommended_label,
+                    "steps": token_issue.get("resolution_steps") or [],
+                },
+            }
+
         return {
             "success": True,
             "message": "✅ Sync successful",
-            "account": {
-                "id": account.id,
-                "status": resolved_status,
-                "last_sync_success": account.last_sync_success.isoformat(),
-                "last_sync_failure": None,
-                "last_error": None
-            }
+            "account": summary,
+            "checked_at": retry_started_at.isoformat(),
         }
 
     except Exception as e:

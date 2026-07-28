@@ -172,7 +172,7 @@ class GraphClient:
     # ✅ UPDATE EVENT
     # ==================================================
 
-    def update_event(self, token, event_id, updates):
+    def update_event(self, token, event_id, updates, raise_on_error: bool = False):
         """
         ✅ PURPOSE:
         Update event in Outlook
@@ -214,7 +214,7 @@ class GraphClient:
         if response.status_code not in [200, 202]:
             detail = _graph_error_detail(response, "Outlook update failed")
             logger.error("❌ %s", detail)
-            if response.status_code not in [404, 410]:
+            if raise_on_error and response.status_code not in [404, 410]:
                 raise RuntimeError(detail)
 
         return response.status_code
@@ -222,7 +222,7 @@ class GraphClient:
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================
-    def create_event(self, token, event_payload):
+    def create_event(self, token, event_payload, raise_on_error: bool = False):
         url = f"{GRAPH_BASE_URL}/me/events"
 
         payload = {
@@ -258,7 +258,9 @@ class GraphClient:
         if response.status_code not in [200, 201, 202]:
             detail = _graph_error_detail(response, "Outlook create failed")
             logger.error("❌ %s", detail)
-            raise RuntimeError(detail)
+            if raise_on_error:
+                raise RuntimeError(detail)
+            return None
 
         response_payload = {}
         try:

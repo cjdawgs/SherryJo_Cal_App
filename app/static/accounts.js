@@ -15,6 +15,17 @@ function setGlobalMessage(message, kind = "error") {
   errorBox.textContent = message || "";
 }
 
+function getIssueSteps(acc) {
+  const steps = Array.isArray(acc?.token_issue?.resolution_steps) ? acc.token_issue.resolution_steps : [];
+  return steps.map((step) => String(step || "").trim()).filter(Boolean);
+}
+
+function buildIssueGuidance(acc) {
+  const steps = getIssueSteps(acc);
+  if (!steps.length) return "";
+  return steps.map((step, index) => `${index + 1}. ${step}`).join(" ");
+}
+
 function setSyncStatus(message, meta = "") {
   const text = document.getElementById("sync-status-text");
   const metaBox = document.getElementById("sync-status-meta");
@@ -391,7 +402,11 @@ async function retryAccount(id, button) {
 
     const data = await res.json();
     if (!res.ok || data.success === false) {
-      setGlobalMessage(data.error || data.message || "Retry failed.");
+      const remediation = data?.remediation || {};
+      const steps = Array.isArray(remediation.steps) ? remediation.steps.filter(Boolean) : [];
+      const guidance = steps.length ? ` Steps: ${steps.map((step, index) => `${index + 1}) ${step}`).join(" ")}` : "";
+      setGlobalMessage((data.error || data.message || "Retry failed.") + guidance);
+      await loadAccounts();
       return;
     }
 
@@ -454,6 +469,11 @@ function renderProviderAccounts(provider, list) {
       && (normalizeProvider(acc.provider) === "google" || normalizeProvider(acc.provider) === "microsoft" || normalizeProvider(acc.provider) === "apple");
     const issueMessage = String(acc?.token_issue?.message || "").trim();
     const issueCode = String(acc?.token_issue?.code || "").trim();
+    const issueGuidance = buildIssueGuidance(acc);
+    const recommendedAction = String(acc?.token_issue?.recommended_action || "").trim();
+    const recommendedLabel = String(acc?.token_issue?.recommended_label || "Resolve").trim();
+    const isRecommendedReconnect = recommendedAction === "reconnect";
+    const isRecommendedRetry = recommendedAction === "retry_sync";
     const showIssue = acc.status === "error" && (issueMessage || issueCode);
 
     div.innerHTML = `
@@ -463,12 +483,13 @@ function renderProviderAccounts(provider, list) {
         ${acc.is_primary ? "⭐" : ""}
         <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
         ${showIssue ? `<div style="margin-top:4px; font-size:12px; color:#7f1d1d;"><strong>${issueCode ? issueCode.replaceAll("_", " ") : "issue"}:</strong> ${issueMessage || "Token action required."}</div>` : ""}
+        ${showIssue && issueGuidance ? `<div style="margin-top:2px; font-size:11px; color:#7f1d1d;">${issueGuidance}</div>` : ""}
       </div>
       <div class="account-actions">
         <button data-action="primary">Primary</button>
         <button data-action="toggle">${acc.sync_enabled ? "Disable" : "Enable"}</button>
         <button data-action="remove">Remove</button>
-        <button data-action="retry">Retry</button>
+        ${isRecommendedRetry || !isRecommendedReconnect ? `<button data-action="retry">${isRecommendedRetry ? recommendedLabel : "Retry"}</button>` : ""}
         ${reconnectVisible ? "<button data-action=\"reconnect\">Reconnect</button>" : ""}
         ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\">Admin Fix Needed</button>" : ""}
       </div>
@@ -477,10 +498,14 @@ function renderProviderAccounts(provider, list) {
     div.querySelector('[data-action="primary"]').onclick = () => setPrimary(acc.id);
     div.querySelector('[data-action="toggle"]').onclick = () => toggleSync(acc.id, !acc.sync_enabled);
     div.querySelector('[data-action="remove"]').onclick = () => removeAccount(acc.id);
-    div.querySelector('[data-action="retry"]').onclick = (e) => retryAccount(acc.id, e.currentTarget);
+    const retryBtn = div.querySelector('[data-action="retry"]');
+    if (retryBtn) {
+      retryBtn.onclick = (e) => retryAccount(acc.id, e.currentTarget);
+    }
 
     const reconnectBtn = div.querySelector('[data-action="reconnect"]');
     if (reconnectBtn) {
+      reconnectBtn.textContent = isRecommendedReconnect ? recommendedLabel : "Reconnect";
       reconnectBtn.onclick = (e) => reconnectAccount(acc.provider, acc.account_email, e.currentTarget);
     }
 

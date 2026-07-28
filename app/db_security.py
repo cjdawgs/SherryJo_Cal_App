@@ -25,6 +25,7 @@ RLS_TABLES = (
     "date_sticky_notes",
     "event_tag_color_settings",
     "tv_diag_log",
+    "app_runtime_secrets",
 )
 
 PUBLIC_API_ROLES = ("anon", "authenticated")
