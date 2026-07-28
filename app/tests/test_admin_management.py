@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.config import settings
-from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, User
+from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, TVDiagLog, User
 
 
 def _register_user(client, role="staff", password="pass12345"):
@@ -165,6 +165,70 @@ def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypte
     assert security.get("encrypted_credentials_present") is True
     assert security.get("token_encryption_key_configured") is False
     assert security.get("missing_key_with_encrypted_credentials") is True
+
+
+def test_admin_current_user_failures_today_reports_plain_english_summary(client, db, monkeypatch):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+
+    failure_time = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    db.add(OAuthAccount(
+        user_id=admin["id"],
+        provider="google",
+        account_email="admin.failure@test.com",
+        access_token="token-value",
+        refresh_token="refresh-value",
+        last_sync_failure=failure_time,
+        last_error="Stored credential is encrypted but TOKEN_ENCRYPTION_KEY is not configured.",
+        status="error",
+    ))
+    db.add(TVDiagLog(
+        user_id=admin["id"],
+        event="calendar_publish_result",
+        details="status=error failed=1 reason=no_targets",
+        ts_server=failure_time,
+    ))
+    db.commit()
+
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+
+    res = client.get("/admin/system/current-user-failures-today", headers=headers)
+    assert res.status_code == 200
+
+    payload = res.json()
+    assert payload["user"]["email"] == admin["email"]
+    assert payload["has_failures"] is True
+    assert payload["counts"]["sync_failures_today"] == 1
+    assert payload["counts"]["publish_failures_today"] == 1
+    assert any("sync failure" in line.lower() for line in payload["summary_lines"])
+    assert len(payload["sync_failure_accounts"]) == 1
+    assert len(payload["publish_failures"]) == 1
+
+
+def test_admin_current_user_failures_today_is_scoped_to_logged_in_admin(client, db):
+    admin_one = _register_user(client, role="admin")
+    admin_two = _register_user(client, role="admin")
+    headers_two = _login_headers(client, admin_two["email"], admin_two["password"])
+
+    db.add(OAuthAccount(
+        user_id=admin_one["id"],
+        provider="google",
+        account_email="other-admin@test.com",
+        access_token="token-value",
+        refresh_token="refresh-value",
+        last_sync_failure=datetime.now(timezone.utc),
+        last_error="failure",
+        status="error",
+    ))
+    db.commit()
+
+    res = client.get("/admin/system/current-user-failures-today", headers=headers_two)
+    assert res.status_code == 200
+
+    payload = res.json()
+    assert payload["user"]["email"] == admin_two["email"]
+    assert payload["counts"]["sync_failures_today"] == 0
+    assert payload["has_failures"] is False
 
 
 def test_admin_table_rows_requires_admin_role(client):

@@ -94,6 +94,58 @@
     .security-warning-banner strong {
       color: #ffd28b;
     }
+
+    .failure-check-panel {
+      margin-top: 14px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(90, 180, 255, 0.25);
+      background: rgba(90, 180, 255, 0.07);
+    }
+
+    .failure-check-panel h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+
+    .failure-check-panel p {
+      margin: 6px 0;
+      font-size: 12px;
+      line-height: 1.5;
+      opacity: 0.84;
+    }
+
+    .failure-check-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 10px 0;
+    }
+
+    .failure-check-result {
+      margin-top: 10px;
+      padding: 12px;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .failure-check-result.is-error {
+      border-color: rgba(255, 149, 0, 0.35);
+      background: rgba(255, 149, 0, 0.10);
+    }
+
+    .failure-check-result ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+
+    .failure-check-result li {
+      margin: 4px 0;
+    }
   </style>
 </head>
 <body>
@@ -282,6 +334,16 @@
           <button id="copyOverviewBtn" class="ghost-btn" type="button">Copy System Snapshot</button>
         </div>
         <div id="securityWarningBanner" class="security-warning-banner" hidden></div>
+        <div class="failure-check-panel">
+          <h3>Run This First: Today&apos;s Failure Check For The Logged-In Admin</h3>
+          <p>Click the button below to check whether the user currently signed into this Admin page had any recorded decrypt warnings, account sync failures, or publish failures today.</p>
+          <p>This check runs against the database used by this running app. If you open this page on Render, you are checking Render data. If you open it locally, you are checking local data only.</p>
+          <div class="failure-check-actions">
+            <button id="runCurrentUserFailureCheckBtn" class="ghost-btn" type="button">Run Today&apos;s Failure Check</button>
+            <span id="currentUserFailureCheckStamp" class="muted-line">Not run yet.</span>
+          </div>
+          <div id="currentUserFailureCheckResult" class="failure-check-result">Press “Run Today&apos;s Failure Check” to load a plain-English summary.</div>
+        </div>
         <div class="system-grid">
           <article class="system-card">
             <h3>Active Database</h3>

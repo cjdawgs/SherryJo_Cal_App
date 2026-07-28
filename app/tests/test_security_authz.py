@@ -48,6 +48,7 @@ PUBLIC_PATHS = {
 
 ADMIN_PATHS = [
     ("GET", "/admin/system/overview"),
+    ("GET", "/admin/system/current-user-failures-today"),
     ("GET", "/admin/system/table/users/rows"),
     ("GET", "/admin/users"),
     ("GET", "/admin/providers"),

@@ -7,6 +7,7 @@ const state = {
   selectedIds: new Set(),
   editing: null,
   overview: null,
+  currentUserFailureCheck: null,
   tableQuery: null,
   purgeMeta: {
     users: {},
@@ -57,6 +58,9 @@ const el = {
   overviewLastUpdated: document.getElementById("overviewLastUpdated"),
   copyOverviewBtn: document.getElementById("copyOverviewBtn"),
   securityWarningBanner: document.getElementById("securityWarningBanner"),
+  runCurrentUserFailureCheckBtn: document.getElementById("runCurrentUserFailureCheckBtn"),
+  currentUserFailureCheckStamp: document.getElementById("currentUserFailureCheckStamp"),
+  currentUserFailureCheckResult: document.getElementById("currentUserFailureCheckResult"),
 };
 
 let adminWindowControlsReady = false;
@@ -169,7 +173,7 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/\"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .split("'").join("&#039;");
 }
 
 function renderSystemOverview(data) {
@@ -232,6 +236,96 @@ function renderSystemOverview(data) {
       el.securityWarningBanner.textContent = "";
     }
   }
+}
+
+function renderCurrentUserFailureCheck(data) {
+  state.currentUserFailureCheck = data;
+
+  if (el.currentUserFailureCheckStamp) {
+    const raw = data?.checked_at;
+    const stamp = raw ? new Date(raw).toLocaleString() : new Date().toLocaleString();
+    el.currentUserFailureCheckStamp.textContent = `Last run: ${stamp}`;
+  }
+
+  if (!el.currentUserFailureCheckResult) {
+    return;
+  }
+
+  const counts = data?.counts || {};
+  const database = data?.checked_database || {};
+  const summaryLines = Array.isArray(data?.summary_lines) ? data.summary_lines : [];
+  const decryptWarnings = Array.isArray(data?.decrypt_warning_accounts) ? data.decrypt_warning_accounts : [];
+  const syncFailures = Array.isArray(data?.sync_failure_accounts) ? data.sync_failure_accounts : [];
+  const publishFailures = Array.isArray(data?.publish_failures) ? data.publish_failures : [];
+  const hasFailures = Boolean(data?.has_failures);
+  const summaryItemsHtml = summaryLines.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+  const decryptWarningsHtml = decryptWarnings.length
+    ? `<div><strong>Accounts with decrypt warnings:</strong><ul>${decryptWarnings.map((item) => `<li>${escapeHtml(item.provider)} / ${escapeHtml(item.account_email)}: ${escapeHtml(item.reason || "decrypt warning")}</li>`).join("")}</ul></div>`
+    : "";
+  const syncFailuresHtml = syncFailures.length
+    ? `<div><strong>Accounts with sync failures:</strong><ul>${syncFailures.map((item) => {
+      const suffix = item.last_error ? `: ${escapeHtml(item.last_error)}` : "";
+      return `<li>${escapeHtml(item.provider)} / ${escapeHtml(item.account_email)} at ${escapeHtml(item.last_sync_failure || "unknown time")}${suffix}</li>`;
+    }).join("")}</ul></div>`
+    : "";
+  const publishFailuresHtml = publishFailures.length
+    ? `<div><strong>Publish failure details:</strong><ul>${publishFailures.map((item) => `<li>${escapeHtml(item.ts_server || "unknown time")} - ${escapeHtml(item.details || "no details")}</li>`).join("")}</ul></div>`
+    : "";
+
+  el.currentUserFailureCheckResult.classList.toggle("is-error", hasFailures);
+  el.currentUserFailureCheckResult.innerHTML = `
+    <div><strong>Checked user:</strong> ${escapeHtml(data?.user?.email || "unknown")}</div>
+    <div><strong>Database used:</strong> ${escapeHtml(database.label || "Unknown")} (${escapeHtml(database.engine || "unknown")})</div>
+    <div><strong>What this means:</strong> This is a same-day check for the logged-in admin only. Counts below come from this app&apos;s current database connection.</div>
+    <ul>
+      ${summaryItemsHtml}
+      <li>Decrypt warnings today: ${escapeHtml(counts.decrypt_warning_accounts ?? 0)}</li>
+      <li>Sync failures today: ${escapeHtml(counts.sync_failures_today ?? 0)}</li>
+      <li>Publish failures today: ${escapeHtml(counts.publish_failures_today ?? 0)}</li>
+      <li>Total publish diagnostic entries today: ${escapeHtml(counts.publish_diagnostics_today ?? 0)}</li>
+    </ul>
+    ${decryptWarningsHtml}
+    ${syncFailuresHtml}
+    ${publishFailuresHtml}
+  `;
+}
+
+async function loadCurrentUserFailureCheck() {
+  if (el.currentUserFailureCheckStamp) {
+    el.currentUserFailureCheckStamp.textContent = "Running check...";
+  }
+
+  if (el.currentUserFailureCheckResult) {
+    el.currentUserFailureCheckResult.classList.remove("is-error");
+    el.currentUserFailureCheckResult.textContent = "Running today’s failure check...";
+  }
+
+  const res = await apiRequest("/admin/system/current-user-failures-today", { method: "GET" });
+  if (!res) {
+    if (el.currentUserFailureCheckResult) {
+      el.currentUserFailureCheckResult.classList.add("is-error");
+      el.currentUserFailureCheckResult.textContent = "Unable to run the failure check.";
+    }
+    setStatus("Unable to run current user failure check", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    if (el.currentUserFailureCheckResult) {
+      el.currentUserFailureCheckResult.classList.add("is-error");
+      el.currentUserFailureCheckResult.textContent = data.detail || "Failure check could not be completed.";
+    }
+    setStatus(data.detail || "Unable to run current user failure check", true);
+    return;
+  }
+
+  renderCurrentUserFailureCheck(data);
+  setStatus(data.has_failures ? "Current user failure check found issues." : "Current user failure check found no issues today.");
 }
 
 async function loadSystemOverview() {
@@ -1373,6 +1467,8 @@ function bindEvents() {
       setStatus("Copy failed. Browser blocked clipboard access.", true);
     }
   });
+
+  el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
 }
 
 bindEvents();
