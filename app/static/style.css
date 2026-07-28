@@ -229,7 +229,6 @@ body {
   }
 }
 
-.gearMenuShell:hover .accountsHoverMenu,
 .gearMenuShell:focus-within .accountsHoverMenu,
 .gearMenuShell.open .accountsHoverMenu {
   display: flex;
