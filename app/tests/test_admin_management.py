@@ -5,7 +5,8 @@ from cryptography.fernet import Fernet
 
 from app.config import settings
 from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, TVDiagLog, User
-from app.utils.crypto import reset_cipher_cache
+from app.utils.crypto import reset_cipher_cache, unseal
+from app.utils.runtime_token_key_store import load_persisted_token_encryption_key
 
 
 def _register_user(client, role="staff", password="pass12345"):
@@ -264,6 +265,51 @@ def test_admin_apply_runtime_token_encryption_key_repairs_missing_key_for_runnin
     assert payload["resolved"] is True
     assert payload["security"]["token_encryption_key_configured"] is True
     assert payload["security"]["missing_key_with_encrypted_credentials"] is False
+    assert payload["persists_after_restart"] is True
+    assert load_persisted_token_encryption_key(db) == known_key
+
+
+def test_admin_apply_runtime_token_encryption_key_persists_for_restart_bootstrap(client, db, monkeypatch):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+    known_key = Fernet.generate_key().decode()
+
+    monkeypatch.setattr(settings, "token_encryption_key", known_key, raising=False)
+    reset_cipher_cache()
+    db.add(OAuthAccount(
+        user_id=owner["id"],
+        provider="google",
+        account_email="persisted-bootstrap@test.com",
+        access_token="live-token",
+        refresh_token="live-refresh",
+    ))
+    db.commit()
+
+    sealed = db.query(OAuthAccount).filter(OAuthAccount.account_email == "persisted-bootstrap@test.com").first().access_token_encrypted
+    assert str(sealed).startswith("v1:")
+
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+    monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
+    reset_cipher_cache()
+
+    res = client.post(
+        "/admin/system/token-encryption-key/runtime",
+        headers=headers,
+        json={"token_encryption_key": known_key},
+    )
+    assert res.status_code == 200
+    assert res.json()["persists_after_restart"] is True
+
+    # Simulate restart-like in-process key loss; persisted key should restore decryptability.
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+    monkeypatch.delenv("TOKEN_ENCRYPTION_KEY", raising=False)
+    reset_cipher_cache()
+
+    persisted = load_persisted_token_encryption_key(db)
+    assert persisted == known_key
+    monkeypatch.setattr(settings, "token_encryption_key", persisted, raising=False)
+    reset_cipher_cache()
+    assert unseal(str(sealed)) == "live-token"
 
 
 def test_admin_apply_runtime_token_encryption_key_rejects_wrong_key(client, db, monkeypatch):

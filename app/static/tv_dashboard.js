@@ -4,6 +4,7 @@ const TOKEN_KEY = 'tv_token';
 // TV state remains backend-driven. Poll often enough for a wall display while
 // lifecycle recovery handles FireOS/Silk timer suspension.
 const POLL_MS = 60000;
+const TV_FETCH_TIMEOUT_MS = 15000;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
 
@@ -275,6 +276,11 @@ const state = {
   eventsRefreshQueued: false,
   queuedRefreshForce: false,
   lastEventsFetchAt: 0,
+  lastEventsEtag: '',
+  lastDataSignature: '',
+  lastDataSnapshotIndex: null,
+  staleMode: false,
+  lastStaleReason: '',
   syncInProgress: false,
   syncStatusTone: null,
   syncStatusUntil: 0,
@@ -1124,12 +1130,24 @@ async function refreshEvents(force = false, options = {}) {
     state.syncInProgress = true;
     applySyncVisualState();
   }
-  const res = await authFetch('/tv/events');
+  const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
+  const res = await authFetch('/tv/events', { cache: 'no-store', timeoutMs: TV_FETCH_TIMEOUT_MS, headers: eventsRequestHeaders });
   try {
     if (!res) {
       if (showSync) setSyncStatus(false, 'Sync Failed');
       return;
     }
+    if (res.status === 304) {
+      state.lastEventsFetchAt = Date.now();
+      if (showSync) setSyncStatus(true, 'Sync Succeed - No changes detected');
+      return;
+    }
+
+    const responseEtag = res.headers.get('ETag');
+    if (responseEtag) {
+      state.lastEventsEtag = responseEtag;
+    }
+
     if (!res.ok) {
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
       if (showSync) setSyncStatus(false, 'Sync Failed');
@@ -1140,34 +1158,83 @@ async function refreshEvents(force = false, options = {}) {
     state.lastEventsFetchAt = Date.now();
     const staleData = Boolean(data.staleData);
     const incomingDays = normalizeTvDays(data.days);
+    const previousSelectedDate = state.selectedDate;
+    const previousCurrentView = state.currentView;
+    const wasStaleMode = state.staleMode;
+    const previousSignature = state.lastDataSignature;
+    let dataChanged = false;
+    let staleTransitionChanged = false;
 
     if (data.selectedDate) state.selectedDate = data.selectedDate;
     if (data.currentView) state.currentView = data.currentView;
 
+    let acceptedDays = false;
     if (!staleData) {
       state.days = incomingDays;
       state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
       state.dayMap = {};
       for (const day of state.days) state.dayMap[day.date] = day;
+      acceptedDays = true;
     } else if (!state.days.length && incomingDays.length) {
       // First usable payload after startup can still be accepted even when marked stale.
       state.days = incomingDays;
       state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
       state.dayMap = {};
       for (const day of state.days) state.dayMap[day.date] = day;
+      acceptedDays = true;
+    }
+
+    if (!staleData && acceptedDays) {
+      const nextIndex = buildTvSnapshotIndex(state.days);
+      const nextSignature = buildTvSnapshotSignature(nextIndex);
+      dataChanged = previousSignature !== nextSignature;
+
+      if (!previousSignature) {
+        const initialCount = Object.keys(nextIndex).length;
+        if (initialCount > 0 && tvDiag) {
+          tvDiag.log('tv_data_loaded', `items=${initialCount}`);
+        }
+      } else if (dataChanged && tvDiag) {
+        const delta = computeTvSnapshotDelta(state.lastDataSnapshotIndex, nextIndex);
+        const totalDelta = delta.added + delta.updated + delta.deleted;
+        if (totalDelta > 0) {
+          tvDiag.log('tv_data_delta', `added=${delta.added} updated=${delta.updated} deleted=${delta.deleted}`);
+        }
+      }
+
+      state.lastDataSnapshotIndex = nextIndex;
+      state.lastDataSignature = nextSignature;
+    }
+
+    if (staleData) {
+      const staleReason = String(data.staleReason || 'temporary backend refresh issue');
+      if (!state.staleMode || state.lastStaleReason !== staleReason) {
+        if (tvDiag) tvDiag.log('stale_snapshot_used', staleReason);
+      }
+      state.staleMode = true;
+      state.lastStaleReason = staleReason;
+      staleTransitionChanged = !wasStaleMode;
+      renderFooterHint(`Using last known events (${staleReason}). Data was not cleared.`);
+    } else {
+      state.staleMode = false;
+      state.lastStaleReason = '';
+      if (wasStaleMode && tvDiag) {
+        tvDiag.log('stale_snapshot_recovered', 'fresh /tv/events payload restored');
+      }
+      staleTransitionChanged = wasStaleMode;
     }
 
     const summary = data.summary || {};
     const eventCount = Number(summary.eventCount || 0);
     const stickyCount = Number(summary.stickyCount || 0);
     const totalItems = eventCount + stickyCount;
+    const viewStateChanged = state.selectedDate !== previousSelectedDate || state.currentView !== previousCurrentView;
     syncFocusAfterData();
-    render();
-    if (staleData) {
-      const staleReason = String(data.staleReason || "temporary backend refresh issue");
-      if (tvDiag) tvDiag.log("stale_snapshot_used", staleReason);
-      renderFooterHint(`Using last known events (${staleReason}). Data was not cleared.`);
+
+    if (force || viewStateChanged || dataChanged || staleTransitionChanged) {
+      render();
     }
+
     if (showSync) {
       if (staleData) {
         setSyncStatus(false, "Sync delayed - keeping last known data");
@@ -1194,9 +1261,20 @@ async function refreshEvents(force = false, options = {}) {
 
 async function authFetch(url, options = {}) {
   if (!state.token) return null;
+  let timeoutHandle = null;
   try {
+    const timeoutMs = Number(options.timeoutMs || TV_FETCH_TIMEOUT_MS);
+    const requestOptions = Object.assign({}, options);
+    delete requestOptions.timeoutMs;
+
     const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
-    const res = await fetch(url, Object.assign({}, options, { headers }));
+    const fetchPromise = fetch(url, Object.assign({}, requestOptions, { headers }));
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`Request timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+    const res = await Promise.race([fetchPromise, timeoutPromise]);
     if (res.status === 401) {
       if (!IS_KIOSK) handleUnpair();
       return null;
@@ -1206,6 +1284,8 @@ async function authFetch(url, options = {}) {
     const message = err && err.message ? err.message : 'Network request failed';
     renderFooterHint(`Network issue: ${message}`);
     return null;
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
   }
 }
 
@@ -2221,6 +2301,83 @@ function normalizeTvDays(daysPayload) {
       events,
     };
   });
+}
+
+function buildTvSnapshotIndex(days) {
+  const index = {};
+  for (const day of (days || [])) {
+    const dateKey = String(day?.date || '');
+
+    const events = Array.isArray(day?.events) ? day.events : [];
+    for (const ev of events) {
+      const eventIdentity = ev?.id != null
+        ? String(ev.id)
+        : `${dateKey}|${String(ev?.start || '')}|${String(ev?.end || '')}|${String(ev?.title || '')}`;
+      const eventKey = `event:${eventIdentity}`;
+      index[eventKey] = [
+        dateKey,
+        String(ev?.title || ''),
+        String(ev?.start || ''),
+        String(ev?.end || ''),
+        String(ev?.description || ''),
+        ev?.hasSticky ? '1' : '0',
+        String(ev?.updatedAt || ev?.updated_at || ''),
+      ].join('|');
+    }
+
+    const stickyNotes = Array.isArray(day?.stickyNotes) ? day.stickyNotes : [];
+    for (let i = 0; i < stickyNotes.length; i += 1) {
+      const sticky = stickyNotes[i] || {};
+      const stickyIdentity = sticky.id != null
+        ? String(sticky.id)
+        : `${i}|${String(sticky.content || '')}`;
+      const stickyKey = `sticky:${dateKey}:${stickyIdentity}`;
+      index[stickyKey] = [
+        dateKey,
+        String(sticky.content || ''),
+        String(sticky.color || ''),
+        String(sticky.updatedAt || sticky.updated_at || ''),
+      ].join('|');
+    }
+  }
+  return index;
+}
+
+function buildTvSnapshotSignature(index) {
+  const keys = Object.keys(index || {}).sort();
+  return keys.map((key) => `${key}=${index[key]}`).join(';');
+}
+
+function computeTvSnapshotDelta(prevIndex, nextIndex) {
+  if (!prevIndex || typeof prevIndex !== 'object') {
+    return {
+      added: Object.keys(nextIndex || {}).length,
+      updated: 0,
+      deleted: 0,
+    };
+  }
+
+  let added = 0;
+  let updated = 0;
+  let deleted = 0;
+
+  for (const key of Object.keys(nextIndex || {})) {
+    if (!(key in prevIndex)) {
+      added += 1;
+      continue;
+    }
+    if (prevIndex[key] !== nextIndex[key]) {
+      updated += 1;
+    }
+  }
+
+  for (const key of Object.keys(prevIndex)) {
+    if (!(key in (nextIndex || {}))) {
+      deleted += 1;
+    }
+  }
+
+  return { added, updated, deleted };
 }
 
 function itemsForDate(dateKey) {

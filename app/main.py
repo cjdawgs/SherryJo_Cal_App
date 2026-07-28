@@ -25,6 +25,7 @@ from app.routers import all_routers
 
 # ✅ NEW: Import background scheduler
 from app.services.sync_scheduler import start_scheduler
+from app.utils.runtime_token_key_store import bootstrap_token_encryption_key_from_store
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +325,15 @@ logger.info("✅ Tables registered: %s", Base.metadata.tables.keys())
 # whichever migration path a deployment uses. Idempotent.
 # Any credential still stored in clear text is sealed in the same pass.
 # ==================================================
+try:
+    from app.database import SessionLocal as _BootstrapSessionLocal
+
+    with _BootstrapSessionLocal() as _bootstrap_db:
+        if bootstrap_token_encryption_key_from_store(_bootstrap_db):
+            logger.info("✅ Loaded TOKEN_ENCRYPTION_KEY from persisted runtime store")
+except Exception as _bootstrap_err:
+    logger.warning("⚠️ Runtime token key bootstrap failed (non-fatal): %s", _bootstrap_err)
+
 enforce_row_level_security(engine)
 seal_stored_credentials(engine)
 

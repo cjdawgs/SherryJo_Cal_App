@@ -98,7 +98,7 @@ function updateFailureFixAvailability(hasLiveIssue) {
   }
   if (el.failureFixHelp) {
     el.failureFixHelp.textContent = hasLiveIssue
-      ? "This applies the key to the current running app only. After it succeeds, the page rechecks automatically and marks the issue resolved in green."
+      ? "This applies the key now and saves it for automatic restart bootstrap. After it succeeds, the page rechecks automatically and marks the issue resolved in green."
       : "This fix is currently inactive because there is no live credential decryption issue to repair in this running app.";
   }
 }

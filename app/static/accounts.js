@@ -61,37 +61,37 @@ function renderSyncDetailList(statusPayload = null) {
   const scheduler = statusPayload?.scheduler || {};
   const lines = selectedAccounts.length > 1
     ? [
-    {
-      title: `Selected accounts (${selectedAccounts.length})`,
-      body: selectedAccounts.map((account) => `${account.provider?.toUpperCase?.() || account.provider} - ${account.account_email || "Unknown"} (${account.status || "unknown"})`).join(" | "),
-    },
-    {
-      title: "Current preferences",
-      body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
-    },
-    {
-      title: "Scheduler health",
-      body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
-    },
-  ]
+      {
+        title: `Selected accounts (${selectedAccounts.length})`,
+        body: selectedAccounts.map((account) => `${account.provider?.toUpperCase?.() || account.provider} - ${account.account_email || "Unknown"} (${account.status || "unknown"})`).join(" | "),
+      },
+      {
+        title: "Current preferences",
+        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+      },
+      {
+        title: "Scheduler health",
+        body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+      },
+    ]
     : [
-    {
-      title: `${chosen.provider?.toUpperCase?.() || chosen.provider} - ${chosen.account_email || "Unknown"}`,
-      body: [
-        `Status: ${chosen.status || "unknown"}`,
-        `Last sync: ${chosen.last_sync_success || chosen.last_sync_failure || chosen.last_sync || "never"}`,
-        `Last error: ${chosen.last_error || "none"}`,
-      ].join(" | "),
-    },
-    {
-      title: "Current preferences",
-      body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
-    },
-    {
-      title: "Scheduler health",
-      body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
-    },
-  ];
+      {
+        title: `${chosen.provider?.toUpperCase?.() || chosen.provider} - ${chosen.account_email || "Unknown"}`,
+        body: [
+          `Status: ${chosen.status || "unknown"}`,
+          `Last sync: ${chosen.last_sync_success || chosen.last_sync_failure || chosen.last_sync || "never"}`,
+          `Last error: ${chosen.last_error || "none"}`,
+        ].join(" | "),
+      },
+      {
+        title: "Current preferences",
+        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+      },
+      {
+        title: "Scheduler health",
+        body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+      },
+    ];
 
   detailList.innerHTML = lines.map((line) => `<div class="syncDetailItem"><strong>${line.title}</strong><span>${line.body}</span></div>`).join("");
   setSyncStatus(
@@ -219,7 +219,13 @@ async function manualRefreshSelectedAccount() {
 
 function getHealthStatus(acc) {
   if (acc.status === "ok") return `<span style="color:#16a34a; font-weight:600;">OK</span>`;
-  if (acc.status === "error") return `<span style="color:#dc2626; font-weight:600;">Needs Attention</span>`;
+  if (acc.status === "error") {
+    const code = String(acc?.token_issue?.code || "").trim();
+    if (code) {
+      return `<span style="color:#dc2626; font-weight:600;">Needs Attention (${code.replaceAll("_", " ")})</span>`;
+    }
+    return `<span style="color:#dc2626; font-weight:600;">Needs Attention</span>`;
+  }
   return `<span style="color:#64748b;">Unknown</span>`;
 }
 
@@ -443,7 +449,12 @@ function renderProviderAccounts(provider, list) {
     const div = document.createElement("div");
     div.className = "account";
 
-    const reconnectVisible = acc.status === "error" && (normalizeProvider(acc.provider) === "google" || normalizeProvider(acc.provider) === "microsoft" || normalizeProvider(acc.provider) === "apple");
+    const reconnectVisible = acc.status === "error"
+      && !Boolean(acc?.token_issue?.requires_admin)
+      && (normalizeProvider(acc.provider) === "google" || normalizeProvider(acc.provider) === "microsoft" || normalizeProvider(acc.provider) === "apple");
+    const issueMessage = String(acc?.token_issue?.message || "").trim();
+    const issueCode = String(acc?.token_issue?.code || "").trim();
+    const showIssue = acc.status === "error" && (issueMessage || issueCode);
 
     div.innerHTML = `
       <div class="left">
@@ -451,6 +462,7 @@ function renderProviderAccounts(provider, list) {
         <span>${acc.account_email || "UNKNOWN"}</span>
         ${acc.is_primary ? "⭐" : ""}
         <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
+        ${showIssue ? `<div style="margin-top:4px; font-size:12px; color:#7f1d1d;"><strong>${issueCode ? issueCode.replaceAll("_", " ") : "issue"}:</strong> ${issueMessage || "Token action required."}</div>` : ""}
       </div>
       <div class="account-actions">
         <button data-action="primary">Primary</button>
@@ -458,6 +470,7 @@ function renderProviderAccounts(provider, list) {
         <button data-action="remove">Remove</button>
         <button data-action="retry">Retry</button>
         ${reconnectVisible ? "<button data-action=\"reconnect\">Reconnect</button>" : ""}
+        ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\">Admin Fix Needed</button>" : ""}
       </div>
     `;
 
@@ -469,6 +482,13 @@ function renderProviderAccounts(provider, list) {
     const reconnectBtn = div.querySelector('[data-action="reconnect"]');
     if (reconnectBtn) {
       reconnectBtn.onclick = (e) => reconnectAccount(acc.provider, acc.account_email, e.currentTarget);
+    }
+
+    const adminFixBtn = div.querySelector('[data-action="admin-fix"]');
+    if (adminFixBtn) {
+      adminFixBtn.onclick = () => {
+        window.location.href = "/admin/ui";
+      };
     }
 
     container.appendChild(div);

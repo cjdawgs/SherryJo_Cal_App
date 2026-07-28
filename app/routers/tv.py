@@ -19,12 +19,13 @@ Endpoints:
 import logging
 import os
 import json
+import hashlib
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from sqlalchemy import String, cast
@@ -741,6 +742,7 @@ def patch_tv_state(
 
 @router.get("/events")
 def get_tv_events(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -906,8 +908,13 @@ def get_tv_events(
             },
             "staleData": False,
         }
+
+        payload_etag = f'W/"{hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()}"'
+        if request.headers.get("if-none-match") == payload_etag:
+            return Response(status_code=304, headers={"ETag": payload_etag, "Cache-Control": "no-store"})
+
         _tv_events_snapshot_cache[current_user.id] = payload
-        return payload
+        return JSONResponse(content=payload, headers={"ETag": payload_etag, "Cache-Control": "no-store"})
     except Exception:
         logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)
         cached = _tv_events_snapshot_cache.get(current_user.id)
@@ -916,16 +923,16 @@ def get_tv_events(
             fallback = dict(cached)
             fallback["staleData"] = True
             fallback["staleReason"] = "backend_refresh_failure"
-            return fallback
+            return JSONResponse(content=fallback, headers={"Cache-Control": "no-store"})
 
         # No safe snapshot yet; keep shape explicit for client-side guards.
-        return {
+        return JSONResponse(content={
             "selectedDate": selected_date_str,
             "currentView": current_view,
             "days": [],
             "staleData": True,
             "staleReason": "backend_refresh_failure_no_snapshot",
-        }
+        }, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/events")

@@ -17,6 +17,7 @@ from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, User
 from app.services.asset_urls import asset_url
 from app.utils.crypto import TokenEncryptionError, reset_cipher_cache, unseal
+from app.utils.runtime_token_key_store import persist_token_encryption_key
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
@@ -165,15 +166,19 @@ def _apply_runtime_token_encryption_key(candidate_key: str, db: Session) -> dict
         if probe_value:
             unseal(str(probe_value))
 
+        persist_token_encryption_key(db, normalized)
+        db.commit()
+
         tables = sorted(inspect(engine).get_table_names())
         security_info = _credential_encryption_health(db, tables)
         return {
             "resolved": not bool(security_info.get("missing_key_with_encrypted_credentials")),
             "security": security_info,
-            "message": "TOKEN_ENCRYPTION_KEY applied to the running app.",
-            "persists_after_restart": False,
+            "message": "TOKEN_ENCRYPTION_KEY applied and saved for automatic restart bootstrap.",
+            "persists_after_restart": True,
         }
     except (TokenEncryptionError, HTTPException) as exc:
+        db.rollback()
         if previous_env is None:
             os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
         else:
@@ -183,6 +188,15 @@ def _apply_runtime_token_encryption_key(candidate_key: str, db: Session) -> dict
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        db.rollback()
+        if previous_env is None:
+            os.environ.pop("TOKEN_ENCRYPTION_KEY", None)
+        else:
+            os.environ["TOKEN_ENCRYPTION_KEY"] = previous_env
+        settings.token_encryption_key = previous_key
+        reset_cipher_cache()
+        raise HTTPException(status_code=500, detail=f"Failed to persist runtime encryption key: {exc}") from exc
 
 
 @router.post("/system/token-encryption-key/runtime")

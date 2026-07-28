@@ -369,3 +369,19 @@ class TVDiagLog(Base):
     visibility    = Column(String, nullable=True)
     guard_enabled = Column(Boolean, nullable=True)
     guard_timeout = Column(Integer, nullable=True)
+
+
+class AppRuntimeSecret(Base):
+    """Encrypted app-level runtime secrets persisted for restart-safe bootstrap."""
+
+    __tablename__ = "app_runtime_secrets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key_name = Column(String, unique=True, nullable=False, index=True)
+    secret_value = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )

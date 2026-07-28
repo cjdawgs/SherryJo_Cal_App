@@ -557,6 +557,9 @@ def test_get_accounts_endpoint(client, multi_account_user: User, oauth_accounts_
     assert "account_email" in data[0]
     assert "credential_state" in data[0]
     assert "decrypt_error" in data[0]["credential_state"]
+    assert "token_issue" in data[0]
+    assert "code" in data[0]["token_issue"]
+    assert "requires_admin" in data[0]["token_issue"]
 
 
 def test_get_accounts_endpoint_survives_encrypted_token_without_key(client, multi_account_user: User, db: Session):
@@ -595,6 +598,46 @@ def test_get_accounts_endpoint_survives_encrypted_token_without_key(client, mult
     assert matching[0]["credential_state"]["encrypted_at_rest"] is True
     assert matching[0]["credential_state"]["decrypt_error"] is True
     assert matching[0]["credential_state"]["warning"]["code"] == "token_decrypt_failed"
+    assert matching[0]["token_issue"]["code"] in {"app_key_missing", "app_key_mismatch", "app_key_error"}
+    assert matching[0]["token_issue"]["requires_admin"] is True
+    assert matching[0]["token_issue"]["user_remediable"] is False
+
+
+def test_get_accounts_endpoint_classifies_never_connected_token_issue(client, multi_account_user: User, db: Session):
+    """Accounts with no saved credentials should be explicitly classified as never-connected."""
+    import jwt
+    from app.routers.auth import SECRET_KEY
+
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="never-connected@sample.net",
+        access_token="",
+        refresh_token=None,
+        status="error",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    token = jwt.encode(
+        {"user_id": multi_account_user.id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+
+    response = client.get(
+        "/accounts",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    matching = [item for item in data if item.get("account_email") == "never-connected@sample.net"]
+    assert len(matching) == 1
+    assert matching[0]["token_issue"]["code"] == "token_never_connected"
+    assert matching[0]["token_issue"]["requires_admin"] is False
+    assert matching[0]["token_issue"]["user_remediable"] is True
 
 
 def test_get_accounts_filtered_endpoint(client, multi_account_user: User, oauth_accounts_setup, db: Session):

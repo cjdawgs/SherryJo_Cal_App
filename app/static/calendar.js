@@ -564,6 +564,7 @@ let syncingAccounts = new Set();
  * key → "ok" | "error"
  **************************************************************/
 let accountStatusMap = {};
+let accountIssueMap = {};
 
 
 // ✅ RANGE CONTROL (NEW)
@@ -1765,9 +1766,17 @@ function showReconnectBanner(accounts) {
   });
 
   const reasonText = (acc) => {
+    const issueMessage = String(acc?.token_issue?.message || "").trim();
+    if (issueMessage) return issueMessage;
     const raw = String(acc?.last_error || "").trim();
     if (!raw) return "Connection expired or provider auth token is no longer valid.";
     return raw.length > 180 ? `${raw.slice(0, 180)}...` : raw;
+  };
+
+  const issueCodeText = (acc) => {
+    const code = String(acc?.token_issue?.code || "").trim();
+    if (!code || code === "none") return "";
+    return code.replaceAll("_", " ");
   };
 
   const providerLabel = (value) => {
@@ -1792,8 +1801,16 @@ function showReconnectBanner(accounts) {
   const header = document.createElement("div");
   header.style.fontWeight = "700";
   header.style.marginBottom = "6px";
-  header.textContent = `⚠ ${fixable.length} account(s) need reconnect`;
+  const adminKeyCount = fixable.filter((acc) => Boolean(acc?.token_issue?.requires_admin)).length;
+  const userTokenCount = fixable.length - adminKeyCount;
+  header.textContent = `⚠ ${fixable.length} account(s) need attention`;
+  const sub = document.createElement("div");
+  sub.style.fontWeight = "500";
+  sub.style.fontSize = "12px";
+  sub.style.marginBottom = "8px";
+  sub.textContent = `${userTokenCount} user-remediable token issue(s), ${adminKeyCount} admin key issue(s)`;
   banner.appendChild(header);
+  banner.appendChild(sub);
 
   const list = document.createElement("div");
   list.style.display = "grid";
@@ -1815,21 +1832,46 @@ function showReconnectBanner(accounts) {
     const why = document.createElement("div");
     why.style.fontSize = "12px";
     why.style.color = "#7f1d1d";
-    why.textContent = `Reason: ${reasonText(acc)}`;
+    const issueCode = issueCodeText(acc);
+    why.textContent = issueCode
+      ? `Reason (${issueCode}): ${reasonText(acc)}`
+      : `Reason: ${reasonText(acc)}`;
 
     const actions = document.createElement("div");
     actions.style.display = "flex";
     actions.style.gap = "6px";
 
-    const reconnectBtn = document.createElement("button");
-    reconnectBtn.textContent = "Reconnect";
-    reconnectBtn.style.border = "1px solid #b91c1c";
-    reconnectBtn.style.color = "#b91c1c";
-    reconnectBtn.style.fontWeight = "700";
-    reconnectBtn.style.background = "#fff";
-    reconnectBtn.style.borderRadius = "6px";
-    reconnectBtn.style.padding = "4px 8px";
-    reconnectBtn.onclick = () => startReconnect(acc.provider, acc.account_email);
+    const issue = acc?.token_issue || {};
+    const isAdminIssue = Boolean(issue.requires_admin);
+    const recommendedAction = String(issue.recommended_action || "").toLowerCase();
+
+    const primaryBtn = document.createElement("button");
+    primaryBtn.style.border = "1px solid #b91c1c";
+    primaryBtn.style.color = "#b91c1c";
+    primaryBtn.style.fontWeight = "700";
+    primaryBtn.style.background = "#fff";
+    primaryBtn.style.borderRadius = "6px";
+    primaryBtn.style.padding = "4px 8px";
+
+    if (isAdminIssue) {
+      primaryBtn.textContent = "Admin Fix Needed";
+      primaryBtn.onclick = () => {
+        window.location.href = "/admin/ui";
+      };
+    } else if (recommendedAction === "open_accounts") {
+      primaryBtn.textContent = issue.recommended_label || "Open Accounts";
+      primaryBtn.onclick = () => {
+        window.location.href = "/accounts/ui";
+      };
+    } else if (recommendedAction === "retry_sync") {
+      primaryBtn.textContent = issue.recommended_label || "Open Accounts";
+      primaryBtn.onclick = () => {
+        window.location.href = "/accounts/ui";
+      };
+    } else {
+      primaryBtn.textContent = issue.recommended_label || "Reconnect";
+      primaryBtn.onclick = () => startReconnect(acc.provider, acc.account_email);
+    }
 
     const detailsBtn = document.createElement("button");
     detailsBtn.textContent = "Open Accounts";
@@ -1842,7 +1884,7 @@ function showReconnectBanner(accounts) {
       window.location.href = "/accounts/ui";
     };
 
-    actions.appendChild(reconnectBtn);
+    actions.appendChild(primaryBtn);
     actions.appendChild(detailsBtn);
 
     row.appendChild(who);
@@ -1994,14 +2036,17 @@ async function loadAccounts() {
       console.log("ACCOUNT COLOR:", key, account.color || getColorByKey(key));
     });
 
+    accountIssueMap = {};
+
     data.forEach(acc => {
-      const key = `${acc.provider}:${(acc.account_email || "").toLowerCase().trim()}`;
+      const key = `${normalizeProvider(acc.provider)}:${(acc.account_email || "").toLowerCase().trim()}`;
 
       console.log("🔑 MAPPING:", key, acc.status);
 
       if (acc.status) {
         accountStatusMap[key] = acc.status;
       }
+      accountIssueMap[key] = acc.token_issue || null;
     });
 
     // ✅ ✅ FIX: CALL USING data (INSIDE SCOPE)
@@ -2580,7 +2625,9 @@ function renderAccounts(accounts) {
      **************************************************************/
     if (status === "error") {
       colorDot.style.boxShadow = "0 0 0 4px #ef4444";
-      colorDot.title = "⚠ Reconnect required";
+      const issue = accountIssueMap[key];
+      const adminIssue = Boolean(issue?.requires_admin);
+      colorDot.title = adminIssue ? "⚠ Admin key fix required" : "⚠ Account token action required";
     }
 
     /**************************************************************
@@ -2601,6 +2648,19 @@ function renderAccounts(accounts) {
       if (status === "error") {
 
         const [provider, email] = key.split(":");
+        const issue = accountIssueMap[key];
+        const action = String(issue?.recommended_action || "reconnect").toLowerCase();
+
+        if (issue?.requires_admin) {
+          window.location.href = "/admin/ui";
+          return;
+        }
+
+        if (action === "open_accounts" || action === "retry_sync") {
+          window.location.href = "/accounts/ui";
+          return;
+        }
+
         startReconnect(provider, email);
 
         return;
@@ -2723,12 +2783,24 @@ function renderAccounts(accounts) {
       errorIcon.textContent = "⚠️";
       errorIcon.style.marginRight = "4px";
 
-      errorIcon.title = "Reconnect required — click to reconnect";
+      const issue = accountIssueMap[key];
+      errorIcon.title = issue?.requires_admin
+        ? "Admin key fix required — click to open admin"
+        : "Token action required — click for remedy";
 
       errorIcon.onclick = (e) => {
         e.stopPropagation();
 
         const [provider, email] = key.split(":");
+        const action = String(issue?.recommended_action || "reconnect").toLowerCase();
+        if (issue?.requires_admin) {
+          window.location.href = "/admin/ui";
+          return;
+        }
+        if (action === "open_accounts" || action === "retry_sync") {
+          window.location.href = "/accounts/ui";
+          return;
+        }
         startReconnect(provider, email);
       };
 
