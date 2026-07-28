@@ -23,7 +23,6 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 import os
-
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import User, OAuthAccount
@@ -49,6 +48,11 @@ logger = logging.getLogger(__name__)
 # ============================================================
 
 router = APIRouter(prefix="/accounts", tags=["OAuth Accounts"])
+
+
+def _has_usable_access_token(account: OAuthAccount) -> bool:
+    token = str(getattr(account, "access_token", "") or "").strip()
+    return bool(token and token != "__REAUTH_REQUIRED__")
 
 
 # ============================================================
@@ -207,7 +211,9 @@ def retry_account_sync(
 
         # Publish-capability probe for Microsoft so "Retry" reflects both read and write health.
         if normalize_provider(account.provider) == "microsoft":
-            token = ensure_valid_token(db, account)
+            # Prefer the currently stored token first; retry already ran read-sync validation,
+            # and forcing refresh here can overwrite a provider-permission signal.
+            token = account.access_token if _has_usable_access_token(account) else ensure_valid_token(db, account)
             if not token:
                 account.status = "error"
                 account.last_sync_failure = datetime.now(timezone.utc)
