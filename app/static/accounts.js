@@ -10,6 +10,13 @@ function normalizeProvider(provider) {
   return p || "other";
 }
 
+function normalizeRemedyAction(action) {
+  const value = String(action || "").toLowerCase().trim();
+  if (["verify", "verify_access", "retry", "retry_sync"].includes(value)) return "verify";
+  if (value === "reconnect") return "reconnect";
+  return "verify";
+}
+
 function setGlobalMessage(message, kind = "error") {
   const errorBox = document.getElementById("error");
   if (!errorBox) return;
@@ -481,9 +488,9 @@ function renderProviderAccounts(provider, list) {
     const issueGuidance = buildIssueGuidance(acc);
     const recommendedAction = String(acc?.token_issue?.recommended_action || "").trim();
     const recommendedLabel = String(acc?.token_issue?.recommended_label || "Resolve").trim();
-    const isRecommendedReconnect = recommendedAction === "reconnect";
     const isRecommendedRetry = recommendedAction === "retry_sync";
     const showIssue = acc.status === "error" && (issueMessage || issueCode);
+    const showVerify = normalizedProvider !== "apple";
 
     div.innerHTML = `
       <div class="left">
@@ -498,7 +505,7 @@ function renderProviderAccounts(provider, list) {
         <button data-action="primary" title="Marks this account as the default for its provider.">Set Primary</button>
         <button data-action="toggle" title="${acc.sync_enabled ? "Turns off background syncing for this account." : "Turns on background syncing for this account."}">${acc.sync_enabled ? "Disable Sync" : "Enable Sync"}</button>
         <button data-action="remove" title="Disconnects this account from the app.">Disconnect</button>
-        ${isRecommendedRetry || !isRecommendedReconnect ? `<button data-action="retry" title="${retryTitle}">${isRecommendedRetry ? recommendedLabel : retryLabel}</button>` : ""}
+        ${showVerify ? `<button data-action="retry" title="${retryTitle}">${isRecommendedRetry ? recommendedLabel : retryLabel}</button>` : ""}
         ${reconnectVisible ? "<button data-action=\"reconnect\" title=\"Reconnects OAuth permissions for this account.\">Reconnect</button>" : ""}
         ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\" title=\"Opens Admin Dashboard for app-level key or permission fixes.\">Admin Fix Needed</button>" : ""}
       </div>
@@ -544,7 +551,12 @@ function focusRemediationTargetIfRequested() {
   target.style.borderColor = "#dc2626";
   target.scrollIntoView({ behavior: "smooth", block: "center" });
 
-  setGlobalMessage(`Resolution target: ${targetKey}. Click Reconnect for this account, then retry publish.`, "info");
+  const action = normalizeRemedyAction(pendingRemediationTarget.action);
+  if (action === "reconnect") {
+    setGlobalMessage(`Resolution target: ${targetKey}. Click Reconnect for this account, complete consent, then retry publish.`, "info");
+  } else {
+    setGlobalMessage(`Resolution target: ${targetKey}. Click Verify Access first. If write access is still denied, click Reconnect, then retry publish.`, "info");
+  }
   pendingRemediationTarget = null;
 }
 
@@ -695,6 +707,7 @@ function applyQueryState() {
   const onboarding = params.get("onboarding");
   const remedyProvider = params.get("remedy_provider");
   const remedyAccount = params.get("remedy_account");
+  const remedyAction = params.get("remedy_action");
 
   if (token) {
     setAuthToken(token);
@@ -718,6 +731,7 @@ function applyQueryState() {
     pendingRemediationTarget = {
       provider: remedyProvider || "",
       account: remedyAccount || "",
+      action: normalizeRemedyAction(remedyAction),
     };
   }
 

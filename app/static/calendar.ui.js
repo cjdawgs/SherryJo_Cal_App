@@ -930,8 +930,9 @@ function buildPublishFailureMessage(data, selectedKeys = []) {
 function buildPublishRemediationHtml(message, selectedRows = []) {
   const lower = String(message || "").toLowerCase();
   const selectedMicrosoft = (selectedRows || []).find((row) => row && row.provider === "microsoft");
+  const accountParam = encodeURIComponent(selectedMicrosoft?.email || "");
   const remediationHref = selectedMicrosoft
-    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${encodeURIComponent(selectedMicrosoft.email || "")}`
+    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${accountParam}&remedy_action=verify_access`
     : "/accounts/ui";
 
   if (lower.includes("erroraccessdenied") || lower.includes("access is denied") || lower.includes("forbidden")) {
@@ -939,8 +940,9 @@ function buildPublishRemediationHtml(message, selectedRows = []) {
     return `
       <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
         Resolution path: <a href="${remediationHref}" style="font-weight:600;">Open Account Manager</a>,
-        click <strong>Reconnect</strong> for <strong>${escapeHtml(accountLabel)}</strong>,
-        complete Microsoft consent, return here, then publish again.
+        click <strong>Verify Access</strong> for <strong>${escapeHtml(accountLabel)}</strong>.
+        If write access is still denied, click <strong>Reconnect</strong>, complete Microsoft consent,
+        return here, then publish again.
       </div>`;
   }
 
@@ -1438,6 +1440,24 @@ function setModalType(type) {
   }
   if (toStickyBtn) toStickyBtn.style.display = modalState.type === "event" && modalState.eventId ? "inline-flex" : "none";
   if (toEventBtn) toEventBtn.style.display = modalState.type === "sticky" && modalState.stickyScope === "event" && modalState.eventId ? "inline-flex" : "none";
+  refreshSaveButtonState();
+}
+
+function refreshSaveButtonState() {
+  const saveBtn = document.getElementById("saveEventBtn");
+  if (!saveBtn) return;
+
+  if (modalState.type !== "event") {
+    saveBtn.disabled = false;
+    saveBtn.title = "Save this sticky note.";
+    return;
+  }
+
+  const hasEdits = eventContentHasUnsavedEdits();
+  saveBtn.disabled = !hasEdits || isSavingEvent;
+  saveBtn.title = hasEdits
+    ? "Save event changes."
+    : "No event changes yet. Edit any field to enable Save.";
 }
 
 function fillModalFields(date = null, eventRef = null) {
@@ -1530,6 +1550,7 @@ function getModalEditSnapshot() {
 function markModalCleanSnapshot() {
   modalState.initialSnapshot = getModalEditSnapshot();
   modalState.initialEventContentSnapshot = getEventContentSnapshot();
+  refreshSaveButtonState();
 }
 
 function modalHasUnsavedEdits() {
@@ -1978,6 +1999,8 @@ async function persistEventRecord({ closeAfterSave = false, showSuccessToast = f
 
     if (closeAfterSave) {
       closeCreateModal({ force: true });
+    } else {
+      markModalCleanSnapshot();
     }
     if (showSuccessToast) {
       window.showToast?.("✅ Event saved");
@@ -1990,6 +2013,7 @@ async function persistEventRecord({ closeAfterSave = false, showSuccessToast = f
     return null;
   } finally {
     isSavingEvent = false;
+    refreshSaveButtonState();
   }
 }
 
@@ -2352,9 +2376,20 @@ function bindUIEvents() {
   document.getElementById("cancelPublishConfirmBtn")?.addEventListener("click", closePublishConfirmationDialog);
   document.getElementById("confirmPublishEventBtn")?.addEventListener("click", confirmPublishCurrentEvent);
 
+  const eventModal = document.getElementById("createEventModal");
+  eventModal?.addEventListener("input", (event) => {
+    if (event.target?.matches?.('input[data-publish-account-key]')) return;
+    refreshSaveButtonState();
+  });
+  eventModal?.addEventListener("change", (event) => {
+    if (event.target?.matches?.('input[data-publish-account-key]')) return;
+    refreshSaveButtonState();
+  });
+
   document.getElementById("eventPublishTargets")?.addEventListener("change", (event) => {
     if (!event.target?.matches?.('input[data-publish-account-key]')) return;
     syncPublishSelectionStateFrom(event.currentTarget);
+    refreshSaveButtonState();
   });
 
   document.getElementById("publishConfirmTargets")?.addEventListener("change", (event) => {
