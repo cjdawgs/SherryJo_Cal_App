@@ -619,6 +619,7 @@ def get_tv_diag(
 @router.post("/generate-code", response_model=GeneratePairCodeResponse)
 def generate_pairing_code(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Admin/user calls this from the web UI to produce a time-limited pairing code
@@ -628,7 +629,7 @@ def generate_pairing_code(
     """
     logger.info("TV_PAIR_REQUEST user_id=%s", current_user.id)
 
-    result = pairing_store.create_code(current_user.id)
+    result = pairing_store.create_code(current_user.id, db=db)
     return result
 
 
@@ -646,7 +647,7 @@ def pair_tv(
     """
     logger.info("TV_PAIR_REQUEST code=%s", body.pairingCode)
 
-    user_id = pairing_store.redeem_code(body.pairingCode)
+    user_id = pairing_store.redeem_code(body.pairingCode, db=db)
     if user_id is None:
         raise HTTPException(status_code=400, detail="Invalid or expired pairing code")
 

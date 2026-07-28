@@ -196,9 +196,11 @@ body {
 
 .accountsHoverMenu {
   position: absolute;
-  top: calc(100% - 1px);
-  right: 0;
+  top: 0;
+  left: calc(100% + 8px);
+  right: auto;
   min-width: 170px;
+  max-width: min(230px, calc(100vw - 24px));
   display: none;
   flex-direction: column;
   gap: 6px;
@@ -208,6 +210,14 @@ body {
   border-radius: 8px;
   box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
   z-index: 2000;
+}
+
+@media (max-width: 768px) {
+  .accountsHoverMenu {
+    left: calc(100% + 6px);
+    top: 0;
+    min-width: 160px;
+  }
 }
 
 .gearMenuShell:hover .accountsHoverMenu,

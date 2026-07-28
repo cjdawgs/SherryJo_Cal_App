@@ -964,6 +964,12 @@ function handleCodeInput(e) {
   e.target.value = v;
 }
 
+function normalizePairingCode(raw) {
+  const compact = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
+  if (compact.length !== 8) return '';
+  return `${compact.slice(0, 4)}-${compact.slice(4)}`;
+}
+
 function setPairError(message) {
   if (!dom.pairError) return;
   dom.pairError.textContent = message || '';
@@ -1028,7 +1034,8 @@ async function openAdminDashboardPanel() {
 
 async function handlePair() {
   if (!dom.pairInput || !dom.pairBtn) return;
-  const code = dom.pairInput.value.trim().toUpperCase();
+  const code = normalizePairingCode(dom.pairInput.value);
+  dom.pairInput.value = code;
   if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
     setPairError('Enter a valid pairing code (XXXX-XXXX).');
     return;
