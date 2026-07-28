@@ -3,6 +3,7 @@
 from typing import TYPE_CHECKING
 
 from app.utils.colors import default_account_color
+from app.utils.crypto import TokenEncryptionError
 from app.utils.datetimes import iso_or_none
 
 if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.models
@@ -12,6 +13,22 @@ if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.models
 def account_sync_summary(account: "OAuthAccount") -> dict:
     """Sync-related fields shared by the account list and sync-status payloads."""
     from app.services.multi_account_oauth_service import resolve_account_status
+
+    decrypt_error = False
+    credential_warning = None
+    token_column_value = getattr(account, "access_token_encrypted", "") or ""
+    encrypted_at_rest = str(token_column_value).startswith("v1:")
+
+    try:
+        # Trigger decryption once so we can provide a structured warning field
+        # in the API payload instead of failing the whole endpoint.
+        _ = (getattr(account, "access_token", "") or "").strip()
+    except TokenEncryptionError as exc:
+        decrypt_error = True
+        credential_warning = {
+            "code": "token_decrypt_failed",
+            "message": str(exc),
+        }
 
     return {
         "id": account.id,
@@ -28,6 +45,11 @@ def account_sync_summary(account: "OAuthAccount") -> dict:
         "last_manual_refresh_at": iso_or_none(
             getattr(account, "last_manual_refresh_at", None)
         ),
+        "credential_state": {
+            "encrypted_at_rest": encrypted_at_rest,
+            "decrypt_error": decrypt_error,
+            "warning": credential_warning,
+        },
     }
 
 

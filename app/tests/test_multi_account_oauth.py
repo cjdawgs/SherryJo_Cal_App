@@ -555,6 +555,8 @@ def test_get_accounts_endpoint(client, multi_account_user: User, oauth_accounts_
     assert "created_at" in data[0]
     assert "updated_at" in data[0]
     assert "account_email" in data[0]
+    assert "credential_state" in data[0]
+    assert "decrypt_error" in data[0]["credential_state"]
 
 
 def test_get_accounts_endpoint_survives_encrypted_token_without_key(client, multi_account_user: User, db: Session):
@@ -590,6 +592,9 @@ def test_get_accounts_endpoint_survives_encrypted_token_without_key(client, mult
     matching = [item for item in data if item.get("account_email") == "broken-encrypted@sample.net"]
     assert len(matching) == 1
     assert matching[0]["status"] == "error"
+    assert matching[0]["credential_state"]["encrypted_at_rest"] is True
+    assert matching[0]["credential_state"]["decrypt_error"] is True
+    assert matching[0]["credential_state"]["warning"]["code"] == "token_decrypt_failed"
 
 
 def test_get_accounts_filtered_endpoint(client, multi_account_user: User, oauth_accounts_setup, db: Session):
