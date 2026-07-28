@@ -196,11 +196,10 @@ body {
 
 .accountsHoverMenu {
   position: absolute;
-  top: 0;
-  left: calc(100% + 8px);
-  right: auto;
+  top: calc(100% - 1px);
+  right: 0;
+  left: auto;
   min-width: 170px;
-  max-width: min(230px, calc(100vw - 24px));
   display: none;
   flex-direction: column;
   gap: 6px;
@@ -212,20 +211,11 @@ body {
   z-index: 2000;
 }
 
-.gearMenuShell.menu-flip-left .accountsHoverMenu {
-  left: auto;
-  right: calc(100% + 8px);
-}
-
 @media (max-width: 768px) {
   .accountsHoverMenu {
-    left: calc(100% + 6px);
-    top: 0;
+    right: 0;
+    top: calc(100% - 1px);
     min-width: 160px;
-  }
-
-  .gearMenuShell.menu-flip-left .accountsHoverMenu {
-    right: calc(100% + 6px);
   }
 }
 
