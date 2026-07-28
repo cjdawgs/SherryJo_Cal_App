@@ -21,13 +21,13 @@ import { apiRequest } from "/static/api.js";
 // DOM REFS
 // ─────────────────────────────────────────────────
 
-const tvDialog        = document.getElementById("tvModeDialog");
-const tvCodeDisplay   = document.getElementById("tvPairingCodeDisplay");
+const tvDialog = document.getElementById("tvModeDialog");
+const tvCodeDisplay = document.getElementById("tvPairingCodeDisplay");
 const tvExpiryDisplay = document.getElementById("tvPairingExpiry");
-const tvStatus        = document.getElementById("tvPairingStatus");
-const enableBtn       = document.getElementById("enableTVModeBtn");
-const closeBtn        = document.getElementById("closeTVDialog");
-const regenerateBtn   = document.getElementById("regenerateTVCode");
+const tvStatus = document.getElementById("tvPairingStatus");
+const enableBtn = document.getElementById("enableTVModeBtn");
+const closeBtn = document.getElementById("closeTVDialog");
+const regenerateBtn = document.getElementById("regenerateTVCode");
 
 // ─────────────────────────────────────────────────
 // STATE
@@ -159,13 +159,13 @@ if (tvDialog) {
 // KIOSK URL FLOW
 // ─────────────────────────────────────────────────
 
-const kioskDialog      = document.getElementById("kioskUrlDialog");
-const kioskUrlDisplay  = document.getElementById("kioskUrlDisplay");
-const kioskUrlStatus   = document.getElementById("kioskUrlStatus");
+const kioskDialog = document.getElementById("kioskUrlDialog");
+const kioskUrlDisplay = document.getElementById("kioskUrlDisplay");
+const kioskUrlStatus = document.getElementById("kioskUrlStatus");
 const generateKioskBtn = document.getElementById("generateKioskUrlBtn");
-const closeKioskBtn    = document.getElementById("closeKioskDialog");
-const copyKioskBtn     = document.getElementById("copyKioskUrlBtn");
-const regenKioskBtn    = document.getElementById("regenerateKioskBtn");
+const closeKioskBtn = document.getElementById("closeKioskDialog");
+const copyKioskBtn = document.getElementById("copyKioskUrlBtn");
+const regenKioskBtn = document.getElementById("regenerateKioskBtn");
 
 function setKioskStatus(msg, isError = false) {
   if (!kioskUrlStatus) return;
@@ -224,15 +224,15 @@ if (regenKioskBtn) {
 // SLEEP GUARD CONTROLS
 // ─────────────────────────────────────────────────
 
-const sleepToggleBtn   = document.getElementById("tvSleepToggleBtn");
-const sleepTimeoutSel  = document.getElementById("tvSleepTimeout");
+const sleepToggleBtn = document.getElementById("tvSleepToggleBtn");
+const sleepTimeoutSel = document.getElementById("tvSleepTimeout");
 const sleepAdminStatus = document.getElementById("tvSleepAdminStatus");
 
-let _sleepGuardEnabled        = true;
+let _sleepGuardEnabled = true;
 let _sleepGuardTimeoutMinutes = 0;
 
 function applySleepGuardUI(enabled, timeoutMinutes) {
-  _sleepGuardEnabled        = enabled;
+  _sleepGuardEnabled = enabled;
   _sleepGuardTimeoutMinutes = timeoutMinutes;
   if (sleepToggleBtn) {
     sleepToggleBtn.textContent = enabled ? "Disable" : "Enable";
@@ -298,18 +298,31 @@ loadSleepGuardState();
 // TV DIAGNOSTICS PANEL
 // ─────────────────────────────────────────────────
 
-const diagLoadBtn      = document.getElementById("tvDiagLoadBtn");
-const diagClearBtn     = document.getElementById("tvDiagClearBtn");
-const diagAutoRefresh  = document.getElementById("tvDiagAutoRefresh");
-const diagBody         = document.getElementById("tvDiagBody");
-const diagCount        = document.getElementById("tvDiagCount");
-let   _diagAutoHandle  = null;
+const diagLoadBtn = document.getElementById("tvDiagLoadBtn");
+const diagClearBtn = document.getElementById("tvDiagClearBtn");
+const diagAutoRefresh = document.getElementById("tvDiagAutoRefresh");
+const diagBody = document.getElementById("tvDiagBody");
+const diagCount = document.getElementById("tvDiagCount");
+const publishDiagLoadBtn = document.getElementById("publishDiagLoadBtn");
+const publishDiagClearBtn = document.getElementById("publishDiagClearBtn");
+const publishDiagBody = document.getElementById("publishDiagBody");
+const publishDiagCount = document.getElementById("publishDiagCount");
+let _diagAutoHandle = null;
 
 function _fmtDiagTime(isoStr) {
   if (!isoStr) return "—";
   try {
     return new Date(isoStr).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   } catch { return isoStr; }
+}
+
+function _escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 async function loadTvDiag() {
@@ -330,7 +343,7 @@ async function loadTvDiag() {
       // Show last 8 chars of device_id so rows from the same device group visually.
       // Full UA is in the title tooltip for hover inspection.
       const shortId = e.device_id ? e.device_id.slice(-8) : '—';
-      const ua      = e.device_ua || '';
+      const ua = e.device_ua || '';
       const deviceLabel = `<span title="${ua.replace(/"/g, '&quot;')}" style="font-family:monospace;cursor:default;">…${shortId}</span>`;
       return `
       <tr>
@@ -345,6 +358,42 @@ async function loadTvDiag() {
     }).join('');
   } catch (err) {
     if (diagCount) diagCount.textContent = `Error: ${err.message}`;
+  }
+}
+
+async function loadPublishDiag() {
+  if (!publishDiagBody) return;
+  try {
+    const data = await apiRequest("/tv/diag?scope=all", { method: "GET" });
+    if (!data || !Array.isArray(data.entries)) {
+      if (publishDiagCount) publishDiagCount.textContent = "error loading";
+      return;
+    }
+
+    const entries = data.entries.filter((entry) => String(entry?.event || "") === "calendar_publish_result");
+    if (publishDiagCount) {
+      publishDiagCount.textContent = `${entries.length} publish rows (${data.source || "db"})`;
+    }
+
+    if (!entries.length) {
+      publishDiagBody.innerHTML = '<tr><td colspan="4" style="opacity:0.4;">No publish diagnostics found yet.</td></tr>';
+      return;
+    }
+
+    publishDiagBody.innerHTML = entries.map((entry) => {
+      const shortId = entry.device_id ? entry.device_id.slice(-8) : "—";
+      const ua = _escapeHtml(entry.device_ua || "");
+      const details = _escapeHtml(entry.details || "—");
+      return `
+      <tr>
+        <td>${_fmtDiagTime(entry.ts_server)}</td>
+        <td>${entry.user_id ?? "—"}</td>
+        <td><span title="${ua}" style="font-family:monospace;cursor:default;">…${shortId}</span></td>
+        <td style="opacity:0.86;">${details}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    if (publishDiagCount) publishDiagCount.textContent = `Error: ${err.message}`;
   }
 }
 
@@ -372,5 +421,16 @@ if (diagAutoRefresh) {
       if (_diagAutoHandle) clearInterval(_diagAutoHandle);
       _diagAutoHandle = null;
     }
+  });
+}
+
+if (publishDiagLoadBtn) {
+  publishDiagLoadBtn.addEventListener("click", loadPublishDiag);
+}
+
+if (publishDiagClearBtn) {
+  publishDiagClearBtn.addEventListener("click", () => {
+    if (publishDiagBody) publishDiagBody.innerHTML = '<tr><td colspan="4" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (publishDiagCount) publishDiagCount.textContent = "cleared";
   });
 }

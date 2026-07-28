@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 
 from app.database import get_db
-from app.models import Event, Note, OAuthAccount, DateStickyNote, EventTagColorSetting
+from app.models import Event, Note, OAuthAccount, DateStickyNote, EventTagColorSetting, TVDiagLog
 from app.deps import get_current_user, require_admin
 
 from app.services.calendar_service import CalendarService, normalize_provider
@@ -684,6 +684,21 @@ async def publish_to_providers(
     except Exception:
         body = {}
 
+    def _record_publish_diag(event_name: str, details: str):
+        try:
+            db.add(TVDiagLog(
+                user_id=current_user.id,
+                device_id=None,
+                device_ua=(request.headers.get("user-agent") or "")[:512] or None,
+                event=event_name,
+                details=(details or "")[:512] or None,
+                ts_client=datetime.now(timezone.utc).isoformat(),
+            ))
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.warning("CALENDAR_PUBLISH diag write failed: %s", exc)
+
     event_ids_raw = body.get("event_ids", None)  # None = key absent (publish all)
     publish_targets = body.get("publish_targets") or {}
     deleted_events = body.get("deleted_events") or []
@@ -692,6 +707,10 @@ async def publish_to_providers(
 
     if event_ids_raw is not None and len(event_ids_raw) == 0 and not deleted_events:
         # Client sent an explicit empty list — no edits tracked, nothing to do
+        _record_publish_diag(
+            "calendar_publish_result",
+            "status=noop reason=no_modified_events event_ids=0 deleted_entries=0",
+        )
         return {"status": "success", "published": 0, "failed": 0,
                 "message": "No modified events to publish — make edits first"}
 
@@ -718,6 +737,10 @@ async def publish_to_providers(
         )
 
     if not events_to_publish and not deleted_events:
+        _record_publish_diag(
+            "calendar_publish_result",
+            f"status=noop reason=no_publishable_events requested_event_ids={len(event_ids)} deleted_entries=0",
+        )
         return {"status": "success", "published": 0, "failed": 0,
                 "message": "No modified events with provider links to publish"}
 
@@ -782,6 +805,22 @@ async def publish_to_providers(
             logger.warning(f"⚠️ Publish failed for event {event.id}: {e}")
             failed += 1
             warnings.append(f"Event {event.id}: {e}")
+
+    first_warning = (warnings[0] if warnings else "")
+    _record_publish_diag(
+        "calendar_publish_result",
+        " ".join([
+            f"published={published}",
+            f"created={created}",
+            f"deleted={deleted}",
+            f"failed={failed}",
+            f"total_events={len(events_to_publish)}",
+            f"requested_event_ids={len(event_ids)}",
+            f"deleted_entries={len(deleted_events)}",
+            f"warnings={len(warnings)}",
+            f"first_warning={first_warning}" if first_warning else "first_warning=",
+        ]),
+    )
 
     return {
         "status": "success",

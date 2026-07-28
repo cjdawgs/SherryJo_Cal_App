@@ -1897,13 +1897,16 @@ async function confirmPublishCurrentEvent() {
     closeCreateModal({ force: true });
 
     if (warnings.length) {
-      window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`, "error");
+      const firstWarning = String(warnings[0] || "").trim();
+      const warningSuffix = firstWarning ? `: ${firstWarning}` : "";
+      window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}${warningSuffix}`, "error");
     } else {
       window.showToast?.(`✅ Published event to ${touched.length || selectedKeys.length} calendar${(touched.length || selectedKeys.length) === 1 ? "" : "s"} (${created} new link${created === 1 ? "" : "s"})`);
     }
   } catch (err) {
     console.error("❌ Single-event publish failed", err);
-    window.showToast?.("❌ Publish failed", "error");
+    const message = String(err?.message || "").trim();
+    window.showToast?.(`❌ Publish failed${message ? `: ${message}` : ""}`, "error");
   } finally {
     isPublishingEvent = false;
     renderEventPublishControls();

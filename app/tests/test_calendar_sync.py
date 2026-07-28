@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 import jwt
 from app.routers.auth import SECRET_KEY
-from app.models import Event, User, OAuthAccount
+from app.models import Event, User, OAuthAccount, TVDiagLog
 
 client = TestClient(app)
 
@@ -223,6 +223,16 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
     assert data["failed"] == 0
     assert data["affected_accounts"] == ["google:publish@example.com"]
 
+    log_row = (
+        db.query(TVDiagLog)
+        .filter(TVDiagLog.user_id == user.id, TVDiagLog.event == "calendar_publish_result")
+        .order_by(TVDiagLog.id.desc())
+        .first()
+    )
+    assert log_row is not None
+    assert "published=1" in (log_row.details or "")
+    assert "created=1" in (log_row.details or "")
+
     db.refresh(event)
     assert event.external_ids["google:publish@example.com"] == "google-new-1"
     mock_google_create.assert_called_once()
@@ -314,6 +324,17 @@ def test_publish_event_ids_with_no_resolved_targets_returns_explicit_warning(cli
     assert data["failed"] == 1
     assert data["warnings"]
     assert f"No publishable targets resolved for event {event.id}" in data["warnings"]
+
+    log_row = (
+        db.query(TVDiagLog)
+        .filter(TVDiagLog.user_id == user.id, TVDiagLog.event == "calendar_publish_result")
+        .order_by(TVDiagLog.id.desc())
+        .first()
+    )
+    assert log_row is not None
+    assert "failed=1" in (log_row.details or "")
+    assert "warnings=1" in (log_row.details or "")
+    assert f"first_warning=No publishable targets resolved for event {event.id}" in (log_row.details or "")
 
 
 @patch("app.services.google_calendar_service.GoogleCalendarService.update_event")

@@ -131,6 +131,22 @@
                 <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
               </table>
             </div>
+
+            <div style="display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap;">
+              <strong style="font-size:13px;">Publish Diagnostics (Option A)</strong>
+              <span id="publishDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+              <button id="publishDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load Publish Logs (All)</button>
+              <button id="publishDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+            </div>
+            <div style="font-size:11px;opacity:0.66;margin:0 0 8px;">
+              Shows <code>calendar_publish_result</code> rows from persistent DB diagnostics. Use this to trace Microsoft/Google publish behavior over time.
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="tv-diag-table" id="publishDiagTable">
+                <thead><tr><th>Server time</th><th>User</th><th>Device</th><th>Details</th></tr></thead>
+                <tbody id="publishDiagBody"><tr><td colspan="4" style="opacity:0.4;">No publish diagnostics loaded yet.</td></tr></tbody>
+              </table>
+            </div>
           </div>
 
           <!-- ── One-time FireStick sleep fix ─────────────────────── -->

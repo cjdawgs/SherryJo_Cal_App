@@ -3389,7 +3389,8 @@ async function publishNow(options = {}) {
 
   } catch (err) {
     console.error("❌ publishNow failed:", err);
-    showToast("❌ Publish failed", "error");
+    const message = String(err?.message || "").trim();
+    showToast(`❌ Publish failed${message ? `: ${message}` : ""}`, "error");
   } finally {
     const btn = document.getElementById("publishBtn");
     if (btn) {
