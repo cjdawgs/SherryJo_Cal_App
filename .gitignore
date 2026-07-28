@@ -45,6 +45,7 @@ Thumbs.db
 # IDEs
 .idea/
 .vscode/*
+.vscode/launch.json
 !.vscode/tasks.json
 
 # Backups & Archives

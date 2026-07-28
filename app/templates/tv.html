@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <script src="/static/console_quiet.js"></script>
   <meta charset="UTF-8" />
@@ -8,27 +9,38 @@
   <style>
     /* ── Reset & base ─────────────────────────────────────────── */
     :root {
-      --bg:          #0d0d0f;
-      --bg-header:   rgba(13,13,15,0.96);
-      --bg-col:      #131318;
-      --bg-col-sel:  #161625;
-      --bg-card:     #1b1b24;
-      --bg-card-now: rgba(79,140,255,0.09);
-      --border:      rgba(255,255,255,0.07);
-      --border-sel:  rgba(79,140,255,0.28);
-      --text:        #f0f0f5;
-      --text-sec:    rgba(240,240,245,0.52);
-      --text-muted:  rgba(240,240,245,0.28);
-      --accent:      #4f8cff;
-      --green:       #34c759;
-      --orange:      #ff9f0a;
-      --red:         #ff453a;
-      --font:        -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
-      --mono:        "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
+      --bg: #0d0d0f;
+      --bg-header: rgba(13, 13, 15, 0.96);
+      --bg-col: #131318;
+      --bg-col-sel: #161625;
+      --bg-card: #1b1b24;
+      --bg-card-now: rgba(79, 140, 255, 0.09);
+      --border: rgba(255, 255, 255, 0.07);
+      --border-sel: rgba(79, 140, 255, 0.28);
+      --text: #f0f0f5;
+      --text-sec: rgba(240, 240, 245, 0.52);
+      --text-muted: rgba(240, 240, 245, 0.28);
+      --accent: #4f8cff;
+      --green: #34c759;
+      --orange: #ff9f0a;
+      --red: #ff453a;
+      --tv-scale: 1;
+      --font: -apple-system, "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+      --mono: "SF Mono", "Menlo", "Monaco", "Courier New", monospace;
     }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      width: 100%; height: 100%;
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
       background: var(--bg);
       color: var(--text);
       font-family: var(--font);
@@ -38,8 +50,14 @@
     }
 
     /* ── Screens ──────────────────────────────────────────────── */
-    .screen { position: absolute; inset: 0; }
-    .hidden { display: none !important; }
+    .screen {
+      position: absolute;
+      inset: 0;
+    }
+
+    .hidden {
+      display: none !important;
+    }
 
     /* ─────────────────────────────────────────────────────────── */
     /* PAIRING SCREEN                                              */
@@ -50,20 +68,22 @@
       align-items: center;
       justify-content: center;
       background:
-        radial-gradient(ellipse 80% 50% at 50% 20%, rgba(79,140,255,0.07) 0%, transparent 70%),
+        radial-gradient(ellipse 80% 50% at 50% 20%, rgba(79, 140, 255, 0.07) 0%, transparent 70%),
         var(--bg);
     }
+
     .pair-card {
-      background: rgba(22,22,30,0.97);
-      border: 1px solid rgba(255,255,255,0.09);
+      background: rgba(22, 22, 30, 0.97);
+      border: 1px solid rgba(255, 255, 255, 0.09);
       border-radius: 22px;
       padding: 56px 60px 52px;
       width: 500px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      box-shadow: 0 40px 80px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset;
+      box-shadow: 0 40px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04) inset;
     }
+
     .pair-logo {
       font-size: 20px;
       font-weight: 300;
@@ -72,6 +92,7 @@
       color: var(--accent);
       margin-bottom: 36px;
     }
+
     .pair-title {
       font-size: 30px;
       font-weight: 700;
@@ -79,6 +100,7 @@
       margin-bottom: 12px;
       text-align: center;
     }
+
     .pair-subtitle {
       font-size: 16px;
       color: var(--text-sec);
@@ -86,11 +108,12 @@
       line-height: 1.65;
       margin-bottom: 40px;
     }
+
     .pair-input {
       width: 100%;
       height: 64px;
-      background: rgba(255,255,255,0.05);
-      border: 1.5px solid rgba(255,255,255,0.11);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1.5px solid rgba(255, 255, 255, 0.11);
       border-radius: 14px;
       color: var(--text);
       font-family: var(--mono);
@@ -103,11 +126,18 @@
       transition: border-color 0.2s, background 0.2s;
       margin-bottom: 20px;
     }
-    .pair-input::placeholder { color: rgba(240,240,245,0.2); letter-spacing: 4px; font-size: 22px; }
+
+    .pair-input::placeholder {
+      color: rgba(240, 240, 245, 0.2);
+      letter-spacing: 4px;
+      font-size: 22px;
+    }
+
     .pair-input:focus {
       border-color: var(--accent);
-      background: rgba(79,140,255,0.06);
+      background: rgba(79, 140, 255, 0.06);
     }
+
     .pair-btn {
       width: 100%;
       height: 54px;
@@ -123,9 +153,20 @@
       transition: opacity 0.2s, transform 0.1s;
       margin-bottom: 18px;
     }
-    .pair-btn:hover:not(:disabled) { opacity: 0.87; }
-    .pair-btn:active:not(:disabled) { transform: scale(0.98); }
-    .pair-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .pair-btn:hover:not(:disabled) {
+      opacity: 0.87;
+    }
+
+    .pair-btn:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+
+    .pair-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     .pair-error {
       font-size: 15px;
       color: var(--red);
@@ -133,6 +174,7 @@
       min-height: 20px;
       display: none;
     }
+
     .pair-hint {
       font-size: 13px;
       color: var(--text-muted);
@@ -147,6 +189,11 @@
     #screen-dashboard {
       display: flex;
       flex-direction: column;
+      transform: scale(var(--tv-scale));
+      transform-origin: top left;
+      width: calc(100% / var(--tv-scale));
+      height: calc(100% / var(--tv-scale));
+      will-change: transform;
     }
 
     /* ── Header ───────────────────────────────────────────────── */
@@ -160,6 +207,7 @@
       border-bottom: 1px solid var(--border);
       backdrop-filter: blur(12px);
     }
+
     .tv-logo {
       font-size: 17px;
       font-weight: 300;
@@ -169,6 +217,7 @@
       width: 200px;
       flex-shrink: 0;
     }
+
     .tv-date-header {
       font-size: 19px;
       font-weight: 600;
@@ -177,6 +226,7 @@
       text-align: center;
       flex: 1;
     }
+
     .tv-header-right {
       display: flex;
       align-items: center;
@@ -185,6 +235,7 @@
       justify-content: flex-end;
       flex-shrink: 0;
     }
+
     .tv-clock {
       font-family: var(--mono);
       font-size: 20px;
@@ -192,9 +243,10 @@
       color: var(--text-sec);
       letter-spacing: 1px;
     }
+
     .tv-unpair-btn {
       background: none;
-      border: 1px solid rgba(255,255,255,0.11);
+      border: 1px solid rgba(255, 255, 255, 0.11);
       border-radius: 7px;
       color: var(--text-muted);
       font-size: 12px;
@@ -204,7 +256,11 @@
       transition: border-color 0.2s, color 0.2s;
       white-space: nowrap;
     }
-    .tv-unpair-btn:hover { border-color: var(--red); color: var(--red); }
+
+    .tv-unpair-btn:hover {
+      border-color: var(--red);
+      color: var(--red);
+    }
 
     /* ── Main ─────────────────────────────────────────────────── */
     .tv-main {
@@ -227,8 +283,18 @@
       gap: 20px;
       text-align: center;
     }
-    .tv-waiting-icon { font-size: 68px; line-height: 1; }
-    .tv-waiting-title { font-size: 32px; font-weight: 600; color: var(--text); }
+
+    .tv-waiting-icon {
+      font-size: 68px;
+      line-height: 1;
+    }
+
+    .tv-waiting-title {
+      font-size: 32px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
     .tv-waiting-sub {
       font-size: 20px;
       color: var(--text-sec);
@@ -245,13 +311,25 @@
       justify-content: center;
       gap: 20px;
     }
+
     .tv-reconnecting-label {
       font-size: 30px;
       font-weight: 600;
       color: var(--orange);
       animation: blink 1.5s ease-in-out infinite;
     }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+    @keyframes blink {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.35
+      }
+    }
 
     /* ── Day columns ──────────────────────────────────────────── */
     .tv-day-col {
@@ -264,26 +342,31 @@
       overflow: hidden;
       min-width: 0;
     }
+
     .tv-day-col.tv-day-selected {
       background: var(--bg-col-sel);
       border-color: var(--border-sel);
       box-shadow:
-        0 0 0 1px rgba(79,140,255,0.08) inset,
-        0 10px 40px rgba(0,0,0,0.35);
+        0 0 0 1px rgba(79, 140, 255, 0.08) inset,
+        0 10px 40px rgba(0, 0, 0, 0.35);
     }
+
     .tv-col-accent {
       height: 3px;
       background: transparent;
       flex-shrink: 0;
     }
+
     .tv-day-col.tv-day-selected .tv-col-accent {
       background: linear-gradient(90deg, transparent 5%, var(--accent) 40%, var(--accent) 60%, transparent 95%);
     }
+
     .tv-day-header {
       padding: 20px 24px 18px;
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
     }
+
     .tv-day-weekday {
       font-size: 11px;
       font-weight: 700;
@@ -292,25 +375,31 @@
       color: var(--text-muted);
       margin-bottom: 4px;
     }
+
     .tv-day-num {
       font-size: 44px;
       font-weight: 700;
       color: var(--text);
       line-height: 1;
     }
-    .tv-day-col.tv-day-selected .tv-day-num { color: var(--accent); }
+
+    .tv-day-col.tv-day-selected .tv-day-num {
+      color: var(--accent);
+    }
+
     .tv-day-month {
       font-size: 15px;
       color: var(--text-sec);
       margin-top: 5px;
     }
+
     .tv-selected-pill {
       display: inline-flex;
       align-items: center;
       margin-top: 10px;
       padding: 3px 11px;
-      background: rgba(79,140,255,0.15);
-      border: 1px solid rgba(79,140,255,0.32);
+      background: rgba(79, 140, 255, 0.15);
+      border: 1px solid rgba(79, 140, 255, 0.32);
       border-radius: 6px;
       font-size: 10px;
       font-weight: 700;
@@ -329,7 +418,11 @@
       gap: 10px;
       scrollbar-width: none;
     }
-    .tv-events-list::-webkit-scrollbar { display: none; }
+
+    .tv-events-list::-webkit-scrollbar {
+      display: none;
+    }
+
     .tv-no-events {
       flex: 1;
       display: flex;
@@ -351,21 +444,30 @@
       flex-shrink: 0;
       transition: border-color 0.25s, background 0.25s;
     }
+
     .tv-event-card.ev-now {
       background: var(--bg-card-now);
-      border-color: rgba(79,140,255,0.28);
-      box-shadow: 0 0 18px rgba(79,140,255,0.07);
+      border-color: rgba(79, 140, 255, 0.28);
+      box-shadow: 0 0 18px rgba(79, 140, 255, 0.07);
     }
+
     .tv-event-card.ev-next {
-      border-color: rgba(255,255,255,0.11);
+      border-color: rgba(255, 255, 255, 0.11);
     }
+
     .ev-color-bar {
       width: 4px;
       flex-shrink: 0;
       background: var(--ev-color, #6b7280);
       border-radius: 12px 0 0 12px;
     }
-    .ev-body { padding: 13px 15px; flex: 1; min-width: 0; }
+
+    .ev-body {
+      padding: 13px 15px;
+      flex: 1;
+      min-width: 0;
+    }
+
     .ev-time-row {
       display: flex;
       align-items: center;
@@ -373,12 +475,14 @@
       margin-bottom: 4px;
       flex-wrap: nowrap;
     }
+
     .ev-time {
       font-family: var(--mono);
       font-size: 14px;
       color: var(--text-sec);
       white-space: nowrap;
     }
+
     .ev-badge {
       font-size: 9px;
       font-weight: 800;
@@ -388,16 +492,19 @@
       border-radius: 4px;
       flex-shrink: 0;
     }
+
     .ev-badge-now {
-      background: rgba(79,140,255,0.22);
+      background: rgba(79, 140, 255, 0.22);
       color: var(--accent);
-      border: 1px solid rgba(79,140,255,0.38);
+      border: 1px solid rgba(79, 140, 255, 0.38);
     }
+
     .ev-badge-next {
-      background: rgba(255,159,10,0.15);
+      background: rgba(255, 159, 10, 0.15);
       color: var(--orange);
-      border: 1px solid rgba(255,159,10,0.28);
+      border: 1px solid rgba(255, 159, 10, 0.28);
     }
+
     .ev-title {
       font-size: 19px;
       font-weight: 600;
@@ -407,6 +514,7 @@
       text-overflow: ellipsis;
       line-height: 1.25;
     }
+
     .ev-desc {
       font-size: 13px;
       color: var(--text-muted);
@@ -415,6 +523,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
+
     .ev-source {
       font-size: 10px;
       font-weight: 600;
@@ -434,12 +543,38 @@
       background: var(--bg-header);
       border-top: 1px solid var(--border);
     }
-    .tv-status { font-size: 13px; display: flex; align-items: center; gap: 5px; }
-    .status-ok   { color: var(--green); }
-    .status-warn { color: var(--orange); }
-    .status-err  { color: var(--red); }
-    .tv-footer-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
-    .tv-last-updated { font-size: 12px; color: var(--text-muted); }
+
+    .tv-status {
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .status-ok {
+      color: var(--green);
+    }
+
+    .status-warn {
+      color: var(--orange);
+    }
+
+    .status-err {
+      color: var(--red);
+    }
+
+    .tv-footer-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1px;
+    }
+
+    .tv-last-updated {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
     /* ── Sleep-guard status — fixed overlay in TV safe zone ─────
        Samsung, LG and FireStick TVs often hide the bottom 5-8% of
        the screen via overscan.  Positioning at bottom:7vh / right:3vw
@@ -461,16 +596,27 @@
       white-space: nowrap;
       letter-spacing: 0.02em;
     }
+
     /* Diagnostic event ticker — fixed at very bottom, full width, monospace */
     .tv-diag-line {
-      position: fixed; bottom: 0; left: 0; right: 0; z-index: 9000;
-      padding: 1px 10px; font-size: 9px; font-family: monospace;
-      color: rgba(255,255,255,0.28); background: rgba(0,0,0,0.25);
-      pointer-events: none; white-space: nowrap;
-      overflow: hidden; text-overflow: ellipsis;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      z-index: 9000;
+      padding: 1px 10px;
+      font-size: 9px;
+      font-family: monospace;
+      color: rgba(255, 255, 255, 0.28);
+      background: rgba(0, 0, 0, 0.25);
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
   </style>
 </head>
+
 <body>
 
   <!-- ══════════════════════════════════════════════════════════ -->
@@ -484,16 +630,8 @@
         Enter the pairing code from your calendar.<br />
         Go to <strong>Admin → Enable TV Mode</strong> to generate one.
       </div>
-      <input
-        id="pair-code-input"
-        class="pair-input"
-        type="text"
-        maxlength="9"
-        autocomplete="off"
-        spellcheck="false"
-        inputmode="text"
-        placeholder="XXXX-XXXX"
-      />
+      <input id="pair-code-input" class="pair-input" type="text" maxlength="9" autocomplete="off" spellcheck="false"
+        inputmode="text" placeholder="XXXX-XXXX" />
       <button id="pair-btn" class="pair-btn" type="button">Connect</button>
       <div id="pair-error" class="pair-error"></div>
       <div class="pair-hint">
@@ -532,8 +670,9 @@
 
   </div>
 
-  <script type="module" src="/static/tv_dashboard.js?v=20260726a"></script>
+  <script type="module" src="/static/tv_dashboard.js?v=20260728a"></script>
   <script src="/static/window_controls.js"></script>
   <div id="tv-diag-line" class="tv-diag-line"></div>
 </body>
+
 </html>

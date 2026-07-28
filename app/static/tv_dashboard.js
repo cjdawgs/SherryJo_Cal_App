@@ -1,14 +1,11 @@
-'use strict';
+import { createTvZoomEngine } from './tv_zoom_engine.js';
 
 const TOKEN_KEY = 'tv_token';
 // TV state remains backend-driven. Poll often enough for a wall display while
 // lifecycle recovery handles FireOS/Silk timer suspension.
 const POLL_MS = 60000;
 const LONG_PRESS_MS = 600;
-const DEFAULT_ZOOM = 1;
-const MIN_ZOOM = 0.8;
-const MAX_ZOOM = 1.3;
-const ZOOM_STEP = 0.1;
+const DEFAULT_ZOOM_LEVEL = 100;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 
@@ -16,6 +13,7 @@ const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 // Declaring it here with let means wakeLock/antiSleep callbacks can safely
 // reference it at runtime without a temporal-dead-zone crash.
 let tvDiag = null;
+let zoomEngine = null;
 
 // ─── Screen Wake Lock Manager ────────────────────────────────────────────────
 // Prevents FireOS / Amazon Silk from sleeping the browser after 20-30 minutes
@@ -292,7 +290,13 @@ const state = {
   longPressTriggered: false,
   clickCount: 0,
   clickTimer: null,
-  zoomLevel: DEFAULT_ZOOM,
+  zoomLevel: DEFAULT_ZOOM_LEVEL,
+  defaultZoomLevel: DEFAULT_ZOOM_LEVEL,
+  zoomHold: {
+    key: null,
+    timer: null,
+    triggered: false,
+  },
   centerArrowMode: false,
   cursor: {
     x: 0,
@@ -742,6 +746,7 @@ function transitionTo(screen) {
 function init() {
   cacheDom();
   ensureStyles();
+  initZoomEngine();
 
   if (dom.pairBtn) dom.pairBtn.addEventListener('click', handlePair);
   if (dom.pairInput) {
@@ -780,6 +785,10 @@ function init() {
   document.addEventListener('visibilitychange', () => {
     const vis = document.visibilityState;
     if (tvDiag) tvDiag.log('visibilitychange', vis);
+    if (document.hidden) {
+      clearRemoteHoldState();
+      return;
+    }
     if (!document.hidden) {
       refreshEvents(true);
       // Re-acquire wake lock — the OS always releases it when the tab hides.
@@ -794,7 +803,10 @@ function init() {
   });
 
   // window blur / focus — fires when focus shifts (e.g., FireOS overlay opens)
-  window.addEventListener('blur', () => { if (tvDiag) tvDiag.log('window_blur', `vis=${document.visibilityState}`); });
+  window.addEventListener('blur', () => {
+    clearRemoteHoldState();
+    if (tvDiag) tvDiag.log('window_blur', `vis=${document.visibilityState}`);
+  });
   window.addEventListener('focus', () => {
     if (tvDiag) tvDiag.log('window_focus', `vis=${document.visibilityState}`);
     if (state.token && document.visibilityState === 'visible') {
@@ -805,7 +817,10 @@ function init() {
   });
 
   // pagehide / pageshow — fires on navigation and bfcache restore
-  window.addEventListener('pagehide', (e) => { if (tvDiag) tvDiag.log('pagehide', `persisted=${e.persisted}`); });
+  window.addEventListener('pagehide', (e) => {
+    clearRemoteHoldState();
+    if (tvDiag) tvDiag.log('pagehide', `persisted=${e.persisted}`);
+  });
   window.addEventListener('pageshow', (e) => {
     if (tvDiag) tvDiag.log('pageshow', `persisted=${e.persisted}`);
     if (state.token && document.visibilityState === 'visible') {
@@ -818,7 +833,10 @@ function init() {
   // Page Lifecycle API (Chromium 68+ / Amazon Silk)
   // 'freeze' fires when the browser decides to freeze the page (CPU saving).
   // This is the last chance to log before the page stops executing.
-  document.addEventListener('freeze', () => { if (tvDiag) tvDiag.log('page_freeze', 'browser froze the page'); });
+  document.addEventListener('freeze', () => {
+    clearRemoteHoldState();
+    if (tvDiag) tvDiag.log('page_freeze', 'browser froze the page');
+  });
   document.addEventListener('resume', () => {
     if (tvDiag) tvDiag.log('page_resume', 'page resumed from frozen state');
     if (state.token) { refreshEvents(true); wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
@@ -878,6 +896,7 @@ function stopAll() {
   state.pollHandle = null;
   state.clockHandle = null;
   state.heartbeatHandle = null;
+  clearRemoteHoldState();
   // Release wake lock on clean teardown (unpair / logout).
   wakeLock.release();
   antiSleep.stop();
@@ -980,6 +999,12 @@ function closeUtilityPanel() {
 function openManageAccountsPanel() {
   state.monthDetailOpen = false;
   state.utilityPanel = 'accounts';
+  render();
+}
+
+function openSettingsPanel() {
+  state.monthDetailOpen = false;
+  state.utilityPanel = 'settings';
   render();
 }
 
@@ -1290,27 +1315,15 @@ function onKeyDown(e) {
     return;
   }
 
-  if (key === 'ArrowUp' || key === 'ArrowDown') {
+  if (isVolumeForwardKey(key) || isVolumeReverseKey(key)) {
     e.preventDefault();
-    adjustZoom(key === 'ArrowUp' ? ZOOM_STEP : -ZOOM_STEP);
+    handleZoomHoldKeyDown(key);
     return;
   }
 
   if (isBackKey(key)) {
     e.preventDefault();
     handleBack();
-    return;
-  }
-
-  if (isVolumeForwardKey(key)) {
-    e.preventDefault();
-    focusNext();
-    return;
-  }
-
-  if (isVolumeReverseKey(key)) {
-    e.preventDefault();
-    focusPrev();
     return;
   }
 
@@ -1337,7 +1350,7 @@ function onKeyDown(e) {
   }
   if (key.toLowerCase() === 'f') {
     e.preventDefault();
-    setView('day');
+    setView('day', { applyHomeZoom: true });
     return;
   }
 
@@ -1352,6 +1365,11 @@ function onKeyUp(e) {
   logRemoteKey('up', e, key);
 
   if (isMuteKey(e, key)) {
+    e.preventDefault();
+    return;
+  }
+
+  if (handleZoomHoldKeyUp(key)) {
     e.preventDefault();
     return;
   }
@@ -1402,23 +1420,7 @@ function onKeyUp(e) {
 }
 
 function applyZoom() {
-  if (!dom.screenDash) return;
-  dom.screenDash.style.zoom = String(state.zoomLevel);
-}
-
-function adjustZoom(delta) {
-  const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, state.zoomLevel + delta));
-  state.zoomLevel = Math.round(next * 10) / 10;
-  applyZoom();
-  renderFooterHint(`Zoom ${Math.round(state.zoomLevel * 100)}% · center resets`);
-}
-
-function resetZoom() {
-  if (state.zoomLevel === DEFAULT_ZOOM) return false;
-  state.zoomLevel = DEFAULT_ZOOM;
-  applyZoom();
-  renderFooterHint('Zoom reset to 100%');
-  return true;
+  syncZoomState();
 }
 
 function normalizeKey(e) {
@@ -1594,7 +1596,7 @@ function handleBack() {
     render();
     return;
   }
-  setView('day');
+  setView('day', { applyHomeZoom: true });
 }
 
 function isBackKey(key) { return key === 'Escape' || key === 'Backspace'; }
@@ -1689,8 +1691,11 @@ function goToday() {
   patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
 
-function setView(viewName) {
+function setView(viewName, options = {}) {
   closeEditor(true);
+  if (viewName === 'day' && options.applyHomeZoom) {
+    applyHomeZoomPreference();
+  }
   state.currentView = viewName;
   if (viewName !== 'month') state.monthDetailOpen = false;
   render();
@@ -1838,6 +1843,47 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
       </aside>`;
   }
 
+  if (state.utilityPanel === 'settings') {
+    const defaultZoom = state.defaultZoomLevel || 100;
+    return `
+      <aside class="tv-right-rail ${extraClass}">
+        <div class="tv-right-title">TV Settings</div>
+        <div class="tv-right-subtitle">Zoom and home-view preferences</div>
+        <div class="tv-right-list">
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Current Zoom</div>
+            <div class="tv-right-item-title">${state.zoomLevel}%</div>
+          </div>
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Home Zoom</div>
+            <div class="tv-right-item-title">${defaultZoom}%</div>
+          </div>
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Remote Zoom</div>
+            <div class="tv-right-item-title">Hold + to zoom in, hold - to zoom out</div>
+          </div>
+        </div>
+        <div class="tv-right-subtitle">Actions</div>
+        <div class="tv-sidebar-actions">
+          <button class="tv-side-btn primary" type="button" data-tv-click="control" data-control="zoom-in">Zoom In</button>
+          <button class="tv-side-btn" type="button" data-tv-click="control" data-control="zoom-out">Zoom Out</button>
+          <button class="tv-side-btn" type="button" data-tv-click="control" data-control="save-zoom-default">Save Current As Home</button>
+          <button class="tv-side-btn" type="button" data-tv-click="control" data-control="restore-home-zoom">Restore Home Zoom</button>
+          <button class="tv-side-btn warn" type="button" data-tv-click="control" data-control="zoom-reset">Reset to 100%</button>
+        </div>
+        <div class="tv-right-subtitle">Quick Launch Summary</div>
+        <div class="tv-right-list">
+          <div class="tv-right-item"><div class="tv-right-item-time">Enter</div><div class="tv-right-item-title">Single press selects and edits</div></div>
+          <div class="tv-right-item"><div class="tv-right-item-time">Enter Hold</div><div class="tv-right-item-title">Creates a new event or sticky note</div></div>
+          <div class="tv-right-item"><div class="tv-right-item-time">+ / - Single Press</div><div class="tv-right-item-title">Moves focus forward or backward</div></div>
+          <div class="tv-right-item"><div class="tv-right-item-time">+ / - Hold</div><div class="tv-right-item-title">Changes zoom level in supported steps</div></div>
+          <div class="tv-right-item"><div class="tv-right-item-time">F / Home</div><div class="tv-right-item-title">Returns to day view and restores Home Zoom</div></div>
+          <div class="tv-right-item"><div class="tv-right-item-time">Triple Select</div><div class="tv-right-item-title">Toggles Arrow Mode and virtual cursor</div></div>
+        </div>
+        <div class="tv-right-editor-anchor"><button class="tv-side-btn full" type="button" data-tv-click="control" data-control="close-panel">Close</button></div>
+      </aside>`;
+  }
+
   if (state.editor) {
     return `
       <aside class="tv-right-rail editor-cover ${extraClass}">
@@ -1882,9 +1928,11 @@ function sidebarItems() {
     { key: 'create-event', label: 'Create Event', group: 'primary', action: () => createEventAndEdit() },
     { key: 'create-sticky', label: 'Create Sticky', group: 'primary', action: () => createStickyAndEdit() },
     { key: 'jump-today', label: 'Jump Today', group: 'primary', action: () => goToday() },
-    { key: 'view-day', label: 'View Day', group: 'primary', action: () => setView('day') },
+    { key: 'view-day', label: 'View Day', group: 'primary', action: () => setView('day', { applyHomeZoom: true }) },
     { key: 'view-week', label: 'View Week', group: 'primary', action: () => setView('week') },
     { key: 'view-month', label: 'View Month', group: 'primary', action: () => setView('month') },
+    { key: 'save-zoom-default', label: 'Save Zoom as Default', group: 'footer', action: () => saveCurrentZoomAsDefault() },
+    { key: 'settings', label: 'Settings', group: 'footer', action: () => openSettingsPanel() },
     { key: 'manage-accounts', label: 'Manage Accounts', group: 'footer', action: () => openManageAccountsPanel() },
   ];
   if (state.userRole === 'admin') {
@@ -2097,6 +2145,124 @@ function render() {
   applyZoom();
 }
 
+function initZoomEngine() {
+  if (zoomEngine) return;
+  zoomEngine = createTvZoomEngine();
+  const restored = zoomEngine.restore();
+  state.zoomLevel = restored.currentZoomLevel;
+  state.defaultZoomLevel = restored.defaultZoomLevel;
+}
+
+function syncZoomState() {
+  if (!zoomEngine) return;
+  state.zoomLevel = zoomEngine.getZoomLevel();
+  state.defaultZoomLevel = zoomEngine.getDefaultZoomLevel();
+}
+
+function announceZoomChange(kind) {
+  syncZoomState();
+  renderFooterHint();
+  if (tvDiag) {
+    if (kind === 'default') {
+      tvDiag.log('default_zoom_changed', `defaultZoom=${state.defaultZoomLevel}%`);
+    } else {
+      tvDiag.log('zoom_changed', `zoom=${state.zoomLevel}%`);
+    }
+  }
+}
+
+function zoomIn() {
+  if (!zoomEngine || !zoomEngine.zoomIn()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function zoomOut() {
+  if (!zoomEngine || !zoomEngine.zoomOut()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function resetZoom() {
+  if (!zoomEngine || !zoomEngine.resetZoom()) return false;
+  announceZoomChange('current');
+  renderFooterHint('Zoom reset to 100%');
+  return true;
+}
+
+function saveCurrentZoomAsDefault() {
+  if (!zoomEngine) return false;
+  const changed = zoomEngine.saveDefaultZoomLevel();
+  syncZoomState();
+  renderFooterHint(changed ? `Home default zoom saved at ${state.defaultZoomLevel}%` : `Home default already ${state.defaultZoomLevel}%`);
+  if (tvDiag && changed) {
+    tvDiag.log('default_zoom_changed', `defaultZoom=${state.defaultZoomLevel}%`);
+  }
+  return changed;
+}
+
+function applyHomeZoomPreference() {
+  if (!zoomEngine || !zoomEngine.applyHomeZoomPreference()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function clearSelectLongPressState() {
+  if (state.longPressTimer) {
+    clearTimeout(state.longPressTimer);
+    state.longPressTimer = null;
+  }
+  state.longPressTriggered = false;
+}
+
+function clearZoomHoldState() {
+  if (state.zoomHold.timer) {
+    clearTimeout(state.zoomHold.timer);
+    state.zoomHold.timer = null;
+  }
+  state.zoomHold.key = null;
+  state.zoomHold.triggered = false;
+}
+
+function clearRemoteHoldState() {
+  clearSelectLongPressState();
+  clearZoomHoldState();
+}
+
+function handleZoomHoldKeyDown(key) {
+  if (!isVolumeForwardKey(key) && !isVolumeReverseKey(key)) return false;
+
+  if (state.zoomHold.key === key) return true;
+
+  clearZoomHoldState();
+
+  state.zoomHold.key = key;
+  state.zoomHold.triggered = false;
+  state.zoomHold.timer = setTimeout(() => {
+    state.zoomHold.timer = null;
+    state.zoomHold.triggered = true;
+    if (isVolumeForwardKey(key)) zoomIn();
+    else zoomOut();
+  }, LONG_PRESS_MS);
+  return true;
+}
+
+function handleZoomHoldKeyUp(key) {
+  if (state.zoomHold.key !== key) return false;
+
+  const wasTriggered = state.zoomHold.triggered;
+  clearZoomHoldState();
+
+  if (wasTriggered) return true;
+  if (isVolumeForwardKey(key)) focusNext();
+  else focusPrev();
+  return true;
+}
+
+function applyZoom() {
+  syncZoomState();
+}
+
 function syncAccountLegend() {
   const map = new Map();
   const colorMap = {};
@@ -2303,7 +2469,7 @@ function renderEditor() {
 
 function renderFooterHint(extra) {
   if (!dom.statusEl || !dom.lastUpdated) return;
-  dom.statusEl.textContent = state.centerArrowMode ? 'Arrow Mode: ON' : 'Arrow Mode: OFF';
+  dom.statusEl.textContent = `${state.centerArrowMode ? 'Arrow ON' : 'Arrow OFF'} | Zoom ${state.zoomLevel}%`;
   const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
   if (hasSyncStatus) {
     dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
@@ -2312,7 +2478,7 @@ function renderFooterHint(extra) {
     return;
   }
   dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
-  dom.lastUpdated.textContent = extra || 'Single SELECT edit • Double SELECT context • Triple SELECT arrow mode • Long press create • +/- tab';
+  dom.lastUpdated.textContent = extra || 'Single SELECT edit • Double SELECT context • Triple SELECT arrow mode • Long press create • +/- hold zoom • F home';
 }
 
 function enterEventEditor(item, mode) {
@@ -2507,7 +2673,7 @@ function handleMainClick(e) {
     }
     if (control === 'view-day') {
       state.monthDetailOpen = false;
-      setView('day');
+      setView('day', { applyHomeZoom: true });
       return;
     }
     if (control === 'view-week') {
@@ -2519,6 +2685,27 @@ function handleMainClick(e) {
     closeUtilityPanel();
     if (control === 'view-month') {
       setView('month');
+      return;
+    }
+    if (control === 'save-zoom-default') {
+      saveCurrentZoomAsDefault();
+      return;
+    }
+    if (control === 'zoom-in') {
+      zoomIn();
+      return;
+    }
+    if (control === 'zoom-out') {
+      zoomOut();
+      return;
+    }
+    if (control === 'restore-home-zoom') {
+      applyHomeZoomPreference();
+      renderFooterHint(`Home zoom restored to ${state.zoomLevel}%`);
+      return;
+    }
+    if (control === 'zoom-reset') {
+      resetZoom();
       return;
     }
     closeUtilityPanel();

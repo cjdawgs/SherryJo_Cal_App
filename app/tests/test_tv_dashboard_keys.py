@@ -6,6 +6,16 @@ def _tv_js_text() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _tv_zoom_engine_text() -> str:
+    path = Path(__file__).resolve().parents[2] / "app" / "static" / "tv_zoom_engine.js"
+    return path.read_text(encoding="utf-8")
+
+
+def _tv_template_text(name: str) -> str:
+    path = Path(__file__).resolve().parents[2] / "app" / "templates" / name
+    return path.read_text(encoding="utf-8")
+
+
 def test_tv_dashboard_has_single_global_key_listener_set():
     text = _tv_js_text()
     # Use only window listeners to avoid duplicate key handling.
@@ -71,6 +81,39 @@ def test_tv_dashboard_exposes_account_chip_filtering_and_sticky_icons():
         assert token in text
 
 
+def test_tv_dashboard_exposes_visible_zoom_settings_panel():
+    text = _tv_js_text()
+    required_tokens = [
+        "TV Settings",
+        "Current Zoom",
+        "Home Zoom",
+        "Zoom In",
+        "Zoom Out",
+        "Save Current As Home",
+        "Restore Home Zoom",
+        "Reset to 100%",
+        "openSettingsPanel()",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
+def test_quick_launch_guide_documents_firetv_remote_map():
+    path = Path(__file__).resolve().parents[2] / "docs" / "quick_launch_firetv.md"
+    text = path.read_text(encoding="utf-8")
+    required_tokens = [
+        "FireTV Quick Launch Guide",
+        "Long press 600ms",
+        "Zoom In",
+        "Zoom Out",
+        "F / Home",
+        "Visible Settings Panel",
+        "Arrow OFF | Zoom 100%",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
 def test_tv_dashboard_auth_fetch_handles_network_exceptions():
     text = _tv_js_text()
     assert "async function authFetch" in text
@@ -89,8 +132,50 @@ def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
 
 def test_tv_dashboard_remote_up_down_zoom_and_center_reset():
     text = _tv_js_text()
-    assert "adjustZoom(key === 'ArrowUp' ? ZOOM_STEP : -ZOOM_STEP)" in text
-    assert "function applyZoom()" in text
-    assert "function resetZoom()" in text
+    engine_text = _tv_zoom_engine_text()
+    required_tokens = [
+        "createTvZoomEngine",
+        "handleZoomHoldKeyDown(key)",
+        "handleZoomHoldKeyUp(key)",
+        "zoomIn()",
+        "zoomOut()",
+        "saveCurrentZoomAsDefault()",
+        "applyHomeZoomPreference()",
+        "function applyZoom()",
+        "function resetZoom()",
+    ]
+    for token in required_tokens:
+        assert token in text
+    assert "tv_zoom_level" in engine_text
+    assert "tv_default_zoom_level" in engine_text
+    assert "SUPPORTED_ZOOM_LEVELS" in engine_text
+    assert "Arrow ON" in text
+    assert "Zoom ${state.zoomLevel}%" in text
     assert "if (count === 1 && resetZoom()) return" in text
-    assert "center resets" in text
+
+
+def test_tv_dashboard_zoom_css_variable_is_centralized():
+    tv_template = _tv_template_text("tv.html")
+    kiosk_template = _tv_template_text("tv_kiosk.html")
+    engine_text = _tv_zoom_engine_text()
+    assert "--tv-scale" in tv_template
+    assert "--tv-scale" in kiosk_template
+    assert "--tv-scale" in engine_text
+    dashboard_text = _tv_js_text()
+    assert "style.zoom" not in dashboard_text
+
+
+def test_tv_dashboard_clears_hold_state_on_lifecycle_interruptions():
+    text = _tv_js_text()
+    required_tokens = [
+        "function clearRemoteHoldState()",
+        "function clearZoomHoldState()",
+        "function clearSelectLongPressState()",
+        "window.addEventListener('blur', () => {",
+        "window.addEventListener('pagehide', (e) => {",
+        "document.addEventListener('freeze', () => {",
+        "if (document.hidden) {",
+    ]
+    for token in required_tokens:
+        assert token in text
+    assert text.count("clearRemoteHoldState();") >= 4

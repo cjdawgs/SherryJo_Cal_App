@@ -149,6 +149,8 @@ class TestGeneratePairingCode:
 
 class TestPairEndpoint:
     def test_pair_with_valid_code(self, client, auth_headers):
+        from app.security import decode_token
+
         # Generate a code via the web UI flow
         gen = client.post("/tv/generate-code", headers=auth_headers)
         code = gen.json()["pairingCode"]
@@ -162,6 +164,10 @@ class TestPairEndpoint:
         # selectedDate must not be forced to today
         assert "selectedDate" in data  # key exists; value may be None
 
+        payload = decode_token(data["token"])
+        assert payload["user_id"]
+        assert "exp" not in payload
+
     def test_pair_with_invalid_code(self, client):
         resp = client.post("/tv/pair", json={"pairingCode": "XXXX-9999"})
         assert resp.status_code == 400
@@ -173,6 +179,24 @@ class TestPairEndpoint:
         client.post("/tv/pair", json={"pairingCode": code})
         resp2 = client.post("/tv/pair", json={"pairingCode": code})
         assert resp2.status_code == 400
+
+
+class TestKioskToken:
+    def test_generate_kiosk_token_is_persistent(self, client, auth_headers):
+        from app.security import decode_token
+
+        resp = client.post("/tv/generate-kiosk-token", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["expires_in"] == "persistent"
+        assert "/tv/kiosk?token=" in data["kiosk_url"]
+
+        payload = decode_token(data["token"])
+        assert payload["user_id"]
+        assert "exp" not in payload
+
+        kiosk_resp = client.get(f"/tv/kiosk?token={data['token']}")
+        assert kiosk_resp.status_code == 200
 
 
 class TestTVStateEndpoints:

@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, User
-from app.security import create_token
+from app.security import create_persistent_token, create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 from app.utils import ensure_utc, parse_iso_datetime
 
@@ -99,15 +99,14 @@ def generate_kiosk_token(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Generate a 1-year JWT for use in a digital-signage kiosk URL.
+    Generate a persistent JWT for use in a digital-signage kiosk URL.
 
     Returns the token AND the full kiosk URL so the admin can paste it
     directly into Kitcast / any signage platform.
     """
     logger.info("TV_KIOSK_TOKEN_GENERATED user_id=%s", current_user.id)
 
-    # 1 year = 525 960 minutes
-    token = create_token(current_user.id, minutes=525_960)
+    token = create_persistent_token(current_user.id)
 
     # Build the full URL from the incoming request so it works on
     # localhost, Render, and any custom domain without hard-coding.
@@ -117,7 +116,7 @@ def generate_kiosk_token(
     return {
         "token":     token,
         "kiosk_url": kiosk_url,
-        "expires_in": "1 year",
+        "expires_in": "persistent",
         "note": "Paste kiosk_url into your signage platform (Kitcast, etc.). No pairing or interaction needed.",
     }
 
@@ -600,8 +599,9 @@ def pair_tv(
         tv_state_store.initialize(user_id, selected_date=None, current_view="day")
     state = tv_state_store.get(user_id)
 
-    # Issue a long-lived TV token (8 hours)
-    token = create_token(user_id, minutes=480)
+    # Issue a persistent TV token so the device stays paired until it is
+    # explicitly unpaired or the signing secret is rotated.
+    token = create_persistent_token(user_id)
 
     return {
         "token": token,

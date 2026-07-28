@@ -45,6 +45,10 @@ The system includes authentication, role-based access control, event management,
 
 ### 1. Activate environment
 
+### FireTV Quick Launch Guide
+
+See [docs/quick_launch_firetv.md](docs/quick_launch_firetv.md) for the FireTV remote map, zoom controls, home zoom preferences, and settings panel usage.
+
 ## Configuration Safety Rules
 
 - `ADMIN_SETUP_CODE` must be set (host env or secret store) before any admin account can be registered via `POST /auth/register`. Admin registration is rejected when it is unset.
