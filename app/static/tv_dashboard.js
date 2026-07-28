@@ -2529,10 +2529,6 @@ function handleZoomHoldKeyUp(key) {
   return true;
 }
 
-function applyZoom() {
-  syncZoomState();
-}
-
 function syncAccountLegend() {
   const map = new Map();
   const colorMap = {};
