@@ -306,6 +306,95 @@ def test_admin_apply_runtime_token_encryption_key_requires_admin(client):
     assert denied.status_code == 403
 
 
+def test_admin_current_user_failure_history_summarizes_range(client, db):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    failure_time = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+
+    db.add(OAuthAccount(
+        user_id=admin["id"],
+        provider="google",
+        account_email="history@test.com",
+        access_token="token-value",
+        refresh_token="refresh-value",
+        last_sync_failure=failure_time,
+        last_error="Provider timeout",
+        status="error",
+    ))
+    db.add(TVDiagLog(
+        user_id=admin["id"],
+        event="calendar_publish_result",
+        details="status=error failed=1 reason=no_targets",
+        ts_server=failure_time,
+    ))
+    db.commit()
+
+    res = client.get(
+        "/admin/system/current-user-failure-history?start_date=2026-07-19&end_date=2026-07-21",
+        headers=headers,
+    )
+    assert res.status_code == 200
+    payload = res.json()
+    assert payload["counts"]["sync_failures"] == 1
+    assert payload["counts"]["publish_failure_rows"] == 1
+    assert payload["counts"]["distinct_publish_failure_reasons"] == 1
+    assert payload["publish_failure_reasons"][0]["reason"] == "no_targets"
+    assert len(payload["recent_error_messages"]) == 1
+
+
+def test_admin_current_user_failure_history_rejects_large_range(client):
+    headers = _admin_headers(client)
+    res = client.get(
+        "/admin/system/current-user-failure-history?start_date=2026-01-01&end_date=2026-05-01",
+        headers=headers,
+    )
+    assert res.status_code == 422
+
+
+def test_admin_tv_stale_refresh_summary_reports_recent_fallbacks(client, db):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    other = _register_user(client, role="staff")
+    now_utc = datetime.now(timezone.utc)
+
+    db.add(TVDiagLog(
+        user_id=admin["id"],
+        event="stale_snapshot_used",
+        details="backend_refresh_failure",
+        device_id="device-admin-a",
+        ts_server=now_utc,
+        visibility="visible",
+    ))
+    db.add(TVDiagLog(
+        user_id=other["id"],
+        event="stale_snapshot_used",
+        details="backend_refresh_failure_no_snapshot",
+        device_id="device-staff-b",
+        ts_server=now_utc,
+        visibility="visible",
+    ))
+    db.add(TVDiagLog(
+        user_id=other["id"],
+        event="heartbeat",
+        details="ignore",
+        device_id="device-staff-b",
+        ts_server=now_utc,
+    ))
+    db.commit()
+
+    res = client.get("/admin/system/tv-stale-refresh-summary?hours=24&limit=50", headers=headers)
+    assert res.status_code == 200
+
+    payload = res.json()
+    assert payload["counts"]["stale_snapshot_events"] == 2
+    assert payload["counts"]["unique_devices"] == 2
+    assert payload["counts"]["unique_users"] == 2
+    reasons = {row["reason"]: row["count"] for row in payload["reason_counts"]}
+    assert reasons.get("backend_refresh_failure") == 1
+    assert reasons.get("backend_refresh_failure_no_snapshot") == 1
+    assert len(payload["recent_rows"]) == 2
+
+
 def test_admin_table_rows_requires_admin_role(client):
     staff_headers = _staff_headers(client)
 

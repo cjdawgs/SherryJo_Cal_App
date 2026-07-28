@@ -337,6 +337,61 @@ def test_publish_event_ids_with_no_resolved_targets_returns_explicit_warning(cli
     assert f"first_warning=No publishable targets resolved for event {event.id}" in (log_row.details or "")
 
 
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-ms")
+@patch("app.services.graph_client.GraphClient.create_event", side_effect=RuntimeError("Outlook create failed (403 ErrorAccessDenied): Access is denied."))
+def test_publish_returns_detailed_microsoft_target_failure(mock_ms_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="publish-ms@example.com",
+        access_token="token-ms",
+        refresh_token="refresh-ms",
+        status="ok",
+    ))
+    db.add(Event(
+        title="Publish Microsoft Failure Detail",
+        start_time=datetime(2026, 7, 15, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 15, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:publish-ms-detail",
+        external_ids={},
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Microsoft Failure Detail").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [event.id],
+            "publish_targets": {
+                str(event.id): ["microsoft:publish-ms@example.com"]
+            }
+        }
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["published"] == 0
+    assert data["created"] == 0
+    assert data["failed"] == 1
+    assert any("Access is denied" in warning for warning in data["warnings"])
+    assert any(
+        result["target_key"] == "microsoft:publish-ms@example.com"
+        and result["status"] == "failed"
+        and "Access is denied" in result["message"]
+        for result in data["account_results"]
+    )
+    mock_ms_create.assert_called_once()
+
+
 @patch("app.services.google_calendar_service.GoogleCalendarService.update_event")
 def test_publish_prefers_healthy_duplicate_oauth_account(mock_google_update, client, auth_headers, db):
     user = db.query(User).filter(User.email.like("%@test.com")).first()

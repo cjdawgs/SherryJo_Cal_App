@@ -20,7 +20,10 @@ const modalState = {
   stickyNotes: [],
   stickyIndex: 0,
   publishTargetKeys: [],
-  initialSnapshot: null
+  initialSnapshot: null,
+  initialEventContentSnapshot: null,
+  publishAttemptConsumed: false,
+  publishAttemptState: "idle"
 };
 
 let isSavingEvent = false;
@@ -643,6 +646,7 @@ function getExistingLinkedAccountKeys(eventRef = null) {
 
 function buildModalAccountRows() {
   const linkedKeys = getExistingLinkedAccountKeys(modalState.eventRef);
+  const shouldUpdateLinked = shouldUpdateLinkedPublishTargets();
   const connected = getConnectedCalendarAccounts();
 
   return connected
@@ -660,7 +664,9 @@ function buildModalAccountRows() {
         status: account?.status || "unknown",
         publishable,
         linked,
-        disabled: !publishable,
+        actionable: publishable && (!linked || shouldUpdateLinked),
+        disabled: !publishable || (linked && !shouldUpdateLinked),
+        lockedLinked: linked && publishable && !shouldUpdateLinked,
       };
     })
     .sort((a, b) => {
@@ -671,7 +677,56 @@ function buildModalAccountRows() {
 }
 
 function seedPublishTargetsFromEvent(eventRef = null) {
-  modalState.publishTargetKeys = [...getExistingLinkedAccountKeys(eventRef)];
+  modalState.publishTargetKeys = shouldUpdateLinkedPublishTargets(eventRef)
+    ? [...getExistingLinkedAccountKeys(eventRef)]
+    : [];
+  modalState.publishAttemptConsumed = false;
+  modalState.publishAttemptState = "idle";
+}
+
+function getEventContentSnapshot() {
+  if (modalState.type === "sticky") {
+    return JSON.stringify({
+      type: "sticky",
+      scope: modalState.stickyScope,
+      dateKey: modalState.dateStickyKey,
+      eventId: modalState.eventId,
+      stickyNotes: modalState.stickyNotes.map((note) => ({
+        content: String(note?.content || ""),
+        color: String(note?.color || "#F7E68A")
+      }))
+    });
+  }
+
+  return JSON.stringify({
+    type: "event",
+    eventId: modalState.eventId,
+    title: (document.getElementById("eventTitle")?.value || "").trim(),
+    date: document.getElementById("eventDate")?.value || "",
+    start: document.getElementById("eventStart")?.value || "",
+    end: document.getElementById("eventEnd")?.value || "",
+    description: getEditorHtml("eventDescriptionEditor"),
+    tags: (document.getElementById("eventTags")?.value || "").trim(),
+    color: document.getElementById("eventColor")?.value || "",
+    colorEnabled: document.getElementById("eventColorEnabled")?.checked === true
+  });
+}
+
+function eventContentHasUnsavedEdits() {
+  if (!window.isModalOpen || !modalState.initialEventContentSnapshot) return false;
+  return getEventContentSnapshot() !== modalState.initialEventContentSnapshot;
+}
+
+function eventHasPendingPublishUpdates(eventRef = modalState.eventRef) {
+  const eventId = Number(modalState.eventId || eventRef?.extendedProps?.backendId || eventRef?.id);
+  if (!Number.isFinite(eventId)) return false;
+
+  const changes = [...(window.pendingPublishChanges?.values?.() || [])];
+  return changes.some((change) => Number(change?.eventId) === eventId && change?.localOnly !== true);
+}
+
+function shouldUpdateLinkedPublishTargets(eventRef = modalState.eventRef) {
+  return eventContentHasUnsavedEdits() || eventHasPendingPublishUpdates(eventRef);
 }
 
 function getSelectedPublishTargetKeys() {
@@ -693,6 +748,14 @@ function getPublishTargetSummary() {
   return rows.filter((row) => selected.has(row.key));
 }
 
+function getActionablePublishTargetSummary() {
+  return getPublishTargetSummary().filter((row) => row.publishable && row.actionable);
+}
+
+function getLockedLinkedPublishRows() {
+  return buildModalAccountRows().filter((row) => row.lockedLinked);
+}
+
 function renderAccountSelectionChecklist(containerId, options = {}) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -709,18 +772,20 @@ function renderAccountSelectionChecklist(containerId, options = {}) {
   container.innerHTML = rows.map((row) => {
     const checked = selected.has(row.key) ? "checked" : "";
     const disabled = row.disabled ? "disabled" : "";
-    const badge = row.linked ? "Linked" : (row.publishable ? "Available" : "View only");
+    const badge = row.lockedLinked ? "Up to date" : (row.linked ? "Linked" : (row.publishable ? "Available" : "View only"));
     const hint = row.disabled
-      ? "Apple visibility is shown here, but direct publish to Apple is not supported in this build."
+      ? (row.lockedLinked
+        ? "Already published here. This row is locked until the event has edits that need republishing."
+        : "Apple visibility is shown here, but direct publish to Apple is not supported in this build.")
       : (row.linked ? "Already linked to this event." : "Create or update this event on this calendar when published.");
     return `
-      <label class="accountPublishRow ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""}">
+      <label class="accountPublishRow ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""} ${row.lockedLinked ? "is-locked-linked" : ""}">
         <input type="checkbox" data-publish-account-key="1" value="${escapeHtml(row.key)}" ${checked} ${disabled} />
         <span class="accountPublishMeta">
           <span class="accountPublishLabel">${escapeHtml(row.label)}</span>
           <span class="accountPublishHint">${escapeHtml(hint)}</span>
         </span>
-        <span class="accountPublishBadge ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""}">${escapeHtml(badge)}</span>
+        <span class="accountPublishBadge ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""} ${row.lockedLinked ? "is-locked-linked" : ""}">${escapeHtml(badge)}</span>
       </label>`;
   }).join("");
 
@@ -730,20 +795,63 @@ function renderAccountSelectionChecklist(containerId, options = {}) {
 function syncPublishSelectionStateFrom(container) {
   const picked = collectSelectedKeysFromContainer(container);
   setSelectedPublishTargetKeys(picked);
+  modalState.publishAttemptConsumed = false;
+  modalState.publishAttemptState = "idle";
   renderEventPublishControls();
   renderPublishConfirmationContents();
+}
+
+function renderConfirmPublishButtonState(options = {}) {
+  const confirmBtn = document.getElementById("confirmPublishEventBtn");
+  if (!confirmBtn) return;
+
+  const actionableCount = getActionablePublishTargetSummary().length;
+  const canPublish = actionableCount > 0 && !modalState.publishAttemptConsumed;
+  const transientState = options.state || modalState.publishAttemptState || "idle";
+
+  confirmBtn.classList.remove("publishBtnIdle", "publishBtnActive", "publishBtnSuccess", "publishBtnError", "is-publishing");
+
+  if (isPublishingEvent) {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Publishing...";
+    confirmBtn.classList.add("publishBtnActive", "is-publishing");
+    return;
+  }
+
+  if (transientState === "success") {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Publish Succeeded";
+    confirmBtn.classList.add("publishBtnSuccess");
+    return;
+  }
+
+  if (transientState === "error") {
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = "Publish Failed";
+    confirmBtn.classList.add("publishBtnError");
+    return;
+  }
+
+  confirmBtn.disabled = !canPublish;
+  confirmBtn.textContent = "Confirm Publish";
+  confirmBtn.classList.add(canPublish ? "publishBtnActive" : "publishBtnIdle");
 }
 
 function renderEventPublishControls() {
   renderAccountSelectionChecklist("eventPublishTargets", { mode: "editor" });
 
-  const selectedCount = getPublishTargetSummary().filter((row) => row.publishable).length;
+  const selectedCount = getActionablePublishTargetSummary().length;
+  const lockedLinkedCount = getLockedLinkedPublishRows().length;
   const info = document.getElementById("eventPublishSelectionInfo");
   const publishBtn = document.getElementById("publishEventBtn");
   if (info) {
-    info.textContent = selectedCount > 0
-      ? `${selectedCount} calendar${selectedCount === 1 ? "" : "s"} selected for one-event publish`
-      : "Select one or more publish-capable calendars to export this event.";
+    if (selectedCount > 0) {
+      info.textContent = `${selectedCount} calendar${selectedCount === 1 ? "" : "s"} selected for one-event publish`;
+    } else if (lockedLinkedCount > 0) {
+      info.textContent = `${lockedLinkedCount} already-published calendar${lockedLinkedCount === 1 ? " is" : "s are"} up to date. Select a new calendar or edit this event to publish more changes.`;
+    } else {
+      info.textContent = "Select one or more publish-capable calendars to export this event.";
+    }
   }
   if (publishBtn) {
     publishBtn.disabled = selectedCount === 0 || isPublishingEvent;
@@ -772,13 +880,51 @@ function renderPublishConfirmationContents() {
   renderAccountSelectionChecklist("publishConfirmTargets", { mode: "confirm" });
 
   const summary = document.getElementById("publishConfirmSummary");
+  renderConfirmPublishButtonState();
   if (!summary) return;
 
   const selectedRows = getPublishTargetSummary();
-  const publishable = selectedRows.filter((row) => row.publishable);
-  summary.textContent = publishable.length > 0
-    ? `Publish this event to ${publishable.length} selected calendar${publishable.length === 1 ? "" : "s"}. Existing linked copies will be updated; newly selected calendars will get a new copy.`
-    : "Choose at least one publish-capable calendar before confirming.";
+  const actionable = selectedRows.filter((row) => row.publishable && row.actionable);
+  const linkedUpdates = actionable.filter((row) => row.linked).length;
+  const newPublishes = actionable.filter((row) => !row.linked).length;
+  const lockedLinkedCount = getLockedLinkedPublishRows().length;
+
+  if (!actionable.length) {
+    summary.textContent = lockedLinkedCount > 0
+      ? "This event is already up to date on its linked calendars. Select a new calendar or make another event edit before confirming."
+      : "Choose at least one publish-capable calendar before confirming.";
+    return;
+  }
+
+  const parts = [];
+  if (linkedUpdates > 0) {
+    parts.push(`${linkedUpdates} linked calendar${linkedUpdates === 1 ? " copy will" : " copies will"} be updated`);
+  }
+  if (newPublishes > 0) {
+    parts.push(`${newPublishes} newly selected calendar${newPublishes === 1 ? " will" : "s will"} get a new copy`);
+  }
+  if (lockedLinkedCount > 0 && linkedUpdates === 0) {
+    parts.push(`${lockedLinkedCount} already-linked calendar${lockedLinkedCount === 1 ? " is" : "s are"} unchanged and will not be republished`);
+  }
+  summary.textContent = `Confirm publish: ${parts.join("; ")}.`;
+}
+
+function buildPublishFailureMessage(data, selectedKeys = []) {
+  const results = Array.isArray(data?.account_results) ? data.account_results : [];
+  const targeted = selectedKeys.length
+    ? results.filter((item) => selectedKeys.includes(String(item?.target_key || "").toLowerCase()))
+    : results;
+  const failed = targeted.filter((item) => item && item.ok !== true && item.message);
+  if (failed.length) {
+    return failed.map((item) => item.message).join("; ");
+  }
+
+  const warnings = Array.isArray(data?.warnings) ? data.warnings.filter(Boolean) : [];
+  if (warnings.length) {
+    return warnings.join("; ");
+  }
+
+  return "No calendars were updated.";
 }
 
 const DATE_STICKY_STORAGE_KEY = "sj_date_sticky_notes_v1";
@@ -1354,6 +1500,7 @@ function getModalEditSnapshot() {
 
 function markModalCleanSnapshot() {
   modalState.initialSnapshot = getModalEditSnapshot();
+  modalState.initialEventContentSnapshot = getEventContentSnapshot();
 }
 
 function modalHasUnsavedEdits() {
@@ -1411,6 +1558,8 @@ function openModal(type = "event", date = null, eventRef = null) {
   modalState.dateStickyKey = null;
   window.editingEventId = modalState.eventId;
   modalState.publishTargetKeys = [];
+  modalState.publishAttemptConsumed = false;
+  modalState.publishAttemptState = "idle";
 
   fillModalFields(date, eventRef);
   setModalType(type);
@@ -1497,6 +1646,7 @@ function closeCreateModal(options = {}) {
 
   window.isModalOpen = false;
   modalState.initialSnapshot = null;
+  modalState.initialEventContentSnapshot = null;
   closeUnsavedEditGuard();
   closePublishConfirmationDialog();
   resetWindowFrame(document.getElementById("createEventModal"));
@@ -1786,7 +1936,9 @@ async function persistEventRecord({ closeAfterSave = false, showSuccessToast = f
     }
 
     const mergedPublishTargets = new Set(getSelectedPublishTargetKeys());
-    getExistingLinkedAccountKeys(nextEvent).forEach((key) => mergedPublishTargets.add(key));
+    if (shouldUpdateLinkedPublishTargets(nextEvent)) {
+      getExistingLinkedAccountKeys(nextEvent).forEach((key) => mergedPublishTargets.add(key));
+    }
     setSelectedPublishTargetKeys([...mergedPublishTargets]);
     renderEventPublishControls();
 
@@ -1825,15 +1977,20 @@ async function saveEvent() {
 async function publishCurrentEvent() {
   if (modalState.type === "sticky") return;
 
-  const nextEvent = await persistEventRecord({ closeAfterSave: false, showSuccessToast: false });
-  if (!nextEvent) return;
+  const needsSaveBeforePublish = !modalState.eventId || eventContentHasUnsavedEdits();
+  const nextEvent = needsSaveBeforePublish
+    ? await persistEventRecord({ closeAfterSave: false, showSuccessToast: false })
+    : modalState.eventRef;
+  if (needsSaveBeforePublish && !nextEvent) return;
 
-  const selectedRows = getPublishTargetSummary().filter((row) => row.publishable);
+  const selectedRows = getActionablePublishTargetSummary();
   if (!selectedRows.length) {
     window.showToast?.("Select at least one Google or Microsoft calendar", "error");
     return;
   }
 
+  modalState.publishAttemptConsumed = false;
+  modalState.publishAttemptState = "idle";
   openPublishConfirmationDialog();
 }
 
@@ -1841,7 +1998,7 @@ async function confirmPublishCurrentEvent() {
   const eventId = modalState.eventId || modalState.eventRef?.extendedProps?.backendId;
   if (!eventId || isPublishingEvent) return;
 
-  const selectedRows = getPublishTargetSummary().filter((row) => row.publishable);
+  const selectedRows = getActionablePublishTargetSummary();
   const selectedKeys = selectedRows.map((row) => row.key);
 
   if (!selectedKeys.length) {
@@ -1851,12 +2008,7 @@ async function confirmPublishCurrentEvent() {
 
   isPublishingEvent = true;
   renderEventPublishControls();
-
-  const confirmBtn = document.getElementById("confirmPublishEventBtn");
-  if (confirmBtn) {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Publishing…";
-  }
+  renderConfirmPublishButtonState();
 
   try {
     const res = await apiFetch("/calendar/publish", {
@@ -1879,10 +2031,10 @@ async function confirmPublishCurrentEvent() {
     const warnings = data.warnings || [];
     const published = Number(data.published || 0);
     const created = Number(data.created || 0);
+    const failureMessage = buildPublishFailureMessage(data, selectedKeys.map((key) => String(key).toLowerCase()));
 
     if (published === 0 && created === 0) {
-      const warningText = warnings.length ? ` (${warnings[0]})` : "";
-      throw new Error(`No calendars were updated${warningText}`);
+      throw new Error(failureMessage);
     }
 
     if (modalState.eventId != null) {
@@ -1892,6 +2044,12 @@ async function confirmPublishCurrentEvent() {
 
     await window.preloadEventCache?.({ silent: true });
     window.smartRefresh?.({ reason: "single_event_publish", force: true });
+
+    modalState.publishAttemptState = "success";
+    modalState.publishAttemptConsumed = true;
+    renderConfirmPublishButtonState({ state: "success" });
+
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
 
     closePublishConfirmationDialog();
     closeCreateModal({ force: true });
@@ -1906,14 +2064,24 @@ async function confirmPublishCurrentEvent() {
   } catch (err) {
     console.error("❌ Single-event publish failed", err);
     const message = String(err?.message || "").trim();
+    modalState.publishAttemptState = "error";
+    modalState.publishAttemptConsumed = true;
+    renderConfirmPublishButtonState({ state: "error" });
+    const summary = document.getElementById("publishConfirmSummary");
+    if (summary) {
+      summary.textContent = message ? `Publish failed: ${message}` : "Publish failed.";
+    }
     window.showToast?.(`❌ Publish failed${message ? `: ${message}` : ""}`, "error");
+    window.setTimeout(() => {
+      if (!isPublishingEvent) {
+        modalState.publishAttemptState = "idle";
+        renderConfirmPublishButtonState();
+      }
+    }, 900);
   } finally {
     isPublishingEvent = false;
     renderEventPublishControls();
-    if (confirmBtn) {
-      confirmBtn.disabled = false;
-      confirmBtn.textContent = "Confirm Publish";
-    }
+    renderConfirmPublishButtonState();
   }
 }
 

@@ -26,11 +26,14 @@ from fastapi.testclient import TestClient
 def _reset_tv_stores():
     """Clear in-memory TV stores between tests to prevent state leakage."""
     from app.services.tv_pairing_service import pairing_store, tv_state_store
+    from app.routers import tv as tv_router
     pairing_store._codes.clear()
     tv_state_store._states.clear()
+    tv_router._tv_events_snapshot_cache.clear()
     yield
     pairing_store._codes.clear()
     tv_state_store._states.clear()
+    tv_router._tv_events_snapshot_cache.clear()
 
 
 # ─────────────────────────────────────────────────
@@ -287,6 +290,64 @@ class TestTVEventsEndpoint:
         assert "hasSticky" in selected_day["events"][0]
         assert selected_day["events"][0]["hasSticky"] is True
 
+    def test_events_marks_has_sticky_for_legacy_event_payload(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Legacy Sticky Event",
+            start_time=datetime(2026, 9, 16, 11, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+            sticky_note={"text": "legacy sticky text"},
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-09-16", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        res = client.get("/tv/events", headers=auth_headers)
+        assert res.status_code == 200
+        payload = res.json()
+        day = next(d for d in payload["days"] if d["date"] == "2026-09-16")
+        assert any(bool(ev.get("hasSticky")) for ev in day.get("events", []))
+
+    def test_events_normalizes_legacy_date_sticky_payload(self, client, auth_headers, db):
+        from app.models import DateStickyNote
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(DateStickyNote(
+            owner_id=user_id,
+            date="2026-09-17",
+            sticky_notes=[{"text": "legacy date sticky"}],
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-09-17", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        res = client.get("/tv/events", headers=auth_headers)
+        assert res.status_code == 200
+        payload = res.json()
+        day = next(d for d in payload["days"] if d["date"] == "2026-09-17")
+        sticky_notes = day.get("stickyNotes") or []
+        assert sticky_notes
+        assert sticky_notes[0]["content"] == "legacy date sticky"
+
     def test_events_requires_auth(self, client):
         resp = client.get("/tv/events")
         assert resp.status_code == 401  # bearer scheme: no token → 401
@@ -317,6 +378,54 @@ class TestTVEventsEndpoint:
         data = resp.json()
         assert data.get("currentView") == "week"
         assert isinstance(data.get("days"), list)
+
+    def test_events_returns_cached_snapshot_when_refresh_fails(self, client, auth_headers, db, monkeypatch):
+        from app.routers import tv as tv_router
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Snapshot Seed Event",
+            start_time=datetime(2026, 10, 13, 15, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 10, 13, 16, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+            source="local",
+            account_email="local",
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-13", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        seed = client.get("/tv/events", headers=auth_headers)
+        assert seed.status_code == 200
+        seed_payload = seed.json()
+        assert seed_payload.get("staleData") is False
+        assert any(day.get("events") for day in seed_payload.get("days", []))
+
+        original_group = tv_router._group_events_by_date
+
+        def _boom(*_args, **_kwargs):
+            raise RuntimeError("synthetic grouping failure")
+
+        monkeypatch.setattr(tv_router, "_group_events_by_date", _boom)
+        try:
+            stale = client.get("/tv/events", headers=auth_headers)
+        finally:
+            monkeypatch.setattr(tv_router, "_group_events_by_date", original_group)
+
+        assert stale.status_code == 200
+        stale_payload = stale.json()
+        assert stale_payload.get("staleData") is True
+        assert stale_payload.get("staleReason") == "backend_refresh_failure"
+        assert stale_payload.get("days") == seed_payload.get("days")
 
     def test_create_update_tv_event(self, client, auth_headers):
         client.patch(

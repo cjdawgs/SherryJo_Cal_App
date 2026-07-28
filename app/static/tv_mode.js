@@ -307,7 +307,14 @@ const publishDiagLoadBtn = document.getElementById("publishDiagLoadBtn");
 const publishDiagClearBtn = document.getElementById("publishDiagClearBtn");
 const publishDiagBody = document.getElementById("publishDiagBody");
 const publishDiagCount = document.getElementById("publishDiagCount");
+const staleDiagLoadBtn = document.getElementById("tvStaleDiagLoadBtn");
+const staleDiagClearBtn = document.getElementById("tvStaleDiagClearBtn");
+const staleDiagBody = document.getElementById("tvStaleDiagBody");
+const staleDiagCount = document.getElementById("tvStaleDiagCount");
+const staleDiagSummary = document.getElementById("tvStaleDiagSummary");
+const staleDiagPanel = document.querySelector(".tv-stale-panel");
 let _diagAutoHandle = null;
+let _stalePanelLoaded = false;
 
 function _fmtDiagTime(isoStr) {
   if (!isoStr) return "—";
@@ -397,6 +404,59 @@ async function loadPublishDiag() {
   }
 }
 
+function _fmtStaleSummary(data) {
+  const counts = data?.counts || {};
+  const windowHours = Number(data?.window?.hours || 24);
+  const points = Array.isArray(data?.meaningful_points) ? data.meaningful_points : [];
+  const reasons = Array.isArray(data?.reason_counts) ? data.reason_counts : [];
+  const reasonText = reasons.length
+    ? reasons.map((row) => `${row.reason}: ${row.count}`).join(", ")
+    : "none";
+
+  return `
+    <div><strong>Window:</strong> last ${windowHours} hour(s)</div>
+    <div><strong>Fallback events:</strong> ${counts.stale_snapshot_events ?? 0} &middot; <strong>Devices:</strong> ${counts.unique_devices ?? 0} &middot; <strong>Users:</strong> ${counts.unique_users ?? 0}</div>
+    <div><strong>Reason mix:</strong> ${_escapeHtml(reasonText)}</div>
+    <ul>${points.map((line) => `<li>${_escapeHtml(line)}</li>`).join("")}</ul>
+  `;
+}
+
+async function loadTvStaleDiag() {
+  if (!staleDiagBody) return;
+  try {
+    const data = await apiRequest("/admin/system/tv-stale-refresh-summary?hours=168&limit=75", { method: "GET" });
+    if (!data || data.ok === false) {
+      if (staleDiagCount) staleDiagCount.textContent = "error loading";
+      if (staleDiagSummary) staleDiagSummary.textContent = "Unable to load stale refresh safety summary.";
+      return;
+    }
+
+    const rows = Array.isArray(data.recent_rows) ? data.recent_rows : [];
+    if (staleDiagCount) staleDiagCount.textContent = `${rows.length} row(s) in the last 7 days`;
+    if (staleDiagSummary) staleDiagSummary.innerHTML = _fmtStaleSummary(data);
+
+    if (!rows.length) {
+      staleDiagBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">No stale snapshot fallback rows in the selected window.</td></tr>';
+      return;
+    }
+
+    staleDiagBody.innerHTML = rows.map((entry) => {
+      const shortId = entry.device_id ? String(entry.device_id).slice(-8) : "—";
+      return `
+      <tr>
+        <td>${_fmtDiagTime(entry.ts_server)}</td>
+        <td>${entry.user_id ?? "—"}</td>
+        <td><span style="font-family:monospace;">…${_escapeHtml(shortId)}</span></td>
+        <td>${_escapeHtml(entry.reason || "unknown")}</td>
+        <td>${_escapeHtml(entry.visibility || "—")}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    if (staleDiagCount) staleDiagCount.textContent = `Error: ${err.message}`;
+    if (staleDiagSummary) staleDiagSummary.textContent = "Error loading stale refresh safety summary.";
+  }
+}
+
 if (diagLoadBtn) {
   diagLoadBtn.addEventListener("click", loadTvDiag);
 }
@@ -432,5 +492,29 @@ if (publishDiagClearBtn) {
   publishDiagClearBtn.addEventListener("click", () => {
     if (publishDiagBody) publishDiagBody.innerHTML = '<tr><td colspan="4" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
     if (publishDiagCount) publishDiagCount.textContent = "cleared";
+  });
+}
+
+if (staleDiagLoadBtn) {
+  staleDiagLoadBtn.addEventListener("click", () => {
+    _stalePanelLoaded = true;
+    loadTvStaleDiag();
+  });
+}
+
+if (staleDiagClearBtn) {
+  staleDiagClearBtn.addEventListener("click", () => {
+    if (staleDiagBody) staleDiagBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (staleDiagCount) staleDiagCount.textContent = "cleared";
+    if (staleDiagSummary) staleDiagSummary.textContent = "Cleared summary view.";
+  });
+}
+
+if (staleDiagPanel) {
+  staleDiagPanel.addEventListener("toggle", () => {
+    if (staleDiagPanel.open && !_stalePanelLoaded) {
+      _stalePanelLoaded = true;
+      loadTvStaleDiag();
+    }
   });
 }

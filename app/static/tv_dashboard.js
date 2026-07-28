@@ -1138,20 +1138,40 @@ async function refreshEvents(force = false, options = {}) {
 
     const data = await res.json().catch(() => ({}));
     state.lastEventsFetchAt = Date.now();
+    const staleData = Boolean(data.staleData);
+    const incomingDays = normalizeTvDays(data.days);
+
     if (data.selectedDate) state.selectedDate = data.selectedDate;
     if (data.currentView) state.currentView = data.currentView;
-    state.days = data.days || [];
-    state.serverAccounts = data.accounts || [];
-    state.dayMap = {};
-    for (const day of state.days) state.dayMap[day.date] = day;
+
+    if (!staleData) {
+      state.days = incomingDays;
+      state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.dayMap = {};
+      for (const day of state.days) state.dayMap[day.date] = day;
+    } else if (!state.days.length && incomingDays.length) {
+      // First usable payload after startup can still be accepted even when marked stale.
+      state.days = incomingDays;
+      state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.dayMap = {};
+      for (const day of state.days) state.dayMap[day.date] = day;
+    }
+
     const summary = data.summary || {};
     const eventCount = Number(summary.eventCount || 0);
     const stickyCount = Number(summary.stickyCount || 0);
     const totalItems = eventCount + stickyCount;
     syncFocusAfterData();
     render();
+    if (staleData) {
+      const staleReason = String(data.staleReason || "temporary backend refresh issue");
+      if (tvDiag) tvDiag.log("stale_snapshot_used", staleReason);
+      renderFooterHint(`Using last known events (${staleReason}). Data was not cleared.`);
+    }
     if (showSync) {
-      if (totalItems > 0) {
+      if (staleData) {
+        setSyncStatus(false, "Sync delayed - keeping last known data");
+      } else if (totalItems > 0) {
         setSyncStatus(true, 'Sync Succeed');
       } else {
         setSyncStatus(true, 'Sync Succeed - No data in current view window');
@@ -2115,6 +2135,92 @@ function sortEventsAsc(events) {
 function filteredEventsForDay(day) {
   const allEvents = sortEventsAsc(day.events || []);
   return allEvents.filter(ev => isAccountVisibleForEvent(ev));
+}
+
+function extractStickyText(payload) {
+  if (typeof payload === 'string') return payload.trim();
+  if (!payload || typeof payload !== 'object') return '';
+  const keys = ['content', 'text', 'note', 'title', 'body', 'message'];
+  for (const key of keys) {
+    const value = payload[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function normalizeStickyEntry(entry) {
+  if (typeof entry === 'string') {
+    const content = entry.trim();
+    if (!content) return null;
+    return { id: `sticky-${Date.now()}`, content, color: '#F7E68A' };
+  }
+  if (!entry || typeof entry !== 'object') return null;
+  const content = extractStickyText(entry);
+  if (!content) return null;
+  return {
+    ...entry,
+    content,
+    color: String(entry.color || '#F7E68A'),
+  };
+}
+
+function normalizeStickyEntries(rawEntries) {
+  if (!rawEntries) return [];
+  let items = rawEntries;
+  if (typeof rawEntries === 'string') {
+    const txt = rawEntries.trim();
+    if (!txt || txt === '[]' || txt === '{}' || txt.toLowerCase() === 'null') return [];
+    try {
+      items = JSON.parse(txt);
+    } catch {
+      items = [txt];
+    }
+  }
+  if (!Array.isArray(items)) items = [items];
+  return items.map(normalizeStickyEntry).filter(Boolean);
+}
+
+function eventHasStickyPayload(event) {
+  if (!event || typeof event !== 'object') return false;
+
+  const explicit = event.hasSticky;
+  if (explicit === true) return true;
+  if (typeof explicit === 'string') {
+    const normalized = explicit.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  }
+
+  if (normalizeStickyEntries(event.stickyNotes).length) return true;
+  if (normalizeStickyEntries(event.sticky_notes).length) return true;
+  if (normalizeStickyEntries(event.stickyNote).length) return true;
+  if (normalizeStickyEntries(event.sticky_note).length) return true;
+
+  if (Array.isArray(event.notes)) {
+    return event.notes.some((note) => Boolean(extractStickyText(note)));
+  }
+  if (typeof event.noteCount === 'number' && event.noteCount > 0) return true;
+  if (typeof event.note_count === 'number' && event.note_count > 0) return true;
+
+  return false;
+}
+
+function normalizeTvDays(daysPayload) {
+  if (!Array.isArray(daysPayload)) return [];
+  return daysPayload.map((day) => {
+    const rawEvents = Array.isArray(day?.events) ? day.events : [];
+    const stickyNotes = normalizeStickyEntries(day?.stickyNotes ?? day?.sticky_notes);
+    const events = rawEvents.map((ev) => ({
+      ...ev,
+      hasSticky: eventHasStickyPayload(ev),
+    }));
+    return {
+      ...day,
+      stickyNotes,
+      events,
+    };
+  });
 }
 
 function itemsForDate(dateKey) {

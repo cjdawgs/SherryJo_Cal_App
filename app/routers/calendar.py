@@ -763,6 +763,7 @@ async def publish_to_providers(
     deleted   = 0
     failed    = 0
     warnings  = []
+    account_results = []
 
     for deleted_entry in deleted_events:
         if not isinstance(deleted_entry, dict):
@@ -794,6 +795,7 @@ async def publish_to_providers(
             for key in (push_result.get("affected_accounts") or []):
                 affected_accounts.add(key)
             warnings.extend(push_result.get("warnings") or [])
+            account_results.extend(push_result.get("account_results") or [])
             updated_count = int(push_result.get("updated") or 0)
             created_count = int(push_result.get("created") or 0)
             created += created_count
@@ -833,6 +835,7 @@ async def publish_to_providers(
         "range_start":        range_start,
         "range_end":          range_end,
         "warnings":           warnings,
+        "account_results":    account_results,
     }
 
 

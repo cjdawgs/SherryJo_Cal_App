@@ -127,6 +127,25 @@ def _details_looks_like_failure(details: str | None) -> bool:
     return any(flag in value for flag in ("status=error", "failed=1", "failed=2", "failed=3", "failed=4", "failed=5", "reason=no_targets", "warning"))
 
 
+def _parse_iso_date_or_422(raw_value: str, field_name: str) -> datetime:
+    try:
+        return datetime.fromisoformat(f"{str(raw_value).strip()}T00:00:00+00:00")
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be YYYY-MM-DD.") from exc
+
+
+def _extract_publish_reason(details: str | None) -> str:
+    value = str(details or "")
+    match = re.search(r"reason=([^\s]+)", value)
+    if match:
+        return match.group(1)
+    if "warning" in value.lower():
+        return "warning"
+    if "status=error" in value.lower():
+        return "error"
+    return "unknown"
+
+
 def _apply_runtime_token_encryption_key(candidate_key: str, db: Session) -> dict:
     previous_key = getattr(settings, "token_encryption_key", None)
     previous_env = os.getenv("TOKEN_ENCRYPTION_KEY")
@@ -277,6 +296,183 @@ def admin_current_user_failures_today(
         "decrypt_warning_accounts": decrypt_warning_accounts,
         "sync_failure_accounts": sync_failure_accounts,
         "publish_failures": publish_failures,
+    }
+
+
+@router.get("/system/current-user-failure-history")
+def admin_current_user_failure_history(
+    start_date: str,
+    end_date: str,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    window_start = _parse_iso_date_or_422(start_date, "start_date")
+    window_end = _parse_iso_date_or_422(end_date, "end_date") + timedelta(days=1)
+    if window_end <= window_start:
+        raise HTTPException(status_code=422, detail="end_date must be on or after start_date.")
+    if window_end - window_start > timedelta(days=90):
+        raise HTTPException(status_code=422, detail="Date range cannot exceed 90 days.")
+
+    accounts = (
+        db.query(OAuthAccount)
+        .filter(OAuthAccount.user_id == admin_user.id)
+        .order_by(OAuthAccount.id.asc())
+        .all()
+    )
+
+    sync_failure_accounts = []
+    for account in accounts:
+        failure_at = getattr(account, "last_sync_failure", None)
+        if failure_at is not None and getattr(failure_at, "tzinfo", None) is None:
+            failure_at = failure_at.replace(tzinfo=timezone.utc)
+        if failure_at and window_start <= failure_at < window_end:
+            sync_failure_accounts.append({
+                "provider": account.provider,
+                "account_email": account.account_email,
+                "last_sync_failure": failure_at.isoformat(),
+                "last_error": getattr(account, "last_error", None),
+            })
+
+    publish_rows = (
+        db.query(TVDiagLog)
+        .filter(
+            TVDiagLog.user_id == admin_user.id,
+            TVDiagLog.event == "calendar_publish_result",
+            TVDiagLog.ts_server >= window_start,
+            TVDiagLog.ts_server < window_end,
+        )
+        .order_by(TVDiagLog.ts_server.desc())
+        .all()
+    )
+
+    publish_failures = []
+    publish_reasons: dict[str, int] = {}
+    for row in publish_rows:
+        if not _details_looks_like_failure(row.details):
+            continue
+        reason = _extract_publish_reason(row.details)
+        publish_reasons[reason] = publish_reasons.get(reason, 0) + 1
+        publish_failures.append({
+            "ts_server": row.ts_server.isoformat() if row.ts_server else None,
+            "details": row.details,
+            "reason": reason,
+        })
+
+    recent_error_messages = []
+    seen_errors = set()
+    for account in sync_failure_accounts:
+        message = str(account.get("last_error") or "").strip()
+        if not message or message in seen_errors:
+            continue
+        seen_errors.add(message)
+        recent_error_messages.append(message)
+
+    meaningful_points = [
+        f"Checked {len(sync_failure_accounts)} account-level sync failure signal(s) whose latest recorded failure falls inside this date range.",
+        f"Found {len(publish_failures)} publish failure/warning diagnostic row(s) across {len(publish_reasons)} distinct publish failure reason(s).",
+        f"This report uses persisted diagnostics only; decrypt warnings are live-state only and are not backfilled historically unless another persisted signal captured them.",
+    ]
+
+    return {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "window": {
+            "start": window_start.isoformat(),
+            "end": window_end.isoformat(),
+            "start_date": start_date,
+            "end_date": end_date,
+        },
+        "checked_database": _safe_database_summary(DATABASE_URL),
+        "user": {
+            "id": admin_user.id,
+            "email": admin_user.email,
+            "username": admin_user.username,
+        },
+        "counts": {
+            "sync_failures": len(sync_failure_accounts),
+            "publish_failure_rows": len(publish_failures),
+            "distinct_publish_failure_reasons": len(publish_reasons),
+            "total_publish_diagnostics": len(publish_rows),
+        },
+        "meaningful_points": meaningful_points,
+        "sync_failure_accounts": sync_failure_accounts,
+        "publish_failure_reasons": [
+            {"reason": reason, "count": count}
+            for reason, count in sorted(publish_reasons.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "publish_failures": publish_failures[:25],
+        "recent_error_messages": recent_error_messages[:10],
+    }
+
+
+@router.get("/system/tv-stale-refresh-summary")
+def admin_tv_stale_refresh_summary(
+    hours: int = 24,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    bounded_hours = max(1, min(int(hours or 24), 24 * 14))
+    bounded_limit = max(1, min(int(limit or 50), 200))
+
+    now_utc = datetime.now(timezone.utc)
+    window_start = now_utc - timedelta(hours=bounded_hours)
+
+    rows = (
+        db.query(TVDiagLog)
+        .filter(
+            TVDiagLog.event == "stale_snapshot_used",
+            TVDiagLog.ts_server >= window_start,
+        )
+        .order_by(TVDiagLog.ts_server.desc())
+        .limit(bounded_limit)
+        .all()
+    )
+
+    reason_counts: dict[str, int] = {}
+    user_ids = set()
+    device_ids = set()
+    recent_rows = []
+
+    for row in rows:
+        reason = str(row.details or "").strip() or "unknown"
+        reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if row.user_id is not None:
+            user_ids.add(row.user_id)
+        if row.device_id:
+            device_ids.add(row.device_id)
+
+        recent_rows.append({
+            "ts_server": row.ts_server.isoformat() if row.ts_server else None,
+            "user_id": row.user_id,
+            "device_id": row.device_id,
+            "reason": reason,
+            "elapsed_min": row.elapsed_min,
+            "visibility": row.visibility,
+        })
+
+    return {
+        "checked_at": now_utc.isoformat(),
+        "checked_database": _safe_database_summary(DATABASE_URL),
+        "window": {
+            "hours": bounded_hours,
+            "start": window_start.isoformat(),
+            "end": now_utc.isoformat(),
+        },
+        "counts": {
+            "stale_snapshot_events": len(rows),
+            "unique_users": len(user_ids),
+            "unique_devices": len(device_ids),
+        },
+        "reason_counts": [
+            {"reason": reason, "count": count}
+            for reason, count in sorted(reason_counts.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "meaningful_points": [
+            "These entries are recorded only when the TV UI keeps the last known event snapshot instead of clearing visible events during a refresh issue.",
+            "A higher count here means the safety guard prevented potential blank-board incidents.",
+            "Use Live Diagnostics Log above to correlate exact lifecycle events around each stale snapshot fallback.",
+        ],
+        "recent_rows": recent_rows,
     }
 
 

@@ -49,6 +49,8 @@ PUBLIC_PATHS = {
 ADMIN_PATHS = [
     ("GET", "/admin/system/overview"),
     ("GET", "/admin/system/current-user-failures-today"),
+    ("GET", "/admin/system/current-user-failure-history?start_date=2026-07-01&end_date=2026-07-02"),
+    ("GET", "/admin/system/tv-stale-refresh-summary?hours=24&limit=50"),
     ("GET", "/admin/system/table/users/rows"),
     ("GET", "/admin/users"),
     ("GET", "/admin/providers"),

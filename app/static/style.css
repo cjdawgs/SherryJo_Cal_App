@@ -1,4 +1,3 @@
-
 /* =====================================================
 ✅ GLOBAL BASE
 ===================================================== */
@@ -169,18 +168,18 @@ body {
   width: 100%;
 }
 
-.actionButtons > button {
+.actionButtons>button {
   min-height: 30px;
   min-width: 0;
   padding: 4px 6px;
 }
 
-.actionButtons > .gearMenuShell {
+.actionButtons>.gearMenuShell {
   min-width: 0;
   width: 100%;
 }
 
-.actionButtons > .gearMenuShell > button {
+.actionButtons>.gearMenuShell>button {
   min-height: 30px;
   min-width: 0;
   width: 100%;
@@ -227,7 +226,7 @@ body {
   background: #f8fbff;
 }
 
-.actionButtons > button svg {
+.actionButtons>button svg {
   width: 16px;
   height: 16px;
 }
@@ -308,35 +307,41 @@ button.primary {
 }
 
 @media (min-width: 768px) {
-  .actionButtons > button,
-  .actionButtons > .gearMenuShell > button {
+
+  .actionButtons>button,
+  .actionButtons>.gearMenuShell>button {
     min-height: 36px;
     padding: 7px 10px;
     font-size: 14px;
   }
 
-  .actionButtons > button svg {
+  .actionButtons>button svg {
     width: 18px;
     height: 18px;
   }
 
-  #accountsBtn { font-size: 14px; }
+  #accountsBtn {
+    font-size: 14px;
+  }
 }
 
 @media (min-width: 1400px) {
-  .actionButtons > button,
-  .actionButtons > .gearMenuShell > button {
+
+  .actionButtons>button,
+  .actionButtons>.gearMenuShell>button {
     min-height: 42px;
     padding: 9px 12px;
     font-size: 15px;
   }
 
-  .actionButtons > button svg {
+  .actionButtons>button svg {
     width: 20px;
     height: 20px;
   }
 
-  #accountsBtn { font-size: 15px; }
+  #accountsBtn {
+    font-size: 15px;
+  }
 }
 
 #syncBtn.is-syncing {
@@ -350,8 +355,13 @@ button.primary {
 }
 
 @keyframes syncIconSpin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(-360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(-360deg);
+  }
 }
 
 /* Dedup toggle button — green when ON (default), red-tinted when OFF */
@@ -565,8 +575,13 @@ button.primary {
 }
 
 @keyframes publishIconSpin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 
@@ -587,7 +602,7 @@ button.primary {
   background: white;
   border-radius: 10px;
   padding: 8px;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
   min-width: 0;
 }
 
@@ -600,7 +615,7 @@ button.primary {
   flex-direction: column;
   gap: 16px;
 
-  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
 
 .sidebarDrawerHeader {
@@ -765,7 +780,7 @@ button.primary {
 .modalOverlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.3);
+  background: rgba(0, 0, 0, 0.3);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
@@ -1119,14 +1134,14 @@ button.primary {
   margin-bottom: 16px;
 }
 
-.tagColorConfirmRows > div {
+.tagColorConfirmRows>div {
   display: grid;
   grid-template-columns: 68px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 }
 
-.tagColorConfirmRows > div > span {
+.tagColorConfirmRows>div>span {
   color: #52677f;
   font-size: 0.8rem;
   font-weight: 700;
@@ -1417,8 +1432,19 @@ button.primary {
   opacity: 0.72;
 }
 
+.accountPublishRow.is-locked-linked {
+  border-color: #d9dee8;
+  background: #f4f6f9;
+  opacity: 1;
+}
+
 .accountPublishRow input[type="checkbox"] {
   margin-top: 2px;
+}
+
+.accountPublishRow.is-locked-linked input[type="checkbox"] {
+  accent-color: #b9c2cf;
+  cursor: not-allowed;
 }
 
 .accountPublishMeta {
@@ -1456,6 +1482,11 @@ button.primary {
 .accountPublishBadge.is-disabled {
   background: #eceff5;
   color: #64748b;
+}
+
+.accountPublishBadge.is-locked-linked {
+  background: #e9edf3;
+  color: #6b7280;
 }
 
 .accountPublishEmpty {
@@ -1549,6 +1580,37 @@ button.primary {
   color: #fff;
 }
 
+.primaryBtn.publishBtnIdle {
+  background: #d8dee8;
+  color: #6b7280;
+}
+
+.primaryBtn.publishBtnActive {
+  background: #2b5fb7;
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(43, 95, 183, 0.1), 0 10px 24px rgba(43, 95, 183, 0.18);
+}
+
+.primaryBtn.publishBtnSuccess {
+  background: #1f8f57;
+  color: #fff;
+}
+
+.primaryBtn.publishBtnError {
+  background: #c2410c;
+  color: #fff;
+}
+
+.primaryBtn.is-publishing {
+  opacity: 0.95;
+}
+
+.primaryBtn.publishBtnIdle:disabled,
+.primaryBtn.publishBtnSuccess:disabled,
+.primaryBtn.publishBtnError:disabled {
+  opacity: 1;
+}
+
 .secondaryBtn {
   background: #e9eef7;
   color: #223b63;
@@ -1596,11 +1658,9 @@ button.primary {
 .stickyDropTarget {
   outline: 2px dashed #0f766e !important;
   outline-offset: -2px;
-  background-image: linear-gradient(
-    135deg,
-    rgba(15, 118, 110, 0.14) 0%,
-    rgba(15, 118, 110, 0.04) 100%
-  );
+  background-image: linear-gradient(135deg,
+      rgba(15, 118, 110, 0.14) 0%,
+      rgba(15, 118, 110, 0.04) 100%);
 }
 
 .stickyDropTargetEvent {
@@ -1648,6 +1708,7 @@ button.primary {
 }
 
 @media (max-width: 760px) {
+
   .eventGrid2,
   .eventGrid2Times,
   .metadataSection {
@@ -1682,32 +1743,33 @@ button.primary {
 /* =========================================
 ✅ 3 COLUMN ACCOUNT GRID for Account.html
 ========================================= */
-  /* =========================================
+/* =========================================
   ✅ UNIFORM COLUMN STACKING
   ========================================= */
-  .provider-col {
-    display: flex;
-    flex-direction: column;
-  }
+.provider-col {
+  display: flex;
+  flex-direction: column;
+}
 
-  /* ✅ ensures consistent spacing under description */
-  .provider-desc {
-    min-height: 40px; /* normalize text height */
-  }
+/* ✅ ensures consistent spacing under description */
+.provider-desc {
+  min-height: 40px;
+  /* normalize text height */
+}
 
-  /* ✅ spacer area (align with Apple connect block height) */
-  .provider-spacer {
-    min-height: 70px;
-  }
-  
-  .provider-accounts {
-    margin-top: 12px;
-  }
+/* ✅ spacer area (align with Apple connect block height) */
+.provider-spacer {
+  min-height: 70px;
+}
+
+.provider-accounts {
+  margin-top: 12px;
+}
 
 
-  body > div {
-    max-width: 1200px;
-  }
+body>div {
+  max-width: 1200px;
+}
 
 
 /* =====================================================
@@ -1797,7 +1859,7 @@ button.primary {
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   padding: 4px 0;
   min-width: 160px;
   z-index: 1000000;
@@ -2089,14 +2151,14 @@ Large: > 1920
     align-content: start;
   }
 
-  .actionButtons > button {
+  .actionButtons>button {
     min-height: 19px;
     font-size: 10px;
     padding: 1px 3px;
     border-radius: 7px;
   }
 
-  .actionButtons > button svg {
+  .actionButtons>button svg {
     width: 14px;
     height: 14px;
   }
@@ -2162,7 +2224,7 @@ Large: > 1920
     min-width: 0;
   }
 
-  .fc-toolbar-chunk:nth-child(3) > .fc-button-group {
+  .fc-toolbar-chunk:nth-child(3)>.fc-button-group {
     display: inline-flex;
     gap: 2px;
     margin: 0;
@@ -2394,13 +2456,13 @@ Large: > 1920
     gap: 3px;
   }
 
-  .actionButtons > button {
+  .actionButtons>button {
     min-height: 22px;
     font-size: 10px;
     padding: 2px 4px;
   }
 
-  .actionButtons > button svg {
+  .actionButtons>button svg {
     width: 15px;
     height: 15px;
   }
@@ -2446,7 +2508,7 @@ Large: > 1920
     min-width: 0;
   }
 
-  .fc-toolbar-chunk:nth-child(3) > .fc-button-group {
+  .fc-toolbar-chunk:nth-child(3)>.fc-button-group {
     display: inline-flex;
     gap: 3px;
     margin: 0;

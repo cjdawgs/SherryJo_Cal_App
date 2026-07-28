@@ -16,6 +16,27 @@ logger = logging.getLogger(__name__)
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 
+def _graph_error_detail(response, fallback_prefix: str) -> str:
+    status_code = getattr(response, "status_code", "unknown")
+    try:
+        payload = response.json() or {}
+    except Exception:
+        payload = {}
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    code = str(error.get("code") or "").strip() if isinstance(error, dict) else ""
+    message = str(error.get("message") or "").strip() if isinstance(error, dict) else ""
+    text = str(getattr(response, "text", "") or "").strip()
+
+    if code and message:
+        return f"{fallback_prefix} ({status_code} {code}): {message}"
+    if message:
+        return f"{fallback_prefix} ({status_code}): {message}"
+    if text:
+        return f"{fallback_prefix} ({status_code}): {text}"
+    return f"{fallback_prefix} ({status_code})"
+
+
 # ==================================================
 # ✅ GRAPH CLIENT (FINAL VERSION)
 # ==================================================
@@ -158,7 +179,10 @@ class GraphClient:
         )
 
         if response.status_code not in [200, 202]:
-            logger.error("❌ Outlook update failed: %s", response.text)
+            detail = _graph_error_detail(response, "Outlook update failed")
+            logger.error("❌ %s", detail)
+            if response.status_code not in [404, 410]:
+                raise RuntimeError(detail)
 
         return response.status_code
 
@@ -199,8 +223,9 @@ class GraphClient:
         )
 
         if response.status_code not in [200, 201]:
-            logger.error("❌ Outlook create failed: %s", response.text)
-            return None
+            detail = _graph_error_detail(response, "Outlook create failed")
+            logger.error("❌ %s", detail)
+            raise RuntimeError(detail)
 
         try:
             return (response.json() or {}).get("id")

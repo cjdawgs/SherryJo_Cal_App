@@ -42,6 +42,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tv", tags=["tv"])
 
+# Per-user last known-good /tv/events payload cache. This is used only as a
+# transient safety net during backend/read failures so the TV UI does not clear.
+_tv_events_snapshot_cache: dict[int, dict] = {}
+
 _BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _templates = Jinja2Templates(directory=os.path.join(_BASE_DIR, "templates"))
 
@@ -194,26 +198,12 @@ def _serialize_event_for_tv(event: Event) -> dict:
     legacy_sticky_note = getattr(event, "stickyNote", None)
     related_notes = getattr(event, "notes", None)
 
-    has_sticky_payload = bool(sticky_note) or bool(legacy_sticky) or bool(legacy_sticky_note)
-    if isinstance(sticky_note, str):
-        txt = sticky_note.strip()
-        if txt and txt not in {"[]", "{}", "null", "None"}:
-            try:
-                has_sticky_payload = has_sticky_payload or bool(json.loads(txt))
-            except Exception:
-                has_sticky_payload = True
-
-    if isinstance(sticky_notes, list):
-        has_sticky_payload = has_sticky_payload or len(sticky_notes) > 0
-    elif isinstance(sticky_notes, dict):
-        has_sticky_payload = has_sticky_payload or bool(sticky_notes)
-    elif isinstance(sticky_notes, str):
-        txt = sticky_notes.strip()
-        if txt and txt not in {"[]", "{}", "null", "None"}:
-            try:
-                has_sticky_payload = has_sticky_payload or bool(json.loads(txt))
-            except Exception:
-                has_sticky_payload = True
+    has_sticky_payload = (
+        _sticky_payload_has_content(sticky_note)
+        or _sticky_payload_has_content(sticky_notes)
+        or _sticky_payload_has_content(legacy_sticky)
+        or _sticky_payload_has_content(legacy_sticky_note)
+    )
 
     has_related_notes = False
     if related_notes is not None:
@@ -247,28 +237,99 @@ def _normalize_sticky_notes(payload) -> list[dict]:
     if payload is None:
         return []
 
+    if isinstance(payload, str):
+        txt = payload.strip()
+        if not txt or txt in {"[]", "{}", "null", "None"}:
+            return []
+        try:
+            parsed = json.loads(txt)
+        except Exception:
+            parsed = {"content": txt}
+        return _normalize_sticky_notes(parsed)
+
     if isinstance(payload, dict):
-        payload = [payload]
+        normalized = _normalize_sticky_note_item(payload)
+        return [normalized] if normalized else []
 
     if not isinstance(payload, list):
         return []
 
     out: list[dict] = []
-    now_iso = datetime.now(timezone.utc).isoformat()
     for item in payload:
-        if not isinstance(item, dict):
-            continue
-        content = str(item.get("content") or "").strip()
-        if not content:
-            continue
-        out.append({
-            "id": item.get("id") or f"sticky-{len(out) + 1}",
-            "content": content,
-            "color": str(item.get("color") or "#F7E68A"),
-            "createdAt": item.get("createdAt") or now_iso,
-            "updatedAt": now_iso,
-        })
+        normalized = _normalize_sticky_note_item(item)
+        if normalized:
+            out.append(normalized)
     return out
+
+
+def _extract_sticky_content(payload) -> str:
+    if isinstance(payload, str):
+        return payload.strip()
+    if not isinstance(payload, dict):
+        return ""
+
+    for key in ("content", "text", "note", "title", "body", "message"):
+        value = payload.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return ""
+
+
+def _normalize_sticky_note_item(item):
+    if isinstance(item, str):
+        text = item.strip()
+        if not text:
+            return None
+        now_iso = datetime.now(timezone.utc).isoformat()
+        return {
+            "id": f"sticky-{abs(hash(text)) % 1000000}",
+            "content": text,
+            "color": "#F7E68A",
+            "createdAt": now_iso,
+            "updatedAt": now_iso,
+        }
+
+    if not isinstance(item, dict):
+        return None
+
+    content = _extract_sticky_content(item)
+    if not content:
+        return None
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    return {
+        "id": item.get("id") or f"sticky-{abs(hash(content)) % 1000000}",
+        "content": content,
+        "color": str(item.get("color") or "#F7E68A"),
+        "createdAt": item.get("createdAt") or now_iso,
+        "updatedAt": item.get("updatedAt") or now_iso,
+    }
+
+
+def _sticky_payload_has_content(payload) -> bool:
+    if payload is None:
+        return False
+
+    if isinstance(payload, str):
+        txt = payload.strip()
+        if not txt or txt in {"[]", "{}", "null", "None"}:
+            return False
+        try:
+            parsed = json.loads(txt)
+        except Exception:
+            return True
+        return _sticky_payload_has_content(parsed)
+
+    if isinstance(payload, list):
+        return any(_sticky_payload_has_content(item) for item in payload)
+
+    if isinstance(payload, dict):
+        return bool(_extract_sticky_content(payload))
+
+    return bool(payload)
 
 
 def _parse_iso_date_or_none(value: Optional[str]):
@@ -660,6 +721,8 @@ def patch_tv_state(
     """
     patch = body.model_dump(exclude_none=True)
     updated = tv_state_store.set(current_user.id, patch)
+    if patch:
+        _tv_events_snapshot_cache.pop(current_user.id, None)
 
     return TVStateResponse(
         selectedDate=updated.get("selectedDate"),
@@ -829,7 +892,7 @@ def get_tv_events(
             account_count,
         )
 
-        return {
+        payload = {
             "selectedDate": selected_date_str,
             "currentView": current_view,
             "rangeStart": window_start_date.isoformat(),
@@ -841,14 +904,27 @@ def get_tv_events(
                 "stickyCount": sticky_count,
                 "accountCount": account_count,
             },
+            "staleData": False,
         }
+        _tv_events_snapshot_cache[current_user.id] = payload
+        return payload
     except Exception:
         logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)
-        # Keep TV UI alive in production even if data layer is unhealthy.
+        cached = _tv_events_snapshot_cache.get(current_user.id)
+        if isinstance(cached, dict) and cached.get("days") is not None:
+            # Return last known-good payload instead of emptying the TV board.
+            fallback = dict(cached)
+            fallback["staleData"] = True
+            fallback["staleReason"] = "backend_refresh_failure"
+            return fallback
+
+        # No safe snapshot yet; keep shape explicit for client-side guards.
         return {
             "selectedDate": selected_date_str,
             "currentView": current_view,
             "days": [],
+            "staleData": True,
+            "staleReason": "backend_refresh_failure_no_snapshot",
         }
 
 

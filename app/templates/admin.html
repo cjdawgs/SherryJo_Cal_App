@@ -181,6 +181,11 @@
       margin: 10px 0 4px;
     }
 
+    .failure-fix-row.is-disabled {
+      opacity: 0.5;
+      filter: saturate(0.4);
+    }
+
     .failure-fix-row label {
       font-size: 12px;
       color: #9f1c16;
@@ -200,6 +205,129 @@
       margin: 4px 0 0;
       font-size: 11px;
       color: #6b7280;
+    }
+
+    .history-query-panel {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #d8e4ef;
+    }
+
+    .history-query-panel h4 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      color: #17324d;
+    }
+
+    .history-query-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+    }
+
+    .history-query-row label {
+      font-size: 12px;
+      color: #264765;
+      font-weight: 600;
+    }
+
+    .history-query-row input {
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #bfd6ea;
+      background: #fff;
+      color: #17324d;
+    }
+
+    .history-query-result {
+      margin-top: 8px;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #c7d6e4;
+      background: #ffffff;
+      color: #162a3d;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .history-query-result.is-error {
+      border-color: #efc8c3;
+      background: #fff7f6;
+      color: #9f1c16;
+    }
+
+    .history-query-result ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+
+    .overview-subsection {
+      margin-top: 12px;
+      border: 1px solid #d4e1ec;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.68);
+      overflow: hidden;
+    }
+
+    .overview-subsection > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 12px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #17324d;
+      background: rgba(255, 255, 255, 0.72);
+      border-bottom: 1px solid transparent;
+    }
+
+    .overview-subsection > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .overview-subsection[open] > summary {
+      border-bottom-color: #d4e1ec;
+    }
+
+    .overview-subsection-body {
+      padding: 14px 16px 16px;
+    }
+
+    .overview-subsection .failure-check-panel,
+    .overview-subsection .history-query-panel {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .tv-stale-panel {
+      margin-top: 10px;
+    }
+
+    .tv-stale-summary {
+      margin: 8px 0;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.18);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .tv-stale-summary ul {
+      margin: 6px 0 0 16px;
+      padding: 0;
+    }
+
+    .publish-diagnostics-panel {
+      color: #17324d;
+    }
+
+    .publish-diagnostics-panel-note {
+      font-size: 11px;
+      opacity: 0.72;
+      margin: 0 0 8px;
     }
   </style>
 </head>
@@ -254,21 +382,27 @@
               </table>
             </div>
 
-            <div style="display:flex;gap:8px;align-items:center;margin:14px 0 8px;flex-wrap:wrap;">
-              <strong style="font-size:13px;">Publish Diagnostics (Option A)</strong>
-              <span id="publishDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
-              <button id="publishDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load Publish Logs (All)</button>
-              <button id="publishDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
-            </div>
-            <div style="font-size:11px;opacity:0.66;margin:0 0 8px;">
-              Shows <code>calendar_publish_result</code> rows from persistent DB diagnostics. Use this to trace Microsoft/Google publish behavior over time.
-            </div>
-            <div style="overflow-x:auto;">
-              <table class="tv-diag-table" id="publishDiagTable">
-                <thead><tr><th>Server time</th><th>User</th><th>Device</th><th>Details</th></tr></thead>
-                <tbody id="publishDiagBody"><tr><td colspan="4" style="opacity:0.4;">No publish diagnostics loaded yet.</td></tr></tbody>
-              </table>
-            </div>
+            <details class="overview-subsection tv-stale-panel">
+              <summary>TV Refresh Safety (Stale Snapshot Fallback)</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  This tracks when the TV board deliberately kept the last known events instead of clearing the screen during transient refresh problems.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvStaleDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+                  <button id="tvStaleDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvStaleDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div id="tvStaleDiagSummary" class="tv-stale-summary">No stale fallback summary loaded yet.</div>
+                <div style="overflow-x:auto;">
+                  <table class="tv-diag-table" id="tvStaleDiagTable">
+                    <thead><tr><th>Server time</th><th>User</th><th>Device</th><th>Reason</th><th>Vis</th></tr></thead>
+                    <tbody id="tvStaleDiagBody"><tr><td colspan="5" style="opacity:0.4;">No stale fallback data loaded yet.</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+
           </div>
 
           <!-- ── One-time FireStick sleep fix ─────────────────────── -->
@@ -389,22 +523,62 @@
           <button id="copyOverviewBtn" class="ghost-btn" type="button">Copy System Snapshot</button>
         </div>
         <div id="securityWarningBanner" class="security-warning-banner" hidden></div>
-        <div class="failure-check-panel">
-          <h3>Run This First: Today&apos;s Failure Check For The Logged-In Admin</h3>
-          <p>Click the button below to check whether the user currently signed into this Admin page had any recorded decrypt warnings, account sync failures, or publish failures today.</p>
-          <p>This check runs against the database used by this running app. If you open this page on Render, you are checking Render data. If you open it locally, you are checking local data only.</p>
-          <div class="failure-check-actions">
-            <button id="runCurrentUserFailureCheckBtn" class="ghost-btn" type="button">Run Today&apos;s Failure Check</button>
-            <span id="currentUserFailureCheckStamp" class="muted-line">Not run yet.</span>
+        <details class="overview-subsection" open>
+          <summary>Run This First: Today&apos;s Failure Check For The Logged-In Admin</summary>
+          <div class="overview-subsection-body">
+            <div class="failure-check-panel">
+              <p>Click the button below to check whether the user currently signed into this Admin page had any recorded decrypt warnings, account sync failures, or publish failures today.</p>
+              <p>This check runs against the database used by this running app. If you open this page on Render, you are checking Render data. If you open it locally, you are checking local data only.</p>
+              <div class="failure-check-actions">
+                <button id="runCurrentUserFailureCheckBtn" class="ghost-btn" type="button">Run Today&apos;s Failure Check</button>
+                <span id="currentUserFailureCheckStamp" class="muted-line">Not run yet.</span>
+              </div>
+              <div id="failureFixRow" class="failure-fix-row">
+                <label for="tokenEncryptionKeyInput">Fix Now:</label>
+                <input id="tokenEncryptionKeyInput" type="password" placeholder="Enter the known TOKEN_ENCRYPTION_KEY">
+                <button id="applyTokenEncryptionKeyBtn" class="danger-btn" type="button">Apply Key And Recheck</button>
+              </div>
+              <p id="failureFixHelp" class="failure-fix-help">This applies the key to the current running app only. After it succeeds, the page rechecks automatically and marks the issue resolved in green.</p>
+              <div id="currentUserFailureCheckResult" class="failure-check-result">Press “Run Today&apos;s Failure Check” to load a plain-English summary.</div>
+            </div>
           </div>
-          <div class="failure-fix-row">
-            <label for="tokenEncryptionKeyInput">Fix Now:</label>
-            <input id="tokenEncryptionKeyInput" type="password" placeholder="Enter the known TOKEN_ENCRYPTION_KEY">
-            <button id="applyTokenEncryptionKeyBtn" class="danger-btn" type="button">Apply Key And Recheck</button>
+        </details>
+        <details class="overview-subsection">
+          <summary>Look Back For Similar Issues In A Prior Date Range</summary>
+          <div class="overview-subsection-body">
+            <div class="history-query-panel">
+              <p>Use this when today looks clean but you want to inspect prior sync and publish failure signals for the logged-in admin.</p>
+              <div class="history-query-row">
+                <label for="historyStartDate">Start date</label>
+                <input id="historyStartDate" type="date">
+                <label for="historyEndDate">End date</label>
+                <input id="historyEndDate" type="date">
+                <button id="runFailureHistoryBtn" class="ghost-btn" type="button">Query Prior Date Range</button>
+              </div>
+              <div id="failureHistoryResult" class="history-query-result">Choose a start and end date to inspect prior similar issues for this admin user.</div>
+            </div>
           </div>
-          <p class="failure-fix-help">This applies the key to the current running app only. After it succeeds, the page rechecks automatically and marks the issue resolved in green.</p>
-          <div id="currentUserFailureCheckResult" class="failure-check-result">Press “Run Today&apos;s Failure Check” to load a plain-English summary.</div>
-        </div>
+        </details>
+        <details class="overview-subsection">
+          <summary>Publish Diagnostics</summary>
+          <div class="overview-subsection-body publish-diagnostics-panel">
+            <div style="display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap;">
+              <strong style="font-size:13px;">Publish Diagnostics (Option A)</strong>
+              <span id="publishDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+              <button id="publishDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load Publish Logs (All)</button>
+              <button id="publishDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+            </div>
+            <div class="publish-diagnostics-panel-note">
+              Shows <code>calendar_publish_result</code> rows from persistent DB diagnostics. Use this to trace Microsoft/Google publish behavior over time.
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="tv-diag-table" id="publishDiagTable">
+                <thead><tr><th>Server time</th><th>User</th><th>Device</th><th>Details</th></tr></thead>
+                <tbody id="publishDiagBody"><tr><td colspan="4" style="opacity:0.4;">No publish diagnostics loaded yet.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </details>
         <div class="system-grid">
           <article class="system-card">
             <h3>Active Database</h3>

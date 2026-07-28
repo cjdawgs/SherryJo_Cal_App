@@ -8,6 +8,7 @@ const state = {
   editing: null,
   overview: null,
   currentUserFailureCheck: null,
+  failureHistory: null,
   tokenKeyRepairStatus: null,
   tableQuery: null,
   purgeMeta: {
@@ -64,7 +65,43 @@ const el = {
   currentUserFailureCheckResult: document.getElementById("currentUserFailureCheckResult"),
   tokenEncryptionKeyInput: document.getElementById("tokenEncryptionKeyInput"),
   applyTokenEncryptionKeyBtn: document.getElementById("applyTokenEncryptionKeyBtn"),
+  failureFixRow: document.getElementById("failureFixRow"),
+  failureFixHelp: document.getElementById("failureFixHelp"),
+  historyStartDate: document.getElementById("historyStartDate"),
+  historyEndDate: document.getElementById("historyEndDate"),
+  runFailureHistoryBtn: document.getElementById("runFailureHistoryBtn"),
+  failureHistoryResult: document.getElementById("failureHistoryResult"),
 };
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isoDateDaysAgo(daysAgo) {
+  const value = new Date();
+  value.setUTCDate(value.getUTCDate() - Number(daysAgo || 0));
+  return value.toISOString().slice(0, 10);
+}
+
+function updateFailureFixAvailability(hasLiveIssue) {
+  if (el.failureFixRow) {
+    el.failureFixRow.classList.toggle("is-disabled", !hasLiveIssue);
+  }
+  if (el.tokenEncryptionKeyInput) {
+    el.tokenEncryptionKeyInput.disabled = !hasLiveIssue;
+    if (!hasLiveIssue) {
+      el.tokenEncryptionKeyInput.value = "";
+    }
+  }
+  if (el.applyTokenEncryptionKeyBtn) {
+    el.applyTokenEncryptionKeyBtn.disabled = !hasLiveIssue;
+  }
+  if (el.failureFixHelp) {
+    el.failureFixHelp.textContent = hasLiveIssue
+      ? "This applies the key to the current running app only. After it succeeds, the page rechecks automatically and marks the issue resolved in green."
+      : "This fix is currently inactive because there is no live credential decryption issue to repair in this running app.";
+  }
+}
 
 let adminWindowControlsReady = false;
 
@@ -227,6 +264,7 @@ function renderSystemOverview(data) {
   if (el.securityWarningBanner) {
     const hasCriticalCryptoGap = Boolean(security?.missing_key_with_encrypted_credentials);
     const resolvedNow = Boolean(state.tokenKeyRepairStatus?.resolved) && !hasCriticalCryptoGap;
+    updateFailureFixAvailability(hasCriticalCryptoGap);
     el.securityWarningBanner.classList.toggle("is-success", resolvedNow);
     if (hasCriticalCryptoGap) {
       const encryptedRows = Number(security?.encrypted_access_token_rows || 0);
@@ -339,6 +377,89 @@ async function loadCurrentUserFailureCheck() {
 
   renderCurrentUserFailureCheck(data);
   setStatus(data.has_failures ? "Current user failure check found issues." : "Current user failure check found no issues today.");
+}
+
+function renderFailureHistory(data) {
+  state.failureHistory = data;
+  if (!el.failureHistoryResult) {
+    return;
+  }
+
+  const counts = data?.counts || {};
+  const meaningfulPoints = Array.isArray(data?.meaningful_points) ? data.meaningful_points : [];
+  const reasonRows = Array.isArray(data?.publish_failure_reasons) ? data.publish_failure_reasons : [];
+  const syncFailures = Array.isArray(data?.sync_failure_accounts) ? data.sync_failure_accounts : [];
+  const recentErrors = Array.isArray(data?.recent_error_messages) ? data.recent_error_messages : [];
+  const publishFailures = Array.isArray(data?.publish_failures) ? data.publish_failures : [];
+
+  const reasonHtml = reasonRows.length
+    ? `<div><strong>Publish failure reasons:</strong><ul>${reasonRows.map((item) => `<li>${escapeHtml(item.reason)}: ${escapeHtml(item.count)}</li>`).join("")}</ul></div>`
+    : "";
+  const syncHtml = syncFailures.length
+    ? `<div><strong>Accounts whose latest sync failure falls in this range:</strong><ul>${syncFailures.map((item) => `<li>${escapeHtml(item.provider)} / ${escapeHtml(item.account_email)} at ${escapeHtml(item.last_sync_failure || "unknown")}${item.last_error ? `: ${escapeHtml(item.last_error)}` : ""}</li>`).join("")}</ul></div>`
+    : "";
+  const errorHtml = recentErrors.length
+    ? `<div><strong>Distinct recent error messages:</strong><ul>${recentErrors.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+    : "";
+  const samplePublishHtml = publishFailures.length
+    ? `<div><strong>Sample publish diagnostics:</strong><ul>${publishFailures.slice(0, 5).map((item) => `<li>${escapeHtml(item.ts_server || "unknown time")} - ${escapeHtml(item.reason || "unknown")} - ${escapeHtml(item.details || "")}</li>`).join("")}</ul></div>`
+    : "";
+
+  el.failureHistoryResult.classList.remove("is-error");
+  el.failureHistoryResult.innerHTML = `
+    <div><strong>Checked user:</strong> ${escapeHtml(data?.user?.email || "unknown")}</div>
+    <div><strong>Date range:</strong> ${escapeHtml(data?.window?.start_date || "?")} through ${escapeHtml(data?.window?.end_date || "?")}</div>
+    <div><strong>Total signals found:</strong> Sync failures ${escapeHtml(counts.sync_failures ?? 0)}, publish failure rows ${escapeHtml(counts.publish_failure_rows ?? 0)}, distinct publish reasons ${escapeHtml(counts.distinct_publish_failure_reasons ?? 0)}</div>
+    <ul>
+      ${meaningfulPoints.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+    </ul>
+    ${reasonHtml}
+    ${syncHtml}
+    ${errorHtml}
+    ${samplePublishHtml}
+  `;
+}
+
+async function loadFailureHistory() {
+  const startDate = String(el.historyStartDate?.value || "").trim();
+  const endDate = String(el.historyEndDate?.value || "").trim();
+  if (!startDate || !endDate) {
+    setStatus("Choose both start and end dates before querying prior issues.", true);
+    return;
+  }
+
+  if (el.failureHistoryResult) {
+    el.failureHistoryResult.classList.remove("is-error");
+    el.failureHistoryResult.textContent = "Querying prior date range...";
+  }
+
+  const params = new URLSearchParams({ start_date: startDate, end_date: endDate });
+  const res = await apiRequest(`/admin/system/current-user-failure-history?${params.toString()}`, { method: "GET" });
+  if (!res) {
+    if (el.failureHistoryResult) {
+      el.failureHistoryResult.classList.add("is-error");
+      el.failureHistoryResult.textContent = "Unable to query prior issues.";
+    }
+    setStatus("Unable to query prior issues.", true);
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    if (el.failureHistoryResult) {
+      el.failureHistoryResult.classList.add("is-error");
+      el.failureHistoryResult.textContent = data.detail || "Could not query prior issues.";
+    }
+    setStatus(data.detail || "Could not query prior issues.", true);
+    return;
+  }
+
+  renderFailureHistory(data);
+  setStatus("Prior date range query completed.");
 }
 
 async function applyTokenEncryptionKey() {
@@ -1540,6 +1661,15 @@ function bindEvents() {
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
   el.applyTokenEncryptionKeyBtn?.addEventListener("click", applyTokenEncryptionKey);
+  el.runFailureHistoryBtn?.addEventListener("click", loadFailureHistory);
+}
+
+if (el.historyStartDate && !el.historyStartDate.value) {
+  el.historyStartDate.value = isoDateDaysAgo(7);
+}
+
+if (el.historyEndDate && !el.historyEndDate.value) {
+  el.historyEndDate.value = todayIsoDate();
 }
 
 bindEvents();

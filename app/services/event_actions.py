@@ -181,6 +181,7 @@ class EventActions:
         created = 0
         affected_accounts = []
         warnings = []
+        account_results = []
 
         if not targets:
             warnings.append(f"No publishable targets resolved for event {getattr(event, 'id', 'unknown')}")
@@ -189,21 +190,38 @@ class EventActions:
                 "created": 0,
                 "affected_accounts": [],
                 "warnings": warnings,
+                "account_results": [],
             }
 
         for target_key in sorted(targets):
             provider, acct_email = target_key.split(":", 1)
             provider = normalize_provider(provider)
             raw_id = external_ids.get(target_key)
+            target_result = {
+                "target_key": target_key,
+                "provider": provider,
+                "account_email": acct_email,
+                "linked": bool(raw_id),
+                "action": "update" if raw_id else "create",
+                "ok": False,
+                "status": "pending",
+                "message": "",
+            }
 
             if provider not in ("google", "microsoft"):
-                warnings.append(f"Publish not supported for {target_key}")
+                target_result["status"] = "unsupported"
+                target_result["message"] = f"Publish not supported for {target_key}"
+                account_results.append(target_result)
+                warnings.append(target_result["message"])
                 continue
 
             try:
                 token = _get_token(db, user.id, provider, acct_email)
                 if not token:
-                    warnings.append(f"No valid token for {target_key}")
+                    target_result["status"] = "no_token"
+                    target_result["message"] = f"No valid token for {target_key}"
+                    account_results.append(target_result)
+                    warnings.append(target_result["message"])
                     continue
 
                 if raw_id:
@@ -216,14 +234,22 @@ class EventActions:
                     if _is_update_success(update_result):
                         pushed += 1
                         affected_accounts.append(target_key)
+                        target_result["ok"] = True
+                        target_result["status"] = "updated"
+                        target_result["message"] = f"Updated {target_key}"
+                        account_results.append(target_result)
                         continue
 
                     if not _is_missing_provider_event(update_result):
-                        warnings.append(f"Update failed for {target_key}")
+                        target_result["status"] = "update_failed"
+                        target_result["message"] = f"Update failed for {target_key} (status {update_result})"
+                        account_results.append(target_result)
+                        warnings.append(target_result["message"])
                         continue
 
                     external_ids.pop(target_key, None)
                     raw_id = None
+                    target_result["action"] = "recreate"
 
                 new_raw_id = None
                 if provider == "google":
@@ -236,11 +262,20 @@ class EventActions:
                     external_ids[target_key] = new_raw_id
                     created += 1
                     affected_accounts.append(target_key)
+                    target_result["ok"] = True
+                    target_result["status"] = "created"
+                    target_result["message"] = f"Created {target_key}"
                 else:
-                    warnings.append(f"Create failed for {target_key}")
+                    target_result["status"] = "create_failed"
+                    target_result["message"] = f"Create failed for {target_key}"
+                    warnings.append(target_result["message"])
+                account_results.append(target_result)
             except Exception as e:
                 logger.warning(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
-                warnings.append(f"Publish failed for {target_key}: {e}")
+                target_result["status"] = "failed"
+                target_result["message"] = f"Publish failed for {target_key}: {e}"
+                account_results.append(target_result)
+                warnings.append(target_result["message"])
 
         if external_ids != (getattr(event, "external_ids", None) or {}):
             event.external_ids = external_ids
@@ -251,6 +286,7 @@ class EventActions:
             "created": created,
             "affected_accounts": sorted(set(affected_accounts)),
             "warnings": warnings,
+            "account_results": account_results,
         }
 
     def delete_external_targets(self, db: Session, user, external_ids: dict, google_service, graph_client) -> dict:
