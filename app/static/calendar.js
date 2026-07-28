@@ -438,6 +438,18 @@ function removePendingPublishChanges(changeKeys = []) {
   updatePublishButtonState();
 }
 
+function removePendingPublishChangesForEventIds(eventIds = []) {
+  const ids = new Set((eventIds || []).map((id) => Number(id)).filter((id) => Number.isFinite(id)));
+  if (!ids.size) return;
+
+  const keysToRemove = getPendingPublishChanges()
+    .filter((change) => change?.eventId != null && ids.has(Number(change.eventId)))
+    .map((change) => change.key);
+
+  if (!keysToRemove.length) return;
+  removePendingPublishChanges(keysToRemove);
+}
+
 function clearPendingPublishChanges() {
   window.pendingPublishChanges.clear();
   window.sessionModifiedEventIds.clear();
@@ -480,6 +492,7 @@ window.trackDeletedProviderEvent = function (eventRef) {
 
 window.trackPendingPublishChange = registerPendingPublishChange;
 window.updatePublishButtonState = updatePublishButtonState;
+window.removePendingPublishChangesForEventIds = removePendingPublishChangesForEventIds;
 // ────────────────────────────────────────────────────────────────────────────
 let editingEventId = null;   // kept for backward-compat within this module
 let editingNoteId = null;

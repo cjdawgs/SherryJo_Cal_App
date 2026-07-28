@@ -228,6 +228,94 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
     mock_google_create.assert_called_once()
 
 
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
+@patch("app.services.google_calendar_service.GoogleCalendarService.create_event", return_value="google-new-null-1")
+def test_publish_single_event_to_selected_account_creates_link_when_external_ids_null(mock_google_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="publish-null@example.com",
+        access_token="token-1",
+        refresh_token="refresh-1",
+    ))
+    db.add(Event(
+        title="Publish Me External IDs Null",
+        start_time=datetime(2026, 7, 13, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 13, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:publish-null",
+        external_ids=None,
+        description="Should create provider copy when selected",
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish Me External IDs Null").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [event.id],
+            "publish_targets": {
+                str(event.id): ["google:publish-null@example.com"]
+            }
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["published"] == 1
+    assert data["created"] == 1
+    assert data["failed"] == 0
+    assert data["affected_accounts"] == ["google:publish-null@example.com"]
+
+    db.refresh(event)
+    assert event.external_ids["google:publish-null@example.com"] == "google-new-null-1"
+    mock_google_create.assert_called_once()
+
+
+def test_publish_event_ids_with_no_resolved_targets_returns_explicit_warning(client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    assert user is not None
+
+    db.add(Event(
+        title="Publish No Targets",
+        start_time=datetime(2026, 7, 14, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 14, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:no-targets",
+        external_ids=None,
+    ))
+    db.commit()
+
+    event = db.query(Event).filter(Event.title == "Publish No Targets").first()
+    assert event is not None
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={"event_ids": [event.id]},
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["published"] == 0
+    assert data["created"] == 0
+    assert data["failed"] == 1
+    assert data["warnings"]
+    assert f"No publishable targets resolved for event {event.id}" in data["warnings"]
+
+
 @patch("app.services.google_calendar_service.GoogleCalendarService.update_event")
 def test_publish_prefers_healthy_duplicate_oauth_account(mock_google_update, client, auth_headers, db):
     user = db.query(User).filter(User.email.like("%@test.com")).first()

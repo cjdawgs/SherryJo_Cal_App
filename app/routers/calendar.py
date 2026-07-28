@@ -704,7 +704,6 @@ async def publish_to_providers(
             .filter(
                 Event.owner_id == current_user.id,
                 Event.id.in_(event_ids),
-                Event.external_ids.isnot(None),
             )
             .all()
         )

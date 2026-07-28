@@ -1880,9 +1880,15 @@ async function confirmPublishCurrentEvent() {
     const published = Number(data.published || 0);
     const created = Number(data.created || 0);
 
+    if (published === 0 && created === 0) {
+      const warningText = warnings.length ? ` (${warnings[0]})` : "";
+      throw new Error(`No calendars were updated${warningText}`);
+    }
+
     if (modalState.eventId != null) {
       window.sessionModifiedEventIds?.delete?.(Number(modalState.eventId));
     }
+    window.removePendingPublishChangesForEventIds?.([eventId]);
 
     await window.preloadEventCache?.({ silent: true });
     window.smartRefresh?.({ reason: "single_event_publish", force: true });
@@ -1891,7 +1897,7 @@ async function confirmPublishCurrentEvent() {
     closeCreateModal({ force: true });
 
     if (warnings.length) {
-      window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` , "error");
+      window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`, "error");
     } else {
       window.showToast?.(`✅ Published event to ${touched.length || selectedKeys.length} calendar${(touched.length || selectedKeys.length) === 1 ? "" : "s"} (${created} new link${created === 1 ? "" : "s"})`);
     }
@@ -1917,7 +1923,7 @@ async function deleteEvent() {
   const eventToDelete = window.sessionEventCache?.find((ev) => {
     return String(ev?.extendedProps?.backendId) === String(eventId) || String(ev?.id) === String(eventId);
   });
-  
+
   const previousEvent = eventToDelete ? JSON.parse(JSON.stringify(eventToDelete)) : null;
   window.trackDeletedProviderEvent?.(eventToDelete);
 
@@ -2661,11 +2667,11 @@ window.moveEventStickyToDate = async (eventRef, targetDateKey) => {
   const remainingEventNotes = eventNotes.filter((_, idx) => !indexSet.has(idx));
   const targetDateNotes = getDateStickyNotes(targetDateKey);
   const nowIso = new Date().toISOString();
-  
+
   // Capture state before move for undo
   const previousEventNotes = JSON.parse(JSON.stringify(eventNotes));
   const previousDateNotes = JSON.parse(JSON.stringify(targetDateNotes));
-  
+
   movedItems.forEach((moved) => {
     targetDateNotes.push({
       ...moved,
@@ -2757,7 +2763,7 @@ window.moveEventStickyToEvent = async (sourceEventRef, targetEventRef) => {
   // Capture state before move for undo
   const previousSourceNotes = JSON.parse(JSON.stringify(sourceNotes));
   const previousTargetNotes = JSON.parse(JSON.stringify(targetNotes));
-  
+
   movedItems.forEach((n) => targetNotes.push({ ...n, updatedAt: nowIso }));
 
   try {
@@ -2847,7 +2853,7 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
   // Capture state before move for undo
   const previousDateNotes = JSON.parse(JSON.stringify(dateNotes));
   const previousEventNotes = JSON.parse(JSON.stringify(eventNotes));
-  
+
   movedItems.forEach((moved) => {
     eventNotes.push({
       ...moved,

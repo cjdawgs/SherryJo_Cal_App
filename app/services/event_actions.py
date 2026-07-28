@@ -182,6 +182,15 @@ class EventActions:
         affected_accounts = []
         warnings = []
 
+        if not targets:
+            warnings.append(f"No publishable targets resolved for event {getattr(event, 'id', 'unknown')}")
+            return {
+                "updated": 0,
+                "created": 0,
+                "affected_accounts": [],
+                "warnings": warnings,
+            }
+
         for target_key in sorted(targets):
             provider, acct_email = target_key.split(":", 1)
             provider = normalize_provider(provider)
