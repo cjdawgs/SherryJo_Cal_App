@@ -368,3 +368,65 @@ class GraphClient:
 
         if response.status_code not in [200, 204]:
             logger.error("❌ Outlook delete failed: %s", response.text)
+
+    def verify_calendar_write_access(self, token) -> tuple[bool, str]:
+        """Verify Microsoft write permission by creating and deleting a probe event."""
+        start = datetime.now(timezone.utc) + timedelta(minutes=20)
+        end = start + timedelta(minutes=5)
+
+        payload = {
+            "subject": "SherryJo Publish Access Probe",
+            "body": {
+                "contentType": "Text",
+                "content": "Auto-generated probe event to verify publish permissions."
+            },
+            "start": {
+                "dateTime": start.isoformat(),
+                "timeZone": "UTC",
+            },
+            "end": {
+                "dateTime": end.isoformat(),
+                "timeZone": "UTC",
+            },
+            "isReminderOn": False,
+            "sensitivity": "private",
+        }
+
+        response = requests.post(
+            f"{GRAPH_BASE_URL}/me/events",
+            json=payload,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        if response.status_code not in [200, 201]:
+            detail = _graph_error_detail(response, "Outlook publish permission check failed")
+            logger.error("❌ %s", detail)
+            return False, detail
+
+        probe_event_id = None
+        try:
+            probe_event_id = str((response.json() or {}).get("id") or "").strip() or None
+        except Exception:
+            probe_event_id = None
+
+        if not probe_event_id:
+            header_candidates = [
+                response.headers.get("OData-EntityId"),
+                response.headers.get("Location"),
+                response.headers.get("Content-Location"),
+            ]
+            for header_value in header_candidates:
+                probe_event_id = _extract_event_id_from_location(header_value)
+                if probe_event_id:
+                    break
+
+        if not probe_event_id:
+            logger.error("❌ Outlook publish permission check failed: created probe event but no id was returned")
+            return False, "Outlook publish permission check failed: create response had no event id."
+
+        try:
+            self.delete_event(token, probe_event_id)
+        except Exception as exc:
+            logger.warning("⚠️ Outlook probe cleanup failed for %s: %s", probe_event_id, exc)
+
+        return True, "ok"

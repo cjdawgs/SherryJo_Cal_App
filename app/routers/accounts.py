@@ -29,6 +29,7 @@ from app.deps import get_current_user
 from app.models import User, OAuthAccount
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
+    ensure_valid_token,
     resolve_account_status,
     normalize_provider,
 )
@@ -184,6 +185,7 @@ def retry_account_sync(
     """
 
     from app.services.calendar_service import CalendarService
+    from app.services.graph_client import GraphClient
     from app.services.multi_account_oauth_service import safe_commit
 
     account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
@@ -202,6 +204,24 @@ def retry_account_sync(
         service.fetch_all_events(db, current_user, account_key=target_key)
 
         db.refresh(account)
+
+        # Publish-capability probe for Microsoft so "Retry" reflects both read and write health.
+        if normalize_provider(account.provider) == "microsoft":
+            token = ensure_valid_token(db, account)
+            if not token:
+                account.status = "error"
+                account.last_sync_failure = datetime.now(timezone.utc)
+                account.last_error = "No valid token available for Microsoft publish validation."
+                safe_commit(db)
+                db.refresh(account)
+            else:
+                publish_ok, publish_msg = GraphClient().verify_calendar_write_access(token)
+                if not publish_ok:
+                    account.status = "error"
+                    account.last_sync_failure = datetime.now(timezone.utc)
+                    account.last_error = str(publish_msg or "Outlook publish permission check failed")
+                    safe_commit(db)
+                    db.refresh(account)
 
         # Keep persisted status aligned with resolver; never force OK when provider still fails.
         resolved_status = resolve_account_status(account)

@@ -67,6 +67,7 @@ logger.debug(
 SCOPES = [
     "User.Read",
     "Calendars.Read",
+    "Calendars.ReadWrite",
     "Tasks.Read",
     "offline_access"
 ]
@@ -117,8 +118,9 @@ def login(request: Request, token: str = None, reconnect: str = None):
         "response_mode": "query",
         "scope": " ".join(SCOPES),
         "state": state,   # ✅ ties login back to user
-        # ✅ FORCE Microsoft to show account picker
-        "prompt": "select_account",
+        # Reconnect should force consent so upgraded scopes (e.g. ReadWrite)
+        # are actually granted on existing accounts.
+        "prompt": "consent" if reconnect_email else "select_account",
     }
 
     if reconnect_email:
@@ -210,6 +212,7 @@ def callback(
     # ✅ Extract tokens
     access_token = token_json.get("access_token")
     refresh_token = token_json.get("refresh_token")
+    granted_scope = str(token_json.get("scope") or "")
 
     # ✅ ERROR HANDLING (THIS FIXES YOUR CRASH)
     if not access_token:
@@ -224,6 +227,15 @@ def callback(
             status_code=400,
             detail="Failed to get access token from Microsoft"
         )
+
+    granted_scope_set = {part.strip() for part in granted_scope.split(" ") if part.strip()}
+    if state and "Calendars.ReadWrite" not in granted_scope_set:
+        logger.error("❌ MICROSOFT TOKEN MISSING REQUIRED WRITE SCOPE: granted=%s", granted_scope)
+        params = urlencode({
+            "error": "microsoft_scope_missing_write",
+            "token": create_token(user_id),
+        })
+        return RedirectResponse(f"/accounts/ui?{params}")
 
 
     # Legacy behavior for old tests: no state, return JSON success.

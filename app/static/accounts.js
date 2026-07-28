@@ -1,5 +1,7 @@
 import { api, setAuthToken } from "/static/api.js";
 
+let pendingRemediationTarget = null;
+
 function normalizeProvider(provider) {
   const p = (provider || "").toLowerCase().trim();
   if (["google", "gmail"].includes(p)) return "google";
@@ -463,6 +465,13 @@ function renderProviderAccounts(provider, list) {
   list.forEach((acc) => {
     const div = document.createElement("div");
     div.className = "account";
+    div.dataset.accountKey = normalizeAccountKey(acc.provider, acc.account_email);
+
+    const normalizedProvider = normalizeProvider(acc.provider);
+    const retryLabel = normalizedProvider === "microsoft" ? "Verify Access" : "Refresh Sync";
+    const retryTitle = normalizedProvider === "microsoft"
+      ? "Checks both read access and publish/create access for this Microsoft calendar account."
+      : "Runs an immediate sync health check for this account using saved credentials.";
 
     const reconnectVisible = acc.status === "error"
       && !Boolean(acc?.token_issue?.requires_admin)
@@ -486,12 +495,12 @@ function renderProviderAccounts(provider, list) {
         ${showIssue && issueGuidance ? `<div style="margin-top:2px; font-size:11px; color:#7f1d1d;">${issueGuidance}</div>` : ""}
       </div>
       <div class="account-actions">
-        <button data-action="primary">Primary</button>
-        <button data-action="toggle">${acc.sync_enabled ? "Disable" : "Enable"}</button>
-        <button data-action="remove">Remove</button>
-        ${isRecommendedRetry || !isRecommendedReconnect ? `<button data-action="retry">${isRecommendedRetry ? recommendedLabel : "Retry"}</button>` : ""}
-        ${reconnectVisible ? "<button data-action=\"reconnect\">Reconnect</button>" : ""}
-        ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\">Admin Fix Needed</button>" : ""}
+        <button data-action="primary" title="Marks this account as the default for its provider.">Set Primary</button>
+        <button data-action="toggle" title="${acc.sync_enabled ? "Turns off background syncing for this account." : "Turns on background syncing for this account."}">${acc.sync_enabled ? "Disable Sync" : "Enable Sync"}</button>
+        <button data-action="remove" title="Disconnects this account from the app.">Disconnect</button>
+        ${isRecommendedRetry || !isRecommendedReconnect ? `<button data-action="retry" title="${retryTitle}">${isRecommendedRetry ? recommendedLabel : retryLabel}</button>` : ""}
+        ${reconnectVisible ? "<button data-action=\"reconnect\" title=\"Reconnects OAuth permissions for this account.\">Reconnect</button>" : ""}
+        ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\" title=\"Opens Admin Dashboard for app-level key or permission fixes.\">Admin Fix Needed</button>" : ""}
       </div>
     `;
 
@@ -518,6 +527,25 @@ function renderProviderAccounts(provider, list) {
 
     container.appendChild(div);
   });
+}
+
+function normalizeAccountKey(provider, email) {
+  return `${normalizeProvider(provider)}:${String(email || "").toLowerCase().trim()}`;
+}
+
+function focusRemediationTargetIfRequested() {
+  if (!pendingRemediationTarget) return;
+  const targetKey = normalizeAccountKey(pendingRemediationTarget.provider, pendingRemediationTarget.account);
+  const cards = [...document.querySelectorAll(".account[data-account-key]")];
+  const target = cards.find((card) => String(card.dataset.accountKey || "").toLowerCase() === targetKey);
+  if (!target) return;
+
+  target.style.boxShadow = "0 0 0 3px rgba(220, 38, 38, 0.35)";
+  target.style.borderColor = "#dc2626";
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+
+  setGlobalMessage(`Resolution target: ${targetKey}. Click Reconnect for this account, then retry publish.`, "info");
+  pendingRemediationTarget = null;
 }
 
 async function loadAccounts() {
@@ -547,6 +575,7 @@ async function loadAccounts() {
   renderProviderAccounts("google", groups.google);
   renderProviderAccounts("microsoft", groups.microsoft);
   renderProviderAccounts("apple", groups.apple);
+  focusRemediationTargetIfRequested();
 
   await fetchSyncStatus();
 
@@ -664,6 +693,8 @@ function applyQueryState() {
   const connectedAccount = params.get("account");
   const oauthError = params.get("error");
   const onboarding = params.get("onboarding");
+  const remedyProvider = params.get("remedy_provider");
+  const remedyAccount = params.get("remedy_account");
 
   if (token) {
     setAuthToken(token);
@@ -673,7 +704,21 @@ function applyQueryState() {
   }
 
   if (oauthError) {
-    setGlobalMessage(oauthError.replace(/_/g, " "));
+    const known = {
+      microsoft_scope_missing_write: "Microsoft connection is missing calendar write permission. Click Microsoft Reconnect and accept full consent.",
+      microsoft_token_missing: "Microsoft token was not returned. Please reconnect Microsoft.",
+      microsoft_profile_failed: "Microsoft profile lookup failed. Please reconnect Microsoft.",
+      microsoft_reconnect_mismatch: "Reconnect completed with a different Microsoft account than expected.",
+      microsoft_email_missing: "Microsoft did not return an account email. Please reconnect Microsoft.",
+    };
+    setGlobalMessage(known[oauthError] || oauthError.replace(/_/g, " "));
+  }
+
+  if (remedyProvider || remedyAccount) {
+    pendingRemediationTarget = {
+      provider: remedyProvider || "",
+      account: remedyAccount || "",
+    };
   }
 
   if (connected) {

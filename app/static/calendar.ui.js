@@ -927,6 +927,35 @@ function buildPublishFailureMessage(data, selectedKeys = []) {
   return "No calendars were updated.";
 }
 
+function buildPublishRemediationHtml(message, selectedRows = []) {
+  const lower = String(message || "").toLowerCase();
+  const selectedMicrosoft = (selectedRows || []).find((row) => row && row.provider === "microsoft");
+  const remediationHref = selectedMicrosoft
+    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${encodeURIComponent(selectedMicrosoft.email || "")}`
+    : "/accounts/ui";
+
+  if (lower.includes("erroraccessdenied") || lower.includes("access is denied") || lower.includes("forbidden")) {
+    const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "microsoft account";
+    return `
+      <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
+        Resolution path: <a href="${remediationHref}" style="font-weight:600;">Open Account Manager</a>,
+        click <strong>Reconnect</strong> for <strong>${escapeHtml(accountLabel)}</strong>,
+        complete Microsoft consent, return here, then publish again.
+      </div>`;
+  }
+
+  if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid")) {
+    const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "the account";
+    return `
+      <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
+        Resolution path: Reconnect <strong>${escapeHtml(accountLabel)}</strong> in
+        <a href="${remediationHref}" style="font-weight:600;">Account Manager</a>, then retry publish.
+      </div>`;
+  }
+
+  return "";
+}
+
 const DATE_STICKY_STORAGE_KEY = "sj_date_sticky_notes_v1";
 let dateStickyMap = {};
 let dateStickyStoreReady = false;
@@ -2064,14 +2093,19 @@ async function confirmPublishCurrentEvent() {
   } catch (err) {
     console.error("❌ Single-event publish failed", err);
     const message = String(err?.message || "").trim();
+    const remediationHtml = buildPublishRemediationHtml(message, selectedRows);
     modalState.publishAttemptState = "error";
     modalState.publishAttemptConsumed = true;
     renderConfirmPublishButtonState({ state: "error" });
     const summary = document.getElementById("publishConfirmSummary");
     if (summary) {
-      summary.textContent = message ? `Publish failed: ${message}` : "Publish failed.";
+      if (remediationHtml) {
+        summary.innerHTML = `${message ? `Publish failed: ${escapeHtml(message)}` : "Publish failed."}${remediationHtml}`;
+      } else {
+        summary.textContent = message ? `Publish failed: ${message}` : "Publish failed.";
+      }
     }
-    window.showToast?.(`❌ Publish failed${message ? `: ${message}` : ""}`, "error");
+    window.showToast?.(`❌ Publish failed${message ? `: ${message}` : ""}${remediationHtml ? " — see resolution path in the publish panel" : ""}`, "error");
     window.setTimeout(() => {
       if (!isPublishingEvent) {
         modalState.publishAttemptState = "idle";

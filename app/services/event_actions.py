@@ -1,5 +1,6 @@
 ﻿from sqlalchemy.orm import Session
 import logging
+from datetime import datetime, timezone
 from app.models import OAuthAccount
 from app.services.multi_account_oauth_service import ensure_valid_token, normalize_provider
 
@@ -132,6 +133,34 @@ def _is_retryable_microsoft_create_error(exc: Exception) -> bool:
     return any(marker in message for marker in retryable_markers)
 
 
+def _set_account_publish_status(db: Session, user_id: int, provider: str, account_email: str, *, ok: bool, message: str = "") -> None:
+    """Reflect publish write outcome on the account row so UI remediation is accurate."""
+    normalized_email = (account_email or "").lower().strip()
+    query = db.query(OAuthAccount).filter(
+        OAuthAccount.user_id == user_id,
+        OAuthAccount.provider == provider,
+    )
+    if normalized_email:
+        query = query.filter(OAuthAccount.account_email == normalized_email)
+
+    account = query.order_by(OAuthAccount.id.desc()).first()
+    if not account:
+        return
+
+    now = datetime.now(timezone.utc)
+    if ok:
+        account.status = "ok"
+        account.last_error = None
+        account.last_sync_success = now
+        account.last_sync_failure = None
+    else:
+        account.status = "error"
+        account.last_error = str(message or "Publish failed")[:512]
+        account.last_sync_failure = now
+
+    db.commit()
+
+
 class EventActions:
 
     def update_event(self, db: Session, event, updates, google_service, graph_client, user):
@@ -255,12 +284,14 @@ class EventActions:
                         target_result["ok"] = True
                         target_result["status"] = "updated"
                         target_result["message"] = f"Updated {target_key}"
+                        _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
                         account_results.append(target_result)
                         continue
 
                     if not _is_missing_provider_event(update_result):
                         target_result["status"] = "update_failed"
                         target_result["message"] = f"Update failed for {target_key} (status {update_result})"
+                        _set_account_publish_status(db, user.id, provider, acct_email, ok=False, message=target_result["message"])
                         account_results.append(target_result)
                         warnings.append(target_result["message"])
                         continue
@@ -297,15 +328,18 @@ class EventActions:
                     target_result["ok"] = True
                     target_result["status"] = "created"
                     target_result["message"] = f"Created {target_key}"
+                    _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
                 else:
                     target_result["status"] = "create_failed"
                     target_result["message"] = f"Create failed for {target_key}: provider returned no event id"
+                    _set_account_publish_status(db, user.id, provider, acct_email, ok=False, message=target_result["message"])
                     warnings.append(target_result["message"])
                 account_results.append(target_result)
             except Exception as e:
                 logger.warning(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
                 target_result["status"] = "failed"
                 target_result["message"] = f"Publish failed for {target_key}: {e}"
+                _set_account_publish_status(db, user.id, provider, acct_email, ok=False, message=target_result["message"])
                 account_results.append(target_result)
                 warnings.append(target_result["message"])
 

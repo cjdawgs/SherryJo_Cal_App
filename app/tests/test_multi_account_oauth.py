@@ -678,8 +678,9 @@ def test_get_accounts_endpoint_classifies_provider_access_denied_issue(client, m
     assert len(matching[0]["token_issue"]["resolution_steps"]) >= 1
 
 
+@patch("app.services.graph_client.GraphClient.verify_calendar_write_access", return_value=(False, "Outlook create failed (403 ErrorAccessDenied): Access is denied."))
 @patch("app.services.calendar_service.CalendarService.fetch_all_events", return_value={"events": []})
-def test_retry_endpoint_returns_remediation_when_account_still_needs_action(_mock_fetch, client, multi_account_user: User, db: Session):
+def test_retry_endpoint_returns_remediation_when_account_still_needs_action(_mock_fetch, _mock_probe, client, multi_account_user: User, db: Session):
     """Retry should return actionable remediation instead of forcing OK status."""
     import jwt
     from app.routers.auth import SECRET_KEY

@@ -16,7 +16,7 @@
 
 <div class="accountsTopbar">
   <div class="accountsTopbarLeft">
-    <button id="adminPanelBtn" class="navActionBtn adminNavBtn hidden" onclick="goToAdmin()" title="Open admin dashboard">
+    <button id="adminPanelBtn" class="navActionBtn adminNavBtn hidden" onclick="goToAdmin()" title="Open Admin Dashboard tools and diagnostics." aria-label="Open Admin Dashboard tools and diagnostics.">
       <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
         <path fill="currentColor" d="M12 1l9 4v6c0 5.55-3.84 10.74-9 12-5.16-1.26-9-6.45-9-12V5l9-4zm0 2.18L5 6.3V11c0 4.68 3.02 9.06 7 10.3 3.98-1.24 7-5.62 7-10.3V6.3l-7-3.12zM11 7h2v6h-2V7zm0 8h2v2h-2v-2z"/>
       </svg>
@@ -26,7 +26,7 @@
   </div>
 
   <div class="accountsTopbarRight">
-    <button class="navActionBtn returnNavBtn" onclick="goToCalendar()" title="Return to calendar">
+    <button class="navActionBtn returnNavBtn" onclick="goToCalendar()" title="Return to the main Calendar view." aria-label="Return to the main Calendar view.">
       <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
         <path fill="currentColor" d="M20 11H7.83l4.58-4.59L11 5l-7 7 7 7 1.41-1.41L7.83 13H20v-2z"/>
       </svg>
@@ -57,7 +57,7 @@
   <!-- ✅ GOOGLE -->
   <div class="provider-col">
 
-    <button class="providerBtn google" onclick="addGoogle()">
+    <button class="providerBtn google" onclick="addGoogle()" title="Connect or reconnect a Google calendar account." aria-label="Connect or reconnect a Google calendar account.">
       <img src="https://www.gstatic.com/images/branding/product/1x/googleg_48dp.png">
       Google
     </button>
@@ -75,7 +75,7 @@
   <!-- ✅ MICROSOFT -->
   <div class="provider-col">
 
-    <button class="providerBtn microsoft" onclick="addMicrosoft()">
+    <button class="providerBtn microsoft" onclick="addMicrosoft()" title="Connect or reconnect a Microsoft Outlook calendar account." aria-label="Connect or reconnect a Microsoft Outlook calendar account.">
       <img src="https://upload.wikimedia.org/wikipedia/commons/4/44/Microsoft_logo.svg">
       Microsoft
     </button>
@@ -94,7 +94,7 @@
     <!-- ✅ APPLE -->
         <div class="provider-col">
 
-        <button class="providerBtn apple" onclick="toggleAppleForm()">
+        <button class="providerBtn apple" onclick="toggleAppleForm()" title="Open Apple account setup and reconnect form." aria-label="Open Apple account setup and reconnect form.">
             🍎 Apple
         </button>
 
@@ -125,8 +125,8 @@
                 style="display:block; width:100%; margin-bottom:8px; padding:5px 6px; font-size:12px; border:1px solid #ccc; border-radius:4px;" />
 
             <div style="display:flex; gap:6px;">
-                <button id="apple-test-btn" onclick="testApple()" style="flex:1; font-size:12px;">Test</button>
-                <button id="apple-connect-btn" onclick="connectApple()" style="flex:1; font-size:12px; background:#3b82f6; color:#fff; border-color:#2563eb;">Connect</button>
+                <button id="apple-test-btn" onclick="testApple()" title="Test Apple credentials without saving the account." aria-label="Test Apple credentials without saving the account." style="flex:1; font-size:12px;">Test</button>
+                <button id="apple-connect-btn" onclick="connectApple()" title="Save and connect this Apple account using the provided app password." aria-label="Save and connect this Apple account using the provided app password." style="flex:1; font-size:12px; background:#3b82f6; color:#fff; border-color:#2563eb;">Connect</button>
             </div>
 
             <div id="apple-status" style="margin-top:6px; font-size:12px;"></div>
@@ -148,7 +148,7 @@
       <h3>Sync Management</h3>
       <p>Control the current data window, cadence, and refresh health without admin access.</p>
     </div>
-    <button id="syncRefreshAllBtn" class="syncPrimaryBtn" onclick="refreshAllSyncStatus()">Refresh Status</button>
+    <button id="syncRefreshAllBtn" class="syncPrimaryBtn" onclick="refreshAllSyncStatus()" title="Reload account sync health, scheduler status, and latest sync metadata." aria-label="Reload account sync health, scheduler status, and latest sync metadata.">Refresh Status</button>
   </div>
 
   <div class="syncPanelGrid">
@@ -168,8 +168,8 @@
   </div>
 
   <div class="syncPanelActions">
-    <button class="syncSecondaryBtn" onclick="saveSyncSettings()">Save Sync Settings</button>
-    <button class="syncPrimaryBtn" onclick="manualRefreshSelectedAccount()">Manual Refresh</button>
+    <button class="syncSecondaryBtn" onclick="saveSyncSettings()" title="Save the selected sync range and frequency settings for chosen accounts." aria-label="Save the selected sync range and frequency settings for chosen accounts.">Save Sync Settings</button>
+    <button class="syncPrimaryBtn" onclick="manualRefreshSelectedAccount()" title="Run sync now for selected accounts using their current sync range settings." aria-label="Run sync now for selected accounts using their current sync range settings.">Manual Refresh</button>
   </div>
 
   <div class="syncHelpGrid" aria-label="Sync control descriptions">
