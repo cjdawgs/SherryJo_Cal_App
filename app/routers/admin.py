@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -10,11 +11,13 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.database import DATABASE_URL, engine, get_db
+from app.config import settings
 from app.deps import require_admin
 from app.models import User
 from app.services.asset_urls import asset_url
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
 
 # Columns that must never leave the database through the table browser,
 # whatever table they appear in: stored credentials and password hashes.
@@ -79,6 +82,34 @@ def _safe_database_summary(url: str) -> dict:
     }
 
 
+def _credential_encryption_health(db: Session, tables: list[str]) -> dict:
+    token_key_configured = bool((getattr(settings, "token_encryption_key", None) or "").strip())
+    encrypted_access_token_rows = 0
+
+    if "oauth_accounts" in set(tables):
+        try:
+            encrypted_access_token_rows = int(
+                db.execute(
+                    text("SELECT COUNT(*) FROM oauth_accounts WHERE access_token LIKE 'v1:%'")
+                ).scalar()
+                or 0
+            )
+        except Exception as exc:
+            logger.warning("Admin security overview query failed: %s", exc)
+
+    encrypted_credentials_present = encrypted_access_token_rows > 0
+    missing_key_with_encrypted_credentials = (
+        encrypted_credentials_present and not token_key_configured
+    )
+
+    return {
+        "token_encryption_key_configured": token_key_configured,
+        "encrypted_access_token_rows": encrypted_access_token_rows,
+        "encrypted_credentials_present": encrypted_credentials_present,
+        "missing_key_with_encrypted_credentials": missing_key_with_encrypted_credentials,
+    }
+
+
 @router.get("/system/overview")
 def admin_system_overview(
     db: Session = Depends(get_db),
@@ -87,6 +118,7 @@ def admin_system_overview(
     inspector = inspect(engine)
     tables = sorted(inspector.get_table_names())
     db_info = _safe_database_summary(DATABASE_URL)
+    security_info = _credential_encryption_health(db, tables)
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -109,6 +141,7 @@ def admin_system_overview(
                 "Delete provider account",
             ],
         },
+        "security": security_info,
     }
 
 

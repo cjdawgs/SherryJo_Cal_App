@@ -56,6 +56,7 @@ const el = {
   providerOpsList: document.getElementById("providerOpsList"),
   overviewLastUpdated: document.getElementById("overviewLastUpdated"),
   copyOverviewBtn: document.getElementById("copyOverviewBtn"),
+  securityWarningBanner: document.getElementById("securityWarningBanner"),
 };
 
 let adminWindowControlsReady = false;
@@ -175,6 +176,7 @@ function renderSystemOverview(data) {
   state.overview = data;
 
   const db = data?.database || {};
+  const security = data?.security || {};
   const tables = Array.isArray(data?.tables) ? data.tables : [];
   const userOps = Array.isArray(data?.admin_operations?.users) ? data.admin_operations.users : [];
   const providerOps = Array.isArray(data?.admin_operations?.providers) ? data.admin_operations.providers : [];
@@ -213,6 +215,22 @@ function renderSystemOverview(data) {
     const raw = data?.generated_at;
     const stamp = raw ? new Date(raw).toLocaleString() : new Date().toLocaleString();
     el.overviewLastUpdated.textContent = `Last refreshed: ${stamp}`;
+  }
+
+  if (el.securityWarningBanner) {
+    const hasCriticalCryptoGap = Boolean(security?.missing_key_with_encrypted_credentials);
+    if (hasCriticalCryptoGap) {
+      const encryptedRows = Number(security?.encrypted_access_token_rows || 0);
+      el.securityWarningBanner.hidden = false;
+      el.securityWarningBanner.innerHTML =
+        `<strong>Credential Decryption Blocked:</strong> ` +
+        `${encryptedRows} encrypted OAuth credential row${encryptedRows === 1 ? " is" : "s are"} present, ` +
+        `but TOKEN_ENCRYPTION_KEY is not configured. ` +
+        `Background sync and provider publish will fail until the key is restored.`;
+    } else {
+      el.securityWarningBanner.hidden = true;
+      el.securityWarningBanner.textContent = "";
+    }
   }
 }
 

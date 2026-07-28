@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
+from app.config import settings
 from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, User
 
 
@@ -139,6 +140,31 @@ def test_admin_system_overview_payload(client):
     ops = payload["admin_operations"]
     assert isinstance(ops.get("users"), list)
     assert isinstance(ops.get("providers"), list)
+
+
+def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypted(client, db, monkeypatch):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+
+    db.add(OAuthAccount(
+        user_id=owner["id"],
+        provider="google",
+        account_email="enc-warning@test.com",
+        access_token="v1:fake-sealed-token",
+        refresh_token="v1:fake-sealed-refresh",
+    ))
+    db.commit()
+
+    monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+
+    res = client.get("/admin/system/overview", headers=headers)
+    assert res.status_code == 200
+
+    payload = res.json()
+    security = payload.get("security") or {}
+    assert security.get("encrypted_credentials_present") is True
+    assert security.get("token_encryption_key_configured") is False
+    assert security.get("missing_key_with_encrypted_credentials") is True
 
 
 def test_admin_table_rows_requires_admin_role(client):

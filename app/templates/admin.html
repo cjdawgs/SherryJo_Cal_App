@@ -79,6 +79,21 @@
       cursor: pointer; white-space: nowrap; flex-shrink: 0;
     }
     .tv-copy-btn:hover { background: rgba(255,255,255,0.1); }
+
+    .security-warning-banner {
+      margin: 10px 0;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 149, 0, 0.45);
+      background: rgba(255, 149, 0, 0.12);
+      color: #ffdfb0;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .security-warning-banner strong {
+      color: #ffd28b;
+    }
   </style>
 </head>
 <body>
@@ -266,6 +281,7 @@
           <span id="overviewLastUpdated" class="muted-line">Last refreshed: loading...</span>
           <button id="copyOverviewBtn" class="ghost-btn" type="button">Copy System Snapshot</button>
         </div>
+        <div id="securityWarningBanner" class="security-warning-banner" hidden></div>
         <div class="system-grid">
           <article class="system-card">
             <h3>Active Database</h3>
