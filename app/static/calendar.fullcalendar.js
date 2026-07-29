@@ -77,6 +77,28 @@ function stickyCountFromNotes(notes = [], legacySticky = null) {
   return String(legacySticky?.content || "").trim() ? 1 : 0;
 }
 
+function resolveCalendarAccountKey(eventLike) {
+  if (!eventLike) return "";
+
+  if (typeof window.getCalendarEventAccountKey === "function") {
+    return window.getCalendarEventAccountKey(eventLike);
+  }
+
+  const directKey = eventLike?.extendedProps?.account_key;
+  if (directKey) return directKey;
+
+  const provider = normalizeProvider(eventLike?.extendedProps?.source || eventLike?.source || "local");
+  const account = String(
+    eventLike?.extendedProps?.account ||
+    eventLike?.extendedProps?.account_email ||
+    eventLike?.account ||
+    eventLike?.account_email ||
+    "local"
+  ).toLowerCase().trim();
+
+  return `${provider}:${account}`;
+}
+
 function buildStickyIcon({ count = 1, title = "Open sticky note", dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
@@ -101,10 +123,13 @@ function buildStickyIcon({ count = 1, title = "Open sticky note", dragPayload = 
     }, { passive: true });
   });
 
-  if (count > 1) {
+  if (count > 0) {
+    const countNum = Number.isFinite(Number(count))
+      ? Math.max(0, Math.trunc(Number(count)))
+      : 1;
     const badge = document.createElement("span");
     badge.className = "stickyCountBadge";
-    badge.textContent = String(count);
+    badge.textContent = countNum > 1 ? String(countNum) : "S";
     icon.appendChild(badge);
   }
 
@@ -225,10 +250,10 @@ function ensureContextMenu() {
 function positionContextMenu(menu, x, y) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const menuW = menu.offsetWidth  || 185;
+  const menuW = menu.offsetWidth || 185;
   const menuH = menu.offsetHeight || 140;
   menu.style.left = (x + menuW > vw ? x - menuW : x) + "px";
-  menu.style.top  = (y + menuH > vh ? y - menuH : y) + "px";
+  menu.style.top = (y + menuH > vh ? y - menuH : y) + "px";
   menu.classList.add("visible");
 }
 
@@ -1171,8 +1196,8 @@ export function initFullCalendar() {
 
     // ✅ Week starts Sunday; editable/selectable enable drag+click
     firstDay: 0,
-    editable:   true,
-    droppable:  false,
+    editable: true,
+    droppable: false,
     selectable: true,
     snapDuration: "00:05:00",
     dragRevertDuration: 180,
@@ -1185,13 +1210,13 @@ export function initFullCalendar() {
     // eventClassNames fires on every render; returns
     // ['event-selected'] for the matching event only.
     // =========================================================
-    eventClassNames: function(arg) {
+    eventClassNames: function (arg) {
       return String(arg.event.id) === String(window.selectedEventId)
         ? ['event-selected']
         : [];
     },
 
-    events: function(fetchInfo, successCallback) {
+    events: function (fetchInfo, successCallback) {
       if (!window.sessionEventCache) {
         console.warn("❌ No cache yet");
         successCallback([]);
@@ -1212,33 +1237,13 @@ export function initFullCalendar() {
       const isAccountVisible = (eventLike) => {
         if (!activeFilters || activeFilters.size === 0) return true;
 
-        const directKey = eventLike?.extendedProps?.account_key;
-        if (directKey) return activeFilters.has(directKey);
-
-        const provider = normalizeProvider(eventLike?.extendedProps?.source || eventLike?.source || "local");
-        const account = (
-          eventLike?.extendedProps?.account ||
-          eventLike?.extendedProps?.account_email ||
-          eventLike?.account ||
-          eventLike?.account_email ||
-          "local"
-        ).toLowerCase().trim();
-
-        return activeFilters.has(`${provider}:${account}`);
+        const key = resolveCalendarAccountKey(eventLike);
+        return !!key && activeFilters.has(key);
       };
 
       const events = sourceEvents.map(ev => {
 
-        const provider = normalizeProvider(ev.extendedProps?.source);
-
-        let email = ev.extendedProps?.account || "";
-
-        // ✅ STRIP BAD SUFFIX
-        email = email.split(" ")[0];
-
-        email = email.toLowerCase().trim();
-
-        const key = `${provider}:${email}`;
+        const key = resolveCalendarAccountKey(ev);
         const accountRaw =
           (window.getColorByKey && window.getColorByKey(key)) ||
           "#4285f4";
@@ -1256,7 +1261,7 @@ export function initFullCalendar() {
           borderColor: raw,
           textColor:
             (window.getBestTextColor &&
-            window.getBestTextColor(soft)) ||
+              window.getBestTextColor(soft)) ||
             "#000"
         };
 
@@ -1301,45 +1306,36 @@ export function initFullCalendar() {
 
       const finalEvents = dedupeOn
         ? (() => {
-            const seenCrossAccount = new Set();
-            return eventsUniqueWithinAccount.filter((ev) => {
-              const key = (() => {
-                if (typeof window.getDisplayDedupKey === "function") {
-                  return window.getDisplayDedupKey(ev);
-                }
-                const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
-                const start = ev?.start ? new Date(ev.start) : null;
-                const startKey = start && !Number.isNaN(start.getTime())
-                  ? start.toISOString().slice(0, 16)
-                  : String(ev?.id || ev?.extendedProps?.backendId || "missing-dedup-key");
-                return `${title}|${startKey}`;
-              })();
-              if (seenCrossAccount.has(key)) return false;
-              seenCrossAccount.add(key);
-              return true;
-            });
-          })()
+          const seenCrossAccount = new Set();
+          return eventsUniqueWithinAccount.filter((ev) => {
+            const key = (() => {
+              if (typeof window.getDisplayDedupKey === "function") {
+                return window.getDisplayDedupKey(ev);
+              }
+              const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
+              const start = ev?.start ? new Date(ev.start) : null;
+              const startKey = start && !Number.isNaN(start.getTime())
+                ? start.toISOString().slice(0, 16)
+                : String(ev?.id || ev?.extendedProps?.backendId || "missing-dedup-key");
+              return `${title}|${startKey}`;
+            })();
+            if (seenCrossAccount.has(key)) return false;
+            seenCrossAccount.add(key);
+            return true;
+          });
+        })()
         : eventsUniqueWithinAccount;
 
       console.log("✅ EVENTS SENT:", finalEvents.length);
 
       successCallback(finalEvents);
     },
-    eventDidMount: function(info) {
+    eventDidMount: function (info) {
 
       info.el.dataset.eventId = String(info.event.id || "");
 
-      
-      const provider = normalizeProvider(info.event.extendedProps?.source);
 
-      let email = info.event.extendedProps?.account || "";
-
-      // ✅ REMOVE ANY TRAILING " 2", " 3", ETC
-      email = email.split(" ")[0];
-
-      email = email.toLowerCase().trim();
-
-      const key = `${provider}:${email}`;
+      const key = resolveCalendarAccountKey(info.event);
 
       const accountRaw =
         (window.getColorByKey && window.getColorByKey(key)) || "#4285f4";
@@ -1584,7 +1580,7 @@ export function initFullCalendar() {
     // Single click updates selectedDate and sidebars only —
     // NEVER changes the main calendar view.
     // =========================================================
-    dateClick: function(info) {
+    dateClick: function (info) {
       const dateStr = info.dateStr;
       console.log("DATE CLICK:", dateStr);
 
@@ -1627,7 +1623,7 @@ export function initFullCalendar() {
     //   Second click (≤280 ms gap) → open edit modal
     //   First click  (>280 ms gap) → select event (highlight)
     // =========================================================
-    eventClick: function(info) {
+    eventClick: function (info) {
       info.jsEvent.preventDefault();
       info.jsEvent.stopPropagation();
 
@@ -1658,7 +1654,7 @@ export function initFullCalendar() {
       }, 280);
     },
 
-    eventsSet: function() {
+    eventsSet: function () {
       if (typeof window.updateChipEventCounts === "function") {
         setTimeout(() => {
           window.updateChipEventCounts();
@@ -1670,7 +1666,7 @@ export function initFullCalendar() {
       setTimeout(() => applyCompactToolbarTitle(), 0);
     },
 
-    datesSet: function(info) {
+    datesSet: function (info) {
       const currentViewType = info.view.type;
       const cal = window.calendar;
       const previousViewType = _prevViewType;
@@ -1733,7 +1729,7 @@ export function initFullCalendar() {
       }
     },
 
-    viewDidMount: function() {
+    viewDidMount: function () {
       if (typeof window.updateChipEventCounts === "function") {
         setTimeout(() => {
           window.updateChipEventCounts();
@@ -1748,7 +1744,7 @@ export function initFullCalendar() {
     // ✅ DRAG-DROP OR RESIZE EVENT — save changes to backend + undo/redo
     // Fires when user drags event to new date/time or resizes duration
     // CRITICAL: Skip this callback if we're programmatically updating via setDates() in undo/redo
-    eventChange: async function(info) {
+    eventChange: async function (info) {
       if (window.skipEventChange) {
         console.log(`[eventChange] Skipped due to skipEventChange flag`);
         return;

@@ -835,8 +835,11 @@ function ensureStyles() {
   .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
   .tv-sticky-indicator::before { content: 'S'; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.9); line-height: 1; }
   .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
-  .tv-inline-sticky-badge { position: static; width: 16px; height: 16px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .tv-inline-sticky-badge { position: static; width: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
   .tv-inline-sticky-badge::before { font-size: 8px; }
+  .tv-sticky-count-indicator { width: auto; min-width: 14px; padding: 0 3px; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.95); }
+  .tv-sticky-count-indicator::before,
+  .tv-sticky-count-indicator::after { content: none; }
   .tv-month-sticky-indicator { top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 4px; font-size: 9px; font-weight: 800; color: rgba(48,34,0,0.95); }
   .tv-month-sticky-indicator::before,
   .tv-month-sticky-indicator::after { content: none; }
@@ -846,7 +849,7 @@ function ensureStyles() {
   .tv-month-preview { position: relative; border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 2px 5px; font-size: 10px; opacity: 0.96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
   .tv-month-preview-time { opacity: 0.92; margin-right: 4px; font-weight: 700; }
   .tv-month-preview-title { opacity: 0.96; }
-  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(145,112,18,0.9); background: rgba(255,226,106,0.98); color: rgba(48,34,0,0.9); font-size: 7px; font-weight: 800; }
+  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 11px; height: 11px; padding: 0 2px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(145,112,18,0.9); background: rgba(255,226,106,0.98); color: rgba(48,34,0,0.9); font-size: 7px; font-weight: 800; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
@@ -2446,16 +2449,20 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
   const weekEvents = weekDateKeys.flatMap(dateKey => filteredEventsForDay(dayData(dateKey)).map(ev => ({ dateKey, ev })));
   const selectedDay = dayData(selectedDateKey);
   const selectedDateStickyCount = Array.isArray(selectedDay.stickyNotes) ? selectedDay.stickyNotes.length : 0;
-  const selectedEventStickyCount = filteredEventsForDay(selectedDay).filter((ev) => eventHasStickyPayload(ev)).length;
+  const selectedEventStickyCount = filteredEventsForDay(selectedDay).reduce((sum, ev) => sum + getEventStickyNoteCount(ev), 0);
   const selectedStickyTotal = selectedDateStickyCount + selectedEventStickyCount;
-  const selectedDayStickyBadge = selectedStickyTotal > 0
-    ? `<span class="tv-sticky-indicator tv-inline-sticky-badge" aria-label="${escapeHtml(`${selectedStickyTotal} sticky note${selectedStickyTotal === 1 ? '' : 's'} on selected day`)}">${escapeHtml(selectedStickyTotal > 1 ? String(Math.min(selectedStickyTotal, 9)) : 'S')}</span>`
-    : '';
-  const weekStickyTotal = weekEvents.filter((row) => eventHasStickyPayload(row.ev)).length
+  const selectedDayStickyBadge = renderStickyCountBadge(
+    selectedStickyTotal,
+    `${selectedStickyTotal} sticky note${selectedStickyTotal === 1 ? '' : 's'} on selected day`,
+    'tv-inline-sticky-badge'
+  );
+  const weekStickyTotal = weekEvents.reduce((sum, row) => sum + getEventStickyNoteCount(row.ev), 0)
     + weekDateKeys.reduce((count, dateKey) => count + ((dayData(dateKey).stickyNotes || []).length), 0);
-  const weekStickyBadge = weekStickyTotal > 0
-    ? `<span class="tv-sticky-indicator tv-inline-sticky-badge" aria-label="${escapeHtml(`${weekStickyTotal} sticky note${weekStickyTotal === 1 ? '' : 's'} this week`)}">${escapeHtml(weekStickyTotal > 1 ? String(Math.min(weekStickyTotal, 9)) : 'S')}</span>`
-    : '';
+  const weekStickyBadge = renderStickyCountBadge(
+    weekStickyTotal,
+    `${weekStickyTotal} sticky note${weekStickyTotal === 1 ? '' : 's'} this week`,
+    'tv-inline-sticky-badge'
+  );
   return `
     <aside class="tv-right-rail ${extraClass}">
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}${selectedDayStickyBadge}</div>
@@ -2463,7 +2470,11 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
         ${selectedItems.length ? selectedItems.map(item => {
     if (item.type === 'event') {
       const eventColor = resolveEventColor(item.event);
-      const sticky = eventHasStickyPayload(item.event) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+      const eventStickyCount = getEventStickyNoteCount(item.event);
+      const sticky = renderStickyCountBadge(
+        eventStickyCount,
+        `${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`
+      );
       return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
     }
     return `<div class="tv-right-item"><span class="tv-sticky-indicator" aria-label="Date sticky note"></span><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
@@ -2473,7 +2484,11 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
       <div class="tv-right-list">
         ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
     const eventColor = resolveEventColor(row.ev);
-    const sticky = eventHasStickyPayload(row.ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+    const eventStickyCount = getEventStickyNoteCount(row.ev);
+    const sticky = renderStickyCountBadge(
+      eventStickyCount,
+      `${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`
+    );
     return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
   }).join('') : '<div class="tv-empty">No events this week</div>'}
       </div>
@@ -2727,28 +2742,51 @@ function normalizeStickyEntries(rawEntries) {
   return items.map(normalizeStickyEntry).filter(Boolean);
 }
 
-function eventHasStickyPayload(event) {
-  if (!event || typeof event !== 'object') return false;
+function getEventStickyNoteCount(event) {
+  if (!event || typeof event !== 'object') return 0;
+
+  const stickyListCount = Math.max(
+    normalizeStickyEntries(event.stickyNotes).length,
+    normalizeStickyEntries(event.sticky_notes).length,
+    normalizeStickyEntries(event.stickyNote).length,
+    normalizeStickyEntries(event.sticky_note).length,
+  );
+
+  const notesCount = Array.isArray(event.notes)
+    ? event.notes.filter((note) => Boolean(extractStickyText(note))).length
+    : 0;
+
+  const noteCountHint = Math.max(
+    Number(event.noteCount) || 0,
+    Number(event.note_count) || 0,
+  );
+
+  let total = Math.max(stickyListCount, notesCount, noteCountHint);
 
   const explicit = event.hasSticky;
-  if (explicit === true) return true;
-  if (typeof explicit === 'string') {
-    const normalized = explicit.trim().toLowerCase();
-    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  if (total === 0 && (explicit === true || String(explicit).trim().toLowerCase() === 'true')) {
+    total = 1;
   }
 
-  if (normalizeStickyEntries(event.stickyNotes).length) return true;
-  if (normalizeStickyEntries(event.sticky_notes).length) return true;
-  if (normalizeStickyEntries(event.stickyNote).length) return true;
-  if (normalizeStickyEntries(event.sticky_note).length) return true;
+  return Math.max(0, Math.trunc(total));
+}
 
-  if (Array.isArray(event.notes)) {
-    return event.notes.some((note) => Boolean(extractStickyText(note)));
-  }
-  if (typeof event.noteCount === 'number' && event.noteCount > 0) return true;
-  if (typeof event.note_count === 'number' && event.note_count > 0) return true;
+function getStickyBadgeLabel(count) {
+  const normalizedCount = Math.max(0, Math.trunc(Number(count) || 0));
+  if (normalizedCount <= 0) return '';
+  return normalizedCount === 1 ? 'S' : String(normalizedCount);
+}
 
-  return false;
+function renderStickyCountBadge(count, ariaLabel, extraClass = '') {
+  const label = getStickyBadgeLabel(count);
+  if (!label) return '';
+
+  const className = `tv-sticky-indicator tv-sticky-count-indicator${extraClass ? ` ${extraClass}` : ''}`;
+  return `<span class="${className}" aria-label="${escapeHtml(ariaLabel)}">${escapeHtml(label)}</span>`;
+}
+
+function eventHasStickyPayload(event) {
+  return getEventStickyNoteCount(event) > 0;
 }
 
 function normalizeTvDays(daysPayload) {
@@ -3237,7 +3275,8 @@ function renderDayCard(day, selected, contextDay = false) {
   const date = parseLocalDate(day.date);
   const items = itemsForDate(day.date);
   const dayEvents = day.events || [];
-  const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && eventHasStickyPayload(ev)));
+  const dayStickyTotal = (day.stickyNotes || []).length + dayEvents.reduce((sum, ev) => sum + getEventStickyNoteCount(ev), 0);
+  const hasDaySticky = dayStickyTotal > 0;
   const now = new Date();
   const cards = items.length
     ? items.map((item, idx) => {
@@ -3247,14 +3286,20 @@ function renderDayCard(day, selected, contextDay = false) {
         const eventColor = resolveEventColor(ev);
         const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
         const border = softColor(eventColor, focused ? 0.7 : 0.5);
-        const eventStickyIndicator = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+        const eventStickyCount = getEventStickyNoteCount(ev);
+        const eventStickyIndicator = renderStickyCountBadge(
+          eventStickyCount,
+          `${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`
+        );
         return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
       }
       return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
     }).join('')
     : `<div class="tv-empty">No events or sticky notes</div>`;
 
-  const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  const stickyIndicator = hasDaySticky
+    ? renderStickyCountBadge(dayStickyTotal, `${dayStickyTotal} sticky note${dayStickyTotal === 1 ? '' : 's'} on day`)
+    : '';
   return `<div class="tv-day-card ${selected ? 'selected' : ''} ${contextDay ? 'context-day' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
 }
 
@@ -3330,7 +3375,11 @@ function renderEventSummaryCard(ev, bucket, index = 0) {
   const bg = softColor(eventColor, bucket === 'all-day' ? 0.26 : eventIsNow(ev, now) ? 0.34 : 0.2);
   const border = softColor(eventColor, 0.56);
   const duration = formatDuration(minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)));
-  const sticky = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+  const eventStickyCount = getEventStickyNoteCount(ev);
+  const sticky = renderStickyCountBadge(
+    eventStickyCount,
+    `${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`
+  );
   const timeLine = bucket === 'all-day'
     ? 'All day'
     : `${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}`;
@@ -3360,12 +3409,15 @@ function renderMonthCell(day, idx) {
   const selected = day.date === state.selectedDate;
   const dayEvents = filteredEventsForDay(day);
   const stickyNoteCount = Array.isArray(day.stickyNotes) ? day.stickyNotes.length : 0;
-  const stickyEventCount = (day.events || []).filter(ev => ev && (ev.hasSticky || eventHasStickyPayload(ev))).length;
+  const stickyEventCount = (day.events || []).reduce((sum, ev) => sum + getEventStickyNoteCount(ev), 0);
   const totalStickyCount = stickyNoteCount + stickyEventCount;
   const hasDaySticky = totalStickyCount > 0;
-  const stickyBadgeText = totalStickyCount > 1 ? String(Math.min(totalStickyCount, 9)) : 'S';
   const stickyIndicator = hasDaySticky
-    ? `<span class="tv-sticky-indicator tv-month-sticky-indicator" aria-label="${escapeHtml(`${totalStickyCount} sticky note${totalStickyCount === 1 ? '' : 's'} present`)}">${escapeHtml(stickyBadgeText)}</span>`
+    ? renderStickyCountBadge(
+      totalStickyCount,
+      `${totalStickyCount} sticky note${totalStickyCount === 1 ? '' : 's'} present`,
+      'tv-month-sticky-indicator'
+    )
     : '';
   const count = dayEvents.length + (day.stickyNotes || []).length;
   const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
@@ -3374,7 +3426,10 @@ function renderMonthCell(day, idx) {
       const eventColor = resolveEventColor(ev);
       const bg = softColor(eventColor, 0.2);
       const border = softColor(eventColor, 0.52);
-      const stickyFlag = eventHasStickyPayload(ev) ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
+      const eventStickyCount = getEventStickyNoteCount(ev);
+      const stickyFlag = eventStickyCount > 0
+        ? `<span class="tv-inline-sticky" aria-label="${escapeHtml(`${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`)}">${escapeHtml(getStickyBadgeLabel(eventStickyCount))}</span>`
+        : '';
       return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
     }).join('')}</div>`
     : '<div class="tv-month-preview">No events</div>';

@@ -644,15 +644,21 @@ window.smartRefresh = smartRefresh;
 function getCalendarEventAccountKey(ev) {
   if (!ev) return "";
 
-  const directKey = ev.extendedProps?.account_key;
+  const directKey = ev.extendedProps?.account_key || ev.account_key;
   if (directKey) return directKey;
 
   const provider = normalizeProvider(ev.extendedProps?.source || ev.source || "local");
-  const account = (
+  let account = (
     ev.extendedProps?.account ||
     ev.extendedProps?.account_email ||
+    ev.account ||
+    ev.account_email ||
     "local"
   ).toLowerCase().trim();
+
+  // Some upstream payloads append duplicate suffixes like "email@x.com 2".
+  // Strip only trailing numeric clone markers so account chip keys still match.
+  account = account.replace(/\s+\d+$/, "");
 
   return normalizeKey(provider, account);
 }
@@ -1244,10 +1250,13 @@ function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen
     });
   }
 
-  if (count > 1) {
+  if (count > 0) {
+    const countNum = Number.isFinite(Number(count))
+      ? Math.max(0, Math.trunc(Number(count)))
+      : 1;
     const badge = document.createElement("span");
     badge.className = "stickyCountBadge";
-    badge.textContent = String(count);
+    badge.textContent = countNum > 1 ? String(countNum) : "S";
     icon.appendChild(badge);
   }
 
