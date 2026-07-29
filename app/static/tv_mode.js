@@ -307,14 +307,23 @@ const publishDiagLoadBtn = document.getElementById("publishDiagLoadBtn");
 const publishDiagClearBtn = document.getElementById("publishDiagClearBtn");
 const publishDiagBody = document.getElementById("publishDiagBody");
 const publishDiagCount = document.getElementById("publishDiagCount");
+const publishDiagWindow = document.getElementById("publishDiagWindow");
 const staleDiagLoadBtn = document.getElementById("tvStaleDiagLoadBtn");
 const staleDiagClearBtn = document.getElementById("tvStaleDiagClearBtn");
 const staleDiagBody = document.getElementById("tvStaleDiagBody");
 const staleDiagCount = document.getElementById("tvStaleDiagCount");
 const staleDiagSummary = document.getElementById("tvStaleDiagSummary");
 const staleDiagPanel = document.querySelector(".tv-stale-panel");
+const repairDiagLoadBtn = document.getElementById("tvRepairDiagLoadBtn");
+const repairDiagClearBtn = document.getElementById("tvRepairDiagClearBtn");
+const repairDiagBody = document.getElementById("tvRepairDiagBody");
+const repairDiagCount = document.getElementById("tvRepairDiagCount");
+const repairDiagSummary = document.getElementById("tvRepairDiagSummary");
+const repairDiagWindow = document.getElementById("tvRepairDiagWindow");
+const repairDiagPanel = document.querySelector(".tv-repair-panel");
 let _diagAutoHandle = null;
 let _stalePanelLoaded = false;
+let _repairPanelLoaded = false;
 
 function _fmtDiagTime(isoStr) {
   if (!isoStr) return "—";
@@ -371,15 +380,20 @@ async function loadTvDiag() {
 async function loadPublishDiag() {
   if (!publishDiagBody) return;
   try {
-    const data = await apiRequest("/tv/diag?scope=all", { method: "GET" });
+    const params = new URLSearchParams({ scope: "all" });
+    const selectedWindow = publishDiagWindow ? String(publishDiagWindow.value || "").trim() : "";
+    if (selectedWindow) params.set("hours", selectedWindow);
+    const data = await apiRequest(`/tv/diag?${params.toString()}`, { method: "GET" });
     if (!data || !Array.isArray(data.entries)) {
       if (publishDiagCount) publishDiagCount.textContent = "error loading";
       return;
     }
 
     const entries = data.entries.filter((entry) => String(entry?.event || "") === "calendar_publish_result");
+    const hours = Number(data?.filters?.hours);
+    const hasWindow = Number.isFinite(hours) && hours > 0;
     if (publishDiagCount) {
-      publishDiagCount.textContent = `${entries.length} publish rows (${data.source || "db"})`;
+      publishDiagCount.textContent = `${entries.length} publish row(s)${hasWindow ? ` in last ${hours}h` : ""} (${data.source || "db"})`;
     }
 
     if (!entries.length) {
@@ -419,6 +433,86 @@ function _fmtStaleSummary(data) {
     <div><strong>Reason mix:</strong> ${_escapeHtml(reasonText)}</div>
     <ul>${points.map((line) => `<li>${_escapeHtml(line)}</li>`).join("")}</ul>
   `;
+}
+
+function _repairScenarioLabel(eventName) {
+  switch (String(eventName || "")) {
+    case "token_invalid_401":
+      return "401 token invalid (paired mode)";
+    case "kiosk_token_invalid_401":
+      return "401 token invalid (kiosk URL mode)";
+    case "storage_token_removed":
+      return "Token removed from browser storage";
+    case "user_unpair_requested":
+      return "User pressed Unpair";
+    default:
+      return String(eventName || "unknown");
+  }
+}
+
+function _fmtRepairSummary(rows) {
+  const counts = new Map();
+  const users = new Set();
+  const devices = new Set();
+  for (const row of rows) {
+    const label = _repairScenarioLabel(row.event);
+    counts.set(label, (counts.get(label) || 0) + 1);
+    if (row.user_id != null) users.add(String(row.user_id));
+    if (row.device_id) devices.add(String(row.device_id));
+  }
+  const mix = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, count]) => `${label}: ${count}`)
+    .join(", ");
+
+  return `
+    <div><strong>Rows:</strong> ${rows.length}</div>
+    <div><strong>Users affected:</strong> ${users.size} &middot; <strong>Devices affected:</strong> ${devices.size}</div>
+    <div><strong>Scenario mix:</strong> ${_escapeHtml(mix || "none")}</div>
+  `;
+}
+
+async function loadTvRepairDiag() {
+  if (!repairDiagBody) return;
+  try {
+    const params = new URLSearchParams({ scope: "all", event_group: "repair_risk" });
+    const selectedWindow = repairDiagWindow ? String(repairDiagWindow.value || "").trim() : "";
+    if (selectedWindow) params.set("hours", selectedWindow);
+    const data = await apiRequest(`/tv/diag?${params.toString()}`, { method: "GET" });
+    if (!data || !Array.isArray(data.entries)) {
+      if (repairDiagCount) repairDiagCount.textContent = "error loading";
+      if (repairDiagSummary) repairDiagSummary.textContent = "Unable to load re-pair diagnostics.";
+      return;
+    }
+
+    const rows = data.entries;
+    const hours = Number(data?.filters?.hours);
+    const hasWindow = Number.isFinite(hours) && hours > 0;
+
+    if (repairDiagCount) repairDiagCount.textContent = `${rows.length} re-pair risk row(s)${hasWindow ? ` in last ${hours}h` : ""}`;
+    if (repairDiagSummary) repairDiagSummary.innerHTML = _fmtRepairSummary(rows);
+
+    if (!rows.length) {
+      repairDiagBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">No re-pair risk scenarios recorded in current diagnostic rows.</td></tr>';
+      return;
+    }
+
+    repairDiagBody.innerHTML = rows.map((entry) => {
+      const shortId = entry.device_id ? String(entry.device_id).slice(-8) : "—";
+      const scenario = _repairScenarioLabel(entry.event);
+      return `
+      <tr>
+        <td>${_fmtDiagTime(entry.ts_server)}</td>
+        <td>${entry.user_id ?? "—"}</td>
+        <td><span style="font-family:monospace;">…${_escapeHtml(shortId)}</span></td>
+        <td>${_escapeHtml(scenario)}</td>
+        <td>${_escapeHtml(entry.details || "—")}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    if (repairDiagCount) repairDiagCount.textContent = `Error: ${err.message}`;
+    if (repairDiagSummary) repairDiagSummary.textContent = "Error loading re-pair diagnostics.";
+  }
 }
 
 async function loadTvStaleDiag() {
@@ -515,6 +609,30 @@ if (staleDiagPanel) {
     if (staleDiagPanel.open && !_stalePanelLoaded) {
       _stalePanelLoaded = true;
       loadTvStaleDiag();
+    }
+  });
+}
+
+if (repairDiagLoadBtn) {
+  repairDiagLoadBtn.addEventListener("click", () => {
+    _repairPanelLoaded = true;
+    loadTvRepairDiag();
+  });
+}
+
+if (repairDiagClearBtn) {
+  repairDiagClearBtn.addEventListener("click", () => {
+    if (repairDiagBody) repairDiagBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (repairDiagCount) repairDiagCount.textContent = "cleared";
+    if (repairDiagSummary) repairDiagSummary.textContent = "Cleared summary view.";
+  });
+}
+
+if (repairDiagPanel) {
+  repairDiagPanel.addEventListener("toggle", () => {
+    if (repairDiagPanel.open && !_repairPanelLoaded) {
+      _repairPanelLoaded = true;
+      loadTvRepairDiag();
     }
   });
 }

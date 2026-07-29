@@ -475,8 +475,11 @@
     Inject the kiosk token as a global before tv_dashboard.js loads.
     The JS reads window.KIOSK_TOKEN first, skipping the pairing screen entirely.
   -->
-  <script>window.KIOSK_TOKEN = "{{ kiosk_token }}";</script>
-  <script type="module" src="/static/tv_dashboard.js?v=20260728a"></script>
+  <script>
+    window.KIOSK_TOKEN = "{{ kiosk_token }}";
+    window.TV_APP_VERSION = "{{ app_version }}";
+  </script>
+  <script type="module" src="/static/tv_dashboard.js?v={{ app_version }}"></script>
   <script src="/static/window_controls.js"></script>
   <div id="tv-diag-line" class="tv-diag-line"></div>
 </body>

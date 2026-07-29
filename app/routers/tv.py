@@ -49,6 +49,17 @@ _tv_events_snapshot_cache: dict[int, dict] = {}
 
 _BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _templates = Jinja2Templates(directory=os.path.join(_BASE_DIR, "templates"))
+_TV_BUILD_FALLBACK = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+
+
+def _get_tv_app_version() -> str:
+    return (
+        os.getenv("TV_APP_VERSION")
+        or os.getenv("APP_VERSION")
+        or os.getenv("RENDER_GIT_COMMIT")
+        or os.getenv("SOURCE_VERSION")
+        or _TV_BUILD_FALLBACK
+    )
 
 
 # ─────────────────────────────────────────────────
@@ -62,7 +73,10 @@ def tv_dashboard(request: Request):
     Authentication is handled client-side: the JS reads a JWT from
     localStorage('tv_token') and uses it for all subsequent API calls.
     """
-    return _templates.TemplateResponse(request, "tv.html", {"request": request})
+    return _templates.TemplateResponse(request, "tv.html", {
+        "request": request,
+        "app_version": _get_tv_app_version(),
+    })
 
 
 # ─────────────────────────────────────────────────
@@ -95,7 +109,15 @@ def tv_kiosk(request: Request, token: str, db: Session = Depends(get_db)):
     return _templates.TemplateResponse(request, "tv_kiosk.html", {
         "request":     request,
         "kiosk_token": token,
+        "app_version": _get_tv_app_version(),
     })
+
+
+@router.get("/version")
+def get_tv_version(
+    current_user: User = Depends(get_current_user),
+):
+    return {"appVersion": _get_tv_app_version()}
 
 
 @router.post("/generate-kiosk-token")
@@ -424,6 +446,14 @@ def _oauth_user_filter(user_id: int):
 # In-memory ring buffer.  Max 500 entries; cleared when the server restarts.
 _diag_buffer: list[dict] = []
 _DIAG_MAX = 500
+_DIAG_QUERY_MAX = 100
+_DIAG_WINDOW_MAX_HOURS = 24 * 30
+REPAIR_RISK_DIAG_EVENTS = frozenset({
+    "token_invalid_401",
+    "kiosk_token_invalid_401",
+    "storage_token_removed",
+    "user_unpair_requested",
+})
 
 
 class TVDiagEntry(BaseModel):
@@ -552,6 +582,8 @@ def post_tv_diag(
 @router.get("/diag")
 def get_tv_diag(
     scope: str = "own",
+    hours: Optional[int] = None,
+    event_group: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -566,6 +598,20 @@ def get_tv_diag(
     not shared between users.
     """
     fleet_wide = scope == "all"
+    normalized_event_group = (event_group or "").strip().lower()
+    if normalized_event_group in {"", "all"}:
+        normalized_event_group = "all"
+        selected_events = None
+    elif normalized_event_group == "repair_risk":
+        selected_events = REPAIR_RISK_DIAG_EVENTS
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported event_group")
+
+    bounded_hours: Optional[int] = None
+    window_start: Optional[datetime] = None
+    if hours is not None:
+        bounded_hours = max(1, min(int(hours), _DIAG_WINDOW_MAX_HOURS))
+        window_start = datetime.now(timezone.utc) - timedelta(hours=bounded_hours)
 
     if fleet_wide and current_user.role != Roles.ADMIN:
         raise HTTPException(status_code=403, detail="Admin only")
@@ -574,11 +620,15 @@ def get_tv_diag(
         query = db.query(TVDiagLog)
         if not fleet_wide:
             query = query.filter(TVDiagLog.user_id == current_user.id)
+        if window_start is not None:
+            query = query.filter(TVDiagLog.ts_server >= window_start)
+        if selected_events is not None:
+            query = query.filter(TVDiagLog.event.in_(tuple(selected_events)))
 
         rows = (
             query
             .order_by(TVDiagLog.ts_server.desc())
-            .limit(100)
+            .limit(_DIAG_QUERY_MAX)
             .all()
         )
         entries = [
@@ -597,18 +647,43 @@ def get_tv_diag(
             }
             for r in rows
         ]
-        return {"entries": entries, "scope": scope if fleet_wide else "own", "source": "db"}
+        return {
+            "entries": entries,
+            "scope": scope if fleet_wide else "own",
+            "source": "db",
+            "filters": {
+                "hours": bounded_hours,
+                "event_group": normalized_event_group,
+            },
+        }
     except Exception as exc:
         logger.warning("TV_DIAG db read failed, falling back to memory buffer: %s", exc)
         buffered = [
             entry
             for entry in reversed(_diag_buffer[-500:])
             if fleet_wide or entry.get("user_id") == current_user.id
-        ][:100]
+        ]
+        if window_start is not None:
+            filtered_by_time = []
+            for entry in buffered:
+                ts_server = parse_iso_datetime(entry.get("ts_server"))
+                if ts_server and ts_server >= window_start:
+                    filtered_by_time.append(entry)
+            buffered = filtered_by_time
+        if selected_events is not None:
+            buffered = [
+                entry for entry in buffered
+                if str(entry.get("event") or "") in selected_events
+            ]
+        buffered = buffered[:_DIAG_QUERY_MAX]
         return {
             "entries": buffered,
             "scope": scope if fleet_wide else "own",
             "source": "memory",
+            "filters": {
+                "hours": bounded_hours,
+                "event_group": normalized_event_group,
+            },
         }
 
 
@@ -766,13 +841,17 @@ def get_tv_events(
     """
     logger.info("TV_EVENTS_FETCH user_id=%s", current_user.id)
 
+    app_version = _get_tv_app_version()
     state = tv_state_store.get(current_user.id)
     selected_date_str: Optional[str] = state.get("selectedDate") if state else None
     current_view = (state.get("currentView") if state else None) or "day"
 
     if not selected_date_str:
         # Do NOT default to today — return empty, let client decide
-        return {"selectedDate": None, "currentView": current_view, "days": []}
+        return JSONResponse(
+            content={"selectedDate": None, "currentView": current_view, "days": [], "appVersion": app_version},
+            headers={"Cache-Control": "no-store", "X-TV-App-Version": app_version},
+        )
 
     anchor_date = _parse_iso_date_or_none(selected_date_str)
     if anchor_date is None:
@@ -900,6 +979,7 @@ def get_tv_events(
             "currentView": current_view,
             "rangeStart": window_start_date.isoformat(),
             "rangeEnd": window_end_date.isoformat(),
+            "appVersion": app_version,
             "days": days,
             "accounts": accounts,
             "summary": {
@@ -912,10 +992,10 @@ def get_tv_events(
 
         payload_etag = f'W/"{hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()}"'
         if request.headers.get("if-none-match") == payload_etag:
-            return Response(status_code=304, headers={"ETag": payload_etag, "Cache-Control": "no-store"})
+            return Response(status_code=304, headers={"ETag": payload_etag, "Cache-Control": "no-store", "X-TV-App-Version": app_version})
 
         _tv_events_snapshot_cache[current_user.id] = payload
-        return JSONResponse(content=payload, headers={"ETag": payload_etag, "Cache-Control": "no-store"})
+        return JSONResponse(content=payload, headers={"ETag": payload_etag, "Cache-Control": "no-store", "X-TV-App-Version": app_version})
     except Exception:
         logger.exception("TV_EVENTS_FETCH_UNEXPECTED_FAILURE user_id=%s", current_user.id)
         cached = _tv_events_snapshot_cache.get(current_user.id)
@@ -924,7 +1004,8 @@ def get_tv_events(
             fallback = dict(cached)
             fallback["staleData"] = True
             fallback["staleReason"] = "backend_refresh_failure"
-            return JSONResponse(content=fallback, headers={"Cache-Control": "no-store"})
+            fallback["appVersion"] = app_version
+            return JSONResponse(content=fallback, headers={"Cache-Control": "no-store", "X-TV-App-Version": app_version})
 
         # No safe snapshot yet; keep shape explicit for client-side guards.
         return JSONResponse(content={
@@ -933,7 +1014,8 @@ def get_tv_events(
             "days": [],
             "staleData": True,
             "staleReason": "backend_refresh_failure_no_snapshot",
-        }, headers={"Cache-Control": "no-store"})
+            "appVersion": app_version,
+        }, headers={"Cache-Control": "no-store", "X-TV-App-Version": app_version})
 
 
 @router.post("/events")

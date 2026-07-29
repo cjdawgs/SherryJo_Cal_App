@@ -108,7 +108,9 @@ def test_quick_launch_guide_documents_firetv_remote_map():
         "Zoom Out",
         "F / Home",
         "Visible Settings Panel",
-        "Arrow OFF | Zoom 100%",
+        "Mode NAV • Zoom 100%",
+        "FF or Channel Up",
+        "REW or Channel Down",
     ]
     for token in required_tokens:
         assert token in text
@@ -149,9 +151,38 @@ def test_tv_dashboard_remote_up_down_zoom_and_center_reset():
     assert "tv_zoom_level" in engine_text
     assert "tv_default_zoom_level" in engine_text
     assert "SUPPORTED_ZOOM_LEVELS" in engine_text
-    assert "Arrow ON" in text
+    assert "inputMode" in text
+    assert "function setInputMode" in text
+    assert "'locked'" in text
+    assert "Mode ${modeLabel}" in text
     assert "Zoom ${state.zoomLevel}%" in text
     assert "if (count === 1 && resetZoom()) return" in text
+
+
+def test_tv_dashboard_persists_remote_capabilities_and_dynamic_help():
+    text = _tv_js_text()
+    required_tokens = [
+        "tv_remote_capabilities_v1",
+        "buildDynamicRemoteHelpText",
+        "renderRemoteCapabilitySummary",
+        "renderDynamicQuickLaunchSummary",
+        "markRemoteCapability",
+        "Mode locked • Triple SELECT unlock",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
+def test_tv_dashboard_has_center_lower_remote_action_echo():
+    text = _tv_js_text()
+    required_tokens = [
+        "tv-remote-action-echo",
+        "showRemoteAction",
+        "Long Select Create",
+        "Nav ${key.replace('Arrow', '')}",
+    ]
+    for token in required_tokens:
+        assert token in text
 
 
 def test_tv_dashboard_zoom_css_variable_is_centralized():

@@ -14,16 +14,27 @@ This guide covers the FireTV remote behavior for the TV dashboard and kiosk disp
 
 - Single press: select the current item or open/edit the focused event or sticky note.
 - Long press 600ms: create a new event on day/week views or a new sticky note on month view.
+- Triple press: cycle NAV and CURSOR modes.
+- In LOCKED mode, triple press unlocks back to NAV mode.
 
 ### + Button
 
 - Single press: move focus forward through interactive items.
 - Long press 600ms: Zoom In one supported level.
+- FireTV note: some remotes route volume keys to system volume only; if so, use long press FF or Channel Up for zoom in.
 
 ### - Button
 
 - Single press: move focus backward through interactive items.
 - Long press 600ms: Zoom Out one supported level.
+- FireTV note: if volume down is OS-captured, use long press REW or Channel Down for zoom out.
+
+### Input Modes
+
+- Mode NAV: arrow keys navigate calendar focus and sections.
+- Mode CURSOR: arrow keys move a virtual cursor and Select clicks at cursor position.
+- Mode LOCKED: app-level remote actions are paused (OS-level FireTV/TV actions still run).
+- Settings panel includes direct mode toggles and lock/unlock actions.
 
 ### F / Home
 
@@ -35,10 +46,11 @@ This guide covers the FireTV remote behavior for the TV dashboard and kiosk disp
 - Closes the editor, panel, or focused overlay.
 - Returns to Day view when no overlay is active.
 
-### Triple Select
+### Action Echo (center-lower)
 
-- Toggles Arrow Mode on or off.
-- When Arrow Mode is on, the virtual cursor can be moved with the arrow keys.
+- A subtle status bubble appears near the lower center after remote actions.
+- It shows concise action words such as `Nav Left`, `Select`, `Long Select Create`, `Zoom In`, `Mode LOCKED`.
+- These words match the behavior naming used in this guide.
 
 ### Mute
 
@@ -73,13 +85,18 @@ Open **Settings** from the sidebar to see:
 - Save current zoom as home
 - Restore home zoom now
 - Reset to 100%
+- Lock/Unlock remote input mode
+- Detected controls on this specific device
 
 ## Footer Status
 
 The footer shows the current navigation mode and zoom state, for example:
 
-- `Arrow OFF | Zoom 100%`
-- `Arrow ON | Zoom 150%`
+- `Mode NAV • Zoom 100%`
+- `Mode CURSOR • Zoom 150%`
+- `Mode LOCKED • Zoom 100%`
+
+The right side help text is dynamic and only advertises controls confirmed on this device.
 
 ## Editing and Navigation
 
@@ -91,6 +108,11 @@ The footer shows the current navigation mode and zoom state, for example:
 ## Kiosk Mode
 
 Kiosk mode uses the same persistent token policy as TV pairing. It stays signed in until the token is explicitly revoked or the signing secret changes.
+
+## Automatic Updates
+
+- After one refresh on each TV, future deployments auto-propagate.
+- When a new app version is detected, TV shows a subtle update notice and reloads automatically after a short delay.
 
 ## Behavior Summary
 

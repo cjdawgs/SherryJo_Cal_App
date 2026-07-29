@@ -403,6 +403,35 @@
               </div>
             </details>
 
+            <details class="overview-subsection tv-repair-panel">
+              <summary>TV Re-pair Risk Log</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Tracks known scenarios that can force re-pairing or invalidate TV auth session state.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvRepairDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+                  <label for="tvRepairDiagWindow" style="font-size:11px;opacity:0.75;">Window</label>
+                  <select id="tvRepairDiagWindow" style="font-size:11px;min-width:110px;">
+                    <option value="24" selected>Last 24h</option>
+                    <option value="72">Last 72h</option>
+                    <option value="168">Last 7d</option>
+                    <option value="336">Last 14d</option>
+                    <option value="">All available</option>
+                  </select>
+                  <button id="tvRepairDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvRepairDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div id="tvRepairDiagSummary" class="tv-stale-summary">No re-pair diagnostics loaded yet.</div>
+                <div style="overflow-x:auto;">
+                  <table class="tv-diag-table" id="tvRepairDiagTable">
+                    <thead><tr><th>Server time</th><th>User</th><th>Device</th><th>Scenario</th><th>Details</th></tr></thead>
+                    <tbody id="tvRepairDiagBody"><tr><td colspan="5" style="opacity:0.4;">No re-pair risk rows loaded yet.</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+
           </div>
 
           <!-- ── One-time FireStick sleep fix ─────────────────────── -->
@@ -565,7 +594,15 @@
             <div style="display:flex;gap:8px;align-items:center;margin:0 0 8px;flex-wrap:wrap;">
               <strong style="font-size:13px;">Publish Diagnostics (Option A)</strong>
               <span id="publishDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
-              <button id="publishDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load Publish Logs (All)</button>
+              <label for="publishDiagWindow" style="font-size:11px;opacity:0.75;">Window</label>
+              <select id="publishDiagWindow" style="font-size:11px;min-width:110px;">
+                <option value="24" selected>Last 24h</option>
+                <option value="72">Last 72h</option>
+                <option value="168">Last 7d</option>
+                <option value="336">Last 14d</option>
+                <option value="">All available</option>
+              </select>
+              <button id="publishDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load Publish Logs</button>
               <button id="publishDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
             </div>
             <div class="publish-diagnostics-panel-note">

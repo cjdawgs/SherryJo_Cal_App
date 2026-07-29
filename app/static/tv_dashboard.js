@@ -7,8 +7,27 @@ const POLL_MS = 60000;
 const TV_FETCH_TIMEOUT_MS = 15000;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
+const DATE_AUTO_ADVANCE_DEBOUNCE_MS = 5000;
+const INPUT_MODE_STORAGE_KEY = 'tv_input_mode';
+const REMOTE_CAPABILITIES_STORAGE_KEY = 'tv_remote_capabilities_v1';
+const REMOTE_ACTION_ECHO_MS = 1400;
+const UPDATE_RELOAD_DELAY_MS = 9000;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
+const CLIENT_APP_VERSION = String(window.TV_APP_VERSION || 'dev-local');
+
+function createDefaultRemoteCapabilities() {
+  return {
+    arrows: false,
+    select: false,
+    back: false,
+    list: false,
+    volume: false,
+    media: false,
+    channel: false,
+    mute: false,
+  };
+}
 
 // tvDiag is assigned after state is initialised (below).
 // Declaring it here with let means wakeLock/antiSleep callbacks can safely
@@ -303,12 +322,22 @@ const state = {
     timer: null,
     triggered: false,
   },
-  centerArrowMode: false,
+  dateAutoAdvanceInFlight: false,
+  lastDateAutoAdvanceAt: 0,
+  inputMode: 'nav',
   cursor: {
     x: 0,
     y: 0,
     visible: false,
   },
+  remoteCapabilities: createDefaultRemoteCapabilities(),
+  remoteActionTimer: null,
+  clientAppVersion: CLIENT_APP_VERSION,
+  serverAppVersion: CLIENT_APP_VERSION,
+  updatePending: false,
+  updateReloadTimer: null,
+  authStatus: IS_KIOSK ? 'kiosk' : 'unpaired',
+  lastAuthIssue: '',
   debug: {
     visible: false,
     lines: [],
@@ -496,7 +525,183 @@ function cacheDom() {
     accountLegend: document.getElementById('tv-account-legend'),
     sleepStatus: document.getElementById('tv-sleep-status'),
     diagLine: document.getElementById('tv-diag-line'),
+    remoteActionEcho: document.getElementById('tv-remote-action-echo'),
   };
+}
+
+function isNavMode() { return state.inputMode === 'nav'; }
+function isCursorMode() { return state.inputMode === 'cursor'; }
+function isLockedMode() { return state.inputMode === 'locked'; }
+
+function persistInputMode() {
+  try { localStorage.setItem(INPUT_MODE_STORAGE_KEY, state.inputMode); } catch { }
+}
+
+function hydrateInputMode() {
+  let stored = null;
+  try { stored = localStorage.getItem(INPUT_MODE_STORAGE_KEY); } catch { }
+  if (stored === 'nav' || stored === 'cursor' || stored === 'locked') {
+    state.inputMode = stored;
+  }
+}
+
+function persistRemoteCapabilities() {
+  try {
+    localStorage.setItem(REMOTE_CAPABILITIES_STORAGE_KEY, JSON.stringify(state.remoteCapabilities));
+  } catch { }
+}
+
+function hydrateRemoteCapabilities() {
+  try {
+    const raw = localStorage.getItem(REMOTE_CAPABILITIES_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return;
+    state.remoteCapabilities = {
+      ...createDefaultRemoteCapabilities(),
+      arrows: Boolean(parsed.arrows),
+      select: Boolean(parsed.select),
+      back: Boolean(parsed.back),
+      list: Boolean(parsed.list),
+      volume: Boolean(parsed.volume),
+      media: Boolean(parsed.media),
+      channel: Boolean(parsed.channel),
+      mute: Boolean(parsed.mute),
+    };
+  } catch { }
+}
+
+function markRemoteCapability(normalizedKey, e) {
+  if (!normalizedKey) return;
+  let changed = false;
+  const caps = state.remoteCapabilities;
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(normalizedKey) && !caps.arrows) {
+    caps.arrows = true;
+    changed = true;
+  }
+  if (normalizedKey === 'Enter' && !caps.select) {
+    caps.select = true;
+    changed = true;
+  }
+  if (isBackKey(normalizedKey) && !caps.back) {
+    caps.back = true;
+    changed = true;
+  }
+  if (isListKey(normalizedKey) && !caps.list) {
+    caps.list = true;
+    changed = true;
+  }
+  if (isVolumeForwardKey(normalizedKey) || isVolumeReverseKey(normalizedKey)) {
+    if (!caps.volume) {
+      caps.volume = true;
+      changed = true;
+    }
+  }
+  if (normalizedKey === 'MediaFastForward' || normalizedKey === 'MediaRewind') {
+    if (!caps.media) {
+      caps.media = true;
+      changed = true;
+    }
+  }
+  if (normalizedKey === 'ChannelUp' || normalizedKey === 'ChannelDown') {
+    if (!caps.channel) {
+      caps.channel = true;
+      changed = true;
+    }
+  }
+  if (isMuteKey(e, normalizedKey) && !caps.mute) {
+    caps.mute = true;
+    changed = true;
+  }
+  if (changed) persistRemoteCapabilities();
+}
+
+function showRemoteAction(message) {
+  if (!message || !dom.remoteActionEcho) return;
+  dom.remoteActionEcho.textContent = message;
+  dom.remoteActionEcho.classList.add('visible');
+  if (state.remoteActionTimer) clearTimeout(state.remoteActionTimer);
+  state.remoteActionTimer = setTimeout(() => {
+    if (dom.remoteActionEcho) dom.remoteActionEcho.classList.remove('visible');
+    state.remoteActionTimer = null;
+  }, REMOTE_ACTION_ECHO_MS);
+}
+
+function buildDynamicRemoteHelpText() {
+  if (isLockedMode()) {
+    return 'Mode locked • Triple SELECT unlock • Settings to change mode';
+  }
+  const caps = state.remoteCapabilities;
+  const hints = [];
+  if (caps.arrows) hints.push('Arrows navigate');
+  if (caps.select) {
+    hints.push('SELECT open');
+    hints.push('Long SELECT create');
+    hints.push('Triple SELECT mode');
+  }
+  if (caps.back) hints.push('BACK close');
+  if (caps.list) hints.push('MENU sticky');
+  if (caps.volume) hints.push('+/- hold zoom');
+  else if (caps.media) hints.push('FF/REW hold zoom');
+  else if (caps.channel) hints.push('CH+/- hold zoom');
+  else hints.push('Zoom from Settings');
+  return hints.length ? hints.join(' • ') : 'Press remote keys to detect available controls';
+}
+
+function setInputMode(nextMode, options = {}) {
+  const normalized = (nextMode === 'cursor' || nextMode === 'locked') ? nextMode : 'nav';
+  if (state.inputMode === normalized && !options.force) return;
+  state.inputMode = normalized;
+  setCursorVisible(normalized === 'cursor');
+  persistInputMode();
+  if (tvDiag) tvDiag.log('input_mode_set', normalized);
+  showRemoteAction(`Mode ${normalized.toUpperCase()}`);
+  if (options.announce !== false) renderFooterHint(`Mode ${normalized.toUpperCase()}`);
+  render();
+}
+
+function normalizeAppVersion(value) {
+  const text = String(value || '').trim();
+  return text || '';
+}
+
+function scheduleUpdateReload(nextVersion) {
+  const serverVersion = normalizeAppVersion(nextVersion);
+  const localVersion = normalizeAppVersion(state.clientAppVersion);
+  if (!serverVersion || serverVersion === localVersion) return;
+
+  state.serverAppVersion = serverVersion;
+  if (state.updatePending) return;
+
+  state.updatePending = true;
+  const seconds = Math.ceil(UPDATE_RELOAD_DELAY_MS / 1000);
+  renderFooterHint(`Update available (${serverVersion.slice(0, 12)}). Reloading in ${seconds}s`);
+  showRemoteAction('Update Reload');
+  if (tvDiag) tvDiag.log('app_update_detected', `${localVersion} -> ${serverVersion}`);
+
+  if (state.updateReloadTimer) clearTimeout(state.updateReloadTimer);
+  state.updateReloadTimer = setTimeout(() => {
+    window.location.reload();
+  }, UPDATE_RELOAD_DELAY_MS);
+}
+
+function processServerVersionSignal(res, data = null) {
+  const headerVersion = normalizeAppVersion(res && res.headers ? res.headers.get('X-TV-App-Version') : '');
+  const bodyVersion = normalizeAppVersion(data && data.appVersion ? data.appVersion : '');
+  const signal = headerVersion || bodyVersion;
+  if (!signal) return;
+  state.serverAppVersion = signal;
+  scheduleUpdateReload(signal);
+}
+
+function toggleCursorMode() {
+  const nextMode = isCursorMode() ? 'nav' : 'cursor';
+  setInputMode(nextMode);
+}
+
+function toggleLockMode() {
+  if (isLockedMode()) setInputMode('nav');
+  else setInputMode('locked');
 }
 
 function ensureStyles() {
@@ -629,6 +834,11 @@ function ensureStyles() {
   .tv-hint-chip { font-size: 11px; opacity: 0.8; }
   .tv-sync-ok { color: rgba(130, 191, 148, 0.88); }
   .tv-sync-fail { color: rgba(197, 120, 120, 0.88); }
+  .tv-status-chip { font-size: 11px; letter-spacing: 0.35px; text-transform: uppercase; color: rgba(218, 230, 244, 0.84); }
+  .tv-status-chip.subtle { color: rgba(168, 185, 208, 0.74); }
+  .tv-status-sep { color: rgba(168, 185, 208, 0.62); margin: 0 4px; }
+  #tv-remote-action-echo { position: fixed; left: 50%; bottom: 8.5vh; transform: translateX(-50%); z-index: 7500; pointer-events: none; font-size: 12px; letter-spacing: 0.45px; text-transform: uppercase; color: rgba(206, 222, 240, 0.82); background: rgba(0, 0, 0, 0.34); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px; padding: 4px 11px; opacity: 0; transition: opacity 170ms ease; }
+  #tv-remote-action-echo.visible { opacity: 1; }
   #tv-virtual-cursor { position: fixed; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #4f8cff; box-shadow: 0 0 0 2px rgba(79,140,255,0.18); background: rgba(79,140,255,0.2); pointer-events: none; z-index: 999999; transform: translate(-50%, -50%); display: none; }
   #tv-debug-overlay { position: fixed; right: 12px; bottom: 52px; width: 420px; max-height: 50vh; overflow: hidden; background: rgba(9,12,20,0.92); border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; box-shadow: 0 12px 26px rgba(0,0,0,0.45); z-index: 999998; color: #d7e6ff; display: none; }
   #tv-debug-overlay.visible { display: block; }
@@ -683,9 +893,16 @@ function ensureStyles() {
     document.body.appendChild(overlay);
   }
 
+  if (!document.getElementById('tv-remote-action-echo')) {
+    const echo = document.createElement('div');
+    echo.id = 'tv-remote-action-echo';
+    document.body.appendChild(echo);
+  }
+
   dom.cursor = document.getElementById('tv-virtual-cursor');
   dom.debugOverlay = document.getElementById('tv-debug-overlay');
   dom.debugList = document.getElementById('tv-debug-list');
+  dom.remoteActionEcho = document.getElementById('tv-remote-action-echo');
 
   ensureLegendRow();
   ensureHeaderActions();
@@ -752,6 +969,9 @@ function transitionTo(screen) {
 function init() {
   cacheDom();
   ensureStyles();
+  hydrateInputMode();
+  hydrateRemoteCapabilities();
+  setCursorVisible(state.inputMode === 'cursor');
   initZoomEngine();
 
   if (dom.pairBtn) dom.pairBtn.addEventListener('click', handlePair);
@@ -857,6 +1077,23 @@ function init() {
   // ────────────────────────────────────────────────────────────────────────────
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
+  state.authStatus = IS_KIOSK ? 'kiosk' : (state.token ? 'paired' : 'unpaired');
+  state.lastAuthIssue = '';
+
+  window.addEventListener('storage', (e) => {
+    if (e.key !== TOKEN_KEY) return;
+    if (IS_KIOSK) return;
+    if (!state.token) return;
+    if (e.newValue !== null) return;
+    if (tvDiag) {
+      tvDiag.log('token_storage_removed', 'localStorage token removed in another tab/session');
+      tvDiag.flush();
+    }
+    state.authStatus = 'invalid';
+    state.lastAuthIssue = 'storage-cleared';
+    handleUnpair('storage_token_removed');
+  });
+
   if (state.token) {
     transitionTo('dashboard');
     bootstrapFromBackend();
@@ -912,8 +1149,39 @@ function tickClock() {
   if (dom.clock) {
     dom.clock.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
+  maybeAutoAdvanceSelectedDate();
   renderSleepStatus();
   enforceSleepTimeout();
+}
+
+function maybeAutoAdvanceSelectedDate() {
+  if (!state.token || !state.selectedDate || state.dateAutoAdvanceInFlight) return;
+
+  const now = Date.now();
+  if ((now - state.lastDateAutoAdvanceAt) < DATE_AUTO_ADVANCE_DEBOUNCE_MS) return;
+
+  const todayKey = toISO(new Date());
+  if (state.selectedDate === todayKey) return;
+
+  const selectedDate = parseLocalDate(state.selectedDate);
+  const today = parseLocalDate(todayKey);
+  if (selectedDate.getTime() >= today.getTime()) return;
+
+  const previousDate = state.selectedDate;
+  state.dateAutoAdvanceInFlight = true;
+  state.lastDateAutoAdvanceAt = now;
+  state.selectedDate = todayKey;
+  state.focusedEventId = null;
+  state.monthDetailOpen = false;
+  render();
+
+  if (tvDiag) tvDiag.log('selected_date_auto_advanced', `${previousDate} -> ${todayKey}`);
+
+  patchTvState({ selectedDate: todayKey, focusedEventId: null }, { recordHistory: false })
+    .finally(() => {
+      state.dateAutoAdvanceInFlight = false;
+      refreshEvents(true);
+    });
 }
 
 // Renders the sleep guard counter in the TV footer bottom-right.
@@ -1053,6 +1321,8 @@ async function handlePair() {
     if (!res.ok) throw new Error(data.detail || `Pairing failed (${res.status})`);
 
     state.token = data.token;
+    state.authStatus = IS_KIOSK ? 'kiosk' : 'paired';
+    state.lastAuthIssue = '';
     localStorage.setItem(TOKEN_KEY, state.token);
     transitionTo('dashboard');
     await bootstrapFromBackend();
@@ -1063,9 +1333,18 @@ async function handlePair() {
   }
 }
 
-function handleUnpair() {
+function handleUnpair(reason = 'user_unpair_requested') {
+  if (tvDiag && state.token) {
+    tvDiag.log(reason, `mode=${IS_KIOSK ? 'kiosk' : 'paired'} vis=${document.visibilityState}`);
+    tvDiag.flush();
+  }
   stopAll();
   state.token = null;
+  if (reason === 'token_invalid_401' || reason === 'storage_token_removed') {
+    state.authStatus = 'invalid';
+  } else {
+    state.authStatus = 'unpaired';
+  }
   state.selectedDate = null;
   state.days = [];
   state.dayMap = {};
@@ -1100,6 +1379,7 @@ async function fetchTvState() {
   const res = await authFetch('/tv/state');
   if (!res) return;
   const data = await res.json().catch(() => ({}));
+  processServerVersionSignal(res, data);
   state.selectedDate = data.selectedDate || null;
   state.currentView = data.currentView || 'day';
   state.focusedEventId = data.focusedEventId || null;
@@ -1144,6 +1424,9 @@ async function refreshEvents(force = false, options = {}) {
       if (showSync) setSyncStatus(false, 'Sync Failed');
       return;
     }
+
+    processServerVersionSignal(res);
+
     if (res.status === 304) {
       state.lastEventsFetchAt = Date.now();
       if (showSync) setSyncStatus(true, 'Sync Succeed - No changes detected');
@@ -1162,6 +1445,7 @@ async function refreshEvents(force = false, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}));
+    processServerVersionSignal(res, data);
     state.lastEventsFetchAt = Date.now();
     const staleData = Boolean(data.staleData);
     const incomingDays = normalizeTvDays(data.days);
@@ -1283,7 +1567,19 @@ async function authFetch(url, options = {}) {
     });
     const res = await Promise.race([fetchPromise, timeoutPromise]);
     if (res.status === 401) {
-      if (!IS_KIOSK) handleUnpair();
+      if (IS_KIOSK) {
+        state.authStatus = 'invalid';
+        state.lastAuthIssue = 'kiosk-401';
+        if (tvDiag && state.token) {
+          tvDiag.log('kiosk_token_invalid_401', `url=${url}`);
+          tvDiag.flush();
+        }
+        renderFooterHint('Kiosk token invalid/expired. Regenerate kiosk URL from Admin.');
+      } else {
+        state.authStatus = 'invalid';
+        state.lastAuthIssue = '401';
+        handleUnpair('token_invalid_401');
+      }
       return null;
     }
     return res;
@@ -1392,11 +1688,37 @@ function onKeyDown(e) {
 
   const key = normalizeKey(e);
   logRemoteKey('down', e, key);
+  markRemoteCapability(key, e);
 
   if (isMuteKey(e, key)) {
     e.preventDefault();
     toggleDebugOverlay();
     return;
+  }
+
+  if (key.toLowerCase() === 'r') {
+    e.preventDefault();
+    if (isLockedMode()) setInputMode('nav');
+    else toggleCursorMode();
+    return;
+  }
+
+  if (isLockedMode()) {
+    if (key === 'Enter') {
+      e.preventDefault();
+      showRemoteAction('Locked');
+      return;
+    }
+    if (isBackKey(key)) {
+      e.preventDefault();
+      showRemoteAction('Locked');
+      return;
+    }
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key) || isVolumeForwardKey(key) || isVolumeReverseKey(key) || isListKey(key)) {
+      e.preventDefault();
+      showRemoteAction('Locked');
+      return;
+    }
   }
 
   if (key === 'Enter') {
@@ -1416,7 +1738,7 @@ function onKeyDown(e) {
     return;
   }
 
-  if (state.centerArrowMode && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
+  if (isCursorMode() && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(key)) {
     e.preventDefault();
     moveCursorByArrow(key);
     return;
@@ -1481,6 +1803,23 @@ function onKeyUp(e) {
     return;
   }
 
+  if (isLockedMode()) {
+    if (key !== 'Enter') return;
+    state.clickCount += 1;
+    if (state.clickTimer) clearTimeout(state.clickTimer);
+    state.clickTimer = setTimeout(() => {
+      const count = state.clickCount;
+      state.clickCount = 0;
+      if (count >= 3) {
+        setInputMode('nav');
+      } else {
+        showRemoteAction('Locked');
+      }
+    }, 260);
+    e.preventDefault();
+    return;
+  }
+
   if (key !== 'Enter') return;
 
   if (state.editor) {
@@ -1519,9 +1858,7 @@ function onKeyUp(e) {
     if (count === 1) onSelect();
     else if (count === 2) onSecondarySelect();
     else if (count >= 3) {
-      state.centerArrowMode = !state.centerArrowMode;
-      setCursorVisible(state.centerArrowMode);
-      renderFooterHint(`Arrow mode ${state.centerArrowMode ? 'enabled' : 'disabled'}`);
+      toggleCursorMode();
     }
   }, 260);
 }
@@ -1548,6 +1885,10 @@ function normalizeKey(e) {
   if (key === 'AudioVolumeMute' || key === 'VolumeMute' || key === 'Mute' || code === 'AudioVolumeMute' || kc === 173 || kc === 181 || kc === 449) return 'AudioVolumeMute';
   if (key === 'PageUp' || code === 'PageUp') return 'PageUp';
   if (key === 'PageDown' || code === 'PageDown') return 'PageDown';
+  if (key === 'MediaFastForward' || code === 'MediaFastForward' || kc === 228) return 'MediaFastForward';
+  if (key === 'MediaRewind' || code === 'MediaRewind' || kc === 227) return 'MediaRewind';
+  if (key === 'ChannelUp' || code === 'ChannelUp' || kc === 427) return 'ChannelUp';
+  if (key === 'ChannelDown' || code === 'ChannelDown' || kc === 428) return 'ChannelDown';
   if (kc === 33) return 'PageUp';
   if (kc === 34) return 'PageDown';
   if (key === '+' || key === 'Add' || key === 'NumpadAdd' || code === 'NumpadAdd' || kc === 107) return '+';
@@ -1624,6 +1965,7 @@ function setCursorVisible(visible) {
 }
 
 function moveCursorByArrow(key) {
+  showRemoteAction(`Cursor ${key.replace('Arrow', '')}`);
   const step = 40;
   if (key === 'ArrowLeft') state.cursor.x -= step;
   if (key === 'ArrowRight') state.cursor.x += step;
@@ -1640,6 +1982,7 @@ function moveCursorByArrow(key) {
 }
 
 function onLongPress() {
+  showRemoteAction('Long Select Create');
   if (state.currentView === 'month') {
     createStickyAndEdit();
   } else {
@@ -1648,7 +1991,8 @@ function onLongPress() {
 }
 
 function onSelect() {
-  if (state.centerArrowMode && state.cursor.visible) {
+  showRemoteAction('Select');
+  if (isCursorMode() && state.cursor.visible) {
     clickCursorTarget('left');
     return;
   }
@@ -1672,7 +2016,8 @@ function onSelect() {
 }
 
 function onSecondarySelect() {
-  if (state.centerArrowMode && state.cursor.visible) {
+  showRemoteAction('Double Select');
+  if (isCursorMode() && state.cursor.visible) {
     clickCursorTarget('right');
     return;
   }
@@ -1687,6 +2032,7 @@ function onSecondarySelect() {
 }
 
 function handleBack() {
+  showRemoteAction('Back');
   if (state.editor) {
     state.editor = null;
     state.editorDirty = false;
@@ -1707,11 +2053,16 @@ function handleBack() {
 }
 
 function isBackKey(key) { return key === 'Escape' || key === 'Backspace'; }
-function isVolumeForwardKey(key) { return key === '+' || key === '=' || key === 'PageDown' || key === 'AudioVolumeUp'; }
-function isVolumeReverseKey(key) { return key === '-' || key === '_' || key === 'PageUp' || key === 'AudioVolumeDown'; }
+function isVolumeForwardKey(key) {
+  return key === '+' || key === '=' || key === 'PageDown' || key === 'AudioVolumeUp' || key === 'MediaFastForward' || key === 'ChannelUp';
+}
+function isVolumeReverseKey(key) {
+  return key === '-' || key === '_' || key === 'PageUp' || key === 'AudioVolumeDown' || key === 'MediaRewind' || key === 'ChannelDown';
+}
 function isListKey(key) { return key === 'ContextMenu' || key === 'F2'; }
 
 function handleArrow(key) {
+  showRemoteAction(`Nav ${key.replace('Arrow', '')}`);
   if (state.focus.region === 'sidebar') {
     if (key === 'ArrowRight') {
       state.focus.region = 'main';
@@ -1914,6 +2265,52 @@ function renderTopControls() {
     </div>`;
 }
 
+function authStatusLabel() {
+  if (state.authStatus === 'kiosk') return 'Kiosk URL token active';
+  if (state.authStatus === 'paired') return 'Paired token active';
+  if (state.authStatus === 'invalid') return `Token invalid${state.lastAuthIssue ? ` (${state.lastAuthIssue})` : ''}`;
+  if (state.authStatus === 'unpaired') return 'No token loaded';
+  return 'Unknown';
+}
+
+function remoteCapabilityLines() {
+  const caps = state.remoteCapabilities;
+  const lines = [];
+  if (caps.arrows) lines.push('Arrows (navigation)');
+  if (caps.select) lines.push('Select / Enter');
+  if (caps.back) lines.push('Back / Escape');
+  if (caps.list) lines.push('Menu / Context');
+  if (caps.volume) lines.push('Volume +/- mapped to app');
+  if (caps.media) lines.push('Fast Forward / Rewind');
+  if (caps.channel) lines.push('Channel +/-');
+  if (caps.mute) lines.push('Mute key observed');
+  return lines;
+}
+
+function renderRemoteCapabilitySummary() {
+  const lines = remoteCapabilityLines();
+  if (!lines.length) return '<div class="tv-empty">No remote keys confirmed yet. Press remote buttons to detect capabilities.</div>';
+  return lines.map(line => `<div class="tv-right-item"><div class="tv-right-item-title">${escapeHtml(line)}</div></div>`).join('');
+}
+
+function renderDynamicQuickLaunchSummary() {
+  const caps = state.remoteCapabilities;
+  const rows = [];
+  if (caps.select) {
+    rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Select</div><div class="tv-right-item-title">Open / choose focused item</div></div>');
+    rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Long Select</div><div class="tv-right-item-title">Create new event or sticky note</div></div>');
+    rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Triple Select</div><div class="tv-right-item-title">Cycle NAV and CURSOR modes; unlock from LOCKED</div></div>');
+  }
+  if (caps.arrows) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Arrows</div><div class="tv-right-item-title">Navigate in NAV mode / move cursor in CURSOR mode</div></div>');
+  if (caps.back) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Back</div><div class="tv-right-item-title">Close editor/panel or return focus</div></div>');
+  if (caps.list) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">Menu</div><div class="tv-right-item-title">Sticky-note action shortcut</div></div>');
+  if (caps.volume) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">+ / - Hold</div><div class="tv-right-item-title">Zoom in / zoom out</div></div>');
+  else if (caps.media) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">FF / REW Hold</div><div class="tv-right-item-title">Zoom in / zoom out fallback</div></div>');
+  else if (caps.channel) rows.push('<div class="tv-right-item"><div class="tv-right-item-time">CH+ / CH- Hold</div><div class="tv-right-item-title">Zoom in / zoom out fallback</div></div>');
+  if (!rows.length) return '<div class="tv-empty">No confirmed controls yet.</div>';
+  return rows.join('');
+}
+
 function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
   if (state.utilityPanel === 'accounts') {
     return `
@@ -1962,31 +2359,40 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
             <div class="tv-right-item-title">${state.zoomLevel}%</div>
           </div>
           <div class="tv-right-item">
+            <div class="tv-right-item-time">Auth Status</div>
+            <div class="tv-right-item-title">${escapeHtml(authStatusLabel())}</div>
+          </div>
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">App Version</div>
+            <div class="tv-right-item-title">Client ${escapeHtml(state.clientAppVersion)}${state.serverAppVersion && state.serverAppVersion !== state.clientAppVersion ? ` • Server ${escapeHtml(state.serverAppVersion)}` : ''}</div>
+          </div>
+          <div class="tv-right-item">
             <div class="tv-right-item-time">Home Zoom</div>
             <div class="tv-right-item-title">${defaultZoom}%</div>
           </div>
           <div class="tv-right-item">
             <div class="tv-right-item-time">Remote Zoom</div>
-            <div class="tv-right-item-title">Hold + to zoom in, hold - to zoom out</div>
+            <div class="tv-right-item-title">Hold + / - to zoom, or use FF / REW if volume keys are OS-reserved</div>
+          </div>
+          <div class="tv-right-item">
+            <div class="tv-right-item-time">Input Mode</div>
+            <div class="tv-right-item-title">${isLockedMode() ? 'LOCKED (app input paused)' : isCursorMode() ? 'CURSOR (virtual pointer active)' : 'NAV (focus navigation active)'}</div>
           </div>
         </div>
         <div class="tv-right-subtitle">Actions</div>
         <div class="tv-sidebar-actions">
+          <button class="tv-side-btn" type="button" data-tv-click="control" data-control="toggle-cursor-mode">${isCursorMode() ? 'Switch to NAV Mode' : 'Switch to CURSOR Mode'}</button>
+          <button class="tv-side-btn warn" type="button" data-tv-click="control" data-control="toggle-lock-mode">${isLockedMode() ? 'Unlock Remote Input' : 'Lock Remote Input'}</button>
           <button class="tv-side-btn primary" type="button" data-tv-click="control" data-control="zoom-in">Zoom In</button>
           <button class="tv-side-btn" type="button" data-tv-click="control" data-control="zoom-out">Zoom Out</button>
           <button class="tv-side-btn" type="button" data-tv-click="control" data-control="save-zoom-default">Save Current As Home</button>
           <button class="tv-side-btn" type="button" data-tv-click="control" data-control="restore-home-zoom">Restore Home Zoom</button>
           <button class="tv-side-btn warn" type="button" data-tv-click="control" data-control="zoom-reset">Reset to 100%</button>
         </div>
+        <div class="tv-right-subtitle">Detected Controls (This Device)</div>
+        <div class="tv-right-list">${renderRemoteCapabilitySummary()}</div>
         <div class="tv-right-subtitle">Quick Launch Summary</div>
-        <div class="tv-right-list">
-          <div class="tv-right-item"><div class="tv-right-item-time">Enter</div><div class="tv-right-item-title">Single press selects and edits</div></div>
-          <div class="tv-right-item"><div class="tv-right-item-time">Enter Hold</div><div class="tv-right-item-title">Creates a new event or sticky note</div></div>
-          <div class="tv-right-item"><div class="tv-right-item-time">+ / - Single Press</div><div class="tv-right-item-title">Moves focus forward or backward</div></div>
-          <div class="tv-right-item"><div class="tv-right-item-time">+ / - Hold</div><div class="tv-right-item-title">Changes zoom level in supported steps</div></div>
-          <div class="tv-right-item"><div class="tv-right-item-time">F / Home</div><div class="tv-right-item-title">Returns to day view and restores Home Zoom</div></div>
-          <div class="tv-right-item"><div class="tv-right-item-time">Triple Select</div><div class="tv-right-item-title">Toggles Arrow Mode and virtual cursor</div></div>
-        </div>
+        <div class="tv-right-list">${renderDynamicQuickLaunchSummary()}</div>
         <div class="tv-right-editor-anchor"><button class="tv-side-btn full" type="button" data-tv-click="control" data-control="close-panel">Close</button></div>
       </aside>`;
   }
@@ -2124,6 +2530,7 @@ function onAccountLegendClick(e) {
 }
 
 function focusNext() {
+  showRemoteAction('Focus Next');
   if (state.currentView === 'month') {
     if (state.focus.region === 'sidebar') {
       state.focus.sidebarIndex = (state.focus.sidebarIndex + 1) % sidebarItems().length;
@@ -2143,6 +2550,7 @@ function focusNext() {
 }
 
 function focusPrev() {
+  showRemoteAction('Focus Previous');
   if (state.currentView === 'month') {
     if (state.focus.region === 'sidebar') {
       state.focus.sidebarIndex = (state.focus.sidebarIndex - 1 + sidebarItems().length) % sidebarItems().length;
@@ -2162,6 +2570,7 @@ function focusPrev() {
 }
 
 function triggerStickyAction() {
+  showRemoteAction('Sticky Action');
   const item = getFocusedItem();
   if (item && item.type === 'sticky') {
     enterStickyEditor(item, 'update');
@@ -2511,8 +2920,13 @@ function handleZoomHoldKeyDown(key) {
   state.zoomHold.timer = setTimeout(() => {
     state.zoomHold.timer = null;
     state.zoomHold.triggered = true;
-    if (isVolumeForwardKey(key)) zoomIn();
-    else zoomOut();
+    if (isVolumeForwardKey(key)) {
+      showRemoteAction('Zoom In');
+      zoomIn();
+    } else {
+      showRemoteAction('Zoom Out');
+      zoomOut();
+    }
   }, LONG_PRESS_MS);
   return true;
 }
@@ -2735,7 +3149,8 @@ function renderEditor() {
 
 function renderFooterHint(extra) {
   if (!dom.statusEl || !dom.lastUpdated) return;
-  dom.statusEl.textContent = `${state.centerArrowMode ? 'Arrow ON' : 'Arrow OFF'} | Zoom ${state.zoomLevel}%`;
+  const modeLabel = isLockedMode() ? 'LOCKED' : isCursorMode() ? 'CURSOR' : 'NAV';
+  dom.statusEl.innerHTML = `<span class="tv-status-chip">Mode ${modeLabel}</span><span class="tv-status-sep">•</span><span class="tv-status-chip">Zoom ${state.zoomLevel}%</span>`;
   const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
   if (hasSyncStatus) {
     dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
@@ -2744,7 +3159,7 @@ function renderFooterHint(extra) {
     return;
   }
   dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
-  dom.lastUpdated.textContent = extra || 'Single SELECT edit • Double SELECT context • Triple SELECT arrow mode • Long press create • +/- hold zoom • F home';
+  dom.lastUpdated.textContent = extra || buildDynamicRemoteHelpText();
 }
 
 function enterEventEditor(item, mode) {
@@ -2957,6 +3372,14 @@ function handleMainClick(e) {
       saveCurrentZoomAsDefault();
       return;
     }
+    if (control === 'toggle-cursor-mode') {
+      toggleCursorMode();
+      return;
+    }
+    if (control === 'toggle-lock-mode') {
+      toggleLockMode();
+      return;
+    }
     if (control === 'zoom-in') {
       zoomIn();
       return;
@@ -3121,7 +3544,9 @@ function formatTime(iso) {
 }
 
 function parseLocalDate(str) {
+  if (!str || typeof str !== 'string' || str.length < 10) return new Date();
   const [y, m, d] = str.slice(0, 10).split('-').map(Number);
+  if (![y, m, d].every(Number.isFinite)) return new Date();
   return new Date(y, m - 1, d);
 }
 

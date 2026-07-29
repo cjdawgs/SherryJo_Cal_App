@@ -181,6 +181,59 @@ def test_repeated_heartbeats_create_one_row(client, auth_headers):
     assert len(persisted) == 1
 
 
+def test_diag_repair_risk_filter_returns_only_expected_scenarios(client, db, admin_headers):
+    from app.models import TVDiagLog
+
+    response = client.post(
+        "/tv/diag",
+        headers=admin_headers,
+        json={
+            "entries": [
+                {"event": "token_invalid_401", "device_id": "d-repair"},
+                {"event": "kiosk_token_invalid_401", "device_id": "d-repair"},
+                {"event": "storage_token_removed", "device_id": "d-repair"},
+                {"event": "user_unpair_requested", "device_id": "d-repair"},
+                {"event": "heartbeat", "device_id": "d-repair"},
+                {"event": "calendar_publish_result", "device_id": "d-repair"},
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["accepted"] == 6
+
+    old_row = (
+        db.query(TVDiagLog)
+        .filter(TVDiagLog.event == "storage_token_removed")
+        .order_by(TVDiagLog.ts_server.desc())
+        .first()
+    )
+    assert old_row is not None
+    old_row.ts_server = datetime.now(timezone.utc) - timedelta(hours=48)
+    db.commit()
+
+    filtered = client.get(
+        "/tv/diag",
+        headers=admin_headers,
+        params={"scope": "all", "event_group": "repair_risk", "hours": 24},
+    )
+    assert filtered.status_code == 200
+
+    payload = filtered.json()
+    events = [entry.get("event") for entry in payload.get("entries", [])]
+    expected = {
+        "token_invalid_401",
+        "kiosk_token_invalid_401",
+        "storage_token_removed",
+        "user_unpair_requested",
+    }
+
+    assert set(events).issubset(expected)
+    assert "storage_token_removed" not in events
+    assert {"token_invalid_401", "kiosk_token_invalid_401", "user_unpair_requested"}.issubset(set(events))
+    assert payload.get("filters", {}).get("event_group") == "repair_risk"
+    assert payload.get("filters", {}).get("hours") == 24
+
+
 # ==================================================
 # RETENTION
 # ==================================================
