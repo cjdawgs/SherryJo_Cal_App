@@ -179,6 +179,26 @@ body {
   width: 100%;
 }
 
+.mobileAccountActionBtn {
+  display: none;
+  min-height: 30px;
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #cfd9ea;
+  border-radius: 8px;
+  background: #f7fbff;
+  color: #1f3558;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.mobileAccountActionBtn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .actionButtons>.gearMenuShell>button {
   min-height: 30px;
   min-width: 0;
@@ -2166,9 +2186,27 @@ Large: > 1920
     border-radius: 7px;
   }
 
+  .actionButtons>.gearMenuShell {
+    display: none;
+  }
+
+  .mobileAccountActionBtn {
+    display: inline-flex;
+    min-height: 19px;
+    font-size: 10px;
+    padding: 1px 3px;
+    border-radius: 7px;
+    gap: 4px;
+  }
+
   .actionButtons>button svg {
     width: 14px;
     height: 14px;
+  }
+
+  .mobileAccountActionBtn svg {
+    width: 12px;
+    height: 12px;
   }
 
   .calendarRangeDisplay {
@@ -2424,6 +2462,28 @@ Large: > 1920
 
   body.sidebar-drawer-open .sidebarDrawerBackdrop {
     display: block;
+  }
+}
+
+@media (max-width: 375px) {
+  body[data-layout-mode="mobile"] .actionButtons .btnLabel {
+    font-size: 9px;
+  }
+
+  .actionButtons>button svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .mobileAccountActionBtn {
+    font-size: 9px;
+    padding: 1px 2px;
+    gap: 3px;
+  }
+
+  .mobileAccountActionBtn svg {
+    width: 11px;
+    height: 11px;
   }
 }
 

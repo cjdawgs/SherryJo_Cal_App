@@ -251,6 +251,70 @@ class TestTVEventsEndpoint:
         assert data["selectedDate"] is None
         assert data["days"] == []
 
+    def test_events_day_view_returns_single_day_window(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split()[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Single Day Window Event",
+            start_time=datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 10, 20, 10, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+        ))
+        db.add(Event(
+            title="Adjacent Day Event",
+            start_time=datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 10, 21, 10, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-20", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["currentView"] == "day"
+        assert [day["date"] for day in data["days"]] == ["2026-10-20"]
+
+    def test_events_three_day_view_keeps_centered_strip(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split()[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        for offset in (-1, 0, 1):
+            day = 20 + offset
+            db.add(Event(
+                title=f"Strip Event {offset}",
+                start_time=datetime(2026, 10, day, 9, 0, tzinfo=timezone.utc),
+                end_time=datetime(2026, 10, day, 10, 0, tzinfo=timezone.utc),
+                owner_id=user_id,
+            ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-20", "currentView": "3-day"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["currentView"] == "3-day"
+        assert [day["date"] for day in data["days"]] == ["2026-10-19", "2026-10-20", "2026-10-21"]
+
     def test_events_grouped_by_date(self, client, auth_headers, db):
         from app.models import Event, User
         from app.security import decode_token

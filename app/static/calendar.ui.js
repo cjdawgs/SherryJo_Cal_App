@@ -2236,6 +2236,8 @@ function bindUIEvents() {
   const gearMenuShell = document.getElementById("gearMenuShell");
   const manageAccountsMenuBtn = document.getElementById("manageAccountsMenuBtn");
   const adminMenuBtn = document.getElementById("adminMenuBtn");
+  const manageAccountsQuickBtn = document.getElementById("manageAccountsQuickBtn");
+  const adminQuickBtn = document.getElementById("adminQuickBtn");
 
   accountsBtn?.addEventListener("click", (event) => {
     event.preventDefault();
@@ -2249,7 +2251,17 @@ function bindUIEvents() {
     window.location.href = "/accounts/ui";
   });
 
+  manageAccountsQuickBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
+    window.location.href = "/accounts/ui";
+  });
+
   adminMenuBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
+    window.location.href = "/admin/ui";
+  });
+
+  adminQuickBtn?.addEventListener("click", () => {
     gearMenuShell?.classList.remove("open");
     window.location.href = "/admin/ui";
   });
@@ -2274,6 +2286,7 @@ function bindUIEvents() {
 
   if (adminMenuBtn) {
     adminMenuBtn.classList.add("hidden");
+    adminQuickBtn?.classList.add("hidden");
 
     apiFetch("/users/me")
       .then(async (res) => {
@@ -2281,6 +2294,7 @@ function bindUIEvents() {
         const me = await res.json();
         if (String(me?.role || "").toLowerCase() === "admin") {
           adminMenuBtn.classList.remove("hidden");
+          adminQuickBtn?.classList.remove("hidden");
         }
       })
       .catch((error) => {

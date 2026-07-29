@@ -786,21 +786,38 @@ function ensureStyles() {
   .tv-day-head { font-size: 11px; letter-spacing: 1.5px; opacity: 0.75; text-transform: uppercase; margin-bottom: 8px; }
   .tv-day-num { font-size: 26px; font-weight: 700; line-height: 1; margin-bottom: 8px; }
   .tv-item-list { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
-  .tv-main.tv-view-day .tv-day-card { min-height: 0; }
-  .tv-main.tv-view-day .tv-item-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-content: start; overflow-y: auto; }
-  .tv-main.tv-view-day .tv-day-card.selected .tv-item-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .tv-main.tv-view-day .tv-day-card.context-day .tv-item-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tv-main.tv-view-three-day .tv-day-card { min-height: 0; }
+  .tv-main.tv-view-three-day .tv-item-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; align-content: start; overflow-y: auto; }
+  .tv-main.tv-view-three-day .tv-day-card.selected .tv-item-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tv-main.tv-view-three-day .tv-day-card.context-day .tv-item-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   /* Lock day-view card column density across all TV widths. */
   @media (max-width: 9999px) {
-    .tv-main.tv-view-day .tv-day-card.selected .tv-item-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .tv-main.tv-view-day .tv-day-card.context-day .tv-item-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tv-main.tv-view-three-day .tv-day-card.selected .tv-item-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .tv-main.tv-view-three-day .tv-day-card.context-day .tv-item-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
-  .tv-main.tv-view-day .tv-day-card.context-day { opacity: 0.84; background: rgba(11, 20, 33, 0.34); }
-  .tv-main.tv-view-day .tv-day-card.context-day .tv-day-num { opacity: 0.85; }
-  .tv-main.tv-view-day .tv-day-card.context-day .tv-item { opacity: 0.74; }
-  .tv-main.tv-view-day .tv-day-card.context-day .tv-item-title { font-size: 14px; font-weight: 500; color: rgba(198, 213, 232, 0.9); }
-  .tv-main.tv-view-day .tv-day-card.context-day .tv-item-sub { font-size: 11px; color: rgba(168, 184, 206, 0.82); }
+  .tv-main.tv-view-three-day .tv-day-card.context-day { opacity: 0.84; background: rgba(11, 20, 33, 0.34); }
+  .tv-main.tv-view-three-day .tv-day-card.context-day .tv-day-num { opacity: 0.85; }
+  .tv-main.tv-view-three-day .tv-day-card.context-day .tv-item { opacity: 0.74; }
+  .tv-main.tv-view-three-day .tv-day-card.context-day .tv-item-title { font-size: 14px; font-weight: 500; color: rgba(198, 213, 232, 0.9); }
+  .tv-main.tv-view-three-day .tv-day-card.context-day .tv-item-sub { font-size: 11px; color: rgba(168, 184, 206, 0.82); }
+  .tv-main.tv-view-day .tv-single-day-pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tv-main.tv-view-day .tv-single-day-summary { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid rgba(201,219,244,0.16); border-radius: 12px; background: rgba(13,24,38,0.44); }
+  .tv-main.tv-view-day .tv-single-day-title { font-size: 18px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; }
+  .tv-main.tv-view-day .tv-single-day-subtitle { font-size: 12px; color: var(--tv-text-soft); margin-top: 2px; }
+  .tv-main.tv-view-day .tv-single-day-pills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .tv-main.tv-view-day .tv-single-day-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 8px; align-items: start; }
+  .tv-main.tv-view-day .tv-day-section { border: 1px solid rgba(201,219,244,0.16); border-radius: 12px; background: rgba(13,24,38,0.44); padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tv-main.tv-view-day .tv-day-section-wide { grid-column: 1 / -1; }
+  .tv-main.tv-view-day .tv-day-section-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .tv-main.tv-view-day .tv-day-section-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+  .tv-main.tv-view-day .tv-day-section-meta { font-size: 11px; color: var(--tv-text-soft); text-align: right; }
+  .tv-main.tv-view-day .tv-day-section-list { display: flex; flex-direction: column; gap: 8px; max-height: 26vh; overflow-y: auto; }
+  .tv-main.tv-view-day .tv-day-event-card { position: relative; border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 8px 10px 8px 10px; background: rgba(12,22,35,0.46); }
+  .tv-main.tv-view-day .tv-day-event-card .tv-item-title { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-main.tv-view-day .tv-day-event-card .tv-item-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tv-main.tv-view-day .tv-day-event-card.free { background: rgba(17,28,44,0.32); }
+  .tv-main.tv-view-day .tv-day-event-card.sticky { background: rgba(255,226,106,0.14); }
   .tv-item { position: relative; border: 1px solid rgba(201,219,244,0.14); border-radius: 10px; padding: 8px; background: rgba(12,22,35,0.46); transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease; }
   .tv-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px); }
   .tv-item:hover { border-color: rgba(255,255,255,0.24); }
@@ -848,8 +865,11 @@ function ensureStyles() {
   .tv-debug-row:last-child { border-bottom: 0; }
 
   /* Broadcast typography scaling by view */
-  .tv-main.tv-view-day .tv-day-num { font-size: 32px; }
-  .tv-main.tv-view-day .tv-item-title { font-size: 18px; font-weight: 700; letter-spacing: 0.18px; }
+  .tv-main.tv-view-three-day .tv-day-num { font-size: 32px; }
+  .tv-main.tv-view-three-day .tv-item-title { font-size: 18px; font-weight: 700; letter-spacing: 0.18px; }
+  .tv-main.tv-view-three-day .tv-item-sub { font-size: 12px; }
+
+  .tv-main.tv-view-day .tv-item-title { font-size: 15px; font-weight: 700; letter-spacing: 0.18px; }
   .tv-main.tv-view-day .tv-item-sub { font-size: 12px; }
 
   .tv-main.tv-view-week .tv-day-num { font-size: 27px; }
@@ -2258,6 +2278,7 @@ function renderTopControls() {
       </div>
       <div class="tv-controls-group">
         <button class="tv-btn view ${state.currentView === 'day' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-day">Day</button>
+        <button class="tv-btn view ${state.currentView === '3-day' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-three-day">3-Day</button>
         <button class="tv-btn view ${state.currentView === 'week' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-week">Week</button>
         <button class="tv-btn view ${state.currentView === 'month' ? 'active' : ''}" type="button" data-tv-click="control" data-control="view-month">Month</button>
         <button class="tv-btn active" type="button" disabled>${escapeHtml(dateText)}</button>
@@ -2442,6 +2463,7 @@ function sidebarItems() {
     { key: 'create-sticky', label: 'Create Sticky', group: 'primary', action: () => createStickyAndEdit() },
     { key: 'jump-today', label: 'Jump Today', group: 'primary', action: () => goToday() },
     { key: 'view-day', label: 'View Day', group: 'primary', action: () => setView('day', { applyHomeZoom: true }) },
+    { key: 'view-three-day', label: 'View 3-Day', group: 'primary', action: () => setView('3-day') },
     { key: 'view-week', label: 'View Week', group: 'primary', action: () => setView('week') },
     { key: 'view-month', label: 'View Month', group: 'primary', action: () => setView('month') },
     { key: 'save-zoom-default', label: 'Save Zoom as Default', group: 'footer', action: () => saveCurrentZoomAsDefault() },
@@ -2944,12 +2966,20 @@ function handleZoomHoldKeyUp(key) {
 }
 
 function syncAccountLegend() {
+  const isPlaceholderAccount = (value) => {
+    const email = String(value || '').trim().toLowerCase();
+    if (!email) return false;
+    if (email === 'test' || email === 'test@example.com') return true;
+    return email.endsWith('@example.com');
+  };
+
   const map = new Map();
   const colorMap = {};
 
   for (const account of (state.serverAccounts || [])) {
     const source = account.provider || account.source || 'local';
     const email = account.accountEmail || account.email || source;
+    if (isPlaceholderAccount(email)) continue;
     const color = normalizeHexColor(account.color) || '#9AA3B2';
     const key = `${source}|${email}`;
     map.set(key, { source, account: email, color });
@@ -2961,6 +2991,7 @@ function syncAccountLegend() {
     for (const ev of (day.events || [])) {
       const source = ev.source || 'local';
       const account = ev.accountEmail || source;
+      if (isPlaceholderAccount(account)) continue;
       const key = `${source}|${account}`;
       const eventColor = normalizeHexColor(ev.color);
       if (!map.has(key)) {
@@ -3017,7 +3048,7 @@ function renderAccountLegend() {
 function renderHeader() {
   if (dom.dateHeader) {
     const d = parseLocalDate(state.selectedDate || toISO(new Date()));
-    dom.dateHeader.textContent = `${state.currentView.toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
+    dom.dateHeader.textContent = `${currentViewLabel(state.currentView).toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
   }
   if (dom.headerUserEmail) {
     dom.headerUserEmail.textContent = '';
@@ -3025,19 +3056,29 @@ function renderHeader() {
   }
 }
 
+function currentViewLabel(viewName) {
+  if (viewName === '3-day') return '3-Day';
+  if (viewName === 'week') return 'Week';
+  if (viewName === 'month') return 'Month';
+  return 'Day';
+}
+
 function renderMain() {
   if (!dom.tvMain) return;
   dom.tvMain.classList.toggle('tv-editor-active', Boolean(state.editor));
-  dom.tvMain.classList.remove('tv-view-day', 'tv-view-week', 'tv-view-month');
+  dom.tvMain.classList.remove('tv-view-day', 'tv-view-three-day', 'tv-view-week', 'tv-view-month');
   if (state.currentView === 'month') {
     dom.tvMain.classList.add('tv-view-month');
     dom.tvMain.innerHTML = renderMonthView();
   } else if (state.currentView === 'week') {
     dom.tvMain.classList.add('tv-view-week');
     dom.tvMain.innerHTML = renderWeekView();
+  } else if (state.currentView === '3-day') {
+    dom.tvMain.classList.add('tv-view-three-day');
+    dom.tvMain.innerHTML = renderThreeDayView();
   } else {
     dom.tvMain.classList.add('tv-view-day');
-    dom.tvMain.innerHTML = renderDayView();
+    dom.tvMain.innerHTML = renderSingleDayView();
   }
   if (state.editor) {
     const holder = dom.tvMain.querySelector('.tv-right-editor-anchor') || dom.tvMain.querySelector('.tv-editor-anchor');
@@ -3045,7 +3086,7 @@ function renderMain() {
   }
 }
 
-function renderDayView() {
+function renderThreeDayView() {
   const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
   const dayDates = buildThreeDayDates(selected);
   return `
@@ -3057,6 +3098,78 @@ function renderDayView() {
         <div class="tv-main-grid day">${dayDates.map(dateKey => renderDayCard(dayData(dateKey), dateKey === state.selectedDate, dateKey !== state.selectedDate)).join('')}</div>
       </div>
       ${renderRightRail(state.selectedDate, buildWeekDates(selected))}
+    </div>`;
+}
+
+function renderSingleDayView() {
+  const selectedDateKey = state.selectedDate || toISO(new Date());
+  const selected = parseLocalDate(selectedDateKey);
+  const day = dayData(selectedDateKey);
+  const schedule = buildDaySchedule(day, selectedDateKey);
+  const weekDates = buildWeekDates(selected);
+  const allDayItems = schedule.allDayEvents;
+  const timedItems = schedule.timedEvents;
+  const stickyNotes = Array.isArray(day.stickyNotes) ? day.stickyNotes : [];
+  const busyMinutes = timedItems.reduce((total, ev) => total + minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)), 0);
+  const summaryBits = [
+    `${allDayItems.length} all-day`,
+    `${timedItems.length} timed`,
+    `${stickyNotes.length} sticky`,
+    `${busyMinutes} busy min`,
+  ];
+  const freeBlocks = schedule.freeBlocks;
+  return `
+    <div class="tv-shell">
+      ${renderLeftSidebar()}
+      <div class="tv-single-day-pane">
+        ${renderTopControls()}
+        <div class="tv-single-day-summary">
+          <div>
+            <div class="tv-single-day-title">True Day View</div>
+            <div class="tv-single-day-subtitle">${escapeHtml(selected.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))}</div>
+          </div>
+          <div class="tv-single-day-pills">${summaryBits.map(bit => `<span class="tv-hint-chip">${escapeHtml(bit)}</span>`).join('')}</div>
+        </div>
+        <div class="tv-single-day-grid">
+          <section class="tv-day-section tv-day-section-wide">
+            <div class="tv-day-section-head">
+              <div class="tv-day-section-title">All-Day Events</div>
+              <div class="tv-day-section-meta">Scheduling anchors that span the whole day</div>
+            </div>
+            <div class="tv-day-section-list">
+              ${allDayItems.length ? allDayItems.map((ev, idx) => renderEventSummaryCard(ev, 'all-day', idx)).join('') : '<div class="tv-empty">No all-day events</div>'}
+            </div>
+          </section>
+          <section class="tv-day-section tv-day-section-wide">
+            <div class="tv-day-section-head">
+              <div class="tv-day-section-title">Timed Events</div>
+              <div class="tv-day-section-meta">Ordered schedule with sticky-note markers and status context</div>
+            </div>
+            <div class="tv-day-section-list">
+              ${timedItems.length ? timedItems.map((ev, idx) => renderEventSummaryCard(ev, 'timed', idx)).join('') : '<div class="tv-empty">No timed events</div>'}
+            </div>
+          </section>
+          <section class="tv-day-section">
+            <div class="tv-day-section-head">
+              <div class="tv-day-section-title">Free Time</div>
+              <div class="tv-day-section-meta">Gaps between scheduled items</div>
+            </div>
+            <div class="tv-day-section-list">
+              ${freeBlocks.length ? freeBlocks.slice(0, 6).map(renderFreeBlockCard).join('') : '<div class="tv-empty">No free time blocks detected</div>'}
+            </div>
+          </section>
+          <section class="tv-day-section">
+            <div class="tv-day-section-head">
+              <div class="tv-day-section-title">Day Sticky Notes</div>
+              <div class="tv-day-section-meta">Visible across the selected day</div>
+            </div>
+            <div class="tv-day-section-list">
+              ${stickyNotes.length ? stickyNotes.map(renderStickySummaryCard).join('') : '<div class="tv-empty">No sticky notes for this day</div>'}
+            </div>
+          </section>
+        </div>
+      </div>
+      ${renderRightRail(selectedDateKey, weekDates)}
     </div>`;
 }
 
@@ -3116,6 +3229,100 @@ function renderDayCard(day, selected, contextDay = false) {
 
   const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
   return `<div class="tv-day-card ${selected ? 'selected' : ''} ${contextDay ? 'context-day' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
+}
+
+function buildDaySchedule(day, dateKey) {
+  const selectedDate = parseLocalDate(dateKey);
+  const dayStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0);
+  const dayEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 23, 59, 59, 999);
+  const events = filteredEventsForDay(day).slice().sort((left, right) => parseDateTime(left.start) - parseDateTime(right.start));
+  const allDayEvents = events.filter(isAllDayLikeEvent);
+  const timedEvents = events.filter((ev) => !isAllDayLikeEvent(ev));
+  const freeBlocks = [];
+  let cursor = new Date(dayStart);
+
+  for (const ev of timedEvents) {
+    const evStart = clampDateTimeToDay(parseDateTime(ev.start), dayStart, dayEnd);
+    const evEnd = clampDateTimeToDay(parseDateTime(ev.end), dayStart, dayEnd);
+    if (evStart - cursor >= 15 * 60000) {
+      freeBlocks.push({ start: new Date(cursor), end: new Date(evStart) });
+    }
+    if (evEnd > cursor) {
+      cursor = new Date(evEnd);
+    }
+  }
+
+  if (dayEnd - cursor >= 15 * 60000) {
+    freeBlocks.push({ start: new Date(cursor), end: new Date(dayEnd) });
+  }
+
+  return { allDayEvents, timedEvents, freeBlocks };
+}
+
+function clampDateTimeToDay(dateValue, dayStart, dayEnd) {
+  const time = dateValue instanceof Date && !Number.isNaN(dateValue.getTime()) ? dateValue : new Date(dayStart);
+  if (time < dayStart) return new Date(dayStart);
+  if (time > dayEnd) return new Date(dayEnd);
+  return time;
+}
+
+function isAllDayLikeEvent(ev) {
+  if (!ev || typeof ev !== 'object') return false;
+  const explicit = ev.allDay ?? ev.all_day ?? ev.isAllDay ?? ev.is_all_day;
+  if (explicit === true) return true;
+  if (typeof explicit === 'string') {
+    const normalized = explicit.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  }
+
+  const start = parseDateTime(ev.start);
+  const end = parseDateTime(ev.end || ev.start);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const durationMinutes = minutesBetween(start, end);
+  const startMinutes = start.getHours() * 60 + start.getMinutes();
+  const endMinutes = end.getHours() * 60 + end.getMinutes();
+  return durationMinutes >= 20 * 60 && startMinutes === 0 && (endMinutes === 0 || endMinutes >= 23 * 60);
+}
+
+function minutesBetween(start, end) {
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function formatDuration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return `${hours}h ${mins}m`;
+  if (hours) return `${hours}h`;
+  return `${mins}m`;
+}
+
+function renderEventSummaryCard(ev, bucket, index = 0) {
+  const eventColor = resolveEventColor(ev);
+  const now = new Date();
+  const bg = softColor(eventColor, bucket === 'all-day' ? 0.26 : eventIsNow(ev, now) ? 0.34 : 0.2);
+  const border = softColor(eventColor, 0.56);
+  const duration = formatDuration(minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)));
+  const sticky = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+  const timeLine = bucket === 'all-day'
+    ? 'All day'
+    : `${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}`;
+  const contextLine = bucket === 'all-day'
+    ? `Duration ${escapeHtml(duration)}`
+    : `Duration ${escapeHtml(duration)} • ${eventIsNow(ev, now) ? 'In progress' : eventIsUpcoming(ev, now) ? 'Upcoming' : 'Completed'}`;
+  return `<div class="tv-day-event-card ${bucket}" data-tv-click="item" data-item-type="event" data-item-index="${index}" data-event-id="${ev.id}" style="background:${bg}; border-color:${border}">${sticky}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${timeLine}</div><div class="tv-item-sub">${escapeHtml(ev.description || '') || contextLine}</div></div>`;
+}
+
+function renderFreeBlockCard(block) {
+  const startLabel = block.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const endLabel = block.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const duration = formatDuration(minutesBetween(block.start, block.end));
+  return `<div class="tv-day-event-card free"><div class="tv-item-title">Free Block</div><div class="tv-item-sub">${escapeHtml(startLabel)} - ${escapeHtml(endLabel)}</div><div class="tv-item-sub">Open for ${escapeHtml(duration)}</div></div>`;
+}
+
+function renderStickySummaryCard(sticky, index = 0) {
+  const color = normalizeHexColor(sticky.color) || '#F7E68A';
+  return `<div class="tv-day-event-card sticky" data-tv-click="item" data-item-type="sticky" data-item-index="${index}" style="background:${softColor(color, 0.28)}; border-color:${softColor(color, 0.62)}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(sticky.content || '')}</div></div>`;
 }
 
 function renderMonthCell(day, idx) {
@@ -3355,6 +3562,12 @@ function handleMainClick(e) {
     if (control === 'view-day') {
       state.monthDetailOpen = false;
       setView('day', { applyHomeZoom: true });
+      return;
+    }
+    if (control === 'view-three-day') {
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
+      setView('3-day');
       return;
     }
     if (control === 'view-week') {

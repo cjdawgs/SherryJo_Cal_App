@@ -62,6 +62,8 @@ def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
         "Manage Accounts",
         "Admin Dashboard",
         "month-popout",
+        "View 3-Day",
+        "data-control=\"view-three-day\"",
     ]
     for token in required_tokens:
         assert token in text

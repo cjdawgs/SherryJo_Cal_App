@@ -213,6 +213,15 @@ def _to_iso(val) -> Optional[str]:
     return str(val)
 
 
+def _is_placeholder_account_email(value: Optional[str]) -> bool:
+    email = (value or "").strip().lower()
+    if not email:
+        return False
+    if email in {"test", "test@example.com"}:
+        return True
+    return email.endswith("@example.com")
+
+
 def _serialize_event_for_tv(event: Event) -> dict:
     """Convert a DB Event row into a TV-UI-ready dict."""
     sticky_note = getattr(event, "sticky_note", None)
@@ -376,7 +385,10 @@ def _month_grid_start_for_date(d):
 
 def _window_for_view(anchor_date, current_view: str):
     if current_view == "day":
-        # TV day mode renders a centered 3-day strip: previous, selected, next.
+        # TV day mode renders a true single-day window.
+        return anchor_date, anchor_date
+    if current_view == "3-day":
+        # Legacy TV day mode now maps to the centered 3-day strip.
         return anchor_date - timedelta(days=1), anchor_date + timedelta(days=1)
     if current_view == "week":
         start = _week_start_for_date(anchor_date)
@@ -831,7 +843,7 @@ def get_tv_events(
     Response shape:
                 {
                     "selectedDate": "...",
-                    "currentView": "day|week|month",
+                    "currentView": "day|3-day|week|month",
                     "rangeStart": "YYYY-MM-DD",
                     "rangeEnd": "YYYY-MM-DD",
                     "days": [ { "date": "...", "events": [...], "stickyNotes": [...] } ]
@@ -945,6 +957,8 @@ def get_tv_events(
             )
             seen = set()
             for acc in account_rows:
+                if _is_placeholder_account_email(acc.account_email):
+                    continue
                 key = (acc.provider or "", acc.account_email or "")
                 if key in seen:
                     continue
