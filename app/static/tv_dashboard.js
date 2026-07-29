@@ -324,6 +324,7 @@ const state = {
   },
   dateAutoAdvanceInFlight: false,
   lastDateAutoAdvanceAt: 0,
+  lastObservedDayKey: null,
   inputMode: 'nav',
   cursor: {
     x: 0,
@@ -834,6 +835,11 @@ function ensureStyles() {
   .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
   .tv-sticky-indicator::before { content: 'S'; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.9); line-height: 1; }
   .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
+  .tv-inline-sticky-badge { position: static; width: 16px; height: 16px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .tv-inline-sticky-badge::before { font-size: 8px; }
+  .tv-month-sticky-indicator { top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 4px; font-size: 9px; font-weight: 800; color: rgba(48,34,0,0.95); }
+  .tv-month-sticky-indicator::before,
+  .tv-month-sticky-indicator::after { content: none; }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
   .tv-month-preview-list { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
@@ -1130,6 +1136,7 @@ async function bootstrapFromBackend() {
 function startPolling() {
   stopAll();
   state.sessionStartAt = Date.now();
+  state.lastObservedDayKey = toISO(new Date());
   if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
@@ -1175,17 +1182,24 @@ function tickClock() {
 }
 
 function maybeAutoAdvanceSelectedDate() {
-  if (!state.token || !state.selectedDate || state.dateAutoAdvanceInFlight) return;
+  if (!state.token) return;
+
+  const todayKey = toISO(new Date());
+  if (!state.lastObservedDayKey) {
+    state.lastObservedDayKey = todayKey;
+    return;
+  }
+
+  // Preserve user-selected navigation date during the day.
+  // Only reset to the new current day when the local day actually rolls over.
+  if (state.lastObservedDayKey === todayKey) return;
+  state.lastObservedDayKey = todayKey;
+
+  if (!state.selectedDate || state.dateAutoAdvanceInFlight) return;
 
   const now = Date.now();
   if ((now - state.lastDateAutoAdvanceAt) < DATE_AUTO_ADVANCE_DEBOUNCE_MS) return;
-
-  const todayKey = toISO(new Date());
   if (state.selectedDate === todayKey) return;
-
-  const selectedDate = parseLocalDate(state.selectedDate);
-  const today = parseLocalDate(todayKey);
-  if (selectedDate.getTime() >= today.getTime()) return;
 
   const previousDate = state.selectedDate;
   state.dateAutoAdvanceInFlight = true;
@@ -1195,7 +1209,7 @@ function maybeAutoAdvanceSelectedDate() {
   state.monthDetailOpen = false;
   render();
 
-  if (tvDiag) tvDiag.log('selected_date_auto_advanced', `${previousDate} -> ${todayKey}`);
+  if (tvDiag) tvDiag.log('selected_date_midnight_rollover', `${previousDate} -> ${todayKey}`);
 
   patchTvState({ selectedDate: todayKey, focusedEventId: null }, { recordHistory: false })
     .finally(() => {
@@ -1386,6 +1400,7 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.accountChipPressTimer = null;
   state.accountChipClickTimer = null;
   state.accountChipClickCount = 0;
+  state.lastObservedDayKey = null;
   closeUtilityPanel();
   state.userEmail = null;
   state.userRole = null;
@@ -2429,24 +2444,36 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
 
   const selectedItems = itemsForDate(selectedDateKey).slice(0, 12);
   const weekEvents = weekDateKeys.flatMap(dateKey => filteredEventsForDay(dayData(dateKey)).map(ev => ({ dateKey, ev })));
+  const selectedDay = dayData(selectedDateKey);
+  const selectedDateStickyCount = Array.isArray(selectedDay.stickyNotes) ? selectedDay.stickyNotes.length : 0;
+  const selectedEventStickyCount = filteredEventsForDay(selectedDay).filter((ev) => eventHasStickyPayload(ev)).length;
+  const selectedStickyTotal = selectedDateStickyCount + selectedEventStickyCount;
+  const selectedDayStickyBadge = selectedStickyTotal > 0
+    ? `<span class="tv-sticky-indicator tv-inline-sticky-badge" aria-label="${escapeHtml(`${selectedStickyTotal} sticky note${selectedStickyTotal === 1 ? '' : 's'} on selected day`)}">${escapeHtml(selectedStickyTotal > 1 ? String(Math.min(selectedStickyTotal, 9)) : 'S')}</span>`
+    : '';
+  const weekStickyTotal = weekEvents.filter((row) => eventHasStickyPayload(row.ev)).length
+    + weekDateKeys.reduce((count, dateKey) => count + ((dayData(dateKey).stickyNotes || []).length), 0);
+  const weekStickyBadge = weekStickyTotal > 0
+    ? `<span class="tv-sticky-indicator tv-inline-sticky-badge" aria-label="${escapeHtml(`${weekStickyTotal} sticky note${weekStickyTotal === 1 ? '' : 's'} this week`)}">${escapeHtml(weekStickyTotal > 1 ? String(Math.min(weekStickyTotal, 9)) : 'S')}</span>`
+    : '';
   return `
     <aside class="tv-right-rail ${extraClass}">
-      <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}</div>
+      <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}${selectedDayStickyBadge}</div>
       <div class="tv-right-list">
         ${selectedItems.length ? selectedItems.map(item => {
     if (item.type === 'event') {
       const eventColor = resolveEventColor(item.event);
-      const sticky = item.event.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+      const sticky = eventHasStickyPayload(item.event) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
       return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
     }
-    return `<div class="tv-right-item"><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
+    return `<div class="tv-right-item"><span class="tv-sticky-indicator" aria-label="Date sticky note"></span><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
   }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
       </div>
-      <div class="tv-right-subtitle">This Week</div>
+      <div class="tv-right-subtitle">This Week${weekStickyBadge}</div>
       <div class="tv-right-list">
         ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
     const eventColor = resolveEventColor(row.ev);
-    const sticky = row.ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+    const sticky = eventHasStickyPayload(row.ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
     return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
   }).join('') : '<div class="tv-empty">No events this week</div>'}
       </div>
@@ -3125,7 +3152,7 @@ function renderSingleDayView() {
         ${renderTopControls()}
         <div class="tv-single-day-summary">
           <div>
-            <div class="tv-single-day-title">True Day View</div>
+            <div class="tv-single-day-title">Day Selected</div>
             <div class="tv-single-day-subtitle">${escapeHtml(selected.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }))}</div>
           </div>
           <div class="tv-single-day-pills">${summaryBits.map(bit => `<span class="tv-hint-chip">${escapeHtml(bit)}</span>`).join('')}</div>
@@ -3152,7 +3179,7 @@ function renderSingleDayView() {
           <section class="tv-day-section">
             <div class="tv-day-section-head">
               <div class="tv-day-section-title">Free Time</div>
-              <div class="tv-day-section-meta">Gaps between scheduled items</div>
+              <div class="tv-day-section-meta">Gaps between scheduled items (7:00 AM - 7:00 PM)</div>
             </div>
             <div class="tv-day-section-list">
               ${freeBlocks.length ? freeBlocks.slice(0, 6).map(renderFreeBlockCard).join('') : '<div class="tv-empty">No free time blocks detected</div>'}
@@ -3210,7 +3237,7 @@ function renderDayCard(day, selected, contextDay = false) {
   const date = parseLocalDate(day.date);
   const items = itemsForDate(day.date);
   const dayEvents = day.events || [];
-  const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && ev.hasSticky));
+  const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && eventHasStickyPayload(ev)));
   const now = new Date();
   const cards = items.length
     ? items.map((item, idx) => {
@@ -3220,7 +3247,7 @@ function renderDayCard(day, selected, contextDay = false) {
         const eventColor = resolveEventColor(ev);
         const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
         const border = softColor(eventColor, focused ? 0.7 : 0.5);
-        const eventStickyIndicator = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+        const eventStickyIndicator = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
         return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
       }
       return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
@@ -3233,8 +3260,8 @@ function renderDayCard(day, selected, contextDay = false) {
 
 function buildDaySchedule(day, dateKey) {
   const selectedDate = parseLocalDate(dateKey);
-  const dayStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0);
-  const dayEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 23, 59, 59, 999);
+  const dayStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 7, 0, 0, 0);
+  const dayEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 19, 0, 0, 0);
   const events = filteredEventsForDay(day).slice().sort((left, right) => parseDateTime(left.start) - parseDateTime(right.start));
   const allDayEvents = events.filter(isAllDayLikeEvent);
   const timedEvents = events.filter((ev) => !isAllDayLikeEvent(ev));
@@ -3303,7 +3330,7 @@ function renderEventSummaryCard(ev, bucket, index = 0) {
   const bg = softColor(eventColor, bucket === 'all-day' ? 0.26 : eventIsNow(ev, now) ? 0.34 : 0.2);
   const border = softColor(eventColor, 0.56);
   const duration = formatDuration(minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)));
-  const sticky = ev.hasSticky ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+  const sticky = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
   const timeLine = bucket === 'all-day'
     ? 'All day'
     : `${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}`;
@@ -3332,8 +3359,14 @@ function renderMonthCell(day, idx) {
   const inMonth = date.getMonth() === anchor.getMonth();
   const selected = day.date === state.selectedDate;
   const dayEvents = filteredEventsForDay(day);
-  const hasDaySticky = Boolean((day.stickyNotes || []).length || (day.events || []).some(ev => ev && ev.hasSticky));
-  const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  const stickyNoteCount = Array.isArray(day.stickyNotes) ? day.stickyNotes.length : 0;
+  const stickyEventCount = (day.events || []).filter(ev => ev && (ev.hasSticky || eventHasStickyPayload(ev))).length;
+  const totalStickyCount = stickyNoteCount + stickyEventCount;
+  const hasDaySticky = totalStickyCount > 0;
+  const stickyBadgeText = totalStickyCount > 1 ? String(Math.min(totalStickyCount, 9)) : 'S';
+  const stickyIndicator = hasDaySticky
+    ? `<span class="tv-sticky-indicator tv-month-sticky-indicator" aria-label="${escapeHtml(`${totalStickyCount} sticky note${totalStickyCount === 1 ? '' : 's'} present`)}">${escapeHtml(stickyBadgeText)}</span>`
+    : '';
   const count = dayEvents.length + (day.stickyNotes || []).length;
   const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
   const previewHtml = dayEvents.length
@@ -3341,7 +3374,7 @@ function renderMonthCell(day, idx) {
       const eventColor = resolveEventColor(ev);
       const bg = softColor(eventColor, 0.2);
       const border = softColor(eventColor, 0.52);
-      const stickyFlag = ev.hasSticky ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
+      const stickyFlag = eventHasStickyPayload(ev) ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
       return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
     }).join('')}</div>`
     : '<div class="tv-month-preview">No events</div>';

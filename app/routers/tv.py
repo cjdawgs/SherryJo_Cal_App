@@ -373,6 +373,37 @@ def _parse_iso_date_or_none(value: Optional[str]):
         return None
 
 
+def _normalize_date_key(value) -> Optional[str]:
+    """Normalize date-like values into a strict YYYY-MM-DD key."""
+    if value is None:
+        return None
+    if hasattr(value, "date") and not isinstance(value, str):
+        try:
+            return value.date().isoformat()
+        except Exception:
+            pass
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        try:
+            return value.isoformat()[:10]
+        except Exception:
+            pass
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    parsed = _parse_iso_date_or_none(text)
+    if parsed is not None:
+        return parsed.isoformat()
+
+    if len(text) >= 10:
+        parsed = _parse_iso_date_or_none(text[:10])
+        if parsed is not None:
+            return parsed.isoformat()
+
+    return None
+
+
 def _week_start_for_date(d):
     # Monday-start week grid
     return d - timedelta(days=d.weekday())
@@ -922,7 +953,8 @@ def get_tv_events(
             try:
                 sticky_rows = [
                     row for row in db.query(DateStickyNote).filter(_sticky_owner_filter(current_user.id)).all()
-                    if isinstance(getattr(row, "date", None), str) and start_key <= row.date <= end_key
+                    if (_normalize_date_key(getattr(row, "date", None)) or "") >= start_key
+                    and (_normalize_date_key(getattr(row, "date", None)) or "") <= end_key
                 ]
             except SQLAlchemyError:
                 logger.exception(
@@ -931,11 +963,12 @@ def get_tv_events(
                 )
                 sticky_rows = []
 
-        sticky_map = {
-            row.date: _normalize_sticky_notes(getattr(row, "sticky_notes", None))
-            for row in sticky_rows
-            if isinstance(getattr(row, "date", None), str)
-        }
+        sticky_map = {}
+        for row in sticky_rows:
+            date_key = _normalize_date_key(getattr(row, "date", None))
+            if not date_key:
+                continue
+            sticky_map[date_key] = _normalize_sticky_notes(getattr(row, "sticky_notes", None))
 
         days = []
         cursor = window_start_date
