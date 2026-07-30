@@ -308,14 +308,27 @@ def _serialize_event_for_tv(event: Event) -> dict:
 
     has_sticky = has_sticky_payload or has_related_notes
 
+    source = getattr(event, "source", "local") or "local"
+    account_email = (getattr(event, "account_email", None) or "").strip().lower()
+    source_text = str(source).strip().lower()
+    source_provider = normalize_provider(source_text)
+
+    account_key = None
+    if account_email:
+        account_key = f"{source_provider}:{account_email}"
+    elif ":" in source_text or "|" in source_text:
+        # Legacy rows sometimes embed source+account in Event.source.
+        account_key = source_text
+
     return {
         "id": event.id,
         "title": event.title or "",
         "start": _to_iso(event.start_time),
         "end": _to_iso(event.end_time),
         "description": event.description or "",
-        "source": getattr(event, "source", "local") or "local",
+        "source": source,
         "accountEmail": getattr(event, "account_email", None),
+        "accountKey": account_key,
         "color": getattr(event, "color", None),
         "hasSticky": has_sticky,
     }

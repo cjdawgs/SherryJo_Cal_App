@@ -2883,7 +2883,42 @@ function parseCompositeAccountKey(value) {
   return null;
 }
 
+function buildAccountIdentityAliases(source, account, rawKey = null) {
+  const src = normalizeAccountSource(source);
+  const acct = normalizeAccountIdentifier(account) || src;
+  const aliases = new Set();
+  aliases.add(`${src}|${acct}`);
+  aliases.add(`${src}:${acct}`);
+  if (!isGenericProviderBucket(src, acct)) {
+    aliases.add(acct);
+  }
+
+  const raw = String(rawKey || '').trim();
+  if (raw) {
+    aliases.add(raw);
+    const parsedRaw = parseCompositeAccountKey(raw);
+    if (parsedRaw && parsedRaw.account) {
+      const rawSrc = normalizeAccountSource(parsedRaw.source);
+      const rawAcct = normalizeAccountIdentifier(parsedRaw.account) || rawSrc;
+      aliases.add(`${rawSrc}|${rawAcct}`);
+      aliases.add(`${rawSrc}:${rawAcct}`);
+      if (!isGenericProviderBucket(rawSrc, rawAcct)) {
+        aliases.add(rawAcct);
+      }
+    }
+  }
+
+  return Array.from(aliases);
+}
+
 function eventAccountIdentity(ev) {
+  const rawSource = (
+    ev?.source
+    || ev?.provider
+    || ev?.extendedProps?.source
+    || 'local'
+  );
+  const sourceComposite = parseCompositeAccountKey(rawSource);
   const composite = parseCompositeAccountKey(
     ev?.account_key
     || ev?.accountKey
@@ -2893,9 +2928,8 @@ function eventAccountIdentity(ev) {
 
   const source = normalizeAccountSource(
     composite?.source
-    || ev?.source
-    || ev?.provider
-    || ev?.extendedProps?.source
+    || sourceComposite?.source
+    || rawSource
     || 'local',
   );
 
@@ -2907,6 +2941,7 @@ function eventAccountIdentity(ev) {
     || ev?.email
     || ev?.extendedProps?.account_email
     || ev?.extendedProps?.accountEmail
+    || sourceComposite?.account
     || source,
   ) || source;
 
@@ -2914,17 +2949,20 @@ function eventAccountIdentity(ev) {
     source,
     account,
     key: `${source}|${account}`,
+    aliases: buildAccountIdentityAliases(source, account, composite ? null : rawSource),
   };
 }
 
 function serverAccountIdentity(account) {
-  const composite = parseCompositeAccountKey(account?.account_key || account?.accountKey);
+  const rawKey = account?.account_key || account?.accountKey;
+  const composite = parseCompositeAccountKey(rawKey);
   const source = normalizeAccountSource(composite?.source || account?.provider || account?.source || 'local');
   const normalizedAccount = normalizeAccountIdentifier(composite?.account || account?.accountEmail || account?.account_email || account?.email || source) || source;
   return {
     source,
     account: normalizedAccount,
     key: `${source}|${normalizedAccount}`,
+    aliases: buildAccountIdentityAliases(source, normalizedAccount, rawKey),
   };
 }
 
@@ -3275,15 +3313,20 @@ function syncAccountLegend() {
   const map = new Map();
   const colorMap = {};
 
+  const recordColorAliases = (aliases, color) => {
+    for (const alias of (aliases || [])) {
+      const normalizedAlias = String(alias || '').trim();
+      if (!normalizedAlias) continue;
+      if (!colorMap[normalizedAlias]) colorMap[normalizedAlias] = color;
+    }
+  };
+
   for (const account of (state.serverAccounts || [])) {
     const identity = serverAccountIdentity(account);
     if (isPlaceholderAccount(identity.account)) continue;
     const color = normalizeHexColor(account.color) || providerFallbackColor(identity.source);
     map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
-    colorMap[identity.key] = color;
-    if (!isGenericProviderBucket(identity.source, identity.account)) {
-      colorMap[identity.account] = color;
-    }
+    recordColorAliases(identity.aliases, color);
   }
 
   for (const day of state.days) {
@@ -3299,10 +3342,7 @@ function syncAccountLegend() {
           color: eventColor || providerFallbackColor(identity.source),
         });
       }
-      if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
-      if (eventColor && !isGenericProviderBucket(identity.source, identity.account) && !colorMap[identity.account]) {
-        colorMap[identity.account] = eventColor;
-      }
+      if (eventColor) recordColorAliases(identity.aliases, eventColor);
     }
   }
   state.accountLegend = Array.from(map.values());
@@ -3325,14 +3365,12 @@ function syncAccountLegend() {
 
 function resolveEventColor(ev) {
   const identity = eventAccountIdentity(ev);
-  const exact = state.accountColorMap[identity.key];
-  if (exact) return exact;
+  for (const alias of (identity.aliases || [])) {
+    const exact = state.accountColorMap[alias];
+    if (exact) return exact;
+  }
   const direct = normalizeHexColor(ev.color);
   if (direct) return direct;
-  if (!isGenericProviderBucket(identity.source, identity.account)) {
-    const byAccount = state.accountColorMap[identity.account];
-    if (byAccount) return byAccount;
-  }
   return providerFallbackColor(identity.source);
 }
 
