@@ -1032,7 +1032,7 @@ async function init() {
       }
     });
   }
-  if (dom.disconnectBtn) dom.disconnectBtn.addEventListener('click', handleUnpair);
+  if (dom.disconnectBtn) dom.disconnectBtn.addEventListener('click', handleLogoutClick);
   if (dom.headerBackBtn) dom.headerBackBtn.addEventListener('click', goBackAction);
   if (dom.headerExitBtn) dom.headerExitBtn.addEventListener('click', exitTvAction);
 
@@ -1455,6 +1455,15 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.history.future = [];
   localStorage.removeItem(TOKEN_KEY);
   transitionTo('pair');
+}
+
+function handleLogoutClick() {
+  const message = 'Log out from this TV and return to pairing?\n\nThis disconnects only this TV session. Your account data stays intact.';
+  const confirmed = typeof window !== 'undefined' && typeof window.confirm === 'function'
+    ? window.confirm(message)
+    : true;
+  if (!confirmed) return;
+  handleUnpair('user_logout_requested');
 }
 
 async function fetchTvState() {
@@ -2712,10 +2721,89 @@ function getFocusedMonthDate() {
   return date || null;
 }
 
+function normalizeAccountSource(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return 'local';
+  const head = raw.split(/[|:]/)[0] || raw;
+  if (!head || head === 'db' || head === 'memory') return 'local';
+  return head;
+}
+
+function normalizeAccountIdentifier(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return raw;
+}
+
+function parseCompositeAccountKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.includes('|')) {
+    const [left, ...rest] = raw.split('|');
+    return {
+      source: normalizeAccountSource(left),
+      account: normalizeAccountIdentifier(rest.join('|')),
+    };
+  }
+  if (raw.includes(':')) {
+    const [left, ...rest] = raw.split(':');
+    const right = rest.join(':').trim();
+    if (right && (right.includes('@') || right.includes('.'))) {
+      return {
+        source: normalizeAccountSource(left),
+        account: normalizeAccountIdentifier(right),
+      };
+    }
+  }
+  return null;
+}
+
+function eventAccountIdentity(ev) {
+  const composite = parseCompositeAccountKey(
+    ev?.account_key
+    || ev?.accountKey
+    || ev?.extendedProps?.account_key
+    || ev?.extendedProps?.accountKey,
+  );
+
+  const source = normalizeAccountSource(
+    composite?.source
+    || ev?.source
+    || ev?.provider
+    || ev?.extendedProps?.source
+    || 'local',
+  );
+
+  const account = normalizeAccountIdentifier(
+    composite?.account
+    || ev?.accountEmail
+    || ev?.account_email
+    || ev?.account
+    || ev?.email
+    || ev?.extendedProps?.account_email
+    || ev?.extendedProps?.accountEmail
+    || source,
+  ) || source;
+
+  return {
+    source,
+    account,
+    key: `${source}|${account}`,
+  };
+}
+
+function serverAccountIdentity(account) {
+  const composite = parseCompositeAccountKey(account?.account_key || account?.accountKey);
+  const source = normalizeAccountSource(composite?.source || account?.provider || account?.source || 'local');
+  const normalizedAccount = normalizeAccountIdentifier(composite?.account || account?.accountEmail || account?.account_email || account?.email || source) || source;
+  return {
+    source,
+    account: normalizedAccount,
+    key: `${source}|${normalizedAccount}`,
+  };
+}
+
 function eventAccountKey(ev) {
-  const source = ev.source || 'local';
-  const account = ev.accountEmail || source;
-  return `${source}|${account}`;
+  return eventAccountIdentity(ev).key;
 }
 
 function isAccountVisibleForEvent(ev) {
@@ -3058,48 +3146,52 @@ function syncAccountLegend() {
   const colorMap = {};
 
   for (const account of (state.serverAccounts || [])) {
-    const source = account.provider || account.source || 'local';
-    const email = account.accountEmail || account.email || source;
-    if (isPlaceholderAccount(email)) continue;
+    const identity = serverAccountIdentity(account);
+    if (isPlaceholderAccount(identity.account)) continue;
     const color = normalizeHexColor(account.color) || '#9AA3B2';
-    const key = `${source}|${email}`;
-    map.set(key, { source, account: email, color });
-    colorMap[key] = color;
-    colorMap[email] = color;
+    map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
+    colorMap[identity.key] = color;
+    colorMap[identity.account] = color;
   }
 
   for (const day of state.days) {
     for (const ev of (day.events || [])) {
-      const source = ev.source || 'local';
-      const account = ev.accountEmail || source;
-      if (isPlaceholderAccount(account)) continue;
-      const key = `${source}|${account}`;
+      const identity = eventAccountIdentity(ev);
+      if (isPlaceholderAccount(identity.account)) continue;
       const eventColor = normalizeHexColor(ev.color);
-      if (!map.has(key)) {
-        map.set(key, {
-          source,
-          account,
+      if (!map.has(identity.key)) {
+        map.set(identity.key, {
+          key: identity.key,
+          source: identity.source,
+          account: identity.account,
           color: eventColor || '#9AA3B2',
         });
       }
-      if (eventColor && !colorMap[key]) colorMap[key] = eventColor;
-      if (eventColor && !colorMap[account]) colorMap[account] = eventColor;
+      if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
+      if (eventColor && !colorMap[identity.account]) colorMap[identity.account] = eventColor;
     }
   }
   state.accountLegend = Array.from(map.values());
   state.accountColorMap = colorMap;
   if (state.selectedAccountKeys.length) {
-    const allowed = new Set(state.accountLegend.map(item => `${item.source}|${item.account}`));
-    state.selectedAccountKeys = state.selectedAccountKeys.filter(key => allowed.has(key));
+    const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}|${item.account}`));
+    state.selectedAccountKeys = state.selectedAccountKeys
+      .map((key) => {
+        const parsed = parseCompositeAccountKey(key);
+        if (!parsed) return String(key || '').trim().toLowerCase();
+        const src = normalizeAccountSource(parsed.source);
+        const acct = normalizeAccountIdentifier(parsed.account) || src;
+        return `${src}|${acct}`;
+      })
+      .filter(key => allowed.has(key));
   }
 }
 
 function resolveEventColor(ev) {
-  const source = ev.source || 'local';
-  const account = ev.accountEmail || source;
-  const exact = state.accountColorMap[`${source}|${account}`];
+  const identity = eventAccountIdentity(ev);
+  const exact = state.accountColorMap[identity.key];
   if (exact) return exact;
-  const byAccount = state.accountColorMap[account];
+  const byAccount = state.accountColorMap[identity.account];
   if (byAccount) return byAccount;
   const direct = normalizeHexColor(ev.color);
   if (direct) return direct;
@@ -3116,7 +3208,7 @@ function renderAccountLegend() {
   const chips = state.accountLegend.map(item => {
     const bg = softColor(item.color, 0.2);
     const border = softColor(item.color, 0.55);
-    const key = `${item.source}|${item.account}`;
+    const key = item.key || `${item.source}|${item.account}`;
     const active = !filtered || state.selectedAccountKeys.includes(key);
     return `<div class="tv-account-chip ${active ? 'active' : 'inactive'}" data-tv-click="account-chip" data-account-key="${escapeHtml(key)}" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
   }).join('');
