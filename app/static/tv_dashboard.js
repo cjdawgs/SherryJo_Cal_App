@@ -2764,6 +2764,10 @@ function normalizeAccountSource(value) {
   if (!raw) return 'local';
   const head = raw.split(/[|:]/)[0] || raw;
   if (!head || head === 'db' || head === 'memory') return 'local';
+  if (head.startsWith('google') || head === 'gmail' || head === 'gcal') return 'google';
+  if (head.startsWith('microsoft') || head.startsWith('ms') || head === 'outlook' || head === 'office365') return 'microsoft';
+  if (head.startsWith('apple') || head === 'icloud' || head === 'caldav') return 'apple';
+  if (head.startsWith('local')) return 'local';
   return head;
 }
 
@@ -2785,7 +2789,7 @@ function parseCompositeAccountKey(value) {
   if (raw.includes(':')) {
     const [left, ...rest] = raw.split(':');
     const right = rest.join(':').trim();
-    if (right && (right.includes('@') || right.includes('.'))) {
+    if (right) {
       return {
         source: normalizeAccountSource(left),
         account: normalizeAccountIdentifier(right),
