@@ -2210,10 +2210,10 @@ Large: > 1920
   }
 
   .controlBand {
-    grid-template-columns: 92px minmax(0, 1fr);
+    grid-template-columns: 124px minmax(0, 1fr);
     gap: 4px;
-    max-height: 15vh;
-    min-height: 74px;
+    max-height: 19vh;
+    min-height: 96px;
     overflow: hidden;
   }
 
@@ -2244,15 +2244,25 @@ Large: > 1920
   }
 
   .accounts .chip {
-    width: 100%;
-    max-width: 100%;
-    justify-content: space-between;
+    width: 75%;
+    max-width: 75%;
+    min-width: 0;
+    align-self: flex-start;
+    justify-content: flex-start;
     min-height: 16px;
     padding: 0 3px;
     font-size: 9px;
     font-weight: 600;
     gap: 4px;
     line-height: 1.15;
+    overflow: hidden;
+  }
+
+  .accounts .chip>input[type="color"] {
+    order: -1;
+    margin-left: 0;
+    margin-right: 4px;
+    flex: 0 0 auto;
   }
 
   #calendarLegend {
@@ -2744,6 +2754,8 @@ Large: > 1920
   }
 
   .accounts .chip {
+    width: 75%;
+    max-width: 75%;
     padding: 0 2px;
     font-size: 8px;
     gap: 3px;
