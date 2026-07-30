@@ -1017,7 +1017,7 @@ function transitionTo(screen) {
   }
 }
 
-function init() {
+async function init() {
   cacheDom();
   ensureStyles();
   hydrateInputMode();
@@ -1128,6 +1128,9 @@ function init() {
   // ────────────────────────────────────────────────────────────────────────────
 
   state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
+  if (!state.token && !IS_KIOSK) {
+    await attemptLanAutoPair();
+  }
   state.authStatus = IS_KIOSK ? 'kiosk' : (state.token ? 'paired' : 'unpaired');
   state.lastAuthIssue = '';
 
@@ -1295,6 +1298,28 @@ function normalizePairingCode(raw) {
   const compact = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
   if (compact.length !== 8) return '';
   return `${compact.slice(0, 4)}-${compact.slice(4)}`;
+}
+
+async function attemptLanAutoPair() {
+  try {
+    const res = await fetch('/tv/auto-pair', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res || !res.ok) return false;
+
+    const data = await res.json().catch(() => ({}));
+    if (!data?.token) return false;
+
+    state.token = data.token;
+    state.authStatus = IS_KIOSK ? 'kiosk' : 'paired';
+    state.lastAuthIssue = '';
+    localStorage.setItem(TOKEN_KEY, state.token);
+    if (tvDiag) tvDiag.log('lan_auto_pair_success', 'TV token bootstrapped from local network context');
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function setPairError(message) {
@@ -3990,4 +4015,6 @@ function escapeHtml(val) {
     .replace(/'/g, '&#39;');
 }
 
-document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', () => {
+  void init();
+});

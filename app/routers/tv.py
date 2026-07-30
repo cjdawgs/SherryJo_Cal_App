@@ -20,6 +20,7 @@ import logging
 import os
 import json
 import hashlib
+import ipaddress
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -51,6 +52,14 @@ _BASE_DIR  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _templates = Jinja2Templates(directory=os.path.join(_BASE_DIR, "templates"))
 _TV_BUILD_FALLBACK = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 
+# Same-network no-code pairing context.
+# When a signed-in user generates a TV pairing code, we cache a short-lived
+# auto-pair principal that LAN clients can redeem without entering the code.
+_lan_autopair_ctx: dict[str, Optional[object]] = {
+    "user_id": None,
+    "expires_at": None,
+}
+
 
 def _get_tv_app_version() -> str:
     return (
@@ -60,6 +69,51 @@ def _get_tv_app_version() -> str:
         or os.getenv("SOURCE_VERSION")
         or _TV_BUILD_FALLBACK
     )
+
+
+def _is_private_or_loopback_host(host: Optional[str]) -> bool:
+    if not host:
+        return False
+    lowered = str(host).strip().lower()
+    if lowered in {"localhost", "testclient"}:
+        return True
+    try:
+        parsed = ipaddress.ip_address(lowered)
+        return parsed.is_private or parsed.is_loopback
+    except ValueError:
+        return False
+
+
+def _auto_pair_enabled() -> bool:
+    raw = str(os.getenv("TV_TRUST_LAN_AUTO_PAIR", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _mark_lan_autopair_principal(user_id: int) -> None:
+    ttl_min = int(str(os.getenv("TV_LAN_AUTO_PAIR_TTL_MINUTES", "10")).strip() or "10")
+    ttl_min = max(1, min(ttl_min, 120))
+    _lan_autopair_ctx["user_id"] = user_id
+    _lan_autopair_ctx["expires_at"] = datetime.now(timezone.utc) + timedelta(minutes=ttl_min)
+
+
+def _resolve_lan_autopair_principal(request: Request) -> Optional[int]:
+    if not _auto_pair_enabled():
+        return None
+
+    client_host = getattr(request.client, "host", None)
+    if not _is_private_or_loopback_host(client_host):
+        return None
+
+    user_id = _lan_autopair_ctx.get("user_id")
+    expires_at = _lan_autopair_ctx.get("expires_at")
+    if not user_id or not isinstance(expires_at, datetime):
+        return None
+    if datetime.now(timezone.utc) > expires_at:
+        _lan_autopair_ctx["user_id"] = None
+        _lan_autopair_ctx["expires_at"] = None
+        return None
+
+    return int(user_id)
 
 
 # ─────────────────────────────────────────────────
@@ -748,6 +802,7 @@ def generate_pairing_code(
     logger.info("TV_PAIR_REQUEST user_id=%s", current_user.id)
 
     result = pairing_store.create_code(current_user.id, db=db)
+    _mark_lan_autopair_principal(current_user.id)
     return result
 
 
@@ -783,6 +838,40 @@ def pair_tv(
     # Issue a persistent TV token so the device stays paired until it is
     # explicitly unpaired or the signing secret is rotated.
     token = create_persistent_token(user_id)
+
+    return {
+        "token": token,
+        "selectedDate": state.get("selectedDate"),
+        "currentView": state.get("currentView", "day"),
+    }
+
+
+@router.post("/auto-pair", response_model=PairResponse)
+def auto_pair_tv(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    Same-network convenience path:
+    - Requires a recent authenticated /tv/generate-code call (short-lived principal)
+    - Accepts only loopback/private-network client addresses
+    - Issues the same persistent TV token as manual pairing
+    """
+    user_id = _resolve_lan_autopair_principal(request)
+    if user_id is None:
+        raise HTTPException(status_code=404, detail="Auto-pair unavailable")
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    existing_state = tv_state_store.get(user_id)
+    if not existing_state:
+        tv_state_store.initialize(user_id, selected_date=None, current_view="day")
+    state = tv_state_store.get(user_id)
+
+    token = create_persistent_token(user_id)
+    logger.info("TV_AUTO_PAIR_SUCCESS user_id=%s host=%s", user_id, getattr(request.client, "host", "?"))
 
     return {
         "token": token,

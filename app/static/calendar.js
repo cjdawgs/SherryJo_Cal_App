@@ -152,7 +152,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(createBtn, "Create");
     createBtn.title = "Create a new calendar event";
     withIconLabel(importBtn, "Import");
-    importBtn.title = "Import events from a file";
+    importBtn.title = "Import events from .ics, .ical, .csv, or .json files";
     withIconLabel(accountsBtn, "Accounts");
     withIconLabel(adminBtn, "Admin");
     withIconLabel(undoBtn, "Undo");
@@ -170,7 +170,7 @@ function applyControlBandDensity(mode) {
     withIconLabel(createBtn, "Create");
     createBtn.title = "Create a new calendar event";
     withIconLabel(importBtn, "Import");
-    importBtn.title = "Import events from a file";
+    importBtn.title = "Import events from .ics, .ical, .csv, or .json files";
     withIconLabel(accountsBtn, "Accounts");
     withIconLabel(adminBtn, "Admin");
     withIconLabel(undoBtn, "Undo");
@@ -187,7 +187,7 @@ function applyControlBandDensity(mode) {
   withIconLabel(createBtn, "Create");
   createBtn.title = "Create a new calendar event";
   withIconLabel(importBtn, "Import");
-  importBtn.title = "Import events from a file";
+  importBtn.title = "Import events from .ics, .ical, .csv, or .json files";
   withIconLabel(accountsBtn, "Accounts");
   withIconLabel(adminBtn, "Admin");
   withIconLabel(undoBtn, "Undo");
@@ -1318,7 +1318,7 @@ function getEventStickyCount(ev) {
 function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete, dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
-  icon.innerHTML = `<img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" aria-hidden="true" draggable="false">`;
+  icon.innerHTML = `<img src="/static/icons/sticky-note-mini.svg" width="12" height="12" alt="" aria-hidden="true" draggable="false">`;
   icon.title = title;
 
   if (dragPayload) {
@@ -1379,7 +1379,7 @@ function openSidebarStickyMenu(x, y, onOpen, onDelete, onEdit) {
   }
 
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="open-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" draggable="false"></span><span>Open Sticky</span></span></div>
+    <div class="ctx-menu-item" data-action="open-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><img src="/static/icons/sticky-note-mini.svg" width="12" height="12" alt="" draggable="false"></span><span>Open Sticky</span></span></div>
     <div class="ctx-menu-item" data-action="edit-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z"/></svg></span><span>Edit Specific Sticky</span></span></div>
     <div class="ctx-menu-item danger" data-action="delete-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg></span><span>Delete Specific Sticky</span></span></div>
   `;

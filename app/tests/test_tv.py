@@ -30,10 +30,14 @@ def _reset_tv_stores():
     pairing_store._codes.clear()
     tv_state_store._states.clear()
     tv_router._tv_events_snapshot_cache.clear()
+    tv_router._lan_autopair_ctx["user_id"] = None
+    tv_router._lan_autopair_ctx["expires_at"] = None
     yield
     pairing_store._codes.clear()
     tv_state_store._states.clear()
     tv_router._tv_events_snapshot_cache.clear()
+    tv_router._lan_autopair_ctx["user_id"] = None
+    tv_router._lan_autopair_ctx["expires_at"] = None
 
 
 # ─────────────────────────────────────────────────
@@ -182,6 +186,22 @@ class TestPairEndpoint:
         client.post("/tv/pair", json={"pairingCode": code})
         resp2 = client.post("/tv/pair", json={"pairingCode": code})
         assert resp2.status_code == 400
+
+
+class TestAutoPairEndpoint:
+    def test_auto_pair_requires_recent_generate_code(self, client):
+        resp = client.post("/tv/auto-pair")
+        assert resp.status_code == 404
+
+    def test_auto_pair_succeeds_after_generate_code(self, client, auth_headers):
+        gen = client.post("/tv/generate-code", headers=auth_headers)
+        assert gen.status_code == 200
+
+        resp = client.post("/tv/auto-pair")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("token")
+        assert "currentView" in data
 
 
 class TestKioskToken:
