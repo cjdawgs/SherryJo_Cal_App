@@ -5,160 +5,6 @@
   box-sizing: border-box;
 }
 
-body {
-  margin: 0;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background: #f1f3f4;
-  overflow-x: hidden;
-}
-
-:root {
-  --layout-gutter: 12px;
-  --sidebar-width: 300px;
-  --calendar-min-height: 700px;
-  --topbar-max-width: 96%;
-  --app-font-scale: 1;
-  --week-header-color: #12c7b5;
-}
-
-.hidden {
-  display: none !important;
-}
-
-
-/* =====================================================
-✅ TOPBAR (HEADER)
-===================================================== */
-.topbar {
-  display: flex;
-  justify-content: center;
-  width: 100%;
-  padding-bottom: 2px;
-}
-
-.topbar-inner,
-.authContainer {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  max-width: var(--topbar-max-width);
-  width: 100%;
-}
-
-.authContainer {
-  width: 100%;
-}
-
-.appTitleRow {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-}
-
-.appTitle {
-  font-size: calc(26px * var(--app-font-scale));
-  font-weight: bold;
-  text-align: center;
-}
-
-.devRoleBadge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #3f526f;
-  background: #e8eef7;
-  border: 1px solid #c3d1e6;
-  border-radius: 999px;
-  padding: 2px 7px;
-  line-height: 1;
-}
-
-.controlBand {
-  display: grid;
-  width: 100%;
-  grid-template-columns: clamp(122px, 18vw, 180px) minmax(0, 1fr);
-  gap: 8px;
-  align-items: stretch;
-}
-
-.controlBandPrimary {
-  display: grid;
-  grid-template-rows: auto auto;
-  order: 2;
-  min-width: 0;
-}
-
-.controlBandActions {
-  order: 1;
-  min-width: 0;
-}
-
-.sidebarToggleBtn,
-.sidebarCloseBtn {
-  display: none;
-}
-
-
-/* =====================================================
-✅ ACCOUNT CHIPS
-===================================================== */
-#accounts {
-  margin-bottom: 2px;
-}
-
-.accounts {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  align-items: center;
-  gap: 8px;
-
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.accounts::-webkit-scrollbar {
-  display: none;
-}
-
-.accounts .chip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-
-  padding: 6px 10px;
-  border-radius: 999px;
-
-  background: #f1f3f4;
-  font-size: 14px;
-  font-weight: 600;
-  white-space: nowrap;
-
-  transition: transform 0.12s ease, background 0.15s ease;
-}
-
-.accounts .chip:hover {
-  transform: translateY(-1px) scale(1.02);
-  background: #e8eaed;
-  cursor: pointer;
-}
-
-
-/* ✅ COLOR PICKER */
-.accounts input[type="color"] {
-  border: none;
-  background: transparent;
-  border-radius: 50%;
-}
-
-
-/* =====================================================
-✅ ACTION BUTTONS
-===================================================== */
 .actionButtons {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -174,199 +20,107 @@ body {
   padding: 4px 6px;
 }
 
-.actionButtons>.gearMenuShell {
-  min-width: 0;
+.topQuickActionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
   width: 100%;
 }
 
+.topQuickActionBtn,
 .mobileAccountActionBtn {
-  display: none;
-  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
   min-width: 0;
   width: 100%;
-  padding: 3px 6px;
+  padding: 4px 6px;
   border: 1px solid #cfd9ea;
   border-radius: 8px;
   background: #f7fbff;
   color: #1f3558;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
   white-space: nowrap;
+}
+
+.topQuickActionBtn svg,
+.mobileAccountActionBtn svg,
+.actionButtons>button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.topQuickActionBtn .btnLabel,
+.mobileAccountActionBtn .btnLabel,
+.actionButtons .btnLabel {
+  display: inline-block;
+  line-height: 1;
+}
+
+.mobileAccountActionBtn {
+  display: none;
 }
 
 .mobileQuickStack {
   display: none;
 }
 
-.createMenuShell {
-  position: relative;
-  display: inline-flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-
-.createActionMenu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 180px;
-  display: none;
-  flex-direction: column;
+/* Dedup toggle button — green when ON (default), red-tinted when OFF */
+#dedupBtn {
+  min-width: 96px;
   gap: 6px;
-  padding: 8px;
-  background: #ffffff;
-  border: 1px solid #cfd9ea;
-  border-radius: 10px;
-  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
-  z-index: 2100;
-}
-
-.createMenuShell.open .createActionMenu,
-.createMenuShell:focus-within .createActionMenu {
-  display: flex;
-}
-
-.createActionMenu button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-start;
-  margin: 0;
-  padding: 8px 10px;
-  font-size: 13px;
-  border: 1px solid #d3dce8;
-  border-radius: 8px;
-  background: #f8fbff;
-}
-
-.createActionMenu svg {
-  width: 13px;
-  height: 13px;
-}
-
-#createBtn {
-  white-space: nowrap;
-}
-
-#createBtn .btnLabel {
-  white-space: nowrap;
-}
-
-.mobileAccountActionBtn svg {
-  width: 13px;
-  height: 13px;
-}
-
-.actionButtons>.gearMenuShell>button {
-  min-height: 30px;
-  min-width: 0;
-  width: 100%;
-  padding: 4px 6px;
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 6px;
+  transition: color 0.2s, opacity 0.2s;
 }
 
-.gearMenuShell {
+#dedupBtn.dedup-on {
+  color: #16a34a;
+  background: rgba(22, 163, 74, 0.10);
+  border-color: rgba(22, 163, 74, 0.35);
+}
+
+#dedupBtn.dedup-off {
+  color: #dc2626;
+  opacity: 0.85;
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.35);
+}
+
+#dedupBtn .btnLabel {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* Publish button — clockwise spin (outward/send direction) */
+#publishBtn.is-publishing {
+  opacity: 0.72;
+  cursor: default;
+}
+
+#publishBtn {
   position: relative;
 }
 
-.accountsHoverMenu {
+.publishCountBadge {
   position: absolute;
-  top: calc(100% - 1px);
-  right: 0;
-  left: auto;
-  min-width: 170px;
-  display: none;
-  flex-direction: column;
-  gap: 6px;
-  padding: 8px;
-  background: #ffffff;
-  border: 1px solid #cfd9ea;
-  border-radius: 8px;
-  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
-  z-index: 2000;
-}
-
-@media (max-width: 768px) {
-  .accountsHoverMenu {
-    right: 0;
-    top: calc(100% - 1px);
-    min-width: 160px;
-  }
-}
-
-.gearMenuShell:focus-within .accountsHoverMenu,
-.gearMenuShell.open .accountsHoverMenu {
-  display: flex;
-}
-
-.accountsHoverMenu button {
-  text-align: left;
-  margin: 0;
-  padding: 8px 10px;
-  font-size: 13px;
-  border: 1px solid #d3dce8;
-  border-radius: 7px;
-  background: #f8fbff;
-}
-
-.actionButtons>button svg {
-  width: 16px;
-  height: 16px;
-}
-
-.actionButtons .btnLabel {
-  display: inline-block;
-  line-height: 1;
-}
-
-#createBtn,
-#accountsBtn {
+  top: 4px;
+  right: 5px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-}
-
-#importBtn {
-  opacity: 0.9;
-}
-
-#importBtn .btnLabel {
-  display: none !important;
-}
-
-body[data-layout-mode="desktop"] #createBtn,
-body[data-layout-mode="desktop"] #accountsBtn,
-body[data-layout-mode="large"] #createBtn,
-body[data-layout-mode="large"] #accountsBtn {
-  min-height: 76px;
-}
-
-body[data-layout-mode="mobile"] .actionButtons .btnLabel {
-  font-size: 11px;
 }
 
 body[data-layout-mode="mobile"] #createBtn,
-body[data-layout-mode="mobile"] #accountsBtn {
-  min-height: 28px;
-  gap: 4px;
-}
-
-body[data-layout-mode="mobile"] #createBtn {
-  min-width: 92px;
-  flex-direction: row !important;
-  padding: 4px 8px;
-}
-
-body[data-layout-mode="mobile"] #createBtn .btnLabel {
-  font-size: 9px;
-  line-height: 1;
+body[data-layout-mode="mobile"] #importBtn {
+  min-width: 0;
+  padding: 4px 6px;
 }
 
 body[data-layout-mode="tablet"] .actionButtons .btnLabel,
@@ -375,59 +129,26 @@ body[data-layout-mode="large"] .actionButtons .btnLabel {
   font-size: 12px;
 }
 
-.calendarRangeDisplay {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  align-self: flex-start;
-  margin: -2px 0 2px 0;
-  padding: 2px 7px;
-  font-size: 10px;
-  font-weight: 600;
-  color: #304562;
-  background: #e8edf5;
-  border-radius: 999px;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-button {
-  padding: 6px 12px;
-  font-size: 13px;
-  border-radius: 6px;
-  border: 1px solid #ccc;
-  background: #f5f5f5;
-  cursor: pointer;
-  transition: background 0.15s ease, transform 0.1s ease;
-}
-
-button:hover {
-  background: #e0e0e0;
-}
-
-button.primary {
-  background: #2563eb;
-  color: white;
-  border: none;
-}
-
 @media (min-width: 768px) {
 
   .actionButtons>button,
+  .topQuickActionBtn,
   .actionButtons>.gearMenuShell>button {
     min-height: 36px;
     padding: 7px 10px;
     font-size: 14px;
   }
 
-  .actionButtons>button svg {
+  .actionButtons>button svg,
+  .topQuickActionBtn svg {
     width: 18px;
     height: 18px;
   }
 
-  #accountsBtn {
+  #accountsBtn,
+  #adminBtn,
+  #importBtn,
+  #createBtn {
     font-size: 14px;
   }
 }
@@ -435,40 +156,66 @@ button.primary {
 @media (min-width: 1400px) {
 
   .actionButtons>button,
+  .topQuickActionBtn,
   .actionButtons>.gearMenuShell>button {
     min-height: 42px;
     padding: 9px 12px;
     font-size: 15px;
   }
 
-  .actionButtons>button svg {
+  .actionButtons>button svg,
+  .topQuickActionBtn svg {
     width: 20px;
     height: 20px;
   }
 
-  #accountsBtn {
+  #accountsBtn,
+  #adminBtn,
+  #importBtn,
+  #createBtn {
     font-size: 15px;
   }
 }
 
-#syncBtn.is-syncing {
-  opacity: 0.72;
-  cursor: default;
+align-items: center;
+justify-content: center;
+gap: 6px;
+min-height: 30px;
+min-width: 0;
+width: 100%;
+padding: 4px 6px;
+border: 1px solid #cfd9ea;
+border-radius: 8px;
+background: #f7fbff;
+color: #1f3558;
+white-space: nowrap;
 }
 
-#syncBtn.is-syncing svg {
-  animation: syncIconSpin 0.75s linear infinite;
-  transform-origin: center;
+.topQuickActionBtn svg,
+.mobileAccountActionBtn svg,
+.actionButtons>button svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
 }
 
-@keyframes syncIconSpin {
-  from {
-    transform: rotate(0deg);
-  }
+.topQuickActionBtn .btnLabel,
+.mobileAccountActionBtn .btnLabel,
+.actionButtons .btnLabel {
+  display: inline-block;
+  line-height: 1;
+}
 
-  to {
-    transform: rotate(-360deg);
-  }
+.mobileAccountActionBtn {
+  display: none;
+}
+}
+
+.gearMenuShell:focus-within .accountsHoverMenu,
+.gearMenuShell.open .accountsHoverMenu {
+  font-size: 10px;
+  transform: rotate(-360deg);
+}
 }
 
 /* Dedup toggle button — green when ON (default), red-tinted when OFF */
@@ -1748,14 +1495,20 @@ button.primary {
   width: 16px;
   height: 16px;
   margin-left: 6px;
-  border-radius: 3px;
-  font-size: 11px;
   cursor: grab;
-  background: #f6e08c;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  background: transparent;
+  box-shadow: none;
   user-select: none;
   -webkit-user-drag: element;
   touch-action: none;
+}
+
+.stickyEventIcon>img,
+.stickyEventIcon>svg {
+  width: 10px;
+  height: 10px;
+  display: block;
+  pointer-events: none;
 }
 
 .stickyEventIcon:active {
@@ -2265,6 +2018,13 @@ Large: > 1920
     border-radius: 7px;
   }
 
+  .topQuickActionBtn {
+    min-height: 19px;
+    font-size: 10px;
+    padding: 1px 3px;
+    border-radius: 7px;
+  }
+
   .actionButtons>.gearMenuShell {
     display: none;
   }
@@ -2298,26 +2058,20 @@ Large: > 1920
     letter-spacing: 0.01em;
   }
 
-  .createMenuShell {
-    min-width: 0;
-    width: 100%;
-  }
-
-  .createMenuShell>#createBtn {
-    width: 100%;
-    min-height: 28px;
-    padding: 3px 6px;
-    flex-direction: row;
-  }
-
-  .createActionMenu {
-    left: 0;
-    min-width: 170px;
-  }
-
   .actionButtons>button svg {
     width: 14px;
     height: 14px;
+  }
+
+  .topQuickActionBtn svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  .topQuickActionBtn .btnLabel {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
   }
 
   .mobileAccountActionBtn svg {

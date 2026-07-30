@@ -103,9 +103,7 @@ function buildStickyIcon({ count = 1, title = "Open sticky note", dragPayload = 
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
   icon.title = title;
-  icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
-    <path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/>
-  </svg>`;
+  icon.innerHTML = `<img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" aria-hidden="true" draggable="false">`;
   icon.style.cursor = "grab";
   icon.style.userSelect = "none";
   icon.style.webkitUserDrag = "element";
@@ -262,7 +260,7 @@ function positionContextMenu(menu, x, y) {
 const CTX_MENU_ICONS = {
   create: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>`,
   edit: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z"/></svg>`,
-  sticky: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/></svg>`,
+  sticky: `<img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" aria-hidden="true" draggable="false">`,
   precision: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>`,
   delete: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg>`
 };

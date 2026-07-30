@@ -129,13 +129,13 @@ function getSafeControlIconHtml(btn) {
 
 function applyControlBandDensity(mode) {
   const createBtn = document.getElementById("createBtn");
+  const importBtn = document.getElementById("importBtn");
   const accountsBtn = document.getElementById("accountsBtn");
-  const createMenuShell = document.getElementById("createMenuShell");
+  const adminBtn = document.getElementById("adminBtn");
   const undoBtn = document.getElementById("undoBtn");
   const redoBtn = document.getElementById("redoBtn");
   const syncBtn = document.getElementById("syncBtn");
   const publishBtn = document.getElementById("publishBtn");
-  const importBtn = document.getElementById("importBtn");
   const dedupBtn = document.getElementById("dedupBtn");
   const logoutBtn = document.getElementById("logoutBtn");
 
@@ -149,14 +149,16 @@ function applyControlBandDensity(mode) {
   };
 
   if (mode === "mobile") {
-    withIconLabel(createBtn, "Create / Import");
-    createBtn.title = "Create or import calendar events";
-    withIconLabel(accountsBtn, "Account Menu");
+    withIconLabel(createBtn, "Create");
+    createBtn.title = "Create a new calendar event";
+    withIconLabel(importBtn, "Import");
+    importBtn.title = "Import events from a file";
+    withIconLabel(accountsBtn, "Accounts");
+    withIconLabel(adminBtn, "Admin");
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
-    if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
@@ -165,14 +167,16 @@ function applyControlBandDensity(mode) {
   }
 
   if (mode === "tablet") {
-    withIconLabel(createBtn, "Create / Import");
-    createBtn.title = "Create or import calendar events";
-    withIconLabel(accountsBtn, "Account Menu");
+    withIconLabel(createBtn, "Create");
+    createBtn.title = "Create a new calendar event";
+    withIconLabel(importBtn, "Import");
+    importBtn.title = "Import events from a file";
+    withIconLabel(accountsBtn, "Accounts");
+    withIconLabel(adminBtn, "Admin");
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
-    if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
@@ -180,14 +184,16 @@ function applyControlBandDensity(mode) {
     return;
   }
 
-  withIconLabel(createBtn, "Create / Import");
-  createBtn.title = "Create or import calendar events";
-  withIconLabel(accountsBtn, "Account Menu");
+  withIconLabel(createBtn, "Create");
+  createBtn.title = "Create a new calendar event";
+  withIconLabel(importBtn, "Import");
+  importBtn.title = "Import events from a file";
+  withIconLabel(accountsBtn, "Accounts");
+  withIconLabel(adminBtn, "Admin");
   withIconLabel(undoBtn, "Undo");
   withIconLabel(redoBtn, "Redo");
   withIconLabel(syncBtn, "Sync Now");
   withIconLabel(publishBtn, "Publish");
-  if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
   withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
   withIconLabel(logoutBtn, "Logout");
   _updateDedupBtnUI();
@@ -196,47 +202,25 @@ function applyControlBandDensity(mode) {
 
 function wireCreateActionMenu() {
   const createBtn = document.getElementById("createBtn");
-  const createMenuShell = document.getElementById("createMenuShell");
-  const createNewEventBtn = document.getElementById("createNewEventBtn");
-  const importEventsMenuBtn = document.getElementById("importEventsMenuBtn");
   const importBtn = document.getElementById("importBtn");
   const importFileInput = document.getElementById("importFileInput");
+  const accountsBtn = document.getElementById("accountsBtn");
+  const adminBtn = document.getElementById("adminBtn");
 
-  if (!createBtn || !createMenuShell || createMenuShell.dataset.bound === "1") {
+  if (!createBtn || createBtn.dataset.bound === "1") {
     return;
   }
 
-  createMenuShell.dataset.bound = "1";
+  createBtn.dataset.bound = "1";
 
   createBtn.addEventListener("click", (event) => {
     event.preventDefault();
-    event.stopPropagation();
-    createMenuShell.classList.toggle("open");
-    createBtn.setAttribute("aria-expanded", createMenuShell.classList.contains("open") ? "true" : "false");
-  });
-
-  createNewEventBtn?.addEventListener("click", () => {
-    createMenuShell.classList.remove("open");
-    createBtn.setAttribute("aria-expanded", "false");
     if (window.isModalOpen) return;
     openCreateModal();
   });
 
-  importEventsMenuBtn?.addEventListener("click", () => {
-    createMenuShell.classList.remove("open");
-    createBtn.setAttribute("aria-expanded", "false");
-    importBtn?.click();
-  });
-
   importBtn?.addEventListener("click", () => {
     importFileInput?.click();
-  });
-
-  document.addEventListener("click", (event) => {
-    if (!createMenuShell.contains(event.target)) {
-      createMenuShell.classList.remove("open");
-      createBtn.setAttribute("aria-expanded", "false");
-    }
   });
 }
 
@@ -1334,9 +1318,7 @@ function getEventStickyCount(ev) {
 function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete, dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
-  icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
-    <path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/>
-  </svg>`;
+  icon.innerHTML = `<img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" aria-hidden="true" draggable="false">`;
   icon.title = title;
 
   if (dragPayload) {
@@ -1397,7 +1379,7 @@ function openSidebarStickyMenu(x, y, onOpen, onDelete, onEdit) {
   }
 
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="open-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/></svg></span><span>Open Sticky</span></span></div>
+    <div class="ctx-menu-item" data-action="open-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><img src="/static/icons/sticky-note-mini.svg" width="10" height="10" alt="" draggable="false"></span><span>Open Sticky</span></span></div>
     <div class="ctx-menu-item" data-action="edit-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z"/></svg></span><span>Edit Specific Sticky</span></span></div>
     <div class="ctx-menu-item danger" data-action="delete-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg></span><span>Delete Specific Sticky</span></span></div>
   `;
