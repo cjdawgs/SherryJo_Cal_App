@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import String, cast
+from sqlalchemy import String, cast, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -536,6 +536,87 @@ def _oauth_user_filter(user_id: int):
     return cast(OAuthAccount.user_id, String) == str(user_id)
 
 
+def _build_tv_events_fast_etag(
+    db: Session,
+    user_id: int,
+    selected_date_str: str,
+    current_view: str,
+    window_start: datetime,
+    window_end: datetime,
+    start_key: str,
+    end_key: str,
+) -> str:
+    """
+    Build a cheap change fingerprint for /tv/events.
+
+    This avoids full payload materialization on unchanged data and allows the
+    endpoint to return 304 quickly. The fingerprint is based on row counts and
+    max(updated_at) markers across events, sticky notes, and account metadata.
+    """
+    event_count, event_max_updated = (
+        db.query(
+            func.count(Event.id),
+            func.max(Event.updated_at),
+        )
+        .filter(
+            _event_owner_filter(user_id),
+            Event.start_time >= window_start,
+            Event.start_time <= window_end,
+        )
+        .one()
+    )
+
+    sticky_count, sticky_max_updated = (
+        db.query(
+            func.count(DateStickyNote.id),
+            func.max(DateStickyNote.updated_at),
+        )
+        .filter(
+            _sticky_owner_filter(user_id),
+            DateStickyNote.date >= start_key,
+            DateStickyNote.date <= end_key,
+        )
+        .one()
+    )
+
+    account_count, account_max_updated = (
+        db.query(
+            func.count(OAuthAccount.id),
+            func.max(OAuthAccount.updated_at),
+        )
+        .filter(
+            _oauth_user_filter(user_id),
+            OAuthAccount.sync_enabled.is_(True),
+        )
+        .one()
+    )
+
+    marker = {
+        "v": 1,
+        "selectedDate": selected_date_str,
+        "currentView": current_view,
+        "rangeStart": start_key,
+        "rangeEnd": end_key,
+        "events": {
+            "count": int(event_count or 0),
+            "maxUpdated": _to_iso(event_max_updated),
+        },
+        "sticky": {
+            "count": int(sticky_count or 0),
+            "maxUpdated": _to_iso(sticky_max_updated),
+        },
+        "accounts": {
+            "count": int(account_count or 0),
+            "maxUpdated": _to_iso(account_max_updated),
+        },
+    }
+
+    digest = hashlib.sha256(
+        json.dumps(marker, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
+    ).hexdigest()
+    return f'W/"{digest}"'
+
+
 # ─────────────────────────────────────────────────
 # DIAGNOSTICS  (ring-buffer log of TV lifecycle events)
 # ─────────────────────────────────────────────────
@@ -993,6 +1074,35 @@ def get_tv_events(
         window_start_date, window_end_date = _window_for_view(anchor_date, current_view)
         window_start = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
         window_end = datetime.combine(window_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+        start_key = window_start_date.isoformat()
+        end_key = window_end_date.isoformat()
+
+        fast_etag = None
+        try:
+            fast_etag = _build_tv_events_fast_etag(
+                db=db,
+                user_id=current_user.id,
+                selected_date_str=selected_date_str,
+                current_view=current_view,
+                window_start=window_start,
+                window_end=window_end,
+                start_key=start_key,
+                end_key=end_key,
+            )
+            if request.headers.get("if-none-match") == fast_etag:
+                return Response(
+                    status_code=304,
+                    headers={
+                        "ETag": fast_etag,
+                        "Cache-Control": "no-store",
+                        "X-TV-App-Version": app_version,
+                    },
+                )
+        except SQLAlchemyError:
+            logger.exception(
+                "TV_EVENTS_FAST_ETAG_FAILED user_id=%s; continuing with full payload",
+                current_user.id,
+            )
 
         try:
             events = (
@@ -1021,9 +1131,6 @@ def get_tv_events(
                 events = []
 
         by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
-
-        start_key = window_start_date.isoformat()
-        end_key = window_end_date.isoformat()
         try:
             sticky_rows = (
                 db.query(DateStickyNote)
@@ -1126,7 +1233,7 @@ def get_tv_events(
             "staleData": False,
         }
 
-        payload_etag = f'W/"{hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()}"'
+        payload_etag = fast_etag or f'W/"{hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")).hexdigest()}"'
         if request.headers.get("if-none-match") == payload_etag:
             return Response(status_code=304, headers={"ETag": payload_etag, "Cache-Control": "no-store", "X-TV-App-Version": app_version})
 

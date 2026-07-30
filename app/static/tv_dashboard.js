@@ -4,7 +4,7 @@ const TOKEN_KEY = 'tv_token';
 // TV state remains backend-driven. Poll often enough for a wall display while
 // lifecycle recovery handles FireOS/Silk timer suspension.
 const POLL_MS = 60000;
-const TV_FETCH_TIMEOUT_MS = 15000;
+const TV_FETCH_TIMEOUT_MS = 20000;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
 const DATE_AUTO_ADVANCE_DEBOUNCE_MS = 5000;
@@ -339,6 +339,7 @@ const state = {
   updateReloadTimer: null,
   authStatus: IS_KIOSK ? 'kiosk' : 'unpaired',
   lastAuthIssue: '',
+  lastAuthFetchError: null,
   debug: {
     visible: false,
     lines: [],
@@ -1509,10 +1510,36 @@ async function refreshEvents(force = false, options = {}) {
     applySyncVisualState();
   }
   const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
-  const res = await authFetch('/tv/events', { cache: 'no-store', timeoutMs: TV_FETCH_TIMEOUT_MS, headers: eventsRequestHeaders });
+  let res = await authFetch('/tv/events', {
+    cache: 'no-store',
+    timeoutMs: TV_FETCH_TIMEOUT_MS,
+    headers: eventsRequestHeaders,
+    suppressNetworkHint: true,
+  });
+
+  if (!res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
+    if (tvDiag) tvDiag.log('tv_events_timeout_retry', `retrying /tv/events after timeout (${state.lastAuthFetchError.message})`);
+    res = await authFetch('/tv/events', {
+      cache: 'no-store',
+      timeoutMs: TV_FETCH_TIMEOUT_MS + 5000,
+      headers: eventsRequestHeaders,
+      suppressNetworkHint: true,
+    });
+  }
+
   try {
     if (!res) {
-      if (showSync) setSyncStatus(false, 'Sync Failed');
+      const networkMessage = state.lastAuthFetchError && state.lastAuthFetchError.message
+        ? state.lastAuthFetchError.message
+        : 'Network request failed';
+      if (showSync) {
+        if (state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
+          setSyncStatus(false, 'Sync delayed - keeping last known data');
+        } else {
+          setSyncStatus(false, 'Sync Failed');
+        }
+      }
+      renderFooterHint(`Network issue: ${networkMessage}`);
       return;
     }
 
@@ -1648,6 +1675,8 @@ async function authFetch(url, options = {}) {
     const timeoutMs = Number(options.timeoutMs || TV_FETCH_TIMEOUT_MS);
     const requestOptions = Object.assign({}, options);
     delete requestOptions.timeoutMs;
+    const suppressNetworkHint = Boolean(requestOptions.suppressNetworkHint);
+    delete requestOptions.suppressNetworkHint;
 
     const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
     const fetchPromise = fetch(url, Object.assign({}, requestOptions, { headers }));
@@ -1657,6 +1686,7 @@ async function authFetch(url, options = {}) {
       }, timeoutMs);
     });
     const res = await Promise.race([fetchPromise, timeoutPromise]);
+    state.lastAuthFetchError = null;
     if (res.status === 401) {
       if (IS_KIOSK) {
         state.authStatus = 'invalid';
@@ -1676,7 +1706,15 @@ async function authFetch(url, options = {}) {
     return res;
   } catch (err) {
     const message = err && err.message ? err.message : 'Network request failed';
-    renderFooterHint(`Network issue: ${message}`);
+    state.lastAuthFetchError = {
+      message,
+      isTimeout: /timed out/i.test(String(message)),
+      url,
+      at: Date.now(),
+    };
+    if (!options.suppressNetworkHint) {
+      renderFooterHint(`Network issue: ${message}`);
+    }
     return null;
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
