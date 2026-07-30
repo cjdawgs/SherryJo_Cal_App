@@ -13,6 +13,7 @@ NOW = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
 def make_account(**kwargs):
     defaults = {
         "access_token": "healthy-token",
+        "provider": "google",
         "sync_frequency_minutes": 5,
         "last_sync": None,
         "last_sync_success": None,
@@ -185,6 +186,18 @@ def test_sync_due_once_cadence_elapsed():
     assert due is True
 
 
+def test_sync_uses_provider_floor_for_apple_cadence(monkeypatch):
+    monkeypatch.setenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", "240")
+    accounts = [
+        make_account(provider="apple", sync_frequency_minutes=5, last_sync=NOW - timedelta(minutes=120)),
+    ]
+
+    due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
+
+    assert due is False
+    assert cadence == 240
+
+
 # ==================================================
 # RUN EVENT SYNC
 # ==================================================
@@ -316,11 +329,12 @@ def test_run_event_sync_verbose_prints_results(monkeypatch, reset_sync_state, ca
 def test_start_scheduler_registers_job(monkeypatch):
     scheduler = MagicMock()
     monkeypatch.setattr(sync_scheduler, "scheduler", scheduler)
+    monkeypatch.setenv("SYNC_SCHEDULER_HEARTBEAT_MINUTES", "7")
 
     sync_scheduler.start_scheduler()
 
     jobs = {call[1]["id"]: call[1] for call in scheduler.add_job.call_args_list}
-    assert jobs["event_sync_job"]["minutes"] == 5
+    assert jobs["event_sync_job"]["minutes"] == 7
     assert jobs["event_sync_job"]["replace_existing"] is True
     assert jobs["tv_diag_prune_job"]["hours"] == 24
     assert jobs["sync_efficiency_rollup_job"]["hour"] == 0
@@ -343,6 +357,7 @@ def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):
     assert health["last_finished_at"] == (NOW + timedelta(seconds=30)).isoformat()
     assert health["next_run_at"] == (NOW + timedelta(minutes=5)).isoformat()
     assert health["frequency_minutes"] == 5
+    assert health["apple_min_frequency_minutes"] == 240
     assert health["last_error"] is None
     assert "adaptive_backoff" in health
     assert "efficiency" in health

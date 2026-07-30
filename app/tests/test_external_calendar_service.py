@@ -274,7 +274,7 @@ def test_fetch_icloud_events_normalizes_results(service, monkeypatch):
     vevent = make_vevent(start=datetime(2026, 3, 1, 9, tzinfo=timezone.utc),
                          end=datetime(2026, 3, 1, 10, tzinfo=timezone.utc))
     calendar = MagicMock()
-    calendar.date_search.return_value = [SimpleNamespace(
+    calendar.search.return_value = [SimpleNamespace(
         vobject_instance=SimpleNamespace(vevent=vevent)
     )]
     monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
@@ -290,6 +290,7 @@ def test_fetch_icloud_events_normalizes_results(service, monkeypatch):
 def test_fetch_icloud_events_falls_back_to_events_call(service, monkeypatch):
     vevent = make_vevent(start=datetime(2026, 3, 1, 9, tzinfo=timezone.utc))
     calendar = MagicMock()
+    calendar.search.side_effect = Exception("search unsupported")
     calendar.date_search.side_effect = Exception("date_search unsupported")
     calendar.events.return_value = [SimpleNamespace(
         vobject_instance=SimpleNamespace(vevent=vevent)
@@ -305,7 +306,7 @@ def test_fetch_icloud_events_falls_back_to_events_call(service, monkeypatch):
 def test_fetch_icloud_events_uses_end_when_start_missing(service, monkeypatch):
     vevent = make_vevent(start=None, end=datetime(2026, 3, 1, 10, tzinfo=timezone.utc))
     calendar = MagicMock()
-    calendar.date_search.return_value = [SimpleNamespace(
+    calendar.search.return_value = [SimpleNamespace(
         vobject_instance=SimpleNamespace(vevent=vevent)
     )]
     monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
@@ -319,7 +320,7 @@ def test_fetch_icloud_events_skips_undated_and_unparsable_entries(service, monke
     undated = SimpleNamespace(vobject_instance=SimpleNamespace(vevent=make_vevent()))
     no_vevent = SimpleNamespace(vobject_instance=None, data=None)
     calendar = MagicMock()
-    calendar.date_search.return_value = [undated, no_vevent]
+    calendar.search.return_value = [undated, no_vevent]
     monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
 
     assert service.fetch_icloud_events("url", "user", "pass") == []
@@ -334,7 +335,7 @@ def test_fetch_icloud_events_returns_empty_on_connection_failure(service, monkey
 def test_fetch_apple_calendar_events_reads_account_credentials(service, monkeypatch):
     vevent = make_vevent(start=datetime(2026, 3, 1, 9, tzinfo=timezone.utc))
     calendar = MagicMock()
-    calendar.date_search.return_value = [SimpleNamespace(
+    calendar.search.return_value = [SimpleNamespace(
         vobject_instance=SimpleNamespace(vevent=vevent)
     )]
     caldav_module = make_caldav(calendars=[calendar])

@@ -42,6 +42,21 @@ from app.utils import (
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_APPLE_MIN_SYNC_MINUTES = 240
+
+
+def _apple_min_sync_minutes() -> int:
+    try:
+        return max(15, int(os.getenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", str(DEFAULT_APPLE_MIN_SYNC_MINUTES))))
+    except ValueError:
+        return DEFAULT_APPLE_MIN_SYNC_MINUTES
+
+
+def _provider_sync_frequency_floor(provider: str | None) -> int:
+    if normalize_provider(provider) == "apple":
+        return _apple_min_sync_minutes()
+    return 1
+
 
 # ============================================================
 # ROUTER SETUP
@@ -477,7 +492,9 @@ def update_account_sync_settings(
     account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
     if payload.sync_frequency_minutes is not None:
-        account.sync_frequency_minutes = max(1, min(int(payload.sync_frequency_minutes), 1440))
+        requested = max(1, min(int(payload.sync_frequency_minutes), 1440))
+        floor = _provider_sync_frequency_floor(account.provider)
+        account.sync_frequency_minutes = max(floor, requested)
 
     if payload.sync_range_days is not None:
         account.sync_range_days = max(1, min(int(payload.sync_range_days), 3650))

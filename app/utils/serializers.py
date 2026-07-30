@@ -1,6 +1,7 @@
 """Shared API serializers."""
 
 from datetime import datetime, timezone
+import os
 
 from typing import TYPE_CHECKING
 
@@ -14,7 +15,13 @@ if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle with app.models
 
 def account_sync_summary(account: "OAuthAccount") -> dict:
     """Sync-related fields shared by the account list and sync-status payloads."""
-    from app.services.multi_account_oauth_service import resolve_account_status
+    from app.services.multi_account_oauth_service import resolve_account_status, normalize_provider
+
+    configured_frequency = max(1, int(getattr(account, "sync_frequency_minutes", 5) or 5))
+    apple_floor = _apple_min_sync_minutes()
+    effective_frequency = configured_frequency
+    if normalize_provider(getattr(account, "provider", "")) == "apple":
+        effective_frequency = max(configured_frequency, apple_floor)
 
     decrypt_error = False
     credential_warning = None
@@ -44,7 +51,7 @@ def account_sync_summary(account: "OAuthAccount") -> dict:
         "last_sync_success": iso_or_none(getattr(account, "last_sync_success", None)),
         "last_sync_failure": iso_or_none(getattr(account, "last_sync_failure", None)),
         "last_error": getattr(account, "last_error", None),
-        "sync_frequency_minutes": getattr(account, "sync_frequency_minutes", 5) or 5,
+        "sync_frequency_minutes": effective_frequency,
         "sync_range_days": getattr(account, "sync_range_days", 30) or 30,
         "last_manual_refresh_at": iso_or_none(
             getattr(account, "last_manual_refresh_at", None)
@@ -56,6 +63,13 @@ def account_sync_summary(account: "OAuthAccount") -> dict:
         },
         "token_issue": token_issue,
     }
+
+
+def _apple_min_sync_minutes() -> int:
+    try:
+        return max(15, int(os.getenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", "240")))
+    except ValueError:
+        return 240
 
 
 def account_summary(account: "OAuthAccount") -> dict:

@@ -12,6 +12,7 @@ const INPUT_MODE_STORAGE_KEY = 'tv_input_mode';
 const REMOTE_CAPABILITIES_STORAGE_KEY = 'tv_remote_capabilities_v1';
 const REMOTE_ACTION_ECHO_MS = 1400;
 const UPDATE_RELOAD_DELAY_MS = 9000;
+const VIEW_PAYLOAD_CACHE_LIMIT = 24;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 const CLIENT_APP_VERSION = String(window.TV_APP_VERSION || 'dev-local');
@@ -374,6 +375,8 @@ const state = {
   accountChipPressFired: false,
   accountChipClickTimer: null,
   accountChipClickCount: 0,
+  viewPayloadCache: {},
+  viewPayloadCacheOrder: [],
 };
 
 let dom = {};
@@ -1448,6 +1451,8 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.accountChipPressTimer = null;
   state.accountChipClickTimer = null;
   state.accountChipClickCount = 0;
+  state.viewPayloadCache = {};
+  state.viewPayloadCacheOrder = [];
   state.lastObservedDayKey = null;
   closeUtilityPanel();
   state.userEmail = null;
@@ -1547,6 +1552,10 @@ async function refreshEvents(force = false, options = {}) {
 
     if (res.status === 304) {
       state.lastEventsFetchAt = Date.now();
+      if (!state.days.length) {
+        const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate);
+        if (hydrated) render();
+      }
       if (showSync) setSyncStatus(true, 'Sync Succeed - No changes detected');
       return;
     }
@@ -1613,6 +1622,12 @@ async function refreshEvents(force = false, options = {}) {
 
       state.lastDataSnapshotIndex = nextIndex;
       state.lastDataSignature = nextSignature;
+      rememberViewPayload(
+        data.currentView || state.currentView,
+        data.selectedDate || state.selectedDate,
+        state.days,
+        state.serverAccounts,
+      );
     }
 
     if (staleData) {
@@ -2260,12 +2275,14 @@ function shiftByView(direction) {
     d.setMonth(d.getMonth() + direction);
     state.selectedDate = toISO(d);
     state.monthDetailOpen = false;
+    hydrateFromViewCache(state.currentView, state.selectedDate);
     render();
     patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).then(() => refreshEvents(true));
     return;
   }
   const next = offsetDate(d, direction * delta);
   state.selectedDate = toISO(next);
+  hydrateFromViewCache(state.currentView, state.selectedDate);
   render();
   patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
@@ -2274,6 +2291,7 @@ function goToday() {
   closeEditor(true);
   state.monthDetailOpen = false;
   state.selectedDate = toISO(new Date());
+  hydrateFromViewCache(state.currentView, state.selectedDate);
   render();
   patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).then(() => refreshEvents(true));
 }
@@ -2292,6 +2310,7 @@ function setView(viewName, options = {}) {
     };
   }
   if (viewName !== 'month') state.monthDetailOpen = false;
+  hydrateFromViewCache(viewName, state.selectedDate);
   render();
   patchTvState({ currentView: viewName }, { recordHistory: true }).then(() => refreshEvents(true));
 }
@@ -2337,6 +2356,40 @@ function buildMonthDates(anchorDate) {
     out.push(toISO(offsetDate(start, i)));
   }
   return out;
+}
+
+function buildViewCacheKey(viewName, selectedDate) {
+  const view = String(viewName || state.currentView || 'day');
+  const date = String(selectedDate || state.selectedDate || '');
+  return `${view}|${date}`;
+}
+
+function rememberViewPayload(viewName, selectedDate, days, accounts) {
+  const key = buildViewCacheKey(viewName, selectedDate);
+  state.viewPayloadCache[key] = {
+    days: Array.isArray(days) ? days : [],
+    accounts: Array.isArray(accounts) ? accounts : [],
+    cachedAt: Date.now(),
+  };
+  state.viewPayloadCacheOrder = state.viewPayloadCacheOrder.filter((entryKey) => entryKey !== key);
+  state.viewPayloadCacheOrder.push(key);
+  while (state.viewPayloadCacheOrder.length > VIEW_PAYLOAD_CACHE_LIMIT) {
+    const staleKey = state.viewPayloadCacheOrder.shift();
+    if (staleKey) delete state.viewPayloadCache[staleKey];
+  }
+}
+
+function hydrateFromViewCache(viewName, selectedDate) {
+  const key = buildViewCacheKey(viewName, selectedDate);
+  const cached = state.viewPayloadCache[key];
+  if (!cached) return false;
+  state.days = Array.isArray(cached.days) ? cached.days : [];
+  state.serverAccounts = Array.isArray(cached.accounts) ? cached.accounts : [];
+  state.dayMap = {};
+  for (const day of state.days) {
+    if (day && day.date) state.dayMap[day.date] = day;
+  }
+  return true;
 }
 
 function dayData(dateKey) {
@@ -2776,6 +2829,20 @@ function normalizeAccountIdentifier(value) {
   return raw;
 }
 
+function isEmailLikeAccount(value) {
+  const raw = String(value || '').trim();
+  return /.+@.+\..+/.test(raw);
+}
+
+function isGenericProviderBucket(source, account) {
+  const normalizedSource = normalizeAccountSource(source);
+  const normalizedAccount = normalizeAccountIdentifier(account);
+  if (!normalizedAccount) return true;
+  if (normalizedAccount === normalizedSource) return true;
+  if (normalizedAccount === `${normalizedSource}_calendar`) return true;
+  return false;
+}
+
 function parseCompositeAccountKey(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -3193,7 +3260,9 @@ function syncAccountLegend() {
     const color = normalizeHexColor(account.color) || '#9AA3B2';
     map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
     colorMap[identity.key] = color;
-    colorMap[identity.account] = color;
+    if (!isGenericProviderBucket(identity.source, identity.account)) {
+      colorMap[identity.account] = color;
+    }
   }
 
   for (const day of state.days) {
@@ -3210,7 +3279,9 @@ function syncAccountLegend() {
         });
       }
       if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
-      if (eventColor && !colorMap[identity.account]) colorMap[identity.account] = eventColor;
+      if (eventColor && !isGenericProviderBucket(identity.source, identity.account) && !colorMap[identity.account]) {
+        colorMap[identity.account] = eventColor;
+      }
     }
   }
   state.accountLegend = Array.from(map.values());
@@ -3233,10 +3304,12 @@ function resolveEventColor(ev) {
   const identity = eventAccountIdentity(ev);
   const exact = state.accountColorMap[identity.key];
   if (exact) return exact;
-  const byAccount = state.accountColorMap[identity.account];
-  if (byAccount) return byAccount;
   const direct = normalizeHexColor(ev.color);
   if (direct) return direct;
+  if (!isGenericProviderBucket(identity.source, identity.account)) {
+    const byAccount = state.accountColorMap[identity.account];
+    if (byAccount) return byAccount;
+  }
   return '#8EA4C4';
 }
 

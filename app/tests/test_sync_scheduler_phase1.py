@@ -11,6 +11,7 @@ NOW = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
 
 def _account(**kwargs):
     defaults = {
+        "provider": "google",
         "sync_frequency_minutes": 5,
         "sync_range_days": 30,
         "last_sync": NOW - timedelta(hours=1),

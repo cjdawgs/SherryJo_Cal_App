@@ -41,6 +41,9 @@ last_global_sync_started_at = None
 last_global_sync_finished_at = None
 last_global_sync_error = None
 
+DEFAULT_SYNC_HEARTBEAT_MINUTES = 5
+DEFAULT_APPLE_MIN_SYNC_MINUTES = 240
+
 # In-memory adaptive throttling state.
 # Keys are user IDs so each user can independently back off when their calendar
 # repeatedly returns no changes.
@@ -78,6 +81,42 @@ def _adaptive_backoff_max_minutes() -> int:
         return max(5, int(os.getenv("SYNC_ADAPTIVE_BACKOFF_MAX_MINUTES", "60")))
     except ValueError:
         return 60
+
+
+def _scheduler_heartbeat_minutes() -> int:
+    """How often the scheduler wakes up to evaluate per-user due state."""
+    try:
+        return max(1, int(os.getenv("SYNC_SCHEDULER_HEARTBEAT_MINUTES", str(DEFAULT_SYNC_HEARTBEAT_MINUTES))))
+    except ValueError:
+        return DEFAULT_SYNC_HEARTBEAT_MINUTES
+
+
+def _apple_min_sync_minutes() -> int:
+    """Provider floor for Apple/CalDAV polling cadence."""
+    try:
+        return max(15, int(os.getenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", str(DEFAULT_APPLE_MIN_SYNC_MINUTES))))
+    except ValueError:
+        return DEFAULT_APPLE_MIN_SYNC_MINUTES
+
+
+def _normalized_provider(account) -> str:
+    return str(getattr(account, "provider", "") or "").strip().lower()
+
+
+def _effective_account_sync_minutes(account) -> int:
+    """
+    Compute provider-aware cadence.
+
+    Apple/CalDAV should not churn at 5-minute intervals by default because it
+    has no upstream delta token and each poll is usually a full-window scan.
+    """
+    configured = int(getattr(account, "sync_frequency_minutes", 5) or 5)
+    configured = max(1, configured)
+
+    if _normalized_provider(account) == "apple":
+        return max(configured, _apple_min_sync_minutes())
+
+    return configured
 
 
 def _compute_sync_window_days(accounts) -> int:
@@ -220,7 +259,7 @@ def _register_sync_outcome(user_id: int, accounts, had_changes: bool, now: datet
         _record_sync_efficiency(had_changes)
         return
 
-    base_cadence = min(max(int(getattr(a, "sync_frequency_minutes", 5) or 5), 1) for a in accounts)
+    base_cadence = min(_effective_account_sync_minutes(a) for a in accounts)
 
     if had_changes:
         _no_change_streak_by_user[user_id] = 0
@@ -249,7 +288,7 @@ def _is_user_sync_due(user_id: int, accounts, now):
     if not accounts:
         return False, None
 
-    cadence = min(max(int(getattr(account, "sync_frequency_minutes", 5) or 5), 1) for account in accounts)
+    cadence = min(_effective_account_sync_minutes(account) for account in accounts)
 
     if _adaptive_backoff_enabled():
         override_due = _next_due_override_by_user.get(user_id)
@@ -422,13 +461,15 @@ def start_scheduler():
     """
     Starts the background scheduler
     
-    Runs every 5 minutes (change below if needed)
+    Wakes on a short heartbeat and only syncs users/accounts that are due.
     """
+
+    heartbeat_minutes = _scheduler_heartbeat_minutes()
 
     scheduler.add_job(
         run_event_sync,
         "interval",
-        minutes=5,   # ✅ You can change this (e.g., 1 for faster testing)
+        minutes=heartbeat_minutes,
         id="event_sync_job",
         replace_existing=True
     )
@@ -452,7 +493,11 @@ def start_scheduler():
 
     scheduler.start()
 
-    logger.info("[SCHEDULER] Background sync started (every 5 min); diag prune daily; sync rollup daily")
+    logger.info(
+        "[SCHEDULER] Background sync started (heartbeat=%s min, apple_min=%s min); diag prune daily; sync rollup daily",
+        heartbeat_minutes,
+        _apple_min_sync_minutes(),
+    )
 
 
 def get_scheduler_health(user_id: int | None = None):
@@ -501,7 +546,8 @@ def get_scheduler_health(user_id: int | None = None):
         "last_finished_at": last_global_sync_finished_at.isoformat() if last_global_sync_finished_at else None,
         "last_error": last_global_sync_error,
         "next_run_at": next_run,
-        "frequency_minutes": 5,
+        "frequency_minutes": _scheduler_heartbeat_minutes(),
+        "apple_min_frequency_minutes": _apple_min_sync_minutes(),
         "adaptive_backoff": adaptive_summary,
         "adaptive_backoff_user": adaptive_user,
         "efficiency": {

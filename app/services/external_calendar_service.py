@@ -141,6 +141,47 @@ class ExternalCalendarService:
     # --------------------------------------------------
     # ICLOUD / CALDAV
     # --------------------------------------------------
+    @staticmethod
+    def _calendar_window_search(calendar, search_start, search_end):
+        """
+        Prefer `calendar.search` to avoid deprecation warnings from `date_search`.
+        Keep compatibility fallbacks for older server/client combinations.
+        """
+        search_err = None
+
+        for kwargs in (
+            {"start": search_start, "end": search_end, "event": True, "expand": True},
+            {"start": search_start, "end": search_end, "expand": True},
+            {"start": search_start, "end": search_end},
+        ):
+            try:
+                events = calendar.search(**kwargs)
+                if events is not None:
+                    return events
+            except TypeError:
+                continue
+            except Exception as exc:
+                search_err = exc
+                break
+
+        try:
+            events = calendar.date_search(
+                start=search_start,
+                end=search_end,
+                expand=True,
+            )
+            return events
+        except Exception as date_search_exc:
+            if search_err is not None:
+                logger.warning(
+                    "⚠️ Apple search/date_search fallback to events(): search=%s date_search=%s",
+                    search_err,
+                    date_search_exc,
+                )
+            else:
+                logger.warning(f"⚠️ Apple date_search fallback to events(): {date_search_exc}")
+            return calendar.events()
+
     def fetch_icloud_events(
         self,
         url: str,
@@ -168,14 +209,9 @@ class ExternalCalendarService:
 
             for calendar in calendars:
                 try:
-                    # Apple can under-return with plain events(); date_search is more reliable.
-                    events = calendar.date_search(
-                        start=search_start,
-                        end=search_end,
-                        expand=True
-                    )
+                    events = self._calendar_window_search(calendar, search_start, search_end)
                 except Exception as e:
-                    logger.warning(f"⚠️ Apple date_search fallback to events(): {e}")
+                    logger.warning(f"⚠️ Apple calendar search fallback to events(): {e}")
                     events = calendar.events()
 
                 logger.info(f"🍎 Apple calendar fetch count: {len(events)}")
