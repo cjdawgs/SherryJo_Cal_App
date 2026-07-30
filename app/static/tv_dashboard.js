@@ -854,19 +854,24 @@ function ensureStyles() {
   .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
-  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; color: rgba(48,34,0,0.95); }
-  .tv-sticky-indicator::before { content: ''; width: 10px; height: 10px; flex: 0 0 10px; background: center / contain no-repeat url('/static/icons/sticky-note-mini.svg'); }
-  .tv-inline-sticky-badge { position: static; width: auto; min-width: 20px; height: 16px; padding: 0 4px; margin-left: 6px; vertical-align: middle; }
-  .tv-sticky-count-indicator { width: auto; min-width: 20px; padding: 0 3px; background: rgba(255,250,228,0.9); border: 1px solid rgba(186,146,39,0.78); border-radius: 999px; box-shadow: 0 1px 2px rgba(0,0,0,0.22); }
-  .tv-sticky-count-indicator .tv-sticky-count-label { font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.95); line-height: 1; }
-  .tv-month-sticky-indicator { top: 6px; right: 6px; min-width: 22px; height: 18px; }
+  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
+  .tv-sticky-indicator::before { content: 'S'; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.9); line-height: 1; }
+  .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
+  .tv-inline-sticky-badge { position: static; width: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
+  .tv-inline-sticky-badge::before { font-size: 8px; }
+  .tv-sticky-count-indicator { width: auto; min-width: 14px; padding: 0 3px; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.95); }
+  .tv-sticky-count-indicator::before,
+  .tv-sticky-count-indicator::after { content: none; }
+  .tv-month-sticky-indicator { top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 4px; font-size: 9px; font-weight: 800; color: rgba(48,34,0,0.95); }
+  .tv-month-sticky-indicator::before,
+  .tv-month-sticky-indicator::after { content: none; }
   .tv-month-date { font-size: 18px; font-weight: 700; margin-bottom: 6px; }
   .tv-month-count { font-size: 10px; opacity: 0.68; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.8px; }
   .tv-month-preview-list { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
   .tv-month-preview { position: relative; border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 2px 5px; font-size: 10px; opacity: 0.96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
   .tv-month-preview-time { opacity: 0.92; margin-right: 4px; font-weight: 700; }
   .tv-month-preview-title { opacity: 0.96; }
-  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 20px; height: 16px; padding: 0 3px; margin-left: 4px; vertical-align: middle; }
+  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: auto; min-width: 11px; height: 11px; padding: 0 2px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(145,112,18,0.9); background: rgba(255,226,106,0.98); color: rgba(48,34,0,0.9); font-size: 7px; font-weight: 800; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
@@ -2799,7 +2804,7 @@ function renderStickyCountBadge(count, ariaLabel, extraClass = '') {
   if (!label) return '';
 
   const className = `tv-sticky-indicator tv-sticky-count-indicator${extraClass ? ` ${extraClass}` : ''}`;
-  return `<span class="${className}" aria-label="${escapeHtml(ariaLabel)}"><span class="tv-sticky-count-label">${escapeHtml(label)}</span></span>`;
+  return `<span class="${className}" aria-label="${escapeHtml(ariaLabel)}">${escapeHtml(label)}</span>`;
 }
 
 function eventHasStickyPayload(event) {
@@ -3464,11 +3469,7 @@ function renderMonthCell(day, idx) {
       const border = softColor(eventColor, 0.52);
       const eventStickyCount = getEventStickyNoteCount(ev);
       const stickyFlag = eventStickyCount > 0
-        ? renderStickyCountBadge(
-          eventStickyCount,
-          `${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`,
-          'tv-inline-sticky-badge tv-inline-sticky'
-        )
+        ? `<span class="tv-inline-sticky" aria-label="${escapeHtml(`${eventStickyCount} sticky note${eventStickyCount === 1 ? '' : 's'} on event`)}">${escapeHtml(getStickyBadgeLabel(eventStickyCount))}</span>`
         : '';
       return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
     }).join('')}</div>`

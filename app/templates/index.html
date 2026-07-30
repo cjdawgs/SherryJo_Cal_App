@@ -70,30 +70,43 @@
           <!-- ✅ ACTION BUTTONS -->
           <div class="actionButtons">
 
-            <!-- ✅ ACTION BUTTON MODEL: Create, Import, Accounts, Admin -->
-            <div class="topQuickActionGrid" aria-label="Quick actions">
-              <button id="createBtn" class="topQuickActionBtn" title="Create a new event" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+            <!-- ✅ UPDATED BUTTON (Create / Import split action) -->
+            <div id="createMenuShell" class="createMenuShell">
+              <button id="createBtn"
+                title="Create a new event or import events from a file"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
                   <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 15H5V9h14v10zm-8-7h2v2h2v2h-2v2h-2v-2H9v-2h2v-2z"/>
                 </svg>
-                <span class="btnLabel">Create</span>
+                <span class="btnLabel">Create / Import</span>
               </button>
+              <div id="createActionMenu" class="createActionMenu" role="menu" aria-label="Create or import actions">
+                <button id="createNewEventBtn" type="button" role="menuitem">
+                  <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 15H5V9h14v10zm-8-7h2v2h2v2h-2v2h-2v-2H9v-2h2v-2z"/>
+                  </svg>
+                  <span>Create Event</span>
+                </button>
+                <button id="importEventsMenuBtn" type="button" role="menuitem">
+                  <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="currentColor" d="M5 20h14v-2H5v2zm7-16-5.5 5.5h3.5V16h4V9.5H17.5L12 4z"/>
+                  </svg>
+                  <span>Import Events</span>
+                </button>
+              </div>
+            </div>
 
-              <button id="importBtn" class="topQuickActionBtn" title="Import events from .ics, .csv, or .json files" type="button">
-                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="currentColor" d="M5 20h14v-2H5v2zm7-16-5.5 5.5h3.5V16h4V9.5H17.5L12 4z"/>
-                </svg>
-                <span class="btnLabel">Import</span>
-              </button>
-
-              <button id="accountsBtn" class="topQuickActionBtn" title="Open connected accounts" type="button">
+            <div id="mobileQuickStack" class="mobileQuickStack" aria-label="Quick account actions">
+              <button id="manageAccountsQuickBtn" class="mobileAccountActionBtn" title="Manage connected accounts" type="button">
                 <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
                   <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm-4 6c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4v-1z"/>
                 </svg>
-                <span class="btnLabel">Accounts</span>
+                <span class="btnLabel">Account</span>
               </button>
 
-              <button id="adminBtn" class="topQuickActionBtn hidden" title="Open admin dashboard" type="button">
+              <button id="adminQuickBtn" class="mobileAccountActionBtn hidden" title="Open admin dashboard" type="button">
                 <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
                   <path fill="currentColor" d="M12 2 4 5v6c0 5.25 3.67 10.18 8 11 4.33-.82 8-5.75 8-11V5l-8-3zm-1 13-3-3 1.41-1.41L11 12.17l4.59-4.58L17 9l-6 6z"/>
                 </svg>
@@ -101,7 +114,24 @@
               </button>
             </div>
 
-            <input id="importFileInput" type="file" accept=".ics,.ical,.csv,.json,application/json,text/calendar,text/csv" class="hidden" />
+            <!--
+            <button id="addTaskBtn">Add</button>
+            <button id="saveEventBtn">Save</button>
+            <button id="cancelEventBtn">Cancel</button>
+            -->
+
+            <!-- ✅ ACCOUNTS / ADMIN HOVER MENU -->
+            <div class="gearMenuShell" id="gearMenuShell">
+              <button id="accountsBtn" title="Open account actions" aria-haspopup="menu" aria-expanded="false">
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.25 7.25 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.88 2h-3.76a.5.5 0 0 0-.49.42l-.36 2.54c-.58.23-1.13.54-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.72 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.49.42h3.76c.24 0 .45-.18.49-.42l.36-2.54c.58-.23 1.13-.54 1.63-.94l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/>
+                </svg>
+              </button>
+              <div id="accountsHoverMenu" class="accountsHoverMenu" role="menu" aria-label="Account actions">
+                <button id="manageAccountsMenuBtn" type="button" role="menuitem">Manage Accounts</button>
+                <button id="adminMenuBtn" type="button" role="menuitem" class="hidden">Admin Dashboard</button>
+              </div>
+            </div>
 
             <!-- ✅ UNDO/REDO + SYNC (requested order: Undo, Redo, Sync) -->
             <button id="undoBtn" title="Undo (Ctrl+Z)" disabled>
@@ -130,6 +160,14 @@
                   d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/>
               </svg>
             </button>
+
+            <button id="importBtn" title="Import events from .ics, .csv, or .json files">
+              <svg width="14" height="14" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M5 20h14v-2H5v2zm7-16-5.5 5.5h3.5V16h4V9.5H17.5L12 4z"/>
+              </svg>
+            </button>
+
+            <input id="importFileInput" type="file" accept=".ics,.ical,.csv,.json,application/json,text/calendar,text/csv" class="hidden" />
 
             <!-- ✅ DEDUP TOGGLE — merge identical cross-account events into one canonical row -->
             <button id="dedupBtn" title="Toggle cross-account deduplication">

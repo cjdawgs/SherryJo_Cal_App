@@ -2232,29 +2232,72 @@ function bindUIEvents() {
   }
 
   const accountsBtn = document.getElementById("accountsBtn");
-  const adminBtn = document.getElementById("adminBtn");
+  const gearMenuShell = document.getElementById("gearMenuShell");
+  const manageAccountsMenuBtn = document.getElementById("manageAccountsMenuBtn");
+  const adminMenuBtn = document.getElementById("adminMenuBtn");
+  const manageAccountsQuickBtn = document.getElementById("manageAccountsQuickBtn");
+  const adminQuickBtn = document.getElementById("adminQuickBtn");
 
-  accountsBtn?.addEventListener("click", () => {
+  accountsBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    gearMenuShell?.classList.toggle("open");
+    accountsBtn.setAttribute("aria-expanded", gearMenuShell?.classList.contains("open") ? "true" : "false");
+  });
+
+  manageAccountsMenuBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
     window.location.href = "/accounts/ui";
   });
 
-  adminBtn?.addEventListener("click", () => {
+  manageAccountsQuickBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
+    window.location.href = "/accounts/ui";
+  });
+
+  adminMenuBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
     window.location.href = "/admin/ui";
   });
 
-  if (adminBtn) {
-    adminBtn.classList.add("hidden");
+  adminQuickBtn?.addEventListener("click", () => {
+    gearMenuShell?.classList.remove("open");
+    window.location.href = "/admin/ui";
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!gearMenuShell) return;
+    if (!gearMenuShell.contains(event.target)) {
+      gearMenuShell.classList.remove("open");
+      accountsBtn?.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      gearMenuShell?.classList.remove("open");
+      accountsBtn?.setAttribute("aria-expanded", "false");
+      if (window.isModalOpen) {
+        closeCreateModal();
+      }
+    }
+  });
+
+  if (adminMenuBtn) {
+    adminMenuBtn.classList.add("hidden");
+    adminQuickBtn?.classList.add("hidden");
 
     apiFetch("/users/me")
       .then(async (res) => {
         if (!res || !res.ok) return;
         const me = await res.json();
         if (String(me?.role || "").toLowerCase() === "admin") {
-          adminBtn.classList.remove("hidden");
+          adminMenuBtn.classList.remove("hidden");
+          adminQuickBtn?.classList.remove("hidden");
         }
       })
       .catch((error) => {
-        console.warn("Unable to resolve user role for admin button", error);
+        console.warn("Unable to resolve user role for admin hover menu", error);
       });
   }
 
