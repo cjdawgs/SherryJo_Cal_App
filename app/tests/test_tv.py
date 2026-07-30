@@ -203,6 +203,31 @@ class TestAutoPairEndpoint:
         assert data.get("token")
         assert "currentView" in data
 
+    def test_auto_pair_token_can_use_tv_endpoints(self, client, auth_headers):
+        gen = client.post("/tv/generate-code", headers=auth_headers)
+        assert gen.status_code == 200
+
+        pair = client.post("/tv/auto-pair")
+        assert pair.status_code == 200
+        token = pair.json()["token"]
+        tv_headers = {"Authorization": f"Bearer {token}"}
+
+        patch = client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-07-30", "currentView": "day"},
+            headers=tv_headers,
+        )
+        assert patch.status_code == 200
+        assert patch.json()["selectedDate"] == "2026-07-30"
+
+        state = client.get("/tv/state", headers=tv_headers)
+        assert state.status_code == 200
+        assert state.json()["selectedDate"] == "2026-07-30"
+
+        events = client.get("/tv/events", headers=tv_headers)
+        assert events.status_code == 200
+        assert events.json()["selectedDate"] == "2026-07-30"
+
 
 class TestKioskToken:
     def test_generate_kiosk_token_is_persistent(self, client, auth_headers):

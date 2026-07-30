@@ -151,60 +151,42 @@ const antiSleep = (() => {
         const stream = _canvas.captureStream(1); // 1 fps — negligible CPU
         _videoEl = document.createElement('video');
         _videoEl.srcObject = stream;
-        _videoEl.muted = true;
-        _videoEl.loop = true;
         _videoEl.playsInline = true;
-        _videoEl.setAttribute('playsinline', '');
-        Object.assign(_videoEl.style, {
+      eventId: ev ? ev.id : null,
+      fieldIndex: 0,
+      fields: [
           position: 'fixed', bottom: '0', right: '0',
-          width: '1px', height: '1px',
-          opacity: '0.001',
-          pointerEvents: 'none',
-          zIndex: '-9998',
         });
-      }
+        { key: 'end', label: 'End Time' },
       if (!document.body.contains(_videoEl)) document.body.appendChild(_videoEl);
       _videoEl.play()
-        .then(() => console.log('[AntiSleep] Layer 4 video stream: playing (media-exempt)'))
-        .catch(err => console.log('[AntiSleep] Layer 4 video stream: play() failed —', err.message));
-    } catch (err) {
-      console.log('[AntiSleep] Layer 4 video stream: not available —', err.message);
-    }
-  }
-
-  function _stopVideoStream() {
-    if (_videoEl) {
+      data: {
+        title: ev ? (ev.title || 'New Event') : 'New Event',
+        start,
+        end,
+        description: ev ? (ev.description || '') : '',
+      },
+    };
       try { _videoEl.pause(); } catch { }
       if (document.body.contains(_videoEl)) document.body.removeChild(_videoEl);
-      _videoEl = null;
-    }
-  }
-
-  // ── Layer 5: Web Audio silent oscillator ─────────────────────────────────
   // Keeps Android audio manager showing the app as active. Uses ultrasonic
   // frequency (20 kHz) at near-zero gain — completely inaudible.
   // Requires a prior user gesture; gracefully skipped in kiosk mode.
-  let _audioCtx = null;
-  let _audioOsc = null;
+    const sticky = item ? (item.sticky || {}) : {};
 
-  function _startAudio() {
-    if (_audioCtx && _audioCtx.state !== 'closed') return;
+      type: 'sticky',
+      mode,
+      date: item ? item.date : state.selectedDate,
     try {
       _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      _audioOsc = _audioCtx.createOscillator();
-      const gain = _audioCtx.createGain();
       gain.gain.setValueAtTime(0.00001, _audioCtx.currentTime);      // inaudible
       _audioOsc.frequency.setValueAtTime(20000, _audioCtx.currentTime); // 20 kHz
-      _audioOsc.connect(gain);
-      gain.connect(_audioCtx.destination);
+        { key: 'content', label: 'Content' },
       _audioOsc.start();
-      console.log('[AntiSleep] Layer 5 Web Audio: started (20 kHz ultrasonic, gain=0.00001)');
     } catch (err) {
       console.log('[AntiSleep] Layer 5 Web Audio: not available —', err.message);
     }
-  }
 
-  function _stopAudio() {
     try { if (_audioOsc) _audioOsc.stop(); } catch { }
     try { if (_audioCtx) _audioCtx.close(); } catch { }
     _audioOsc = null;
