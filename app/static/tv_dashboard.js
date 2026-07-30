@@ -439,60 +439,42 @@ tvDiag = (() => {
     el.textContent = `[${ts}] ${entry.event}${entry.details ? ' \u00b7 ' + entry.details : ''}`;
   }
 
-  function _beacon(entry) {
-    _pending.push({
       event: entry.event,
-      details: entry.details,
-      ts: entry.t,
+      eventId: ev ? ev.id : null,
+      fieldIndex: 0,
+      fields: [
       sessionElapsedMin: state.sessionStartAt ? Math.floor((Date.now() - state.sessionStartAt) / 60000) : null,
-      visibilityState: entry.vis,
-      guardEnabled: entry.guard,
-      guardTimeout: entry.timeout,
-      device_id: TV_DEVICE_ID,
     });
-    if (_pending.length >= 50 || IMMEDIATE_EVENTS.has(entry.event)) flush();
+        { key: 'end', label: 'End Time' },
   }
 
-  function flush() {
-    if (!_pending.length) return;
-    const token = state.token || (IS_KIOSK ? window.KIOSK_TOKEN : null);
-    if (!token) return;
-    const entries = _pending;
-    _pending = [];
-    fetch('/tv/diag', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      data: {
+        title: ev ? (ev.title || 'New Event') : 'New Event',
+        start,
+        end,
+        description: ev ? (ev.description || '') : '',
+      },
+    };
       body: JSON.stringify({ entries }),
       keepalive: true,   // delivers even when page is unloading
-    }).catch(() => { });  // never block on diagnostics
-  }
-
-  setInterval(flush, FLUSH_MS);
-  window.addEventListener('pagehide', flush);
 
   function getLog() { return [..._buf]; }
 
-  return { log, getLog, flush };
-})();
+    const sticky = item ? (item.sticky || {}) : {};
 
-// Wire the RAF frame-gap callback now that tvDiag is ready
-antiSleep.setRafGapCb((deltaMs) => {
+      type: 'sticky',
+      mode,
+      date: item ? item.date : state.selectedDate,
   tvDiag.log('raf_gap', `${Math.round(deltaMs / 1000)}s gap \u2014 OS may be throttling renderer`);
   if (deltaMs >= POLL_MS && state.token && document.visibilityState === 'visible') {
-    refreshEvents(true);
-  }
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-
+        { key: 'content', label: 'Content' },
 const TITLE_PRESETS = ['New Event', 'Meeting', 'Reminder', 'Appointment', 'Call'];
-const DESC_PRESETS = ['', 'Updated from TV', 'Bring notes', 'Follow up needed'];
 const STICKY_PRESETS = ['New sticky note', 'Action item', 'Priority', 'Reminder'];
 const STICKY_COLORS = ['#F7E68A', '#F8C8DC', '#CDEEFF', '#D8F5C1'];
 
-function cacheDom() {
   dom = {
-    screenPair: document.getElementById('screen-pair'),
     screenDash: document.getElementById('screen-dashboard'),
     pairInput: document.getElementById('pair-code-input'),
     pairBtn: document.getElementById('pair-btn'),

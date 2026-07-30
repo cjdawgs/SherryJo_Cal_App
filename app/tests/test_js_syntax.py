@@ -1,9 +1,13 @@
 """
 JS syntax smoke tests.
 Checks that key static JS files have balanced parentheses and backticks,
-catching the class of error (unclosed callback) that broke the UI in production.
+and uses Node's parser to catch broader syntax corruption in production assets.
 """
 from pathlib import Path
+import shutil
+import subprocess
+
+import pytest
 
 STATIC_DIR = Path(__file__).resolve().parents[2] / "app" / "static"
 JS_FILES = [
@@ -14,6 +18,12 @@ JS_FILES = [
     "api.js",
     "core.js",
     "account_connections.js",
+    "tv_dashboard.js",
+]
+
+HEURISTIC_BALANCE_FILES = [
+    name for name in JS_FILES
+    if name != "tv_dashboard.js"
 ]
 
 
@@ -95,7 +105,7 @@ def _backtick_balance(text: str) -> bool:
 
 def test_js_parentheses_balanced():
     errors = []
-    for name in JS_FILES:
+    for name in HEURISTIC_BALANCE_FILES:
         path = STATIC_DIR / name
         if not path.exists():
             continue
@@ -108,7 +118,7 @@ def test_js_parentheses_balanced():
 
 def test_js_backticks_balanced():
     errors = []
-    for name in JS_FILES:
+    for name in HEURISTIC_BALANCE_FILES:
         path = STATIC_DIR / name
         if not path.exists():
             continue
@@ -116,3 +126,22 @@ def test_js_backticks_balanced():
         if not _backtick_balance(text):
             errors.append(f"{name}: odd number of backticks (unclosed template literal)")
     assert not errors, "\n".join(errors)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_js_files_parse_with_node():
+    errors = []
+    for name in JS_FILES:
+        path = STATIC_DIR / name
+        if not path.exists():
+            continue
+        result = subprocess.run(
+            ["node", "--check", str(path)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            details = (result.stderr or result.stdout or "parse failure").strip()
+            errors.append(f"{name}: {details}")
+    assert not errors, "\n\n".join(errors)
