@@ -13,6 +13,7 @@ const REMOTE_CAPABILITIES_STORAGE_KEY = 'tv_remote_capabilities_v1';
 const REMOTE_ACTION_ECHO_MS = 1400;
 const UPDATE_RELOAD_DELAY_MS = 9000;
 const VIEW_PAYLOAD_CACHE_LIMIT = 24;
+const TV_VIEW_NAMES = new Set(['day', '3-day', 'week', 'month']);
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 const CLIENT_APP_VERSION = String(window.TV_APP_VERSION || 'dev-local');
@@ -377,6 +378,8 @@ const state = {
   accountChipClickCount: 0,
   viewPayloadCache: {},
   viewPayloadCacheOrder: [],
+  legendSourceDays: null,
+  legendSourceAccounts: null,
 };
 
 let dom = {};
@@ -1453,6 +1456,8 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.accountChipClickCount = 0;
   state.viewPayloadCache = {};
   state.viewPayloadCacheOrder = [];
+  state.legendSourceDays = null;
+  state.legendSourceAccounts = null;
   state.lastObservedDayKey = null;
   closeUtilityPanel();
   state.userEmail = null;
@@ -1494,6 +1499,7 @@ async function fetchTvState() {
 
 async function refreshEvents(force = false, options = {}) {
   const showSync = Boolean(options && options.showSync);
+  const stateOverride = options && options.stateOverride ? options.stateOverride : null;
   if (document.hidden && !force) {
     return;
   }
@@ -1515,7 +1521,8 @@ async function refreshEvents(force = false, options = {}) {
     applySyncVisualState();
   }
   const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
-  let res = await authFetch('/tv/events', {
+  const eventsUrl = buildEventsRequestUrl(stateOverride);
+  let res = await authFetch(eventsUrl, {
     cache: 'no-store',
     timeoutMs: TV_FETCH_TIMEOUT_MS,
     headers: eventsRequestHeaders,
@@ -1524,7 +1531,7 @@ async function refreshEvents(force = false, options = {}) {
 
   if (!res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
     if (tvDiag) tvDiag.log('tv_events_timeout_retry', `retrying /tv/events after timeout (${state.lastAuthFetchError.message})`);
-    res = await authFetch('/tv/events', {
+    res = await authFetch(eventsUrl, {
       cache: 'no-store',
       timeoutMs: TV_FETCH_TIMEOUT_MS + 5000,
       headers: eventsRequestHeaders,
@@ -1590,6 +1597,8 @@ async function refreshEvents(force = false, options = {}) {
     if (!staleData) {
       state.days = incomingDays;
       state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.legendSourceDays = null;
+      state.legendSourceAccounts = null;
       state.dayMap = {};
       for (const day of state.days) state.dayMap[day.date] = day;
       acceptedDays = true;
@@ -1597,6 +1606,8 @@ async function refreshEvents(force = false, options = {}) {
       // First usable payload after startup can still be accepted even when marked stale.
       state.days = incomingDays;
       state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.legendSourceDays = null;
+      state.legendSourceAccounts = null;
       state.dayMap = {};
       for (const day of state.days) state.dayMap[day.date] = day;
       acceptedDays = true;
@@ -2277,14 +2288,16 @@ function shiftByView(direction) {
     state.monthDetailOpen = false;
     hydrateFromViewCache(state.currentView, state.selectedDate);
     render();
-    patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).then(() => refreshEvents(true));
+    patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).catch(() => null);
+    refreshEvents(true, { stateOverride: { selectedDate: toISO(d), currentView: state.currentView } });
     return;
   }
   const next = offsetDate(d, direction * delta);
   state.selectedDate = toISO(next);
   hydrateFromViewCache(state.currentView, state.selectedDate);
   render();
-  patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).then(() => refreshEvents(true));
+  patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).catch(() => null);
+  refreshEvents(true, { stateOverride: { selectedDate: toISO(next), currentView: state.currentView } });
 }
 
 function goToday() {
@@ -2293,7 +2306,8 @@ function goToday() {
   state.selectedDate = toISO(new Date());
   hydrateFromViewCache(state.currentView, state.selectedDate);
   render();
-  patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).then(() => refreshEvents(true));
+  patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).catch(() => null);
+  refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: state.currentView } });
 }
 
 function setView(viewName, options = {}) {
@@ -2312,7 +2326,8 @@ function setView(viewName, options = {}) {
   if (viewName !== 'month') state.monthDetailOpen = false;
   hydrateFromViewCache(viewName, state.selectedDate);
   render();
-  patchTvState({ currentView: viewName }, { recordHistory: true }).then(() => refreshEvents(true));
+  patchTvState({ currentView: viewName }, { recordHistory: true }).catch(() => null);
+  refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: viewName } });
 }
 
 function goBackAction() {
@@ -2385,6 +2400,8 @@ function hydrateFromViewCache(viewName, selectedDate) {
   if (!cached) return false;
   state.days = Array.isArray(cached.days) ? cached.days : [];
   state.serverAccounts = Array.isArray(cached.accounts) ? cached.accounts : [];
+  state.legendSourceDays = null;
+  state.legendSourceAccounts = null;
   state.dayMap = {};
   for (const day of state.days) {
     if (day && day.date) state.dayMap[day.date] = day;
@@ -3244,6 +3261,10 @@ function handleZoomHoldKeyUp(key) {
 }
 
 function syncAccountLegend() {
+  if (state.legendSourceDays === state.days && state.legendSourceAccounts === state.serverAccounts && state.accountLegend.length) {
+    return;
+  }
+
   const isPlaceholderAccount = (value) => {
     const email = String(value || '').trim().toLowerCase();
     if (!email) return false;
@@ -3257,7 +3278,7 @@ function syncAccountLegend() {
   for (const account of (state.serverAccounts || [])) {
     const identity = serverAccountIdentity(account);
     if (isPlaceholderAccount(identity.account)) continue;
-    const color = normalizeHexColor(account.color) || '#9AA3B2';
+    const color = normalizeHexColor(account.color) || providerFallbackColor(identity.source);
     map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
     colorMap[identity.key] = color;
     if (!isGenericProviderBucket(identity.source, identity.account)) {
@@ -3275,7 +3296,7 @@ function syncAccountLegend() {
           key: identity.key,
           source: identity.source,
           account: identity.account,
-          color: eventColor || '#9AA3B2',
+          color: eventColor || providerFallbackColor(identity.source),
         });
       }
       if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
@@ -3286,6 +3307,8 @@ function syncAccountLegend() {
   }
   state.accountLegend = Array.from(map.values());
   state.accountColorMap = colorMap;
+  state.legendSourceDays = state.days;
+  state.legendSourceAccounts = state.serverAccounts;
   if (state.selectedAccountKeys.length) {
     const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}|${item.account}`));
     state.selectedAccountKeys = state.selectedAccountKeys
@@ -3310,7 +3333,7 @@ function resolveEventColor(ev) {
     const byAccount = state.accountColorMap[identity.account];
     if (byAccount) return byAccount;
   }
-  return '#8EA4C4';
+  return providerFallbackColor(identity.source);
 }
 
 function renderAccountLegend() {
@@ -4131,6 +4154,31 @@ function normalizeHexColor(hex) {
     return `#${raw.toUpperCase()}`;
   }
   return null;
+}
+
+function providerFallbackColor(source) {
+  const normalized = normalizeAccountSource(source);
+  if (normalized === 'google') return '#34A853';
+  if (normalized === 'microsoft') return '#2563EB';
+  if (normalized === 'apple') return '#EF4444';
+  if (normalized === 'local') return '#7CA3AF';
+  return '#8EA4C4';
+}
+
+function buildEventsRequestUrl(stateOverride = null) {
+  const params = new URLSearchParams();
+  const selectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '').trim();
+  if (selectedDate) {
+    params.set('selectedDate', selectedDate);
+  }
+
+  const requestedViewRaw = String((stateOverride && stateOverride.currentView) || state.currentView || '').trim().toLowerCase();
+  if (TV_VIEW_NAMES.has(requestedViewRaw)) {
+    params.set('currentView', requestedViewRaw);
+  }
+
+  const query = params.toString();
+  return query ? `/tv/events?${query}` : '/tv/events';
 }
 
 function hexToRgb(hex) {

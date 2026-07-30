@@ -360,6 +360,72 @@ class TestTVEventsEndpoint:
         assert data["currentView"] == "3-day"
         assert [day["date"] for day in data["days"]] == ["2026-10-19", "2026-10-20", "2026-10-21"]
 
+    def test_events_supports_selected_date_and_view_query_override(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Override View Event",
+            start_time=datetime(2026, 11, 5, 10, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 11, 5, 11, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-10-01", "currentView": "month"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events?selectedDate=2026-11-05&currentView=day", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["selectedDate"] == "2026-11-05"
+        assert data["currentView"] == "day"
+        assert [day["date"] for day in data["days"]] == ["2026-11-05"]
+        assert data["days"][0]["events"]
+
+    def test_events_accounts_include_account_key_and_color(self, client, auth_headers, db):
+        from app.models import OAuthAccount
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(OAuthAccount(
+            user_id=user_id,
+            provider="google",
+            provider_id="google-account-1",
+            account_email="colorized@realmail.test",
+            access_token="token",
+            refresh_token="refresh",
+            sync_enabled=True,
+            color="#112233",
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-11-07", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events", headers=auth_headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        accounts = data.get("accounts") or []
+        target = next((item for item in accounts if item.get("accountEmail") == "colorized@realmail.test"), None)
+        assert target is not None
+        assert target.get("provider") == "google"
+        assert target.get("account_key") == "google:colorized@realmail.test"
+        assert target.get("color") == "#112233"
+
     def test_events_grouped_by_date(self, client, auth_headers, db):
         from app.models import Event, User
         from app.security import decode_token

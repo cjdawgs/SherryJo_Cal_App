@@ -38,6 +38,8 @@ from app.deps import get_current_user
 from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, User
 from app.security import create_persistent_token, create_token
 from app.services.tv_pairing_service import pairing_store, tv_state_store
+from app.services.multi_account_oauth_service import normalize_provider
+from app.utils.colors import default_account_color
 from app.utils import ensure_utc, parse_iso_datetime
 
 logger = logging.getLogger(__name__)
@@ -1032,6 +1034,8 @@ def patch_tv_state(
 @router.get("/events")
 def get_tv_events(
     request: Request,
+    selectedDate: Optional[str] = None,
+    currentView: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1056,8 +1060,15 @@ def get_tv_events(
 
     app_version = _get_tv_app_version()
     state = tv_state_store.get(current_user.id)
-    selected_date_str: Optional[str] = state.get("selectedDate") if state else None
-    current_view = (state.get("currentView") if state else None) or "day"
+    selected_date_str: Optional[str] = (selectedDate or "").strip() or None
+    if selected_date_str is None:
+        selected_date_str = state.get("selectedDate") if state else None
+
+    requested_view = (currentView or "").strip().lower()
+    if requested_view in {"day", "3-day", "week", "month"}:
+        current_view = requested_view
+    else:
+        current_view = (state.get("currentView") if state else None) or "day"
 
     if not selected_date_str:
         # Do NOT default to today — return empty, let client decide
@@ -1188,14 +1199,20 @@ def get_tv_events(
             for acc in account_rows:
                 if _is_placeholder_account_email(acc.account_email):
                     continue
-                key = (acc.provider or "", acc.account_email or "")
+                provider = normalize_provider(acc.provider or "local")
+                account_email = (acc.account_email or "").strip().lower()
+                dedupe_key = (provider, account_email)
+                account_key = f"{provider}:{account_email or provider}"
+                color = acc.color or default_account_color(provider)
+                key = dedupe_key
                 if key in seen:
                     continue
                 seen.add(key)
                 accounts.append({
-                    "provider": acc.provider or "local",
-                    "accountEmail": acc.account_email or "",
-                    "color": acc.color,
+                    "provider": provider,
+                    "accountEmail": account_email,
+                    "account_key": account_key,
+                    "color": color,
                 })
         except SQLAlchemyError:
             logger.exception("TV_EVENTS_FETCH_ACCOUNTS_QUERY_FAILED user_id=%s; omitting account legend metadata", current_user.id)

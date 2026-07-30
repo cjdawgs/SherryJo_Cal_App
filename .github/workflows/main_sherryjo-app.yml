@@ -22,7 +22,7 @@ jobs:
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       # 🛠️ Local Build Section (Optional)
       # The following section in your workflow is designed to catch build issues early on the client side, before deployment. This can be helpful for debugging and validation. However, if this step significantly increases deployment time and early detection is not critical for your workflow, you may remove this section to streamline the deployment process.
@@ -41,8 +41,24 @@ jobs:
           python -m venv antenv
           source antenv/bin/activate
           pip install -r requirements.txt
-                
-      # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size. 
+          pip install pytest
+
+      - name: TV pairing deployment contract gate
+        env:
+          DISABLE_DOTENV: "true"
+          MS_CLIENT_ID: test-client-id
+          MS_CLIENT_SECRET: test-client-secret
+          MS_TENANT_ID: test-tenant-id
+          MS_REDIRECT_URI: http://127.0.0.1:8000/ms/callback
+          GOOGLE_CLIENT_ID: test-client-id
+          GOOGLE_CLIENT_SECRET: test-client-secret
+          GOOGLE_REDIRECT_URI: http://127.0.0.1:8000/auth/google/callback
+          JWT_SECRET_KEY: test-jwt-secret-key-not-used-in-production
+        run: |
+          source antenv/bin/activate
+          pytest -q app/tests/test_tv_deploy_contract.py app/tests/test_tv.py app/tests/test_tv_dashboard_keys.py
+
+      # By default, when you enable GitHub CI/CD integration through the Azure portal, the platform automatically sets the SCM_DO_BUILD_DURING_DEPLOYMENT application setting to true. This triggers the use of Oryx, a build engine that handles application compilation and dependency installation (e.g., pip install) directly on the platform during deployment. Hence, we exclude the antenv virtual environment directory from the deployment artifact to reduce the payload size.
       - name: Upload artifact for deployment jobs
         uses: actions/upload-artifact@v4
         with:
@@ -55,7 +71,6 @@ jobs:
       # If you prefer to disable the Oryx build process during deployment, follow these steps:
       # 1. Remove the SCM_DO_BUILD_DURING_DEPLOYMENT app setting from your Azure App Service Environment variables.
       # 2. Refer to sample workflows for alternative deployment strategies: https://github.com/Azure/actions-workflow-samples/tree/master/AppService
-      
 
   deploy:
     runs-on: ubuntu-latest
@@ -69,7 +84,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
-      
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -77,10 +92,9 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_6C055A6F3F18410E96CE5B3E4D7FEAD3 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_E84F51774F2147C291C6959CCDFCE2C1 }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: "Deploy to Azure Web App"
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'sherryjo-app'
-          slot-name: 'Production'
-          
+          app-name: "sherryjo-app"
+          slot-name: "Production"
