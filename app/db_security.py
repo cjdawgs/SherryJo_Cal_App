@@ -24,6 +24,7 @@ RLS_TABLES = (
     "tasks",
     "date_sticky_notes",
     "event_tag_color_settings",
+    "sync_efficiency_daily_rollups",
     "tv_diag_log",
     "app_runtime_secrets",
 )
