@@ -346,6 +346,11 @@ const state = {
   },
   editor: null,
   editorDirty: false,
+  daySectionState: {
+    allDay: true,
+    freeTime: true,
+    sticky: true,
+  },
   monthDetailOpen: false,
   utilityPanel: null,
   adminUsers: [],
@@ -813,6 +818,23 @@ function ensureStyles() {
   .tv-main.tv-view-day .tv-day-section-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
   .tv-main.tv-view-day .tv-day-section-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
   .tv-main.tv-view-day .tv-day-section-meta { font-size: 11px; color: var(--tv-text-soft); text-align: right; }
+  .tv-main.tv-view-day .tv-day-section-toggle { border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 3px 8px; font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--tv-text-soft); background: rgba(17,28,44,0.34); cursor: pointer; }
+  .tv-main.tv-view-day .tv-day-section-toggle:hover { border-color: rgba(255,255,255,0.32); color: var(--tv-text); }
+  .tv-main.tv-view-day .tv-day-section-body { display: flex; flex-direction: column; gap: 8px; }
+  .tv-main.tv-view-day .tv-day-section.collapsed .tv-day-section-body { display: none; }
+  .tv-main.tv-view-day .tv-day-subsection { margin-top: 2px; padding-top: 8px; background: rgba(17,28,44,0.28); border-color: rgba(201,219,244,0.12); }
+  .tv-main.tv-view-day .tv-day-subsection .tv-day-section-list { max-height: 11vh; }
+  .tv-main.tv-view-day .tv-day-timed-grid { display: grid; grid-template-columns: repeat(var(--timed-columns, 1), minmax(0, 1fr)); gap: 8px; align-items: start; }
+  .tv-main.tv-view-day .tv-day-timed-grid > .tv-day-event-card { min-width: 0; height: 100%; }
+  .tv-main.tv-view-day .tv-day-timed-grid > .tv-empty { grid-column: 1 / -1; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense { gap: 6px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense > .tv-day-event-card { padding: 6px 8px; border-radius: 9px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense > .tv-day-event-card .tv-item-title { font-size: 14px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense > .tv-day-event-card .tv-item-sub { font-size: 11px; margin-top: 1px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense-4 { gap: 5px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense-4 > .tv-day-event-card { padding: 5px 7px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense-4 > .tv-day-event-card .tv-item-title { font-size: 13px; }
+  .tv-main.tv-view-day .tv-day-timed-grid.dense-4 > .tv-day-event-card .tv-item-sub:nth-of-type(3) { display: none; }
   .tv-main.tv-view-day .tv-day-section-list { display: flex; flex-direction: column; gap: 8px; max-height: 26vh; overflow-y: auto; }
   .tv-main.tv-view-day .tv-day-event-card { position: relative; border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 8px 10px 8px 10px; background: rgba(12,22,35,0.46); }
   .tv-main.tv-view-day .tv-day-event-card .tv-item-title { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2215,6 +2237,13 @@ function setView(viewName, options = {}) {
     applyHomeZoomPreference();
   }
   state.currentView = viewName;
+  if (viewName === 'day') {
+    state.daySectionState = {
+      allDay: true,
+      freeTime: true,
+      sticky: true,
+    };
+  }
   if (viewName !== 'month') state.monthDetailOpen = false;
   render();
   patchTvState({ currentView: viewName }, { recordHistory: true }).then(() => refreshEvents(true));
@@ -3162,6 +3191,13 @@ function renderSingleDayView() {
   const allDayItems = schedule.allDayEvents;
   const timedItems = schedule.timedEvents;
   const stickyNotes = Array.isArray(day.stickyNotes) ? day.stickyNotes : [];
+  const freeBlocks = schedule.freeBlocks;
+  const daySections = state.daySectionState || { allDay: true, freeTime: true, sticky: true };
+  const allDayCollapsed = daySections.allDay !== false;
+  const freeTimeCollapsed = daySections.freeTime !== false;
+  const stickyCollapsed = daySections.sticky !== false;
+  const timedColumnCount = getTimedEventColumnCount(timedItems.length);
+  const timedRowCount = Math.max(1, Math.ceil(timedItems.length / timedColumnCount));
   const busyMinutes = timedItems.reduce((total, ev) => total + minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)), 0);
   const summaryBits = [
     `${allDayItems.length} all-day`,
@@ -3169,7 +3205,6 @@ function renderSingleDayView() {
     `${stickyNotes.length} sticky`,
     `${busyMinutes} busy min`,
   ];
-  const freeBlocks = schedule.freeBlocks;
   return `
     <div class="tv-shell">
       ${renderLeftSidebar()}
@@ -3183,13 +3218,28 @@ function renderSingleDayView() {
           <div class="tv-single-day-pills">${summaryBits.map(bit => `<span class="tv-hint-chip">${escapeHtml(bit)}</span>`).join('')}</div>
         </div>
         <div class="tv-single-day-grid">
-          <section class="tv-day-section tv-day-section-wide">
+          <section class="tv-day-section tv-day-section-wide ${allDayCollapsed ? 'collapsed' : ''}">
             <div class="tv-day-section-head">
               <div class="tv-day-section-title">All-Day Events</div>
-              <div class="tv-day-section-meta">Scheduling anchors that span the whole day</div>
+              <div class="tv-day-section-meta">${allDayCollapsed ? `${allDayItems.length} item${allDayItems.length === 1 ? '' : 's'}` : 'Scheduling anchors that span the whole day'}</div>
+              <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="allDay">${allDayCollapsed ? 'Expand' : 'Collapse'}</button>
             </div>
-            <div class="tv-day-section-list">
-              ${allDayItems.length ? allDayItems.map((ev, idx) => renderEventSummaryCard(ev, 'all-day', idx)).join('') : '<div class="tv-empty">No all-day events</div>'}
+            <div class="tv-day-section-body">
+              <div class="tv-day-section-list">
+                ${allDayItems.length ? allDayItems.map((ev, idx) => renderEventSummaryCard(ev, 'all-day', idx)).join('') : '<div class="tv-empty">No all-day events</div>'}
+              </div>
+              <section class="tv-day-section tv-day-subsection ${stickyCollapsed ? 'collapsed' : ''}">
+                <div class="tv-day-section-head">
+                  <div class="tv-day-section-title">Day Sticky Notes</div>
+                  <div class="tv-day-section-meta">${stickyCollapsed ? `${stickyNotes.length} note${stickyNotes.length === 1 ? '' : 's'}` : 'Visible across the selected day'}</div>
+                  <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="sticky">${stickyCollapsed ? 'Expand' : 'Collapse'}</button>
+                </div>
+                <div class="tv-day-section-body">
+                  <div class="tv-day-section-list compact">
+                    ${stickyNotes.length ? stickyNotes.map(renderStickySummaryCard).join('') : '<div class="tv-empty">No sticky notes for this day</div>'}
+                  </div>
+                </div>
+              </section>
             </div>
           </section>
           <section class="tv-day-section tv-day-section-wide">
@@ -3197,26 +3247,22 @@ function renderSingleDayView() {
               <div class="tv-day-section-title">Timed Events</div>
               <div class="tv-day-section-meta">Ordered schedule with sticky-note markers and status context</div>
             </div>
-            <div class="tv-day-section-list">
+            <div class="tv-day-section-body">
+              <div class="tv-day-timed-grid ${timedColumnCount >= 3 ? 'dense' : ''} ${timedColumnCount >= 4 ? 'dense-4' : ''}" style="--timed-columns:${timedColumnCount}; --timed-rows:${timedRowCount};">
               ${timedItems.length ? timedItems.map((ev, idx) => renderEventSummaryCard(ev, 'timed', idx)).join('') : '<div class="tv-empty">No timed events</div>'}
+              </div>
             </div>
           </section>
-          <section class="tv-day-section">
+          <section class="tv-day-section ${freeTimeCollapsed ? 'collapsed' : ''}">
             <div class="tv-day-section-head">
               <div class="tv-day-section-title">Free Time</div>
-              <div class="tv-day-section-meta">Gaps between scheduled items (7:00 AM - 7:00 PM)</div>
+              <div class="tv-day-section-meta">${freeTimeCollapsed ? `${freeBlocks.length} block${freeBlocks.length === 1 ? '' : 's'}` : 'Gaps between scheduled items (7:00 AM - 7:00 PM)'}</div>
+              <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="freeTime">${freeTimeCollapsed ? 'Expand' : 'Collapse'}</button>
             </div>
-            <div class="tv-day-section-list">
-              ${freeBlocks.length ? freeBlocks.slice(0, 6).map(renderFreeBlockCard).join('') : '<div class="tv-empty">No free time blocks detected</div>'}
-            </div>
-          </section>
-          <section class="tv-day-section">
-            <div class="tv-day-section-head">
-              <div class="tv-day-section-title">Day Sticky Notes</div>
-              <div class="tv-day-section-meta">Visible across the selected day</div>
-            </div>
-            <div class="tv-day-section-list">
-              ${stickyNotes.length ? stickyNotes.map(renderStickySummaryCard).join('') : '<div class="tv-empty">No sticky notes for this day</div>'}
+            <div class="tv-day-section-body">
+              <div class="tv-day-section-list">
+                ${freeBlocks.length ? freeBlocks.slice(0, 6).map(renderFreeBlockCard).join('') : '<div class="tv-empty">No free time blocks detected</div>'}
+              </div>
             </div>
           </section>
         </div>
@@ -3370,6 +3416,17 @@ function renderFreeBlockCard(block) {
   const endLabel = block.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const duration = formatDuration(minutesBetween(block.start, block.end));
   return `<div class="tv-day-event-card free"><div class="tv-item-title">Free Block</div><div class="tv-item-sub">${escapeHtml(startLabel)} - ${escapeHtml(endLabel)}</div><div class="tv-item-sub">Open for ${escapeHtml(duration)}</div></div>`;
+}
+
+function getTimedEventColumnCount(eventCount) {
+  const count = Math.max(0, Math.trunc(Number(eventCount) || 0));
+  const width = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const widthLimit = width >= 1700 ? 4 : width >= 1400 ? 3 : width >= 1100 ? 2 : 1;
+
+  if (count >= 18) return Math.min(4, widthLimit);
+  if (count >= 10) return Math.min(3, widthLimit);
+  if (count >= 4) return Math.min(2, widthLimit);
+  return 1;
 }
 
 function renderStickySummaryCard(sticky, index = 0) {
@@ -3572,6 +3629,18 @@ function handleMainClick(e) {
       closeUtilityPanel();
       state.monthDetailOpen = false;
       patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
+    }
+    return;
+  }
+
+  if (role === 'day-toggle') {
+    const section = t.getAttribute('data-section');
+    if (section && state.daySectionState && Object.prototype.hasOwnProperty.call(state.daySectionState, section)) {
+      state.daySectionState = {
+        ...state.daySectionState,
+        [section]: !state.daySectionState[section],
+      };
+      render();
     }
     return;
   }
