@@ -2,6 +2,11 @@ import { api, setAuthToken } from "/static/api.js";
 
 let pendingRemediationTarget = null;
 
+const ALERT_THRESHOLDS = {
+  minNoChangeRatio: 0.35,
+  cacheHitDropAbsolute: 0.20,
+};
+
 function normalizeProvider(provider) {
   const p = (provider || "").toLowerCase().trim();
   if (["google", "gmail"].includes(p)) return "google";
@@ -15,6 +20,15 @@ function normalizeRemedyAction(action) {
   if (["verify", "verify_access", "retry", "retry_sync"].includes(value)) return "verify";
   if (value === "reconnect") return "reconnect";
   return "verify";
+}
+
+function asciiText(value, fallback = "") {
+  const raw = String(value ?? "");
+  const cleaned = raw
+    .replace(/[\uFFFD]/g, "")
+    .replace(/[^\x20-\x7E]/g, "")
+    .trim();
+  return cleaned || fallback;
 }
 
 function setGlobalMessage(message, kind = "error") {
@@ -42,7 +56,167 @@ function setSyncStatus(message, meta = "") {
   if (metaBox) metaBox.textContent = meta || "";
 }
 
-function renderSyncDetailList(statusPayload = null) {
+function formatRatio(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "n/a";
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+function average(values = []) {
+  const nums = values.filter((v) => typeof v === "number" && !Number.isNaN(v));
+  if (!nums.length) return null;
+  return nums.reduce((sum, val) => sum + val, 0) / nums.length;
+}
+
+function renderSparkline(svgId, points, color) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+
+  const width = 260;
+  const height = 70;
+  const pad = 6;
+
+  if (!Array.isArray(points) || points.length === 0) {
+    svg.innerHTML = `<text x="8" y="38" fill="#6b7d96" font-size="11">No weekly data yet</text>`;
+    return;
+  }
+
+  const vals = points.map((p) => Number(p.value ?? 0));
+  const minVal = Math.min(...vals);
+  const maxVal = Math.max(...vals);
+  const span = Math.max(1e-6, maxVal - minVal);
+  const xStep = points.length > 1 ? (width - (pad * 2)) / (points.length - 1) : 0;
+
+  const coords = points.map((point, index) => {
+    const x = pad + (xStep * index);
+    const normalized = (Number(point.value ?? 0) - minVal) / span;
+    const y = height - pad - (normalized * (height - (pad * 2)));
+    return { x, y };
+  });
+
+  const polyline = coords.map((c) => `${c.x.toFixed(2)},${c.y.toFixed(2)}`).join(" ");
+  const circles = coords
+    .map((c) => `<circle cx="${c.x.toFixed(2)}" cy="${c.y.toFixed(2)}" r="2.2" fill="${color}" />`)
+    .join("");
+
+  svg.innerHTML = `
+    <line x1="0" y1="${height - pad}" x2="${width}" y2="${height - pad}" stroke="#d6dfeb" stroke-width="1" />
+    <polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+    ${circles}
+  `;
+}
+
+function renderRollupAlerts(rollupPayload) {
+  const alertEl = document.getElementById("sync-metrics-alert");
+  if (!alertEl) return;
+
+  const rows = Array.isArray(rollupPayload?.rows) ? rollupPayload.rows : [];
+  const currentWeekRows = Array.isArray(rollupPayload?.current_week?.rows) ? rollupPayload.current_week.rows : [];
+
+  const currentNoChangeRatio = average(currentWeekRows.map((r) => r.no_change_ratio));
+  const currentCacheHitRatio = average(currentWeekRows.map((r) => r.google_cache_hit_ratio));
+
+  const currentWeekStart = rollupPayload?.current_week?.week_start_date;
+  const priorWeekRows = rows.filter((row) => {
+    if (!row?.week_start_date || !currentWeekStart) return false;
+    return row.week_start_date < currentWeekStart;
+  });
+  const priorWeekStart = priorWeekRows.length ? priorWeekRows[priorWeekRows.length - 1].week_start_date : null;
+  const priorWeekOnly = priorWeekRows.filter((r) => r.week_start_date === priorWeekStart);
+  const priorCacheHitRatio = average(priorWeekOnly.map((r) => r.google_cache_hit_ratio));
+
+  const alerts = [];
+
+  if (typeof currentNoChangeRatio === "number" && currentNoChangeRatio < ALERT_THRESHOLDS.minNoChangeRatio) {
+    alerts.push(`No-change ratio is low (${formatRatio(currentNoChangeRatio)}). Polling may be too frequent for current activity.`);
+  }
+
+  if (
+    typeof currentCacheHitRatio === "number"
+    && typeof priorCacheHitRatio === "number"
+    && (priorCacheHitRatio - currentCacheHitRatio) >= ALERT_THRESHOLDS.cacheHitDropAbsolute
+  ) {
+    alerts.push(
+      `Google cache hit ratio dropped sharply (${formatRatio(priorCacheHitRatio)} -> ${formatRatio(currentCacheHitRatio)}). Review sync load and token churn.`
+    );
+  }
+
+  if (!alerts.length) {
+    alertEl.hidden = true;
+    alertEl.textContent = "";
+    return;
+  }
+
+  alertEl.hidden = false;
+  alertEl.textContent = alerts.join(" ");
+}
+
+function renderRollupSparklines(rollupPayload) {
+  const rows = Array.isArray(rollupPayload?.current_week?.rows) ? rollupPayload.current_week.rows : [];
+
+  const changeSeries = rows.map((r) => ({
+    label: r.snapshot_date,
+    value: Number(r.changes || 0),
+  }));
+
+  const noChangeSeries = rows.map((r) => ({
+    label: r.snapshot_date,
+    value: Number(r.no_changes || 0),
+  }));
+
+  const cacheSeries = rows.map((r) => ({
+    label: r.snapshot_date,
+    value: Number(r.google_cache_hit_ratio || 0),
+  }));
+
+  // Overlay by combining changes and no-changes into one lane where each point
+  // represents net activity pressure across the week.
+  const combinedSeries = changeSeries.map((c, idx) => ({
+    label: c.label,
+    value: c.value - (noChangeSeries[idx]?.value || 0),
+  }));
+
+  renderSparkline("sync-sparkline-changes", combinedSeries, "#1d4ed8");
+  renderSparkline("sync-sparkline-cache", cacheSeries, "#0f766e");
+  renderRollupAlerts(rollupPayload);
+}
+
+async function fetchSyncRollups(days = 28) {
+  const safeDays = days === 28 ? 28 : 7;
+  const res = await api.get(`/accounts/sync-rollups?days=${safeDays}`);
+  if (!res || !res.ok) return null;
+  return await res.json();
+}
+
+function renderSchedulerMetricsCard(scheduler = {}, rollupPayload = null) {
+  const card = document.getElementById("scheduler-metrics-card");
+  if (!card) return;
+
+  const grid = card.querySelector(".syncMetricsGrid");
+  if (!grid) return;
+
+  const efficiency = scheduler?.efficiency || {};
+  const cache = scheduler?.google_calendar_list_cache || {};
+  const backoff = scheduler?.adaptive_backoff_user || {};
+
+  const cells = [
+    { label: "Sync Changes", value: String(efficiency?.changes ?? 0) },
+    { label: "Sync No-Changes", value: String(efficiency?.no_changes ?? 0) },
+    { label: "Change Ratio", value: formatRatio(efficiency?.change_ratio) },
+    { label: "No-Change Ratio", value: formatRatio(efficiency?.no_change_ratio) },
+    { label: "Google Cache Hit Ratio", value: formatRatio(cache?.hit_ratio) },
+    { label: "Google Cache Lookups", value: String(cache?.total_lookups ?? 0) },
+    { label: "Backoff Streak (You)", value: String(backoff?.no_change_streak ?? 0) },
+    { label: "Backoff Active (You)", value: backoff?.backoff_active ? "yes" : "no" },
+  ];
+
+  grid.innerHTML = cells
+    .map((cell) => `<div class="syncMetricCell"><b>${cell.label}</b><span>${cell.value}</span></div>`)
+    .join("");
+
+  renderRollupSparklines(rollupPayload);
+}
+
+function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
   const detailList = document.getElementById("sync-detail-list");
   const select = document.getElementById("sync-account-select");
   if (!detailList || !select) return;
@@ -53,14 +227,17 @@ function renderSyncDetailList(statusPayload = null) {
   const selectionSet = new Set(shouldDefaultAll ? accounts.map((account) => String(account.id)) : previousSelection);
 
   select.innerHTML = [`<option value="__all__">All Accounts</option>`].concat(accounts.map((account) => {
-    const label = `${account.provider?.toUpperCase?.() || account.provider} - ${account.account_email || "Unknown"}`;
+    const providerLabel = asciiText(account.provider?.toUpperCase?.() || account.provider, "UNKNOWN");
+    const emailLabel = asciiText(account.account_email, "Unknown");
+    const label = `${providerLabel} - ${emailLabel}`;
     const isSelected = selectionSet.has(String(account.id));
-    return `<option value="${account.id}" ${isSelected ? "selected" : ""}>${isSelected ? "✓ " : ""}${label}</option>`;
+    return `<option value="${account.id}" ${isSelected ? "selected" : ""}>${isSelected ? "[x] " : ""}${label}</option>`;
   })).join("");
 
   if (!accounts.length) {
     detailList.innerHTML = '<div class="syncDetailItem">No sync-enabled accounts found.</div>';
     setSyncStatus("No sync-enabled accounts found.", "");
+    renderSchedulerMetricsCard(statusPayload?.scheduler || {}, rollupPayload);
     return;
   }
 
@@ -118,8 +295,9 @@ function renderSyncDetailList(statusPayload = null) {
     selectedAccounts.length > 1
       ? `Selected accounts: ${selectedAccounts.length}`
       : `Selected account: ${chosen.account_email || "Unknown"}`,
-    `Range ${chosen.sync_range_days || 30} days • Every ${chosen.sync_frequency_minutes || 5} min • ${scheduler.running ? "scheduler running" : "scheduler idle"}`
+    `Range ${chosen.sync_range_days || 30} days | Every ${chosen.sync_frequency_minutes || 5} min | ${scheduler.running ? "scheduler running" : "scheduler idle"}`
   );
+  renderSchedulerMetricsCard(scheduler, rollupPayload);
 
   const rangeInput = document.getElementById("sync-range-days");
   const freqInput = document.getElementById("sync-frequency-minutes");
@@ -163,7 +341,8 @@ async function fetchSyncStatus() {
   }
 
   const payload = await res.json();
-  renderSyncDetailList(payload);
+  const rollups = await fetchSyncRollups(28);
+  renderSyncDetailList(payload, rollups);
   return payload;
 }
 
@@ -489,14 +668,15 @@ function renderProviderAccounts(provider, list) {
     const recommendedAction = String(acc?.token_issue?.recommended_action || "").trim();
     const recommendedLabel = String(acc?.token_issue?.recommended_label || "Resolve").trim();
     const isRecommendedRetry = recommendedAction === "retry_sync";
+    const isRecommendedReconnect = recommendedAction === "reconnect";
     const showIssue = acc.status === "error" && (issueMessage || issueCode);
     const showVerify = normalizedProvider !== "apple";
 
     div.innerHTML = `
       <div class="left">
-        <span class="provider ${provider}">${provider.toUpperCase()}</span>
-        <span>${acc.account_email || "UNKNOWN"}</span>
-        ${acc.is_primary ? "⭐" : ""}
+        <span class="provider ${provider}">${asciiText(provider.toUpperCase(), "UNKNOWN")}</span>
+        <span>${asciiText(acc.account_email, "UNKNOWN")}</span>
+        ${acc.is_primary ? "[PRIMARY]" : ""}
         <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
         ${showIssue ? `<div style="margin-top:4px; font-size:12px; color:#7f1d1d;"><strong>${issueCode ? issueCode.replaceAll("_", " ") : "issue"}:</strong> ${issueMessage || "Token action required."}</div>` : ""}
         ${showIssue && issueGuidance ? `<div style="margin-top:2px; font-size:11px; color:#7f1d1d;">${issueGuidance}</div>` : ""}

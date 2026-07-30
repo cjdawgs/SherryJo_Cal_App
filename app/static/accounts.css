@@ -1,4 +1,8 @@
-*, *::before, *::after { box-sizing: border-box; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
 body {
   font-family: Arial, sans-serif;
@@ -248,6 +252,98 @@ body {
   margin-top: 14px;
 }
 
+.syncMetricsCard {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #d8e2ef;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.syncMetricsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.syncMetricsHeader strong {
+  font-size: 14px;
+  color: #10253f;
+}
+
+.syncMetricsHeader span {
+  font-size: 12px;
+  color: #5f6f86;
+}
+
+.syncMetricsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.syncMetricsAlert {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid #f5c2c7;
+  background: #fff4f4;
+  color: #7a1f2a;
+  font-size: 12px;
+}
+
+.syncSparklineGrid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.syncSparklineCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 8px 10px;
+}
+
+.syncSparklineCard strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #153353;
+}
+
+.syncSparklineCard svg {
+  width: 100%;
+  height: 70px;
+  display: block;
+}
+
+.syncMetricCell {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: #f8fbff;
+}
+
+.syncMetricCell b {
+  display: block;
+  margin-bottom: 3px;
+  font-size: 11px;
+  color: #4b5f79;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.syncMetricCell span {
+  display: block;
+  font-size: 14px;
+  color: #132c4a;
+  font-weight: 700;
+}
+
 .syncDetailItem {
   padding: 10px 12px;
   border-radius: 10px;
@@ -307,6 +403,14 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .syncMetricsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .syncSparklineGrid {
+    grid-template-columns: 1fr;
+  }
+
   .syncPanelHeader,
   .syncStatusBar {
     flex-direction: column;
@@ -347,9 +451,17 @@ body {
   font-weight: 700;
 }
 
-.google { color: #d93025; }
-.microsoft { color: #0078d4; }
-.apple { color: #111827; }
+.google {
+  color: #d93025;
+}
+
+.microsoft {
+  color: #0078d4;
+}
+
+.apple {
+  color: #111827;
+}
 
 button {
   margin-left: 5px;
@@ -415,8 +527,13 @@ button:disabled {
 }
 
 @keyframes accountSpin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .onboarding {
@@ -449,6 +566,7 @@ button:disabled {
 }
 
 @media (min-width: 768px) {
+
   .account-actions button,
   .providerBtn,
   .navActionBtn {
@@ -459,6 +577,7 @@ button:disabled {
 }
 
 @media (min-width: 1400px) {
+
   .account-actions button,
   .providerBtn,
   .navActionBtn {

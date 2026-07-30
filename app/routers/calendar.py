@@ -5,7 +5,7 @@
 import logging
 import os
 
-from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Request, HTTPException, File, UploadFile
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +22,11 @@ from app.services.multi_account_oauth_service import (
 from app.services.event_actions import EventActions
 from app.services.google_calendar_service import GoogleCalendarService
 from app.services.graph_client import GraphClient
+from app.services.event_import_service import (
+    EventImportError,
+    append_sticky_notes_to_description,
+    parse_import_payload,
+)
 from app.utils import (
     ensure_utc,
     get_owned_or_404,
@@ -42,6 +47,9 @@ calendar_service = CalendarService()
 _event_actions = EventActions()
 _google_service = GoogleCalendarService()
 _graph_client = GraphClient()
+
+MAX_IMPORT_EVENTS = 1000
+MAX_IMPORT_FILE_BYTES = 8 * 1024 * 1024
 
 # ==================================================
 # ✅ SAFE HELPERS (TOP LEVEL — NOT INSIDE ANY FUNCTION)
@@ -839,6 +847,121 @@ async def publish_to_providers(
     }
 
 
+@router.post("/import-events")
+async def import_events_file(
+    file: UploadFile = File(...),
+    publish: bool = Query(False),
+    publish_sticky_mode: str = Query("description"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    filename = (file.filename or "").strip()
+    if not filename:
+        raise HTTPException(status_code=400, detail="Missing file name")
+
+    payload = await file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    if len(payload) > MAX_IMPORT_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="File too large (max 8MB)")
+
+    try:
+        parsed_events, warnings = parse_import_payload(filename, payload)
+    except EventImportError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if not parsed_events:
+        return {
+            "status": "success",
+            "imported": 0,
+            "published_events": 0,
+            "published_creates": 0,
+            "published_updates": 0,
+            "warnings": warnings or ["No importable events were found in the uploaded file"],
+        }
+
+    if len(parsed_events) > MAX_IMPORT_EVENTS:
+        warnings.append(f"Only the first {MAX_IMPORT_EVENTS} events were imported")
+        parsed_events = parsed_events[:MAX_IMPORT_EVENTS]
+
+    now = datetime.now(timezone.utc)
+    imported_models: list[Event] = []
+    sticky_mode = (publish_sticky_mode or "description").strip().lower()
+    include_sticky_in_description = sticky_mode == "description"
+
+    for item in parsed_events:
+        sticky_notes = item.sticky_notes or []
+        description = item.description or ""
+        if include_sticky_in_description and sticky_notes:
+            description = append_sticky_notes_to_description(description, sticky_notes)
+
+        model = Event(
+            owner_id=current_user.id,
+            title=(item.title or "Untitled Event")[:255],
+            description=description,
+            start_time=ensure_utc(item.start_time),
+            end_time=ensure_utc(item.end_time) if item.end_time else None,
+            source="local",
+            account_email="local",
+            sticky_notes=sticky_notes or None,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(model)
+        imported_models.append(model)
+
+    db.commit()
+    for model in imported_models:
+        db.refresh(model)
+
+    published_events = 0
+    published_creates = 0
+    published_updates = 0
+    publish_warnings: list[str] = []
+
+    if publish and imported_models:
+        account_keys = {
+            f"{normalize_provider(acc.provider)}:{(acc.account_email or '').lower().strip()}"
+            for acc in MultiAccountOAuthService.get_all_sync_enabled_accounts(db, current_user.id)
+            if normalize_provider(acc.provider) in {"google", "microsoft"}
+            and (acc.account_email or "").strip()
+        }
+
+        if not account_keys:
+            publish_warnings.append("No publish-enabled Google or Microsoft accounts available")
+        else:
+            for imported in imported_models:
+                try:
+                    result = _event_actions.push_to_providers(
+                        db,
+                        imported,
+                        _google_service,
+                        _graph_client,
+                        current_user,
+                        selected_account_keys=sorted(account_keys),
+                    )
+                    updated = int(result.get("updated") or 0)
+                    created = int(result.get("created") or 0)
+                    published_updates += updated
+                    published_creates += created
+                    if updated + created > 0:
+                        published_events += 1
+                    publish_warnings.extend(result.get("warnings") or [])
+                except Exception as exc:
+                    logger.warning("Import publish failed for event %s: %s", imported.id, exc)
+                    publish_warnings.append(f"Event {imported.id}: {exc}")
+
+    return {
+        "status": "success",
+        "imported": len(imported_models),
+        "published_events": published_events,
+        "published_creates": published_creates,
+        "published_updates": published_updates,
+        "warnings": warnings + publish_warnings,
+        "publish_sticky_mode": sticky_mode,
+    }
+
+
 # ==================================================
 # ✅ UNIFIED CALENDAR (FINAL CLEAN VERSION)
 # ==================================================
@@ -867,14 +990,14 @@ def get_unified_calendar(
         start_date = parse_iso_datetime(start)
         end_date = parse_iso_datetime(end)
         if start_date and end_date:
-            logger.debug(f"✅ FULLCAL RANGE: {start_date} → {end_date}")
+            logger.debug(f"[SYNC] FULLCAL RANGE: {start_date} -> {end_date}")
         else:
-            logger.error("❌ Invalid start/end, falling back")
+            logger.error("[SYNC] Invalid start/end, falling back")
 
     if not start_date or not end_date:
         start_date = now - timedelta(days=range_days)
         end_date = now + timedelta(days=range_days)
-        logger.debug(f"✅ RANGE WINDOW: ±{range_days} days")
+        logger.debug(f"[SYNC] RANGE WINDOW: +/-{range_days} days")
 
     events = []
     account_event_totals = {}

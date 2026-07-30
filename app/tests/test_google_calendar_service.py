@@ -9,6 +9,9 @@ from app.services.google_calendar_service import GoogleCalendarService
 
 @pytest.fixture
 def service():
+    GoogleCalendarService._CALENDAR_LIST_CACHE.clear()
+    GoogleCalendarService._CALENDAR_LIST_CACHE_METRICS["hits"] = 0
+    GoogleCalendarService._CALENDAR_LIST_CACHE_METRICS["misses"] = 0
     return GoogleCalendarService()
 
 
@@ -254,6 +257,25 @@ def test_fetch_events_v2_skips_failed_calendar(mock_get, service):
 
     assert result["events"] == []
     assert result["next_tokens"] == {}
+
+
+@patch("app.services.google_calendar_service.requests.get")
+def test_calendar_list_cache_metrics_reports_hit_ratio(mock_get, service):
+    def _fake_get(url, *args, **kwargs):
+        if "calendarList" in url:
+            return make_response(json_data={"items": [{"id": "work@example.com"}]})
+        return make_response(json_data={"items": []})
+
+    mock_get.side_effect = _fake_get
+
+    service.fetch_events("token", account_email="me@example.com")
+    service.fetch_events("token", account_email="me@example.com")
+
+    metrics = GoogleCalendarService.get_calendar_list_cache_metrics()
+    assert metrics["hits"] >= 1
+    assert metrics["misses"] >= 1
+    assert metrics["total_lookups"] == metrics["hits"] + metrics["misses"]
+    assert metrics["hit_ratio"] is not None
 
 
 # ==================================================

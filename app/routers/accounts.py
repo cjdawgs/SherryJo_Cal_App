@@ -25,7 +25,7 @@ from datetime import datetime, timezone, timedelta
 import os
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import User, OAuthAccount
+from app.models import User, OAuthAccount, SyncEfficiencyDailyRollup
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     ensure_valid_token,
@@ -386,8 +386,84 @@ def get_sync_status(
     account_summaries = [account_sync_summary(acc) for acc in accounts]
 
     return {
-        "scheduler": get_scheduler_health(),
+        "scheduler": get_scheduler_health(user_id=current_user.id),
         "accounts": account_summaries,
+    }
+
+
+@router.get("/sync-rollups")
+def get_sync_rollups(
+    days: int = Query(7, ge=1, le=28),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read-only trend endpoint for sync efficiency charts.
+
+    Returns the most recent daily rollup rows (up to 28 days) plus a compact
+    current-week summary so the UI can render week-over-week visuals without
+    direct DB access.
+    """
+
+    # current_user dependency enforces auth; user-id is not used because
+    # rollups are global operational metrics, not per-user private records.
+    _ = current_user.id
+
+    safe_days = 28 if int(days) == 28 else 7
+
+    today = datetime.now(timezone.utc).date()
+    start_date = today - timedelta(days=safe_days - 1)
+
+    rows = (
+        db.query(SyncEfficiencyDailyRollup)
+        .filter(SyncEfficiencyDailyRollup.snapshot_date >= start_date)
+        .order_by(SyncEfficiencyDailyRollup.snapshot_date.asc())
+        .all()
+    )
+
+    serialized_rows = [
+        {
+            "snapshot_date": row.snapshot_date.isoformat() if row.snapshot_date else None,
+            "week_start_date": row.week_start_date.isoformat() if row.week_start_date else None,
+            "changes": int(row.changes or 0),
+            "no_changes": int(row.no_changes or 0),
+            "total_cycles": int(row.total_cycles or 0),
+            "change_ratio": row.change_ratio,
+            "no_change_ratio": row.no_change_ratio,
+            "google_cache_hits": int(row.google_cache_hits or 0),
+            "google_cache_misses": int(row.google_cache_misses or 0),
+            "google_cache_total_lookups": int(row.google_cache_total_lookups or 0),
+            "google_cache_hit_ratio": row.google_cache_hit_ratio,
+            "google_cache_entries": int(row.google_cache_entries or 0),
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+        for row in rows
+    ]
+
+    current_week_start = today - timedelta(days=today.weekday())
+    current_week_rows = [
+        row for row in serialized_rows
+        if row.get("week_start_date") == current_week_start.isoformat()
+    ]
+
+    def _avg(key: str):
+        values = [r.get(key) for r in current_week_rows if isinstance(r.get(key), (int, float))]
+        return (sum(values) / len(values)) if values else None
+
+    current_week_summary = {
+        "week_start_date": current_week_start.isoformat(),
+        "days_present": len(current_week_rows),
+        "avg_no_change_ratio": _avg("no_change_ratio"),
+        "avg_google_cache_hit_ratio": _avg("google_cache_hit_ratio"),
+        "rows": current_week_rows,
+    }
+
+    return {
+        "days": safe_days,
+        "start_date": start_date.isoformat(),
+        "end_date": today.isoformat(),
+        "rows": serialized_rows,
+        "current_week": current_week_summary,
     }
 
 

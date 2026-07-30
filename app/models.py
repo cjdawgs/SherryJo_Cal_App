@@ -3,7 +3,7 @@
 # ✅ IMPORTS
 # --------------------------------------------------
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, JSON, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, Boolean, ForeignKey, JSON, UniqueConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -369,6 +369,38 @@ class TVDiagLog(Base):
     visibility    = Column(String, nullable=True)
     guard_enabled = Column(Boolean, nullable=True)
     guard_timeout = Column(Integer, nullable=True)
+
+
+class SyncEfficiencyDailyRollup(Base):
+    """Daily rollup snapshots for sync efficiency and provider-cache metrics."""
+
+    __tablename__ = "sync_efficiency_daily_rollups"
+    __table_args__ = (
+        UniqueConstraint("snapshot_date", name="uq_sync_efficiency_snapshot_date"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    snapshot_date = Column(Date, nullable=False, index=True)
+    week_start_date = Column(Date, nullable=False, index=True)
+
+    changes = Column(Integer, nullable=False, default=0)
+    no_changes = Column(Integer, nullable=False, default=0)
+    total_cycles = Column(Integer, nullable=False, default=0)
+    change_ratio = Column(Float, nullable=True)
+    no_change_ratio = Column(Float, nullable=True)
+
+    google_cache_hits = Column(Integer, nullable=False, default=0)
+    google_cache_misses = Column(Integer, nullable=False, default=0)
+    google_cache_total_lookups = Column(Integer, nullable=False, default=0)
+    google_cache_hit_ratio = Column(Float, nullable=True)
+    google_cache_entries = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class AppRuntimeSecret(Base):

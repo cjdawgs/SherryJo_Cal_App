@@ -103,7 +103,9 @@ function buildStickyIcon({ count = 1, title = "Open sticky note", dragPayload = 
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
   icon.title = title;
-  icon.textContent = "🗒";
+  icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/>
+  </svg>`;
   icon.style.cursor = "grab";
   icon.style.userSelect = "none";
   icon.style.webkitUserDrag = "element";
@@ -224,13 +226,13 @@ export function renderRangePill() {
       month: "short",
       day: "numeric"
     });
-    el.textContent = `📦 Loaded Data: ${fmt(cacheStart)} → ${fmt(cacheEnd)}`;
+    el.textContent = `Loaded Data: ${fmt(cacheStart)} to ${fmt(cacheEnd)}`;
     return;
   }
 
   const days = window.currentRangeDays || 30;
   const range = getActiveRangeLabel(days);
-  el.textContent = `📅 ${range?.label || "NO RANGE"}`;
+  el.textContent = `${range?.label || "NO RANGE"}`;
 
   console.log("✅ RANGE PILL RENDER:", el.textContent);
 }
@@ -257,18 +259,31 @@ function positionContextMenu(menu, x, y) {
   menu.classList.add("visible");
 }
 
+const CTX_MENU_ICONS = {
+  create: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>`,
+  edit: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z"/></svg>`,
+  sticky: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/></svg>`,
+  precision: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2 1 21h22L12 2zm1 14h-2v-2h2v2zm0-4h-2V8h2v4z"/></svg>`,
+  delete: `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg>`
+};
+
+function ctxMenuLabel(iconKey, text) {
+  const icon = CTX_MENU_ICONS[iconKey] || "";
+  return `<span style="display:inline-flex;align-items:center;gap:6px;"><span class="ctxMenuIcon" aria-hidden="true" style="line-height:0;display:inline-flex;">${icon}</span><span>${text}</span></span>`;
+}
+
 function openContextMenu(x, y, fcEvent) {
   const menu = ensureContextMenu();
   const precisionLabel = getDragPrecisionModeLabel();
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create" title="Create Event">➕ Create Event</div>
+    <div class="ctx-menu-item" data-action="create" title="Create Event">${ctxMenuLabel("create", "Create Event")}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="edit" title="Edit">✏️ Edit</div>
-    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">🗒 New Sticky Note</div>
+    <div class="ctx-menu-item" data-action="edit" title="Edit">${ctxMenuLabel("edit", "Edit")}</div>
+    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">${ctxMenuLabel("sticky", "New Sticky Note")}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">🎯 Precision Drag: ${precisionLabel}</div>
+    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">${ctxMenuLabel("precision", `Precision Drag: ${precisionLabel}`)}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item danger" data-action="delete" title="Delete">🗑 Delete</div>
+    <div class="ctx-menu-item danger" data-action="delete" title="Delete">${ctxMenuLabel("delete", "Delete")}</div>
   `;
   positionContextMenu(menu, x, y);
   menu.querySelector("[data-action='create']").onclick = () => {
@@ -297,9 +312,9 @@ function openContextMenu(x, y, fcEvent) {
 function openStickyIconContextMenu(x, y, payload) {
   const menu = ensureContextMenu();
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="open-sticky">🗒 Open Sticky</div>
-    <div class="ctx-menu-item" data-action="edit-sticky">✏️ Edit Specific Sticky</div>
-    <div class="ctx-menu-item danger" data-action="delete-sticky">🧽 Delete Specific Sticky</div>
+    <div class="ctx-menu-item" data-action="open-sticky">${ctxMenuLabel("sticky", "Open Sticky")}</div>
+    <div class="ctx-menu-item" data-action="edit-sticky">${ctxMenuLabel("edit", "Edit Specific Sticky")}</div>
+    <div class="ctx-menu-item danger" data-action="delete-sticky">${ctxMenuLabel("delete", "Delete Specific Sticky")}</div>
   `;
   positionContextMenu(menu, x, y);
 
@@ -368,14 +383,14 @@ function openDateContextMenu(x, y, dateStr) {
 
   const menu = ensureContextMenu();
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="create" title="Create Event">➕ Create Event</div>
+    <div class="ctx-menu-item" data-action="create" title="Create Event">${ctxMenuLabel("create", "Create Event")}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="edit" title="Edit">✏️ Edit</div>
-    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">🗒 New Sticky Note</div>
+    <div class="ctx-menu-item" data-action="edit" title="Edit">${ctxMenuLabel("edit", "Edit")}</div>
+    <div class="ctx-menu-item" data-action="sticky" title="New Sticky Note">${ctxMenuLabel("sticky", "New Sticky Note")}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">🎯 Precision Drag: ${precisionLabel}</div>
+    <div class="ctx-menu-item" data-action="toggle-precision" title="Toggle drag confirmation">${ctxMenuLabel("precision", `Precision Drag: ${precisionLabel}`)}</div>
     <div class="ctx-menu-separator"></div>
-    <div class="ctx-menu-item danger" data-action="delete" title="Delete">🗑 Delete</div>
+    <div class="ctx-menu-item danger" data-action="delete" title="Delete">${ctxMenuLabel("delete", "Delete")}</div>
   `;
   positionContextMenu(menu, x, y);
 
@@ -2086,7 +2101,7 @@ function getEventSummary(ev) {
   const legacySticky = ev.extendedProps?.stickyNote;
   const stickyText = summarizeText(firstSticky?.content || legacySticky?.content || "", 60);
 
-  return stickyText ? `${title}\n🗒 ${stickyText}` : title;
+  return stickyText ? `${title}\nSticky: ${stickyText}` : title;
 }
 
 function applyGridHoverSummaries() {
@@ -2120,7 +2135,7 @@ function applyGridHoverSummaries() {
         || "";
       const stickySummary = summarizeText(sticky, 52);
       const countLine = extra > 0 ? `\n+${extra} more` : "";
-      const stickyLine = stickySummary ? `\n🗒 ${stickySummary}` : "";
+      const stickyLine = stickySummary ? `\nSticky: ${stickySummary}` : "";
       el.title = `${firstSummary}${stickyLine}${countLine}`;
     });
   };

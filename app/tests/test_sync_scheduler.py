@@ -72,10 +72,18 @@ def reset_sync_state():
     sync_scheduler.last_global_sync_started_at = None
     sync_scheduler.last_global_sync_finished_at = None
     sync_scheduler.last_global_sync_error = None
+    sync_scheduler._no_change_streak_by_user.clear()
+    sync_scheduler._next_due_override_by_user.clear()
+    sync_scheduler._sync_efficiency_counters["changes"] = 0
+    sync_scheduler._sync_efficiency_counters["no_changes"] = 0
     yield
     sync_scheduler.last_global_sync_started_at = None
     sync_scheduler.last_global_sync_finished_at = None
     sync_scheduler.last_global_sync_error = None
+    sync_scheduler._no_change_streak_by_user.clear()
+    sync_scheduler._next_due_override_by_user.clear()
+    sync_scheduler._sync_efficiency_counters["changes"] = 0
+    sync_scheduler._sync_efficiency_counters["no_changes"] = 0
 
 
 # ==================================================
@@ -133,11 +141,11 @@ def test_latest_account_sync_marker_without_history():
 # ==================================================
 
 def test_sync_not_due_without_accounts():
-    assert sync_scheduler._is_user_sync_due([], NOW) == (False, None)
+    assert sync_scheduler._is_user_sync_due(1, [], NOW) == (False, None)
 
 
 def test_sync_due_when_never_synced():
-    due, cadence = sync_scheduler._is_user_sync_due([make_account()], NOW)
+    due, cadence = sync_scheduler._is_user_sync_due(1, [make_account()], NOW)
 
     assert (due, cadence) == (True, 5)
 
@@ -148,7 +156,7 @@ def test_sync_uses_shortest_cadence_and_floors_at_one_minute():
         make_account(sync_frequency_minutes=-10, last_sync=NOW - timedelta(minutes=3)),
     ]
 
-    due, cadence = sync_scheduler._is_user_sync_due(accounts, NOW)
+    due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
     assert (due, cadence) == (True, 1)
 
@@ -156,7 +164,7 @@ def test_sync_uses_shortest_cadence_and_floors_at_one_minute():
 def test_sync_cadence_falls_back_to_five_minutes_when_unset():
     accounts = [make_account(sync_frequency_minutes=0, last_sync=NOW - timedelta(minutes=3))]
 
-    due, cadence = sync_scheduler._is_user_sync_due(accounts, NOW)
+    due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
     assert (due, cadence) == (False, 5)
 
@@ -164,7 +172,7 @@ def test_sync_cadence_falls_back_to_five_minutes_when_unset():
 def test_sync_not_due_before_cadence_elapses():
     accounts = [make_account(sync_frequency_minutes=30, last_sync=NOW - timedelta(minutes=5))]
 
-    due, cadence = sync_scheduler._is_user_sync_due(accounts, NOW)
+    due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
     assert (due, cadence) == (False, 30)
 
@@ -172,7 +180,7 @@ def test_sync_not_due_before_cadence_elapses():
 def test_sync_due_once_cadence_elapsed():
     accounts = [make_account(sync_frequency_minutes=10, last_sync=NOW - timedelta(minutes=10))]
 
-    due, _ = sync_scheduler._is_user_sync_due(accounts, NOW)
+    due, _ = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
     assert due is True
 
@@ -239,12 +247,15 @@ def test_run_event_sync_syncs_due_users_and_skips_accountless(monkeypatch, reset
         accounts_by_user_id={1: [make_account()], 2: []},
     )
     monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
-    sync_all = MagicMock(return_value={"synced": 3})
+    sync_all = MagicMock(return_value={"created": 0, "updated": 0, "deleted": 0, "deduped": 0})
     monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
 
     sync_scheduler.run_event_sync()
 
-    sync_all.assert_called_once_with(session, due_user)
+    sync_all.assert_called_once()
+    kwargs = sync_all.call_args.kwargs
+    assert kwargs.get("start_date") is not None
+    assert kwargs.get("end_date") is not None
     assert sync_scheduler.last_global_sync_error is None
 
 
@@ -257,10 +268,10 @@ def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_sta
     )
     monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
 
-    def sync_all(db, user):
+    def sync_all(db, user, start_date=None, end_date=None):
         if user is failing_user:
             raise RuntimeError("provider down")
-        return {"synced": 1}
+        return {"created": 0, "updated": 1, "deleted": 0, "deduped": 0}
 
     monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
 
@@ -287,13 +298,15 @@ def test_run_event_sync_verbose_prints_results(monkeypatch, reset_sync_state, ca
     session = RoutingSession(users=[user], accounts_by_user_id={7: [make_account()]})
     monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
     monkeypatch.setattr(
-        sync_scheduler.calendar_service, "sync_all", MagicMock(return_value={"synced": 2})
+        sync_scheduler.calendar_service,
+        "sync_all",
+        MagicMock(return_value={"created": 1, "updated": 0, "deleted": 0, "deduped": 0}),
     )
 
     with caplog.at_level("INFO", logger="app.services.sync_scheduler"):
         sync_scheduler.run_event_sync()
 
-    assert "[SYNC] user=7 {'synced': 2}" in caplog.text
+    assert "[SYNC] user=7 {'created': 1, 'updated': 0, 'deleted': 0, 'deduped': 0}" in caplog.text
 
 
 # ==================================================
@@ -310,6 +323,8 @@ def test_start_scheduler_registers_job(monkeypatch):
     assert jobs["event_sync_job"]["minutes"] == 5
     assert jobs["event_sync_job"]["replace_existing"] is True
     assert jobs["tv_diag_prune_job"]["hours"] == 24
+    assert jobs["sync_efficiency_rollup_job"]["hour"] == 0
+    assert jobs["sync_efficiency_rollup_job"]["minute"] == 5
     scheduler.start.assert_called_once()
 
 
@@ -329,6 +344,9 @@ def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):
     assert health["next_run_at"] == (NOW + timedelta(minutes=5)).isoformat()
     assert health["frequency_minutes"] == 5
     assert health["last_error"] is None
+    assert "adaptive_backoff" in health
+    assert "efficiency" in health
+    assert "google_calendar_list_cache" in health
 
 
 def test_get_scheduler_health_handles_lookup_failure(monkeypatch, reset_sync_state):
@@ -344,3 +362,21 @@ def test_get_scheduler_health_handles_lookup_failure(monkeypatch, reset_sync_sta
     assert health["next_run_at"] is None
     assert health["running"] is False
     assert health["last_started_at"] is None
+
+
+def test_run_event_sync_passes_window_days_from_accounts(monkeypatch, reset_sync_state):
+    user = SimpleNamespace(id=11)
+    account = make_account(sync_frequency_minutes=5, sync_range_days=21)
+    session = RoutingSession(users=[user], accounts_by_user_id={11: [account]})
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
+
+    sync_all = MagicMock(return_value={"created": 0, "updated": 0, "deleted": 0, "deduped": 0})
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
+
+    sync_scheduler.run_event_sync()
+
+    kwargs = sync_all.call_args.kwargs
+    start_date = kwargs["start_date"]
+    end_date = kwargs["end_date"]
+    assert start_date is not None and end_date is not None
+    assert (end_date - start_date).days == 42

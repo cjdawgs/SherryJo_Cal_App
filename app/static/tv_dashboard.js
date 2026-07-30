@@ -346,6 +346,11 @@ const state = {
   },
   editor: null,
   editorDirty: false,
+  daySectionState: {
+    allDay: false,
+    freeTime: false,
+    sticky: false,
+  },
   monthDetailOpen: false,
   utilityPanel: null,
   adminUsers: [],
@@ -807,13 +812,30 @@ function ensureStyles() {
   .tv-main.tv-view-day .tv-single-day-title { font-size: 18px; font-weight: 800; letter-spacing: 0.4px; text-transform: uppercase; }
   .tv-main.tv-view-day .tv-single-day-subtitle { font-size: 12px; color: var(--tv-text-soft); margin-top: 2px; }
   .tv-main.tv-view-day .tv-single-day-pills { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .tv-main.tv-view-day .tv-single-day-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 8px; align-items: start; }
+  .tv-main.tv-view-day .tv-single-day-grid { display: grid; grid-template-columns: minmax(0, 1.58fr) minmax(0, 0.42fr); gap: 8px; align-items: start; }
+  .tv-main.tv-view-day .tv-day-primary { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+  .tv-main.tv-view-day .tv-day-secondary { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-view-day .tv-day-section { border: 1px solid rgba(201,219,244,0.16); border-radius: 12px; background: rgba(13,24,38,0.44); padding: 10px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
   .tv-main.tv-view-day .tv-day-section-wide { grid-column: 1 / -1; }
   .tv-main.tv-view-day .tv-day-section-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
-  .tv-main.tv-view-day .tv-day-section-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
+  .tv-main.tv-view-day .tv-day-section-title { font-size: 12px; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase; }
   .tv-main.tv-view-day .tv-day-section-meta { font-size: 11px; color: var(--tv-text-soft); text-align: right; }
-  .tv-main.tv-view-day .tv-day-section-list { display: flex; flex-direction: column; gap: 8px; max-height: 26vh; overflow-y: auto; }
+  .tv-main.tv-view-day .tv-day-section-list { display: flex; flex-direction: column; gap: 8px; max-height: 20vh; overflow-y: auto; }
+  .tv-main.tv-view-day .tv-day-section-list.compact { max-height: 11vh; }
+  .tv-main.tv-view-day .tv-day-section.collapsed { padding-bottom: 8px; }
+  .tv-main.tv-view-day .tv-day-section.collapsed .tv-day-section-head { align-items: center; }
+  .tv-main.tv-view-day .tv-day-section.collapsed .tv-day-section-meta { font-size: 10px; }
+  .tv-main.tv-view-day .tv-day-section.collapsed .tv-day-section-list,
+  .tv-main.tv-view-day .tv-day-section.collapsed .tv-day-section-scroll { display: none; }
+  .tv-main.tv-view-day .tv-day-section-toggle { border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 3px 8px; font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--tv-text-soft); background: rgba(17,28,44,0.34); }
+  .tv-main.tv-view-day .tv-day-section-toggle:hover { border-color: rgba(255,255,255,0.32); color: var(--tv-text); }
+  .tv-main.tv-view-day .tv-day-timed { min-height: clamp(36vh, 49vh, 60vh); max-height: clamp(36vh, 49vh, 60vh); display: flex; flex-direction: column; }
+  .tv-main.tv-view-day .tv-day-timed .tv-day-section-head { align-items: center; }
+  .tv-main.tv-view-day .tv-day-section-scroll { display: flex; justify-content: flex-end; gap: 6px; }
+  .tv-main.tv-view-day .tv-day-scroll-btn { min-width: 28px; min-height: 24px; border: 1px solid rgba(201,219,244,0.24); border-radius: 7px; background: rgba(17,28,44,0.34); color: var(--tv-text); font-size: 13px; line-height: 1; font-weight: 700; }
+  .tv-main.tv-view-day .tv-day-scroll-btn:hover { border-color: rgba(255,255,255,0.34); }
+  .tv-main.tv-view-day .tv-day-scroll-btn:disabled { opacity: 0.4; }
+  .tv-main.tv-view-day .tv-day-timed .tv-day-section-list { max-height: none; min-height: 0; flex: 1; overflow-y: auto; padding-right: 2px; }
   .tv-main.tv-view-day .tv-day-event-card { position: relative; border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 8px 10px 8px 10px; background: rgba(12,22,35,0.46); }
   .tv-main.tv-view-day .tv-day-event-card .tv-item-title { font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-main.tv-view-day .tv-day-event-card .tv-item-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -3183,6 +3205,25 @@ function renderSingleDayView() {
     `${busyMinutes} busy min`,
   ];
   const freeBlocks = schedule.freeBlocks;
+  const allDayCollapsed = state.daySectionState.allDay !== true;
+  const freeTimeCollapsed = state.daySectionState.freeTime !== true;
+  const stickyCollapsed = state.daySectionState.sticky !== true;
+
+  const allDayCount = allDayItems.length;
+  const timedCount = timedItems.length;
+  const freeCount = freeBlocks.length;
+  const stickyCount = stickyNotes.length;
+
+  const allDayMeta = allDayCollapsed
+    ? `${allDayCount} item${allDayCount === 1 ? '' : 's'}`
+    : 'Scheduling anchors that span the whole day';
+  const freeMeta = freeTimeCollapsed
+    ? `${freeCount} block${freeCount === 1 ? '' : 's'}`
+    : 'Gaps between scheduled items (7:00 AM - 7:00 PM)';
+  const stickyMeta = stickyCollapsed
+    ? `${stickyCount} note${stickyCount === 1 ? '' : 's'}`
+    : 'Visible across the selected day';
+
   return `
     <div class="tv-shell">
       ${renderLeftSidebar()}
@@ -3464,42 +3505,57 @@ function enterEventEditor(item, mode) {
   state.editor = {
     type: 'event',
     mode,
-    eventId: ev ? ev.id : null,
+          <div class="tv-day-primary">
+          <section class="tv-day-section tv-day-timed">
     date: item ? item.date : state.selectedDate,
-    fieldIndex: 0,
-    fields: [
+              <div class="tv-day-section-title">Timed Events</div>
+              <div class="tv-day-section-meta">${timedCount} scheduled item${timedCount === 1 ? '' : 's'} • dominant day lane</div>
       { key: 'title', label: 'Title' },
+            <div class="tv-day-section-scroll">
+              <button class="tv-day-scroll-btn" type="button" data-tv-click="timed-scroll" data-direction="up" aria-label="Scroll timed events up">▲</button>
+              <button class="tv-day-scroll-btn" type="button" data-tv-click="timed-scroll" data-direction="down" aria-label="Scroll timed events down">▼</button>
+            </div>
       { key: 'start', label: 'Start Time' },
-      { key: 'end', label: 'End Time' },
+              ${timedItems.length ? timedItems.map((ev, idx) => renderEventSummaryCard(ev, 'timed', idx)).join('') : '<div class="tv-empty">No timed events</div>'}
       { key: 'description', label: 'Description' },
     ],
-    data: {
+
+          <section class="tv-day-section ${allDayCollapsed ? 'collapsed' : ''}">
       title: ev ? (ev.title || 'New Event') : 'New Event',
-      start,
-      end,
+              <div class="tv-day-section-title">All-Day Events</div>
+              <div class="tv-day-section-meta">${allDayMeta}</div>
+              <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="allDay">${allDayCollapsed ? 'Expand' : 'Collapse'}</button>
       description: ev ? (ev.description || '') : '',
-    },
-  };
+            <div class="tv-day-section-list compact">
+              ${allDayItems.length ? allDayItems.map((ev, idx) => renderEventSummaryCard(ev, 'all-day', idx)).join('') : '<div class="tv-empty">No all-day events</div>'}
   state.editorDirty = false;
   render();
-}
+
+          </div>
+
+          <div class="tv-day-secondary">
+          <section class="tv-day-section ${freeTimeCollapsed ? 'collapsed' : ''}">
 
 function enterStickyEditor(item, mode) {
-  const sticky = item ? item.sticky : { content: 'New sticky note', color: STICKY_COLORS[0] };
+              <div class="tv-day-section-meta">${freeMeta}</div>
+              <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="freeTime">${freeTimeCollapsed ? 'Expand' : 'Collapse'}</button>
   state.editor = {
-    type: 'sticky',
-    mode,
+            <div class="tv-day-section-list compact">
+              ${freeBlocks.length ? freeBlocks.slice(0, 12).map(renderFreeBlockCard).join('') : '<div class="tv-empty">No free time blocks detected</div>'}
     stickyId: item ? item.id : null,
     stickyIndex: item ? item.index : null,
-    date: item ? item.date : state.selectedDate,
+
+          <section class="tv-day-section ${stickyCollapsed ? 'collapsed' : ''}">
     fieldIndex: 0,
     fields: [
-      { key: 'content', label: 'Title' },
+              <div class="tv-day-section-meta">${stickyMeta}</div>
+              <button class="tv-day-section-toggle" type="button" data-tv-click="day-toggle" data-section="sticky">${stickyCollapsed ? 'Expand' : 'Collapse'}</button>
       { key: 'color', label: 'Color' },
-      { key: 'description', label: 'Description' },
+            <div class="tv-day-section-list compact">
     ],
     data: {
       content: sticky.content || 'New sticky note',
+          </div>
       color: sticky.color || STICKY_COLORS[0],
       description: sticky.description || '',
     },
@@ -3617,6 +3673,21 @@ function handleMainClick(e) {
     return;
   }
 
+  if (role === 'day-toggle') {
+    const section = t.getAttribute('data-section');
+    if (section && Object.prototype.hasOwnProperty.call(state.daySectionState, section)) {
+      state.daySectionState[section] = !state.daySectionState[section];
+      render();
+    }
+    return;
+  }
+
+  if (role === 'timed-scroll') {
+    const direction = t.getAttribute('data-direction') === 'up' ? -1 : 1;
+    scrollTimedEventsPanel(direction);
+    return;
+  }
+
   if (role === 'field' && state.editor) {
     const idx = Number(t.getAttribute('data-field-index') || 0);
     state.editor.fieldIndex = idx;
@@ -3703,6 +3774,13 @@ function handleMainClick(e) {
       exitTvAction();
     }
   }
+}
+
+function scrollTimedEventsPanel(direction = 1) {
+  const list = dom.tvMain?.querySelector('.tv-day-timed .tv-day-section-list');
+  if (!list) return;
+  const delta = Math.max(72, Math.floor(list.clientHeight * 0.42));
+  list.scrollBy({ top: delta * direction, behavior: 'smooth' });
 }
 
 function clickCursorTarget(mode) {

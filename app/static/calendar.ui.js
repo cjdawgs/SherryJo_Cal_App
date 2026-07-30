@@ -2199,7 +2199,7 @@ async function deleteEvent() {
     await window.undoRedoManager.registerExecuted(command);
 
     closeCreateModal({ force: true });
-    window.showToast?.("🗑 Event deleted");
+    window.showToast?.("Event deleted");
     window.smartRefresh?.({ reason: "event_deleted", force: true });
     updateUndoRedoButtonStates();
   } catch (err) {
@@ -2500,6 +2500,37 @@ function bindUIEvents() {
     if (typeof window.openPublishReviewMenu === "function") {
       window.openPublishReviewMenu(event.clientX, event.clientY);
     }
+  });
+
+  document.getElementById("importBtn")?.addEventListener("click", () => {
+    document.getElementById("importFileInput")?.click();
+  });
+
+  document.getElementById("importFileInput")?.addEventListener("change", async (event) => {
+    const input = event.target;
+    const file = input?.files?.[0];
+    if (!file) return;
+
+    const publishNow = window.confirm(
+      "Publish imported events to connected Google/Microsoft calendars now?\n\nOK = Import and publish\nCancel = Import locally only"
+    );
+
+    let publishStickyMode = "description";
+    if (publishNow) {
+      const includeStickyAsDescription = window.confirm(
+        "When publishing, include sticky-note text in event descriptions?\n\nOK = Include sticky text in description\nCancel = Skip sticky text"
+      );
+      publishStickyMode = includeStickyAsDescription ? "description" : "none";
+    }
+
+    if (typeof window.importEventsFromFile === "function") {
+      await window.importEventsFromFile(file, {
+        publishNow,
+        publishStickyMode,
+      });
+    }
+
+    input.value = "";
   });
 
   document.getElementById("dedupBtn")?.addEventListener("click", () => {
@@ -2980,7 +3011,7 @@ window.moveEventStickyToDate = async (eventRef, targetDateKey) => {
     await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
-    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "🗒 Sticky moved to date";
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "Sticky moved to date";
     window.showToast?.(label);
     updateUndoRedoButtonStates();
     return true;
@@ -3068,7 +3099,7 @@ window.moveEventStickyToEvent = async (sourceEventRef, targetEventRef) => {
     await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
-    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "🗒 Sticky moved to event";
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "Sticky moved to event";
     window.showToast?.(label);
     updateUndoRedoButtonStates();
     return true;
@@ -3162,7 +3193,7 @@ window.moveDateStickyToEvent = async (sourceDateKey, eventRef) => {
     await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
-    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "🗒 Sticky moved to event";
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to event` : "Sticky moved to event";
     window.showToast?.(label);
     updateUndoRedoButtonStates();
     return true;
@@ -3234,7 +3265,7 @@ window.moveDateStickyToDate = async (sourceDateKey, targetDateKey) => {
     await window.undoRedoManager.registerExecuted(command);
 
     refreshStickyVisuals();
-    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "🗒 Sticky moved to date";
+    const label = movedItems.length > 1 ? `${movedItems.length} stickies moved to date` : "Sticky moved to date";
     window.showToast?.(label);
     updateUndoRedoButtonStates();
     return true;
@@ -3273,7 +3304,7 @@ async function deleteSelectedStickyInModal() {
       dateKey: modalState.dateStickyKey,
       localOnly: true
     });
-    window.showToast?.("🗒 Date sticky note deleted");
+    window.showToast?.("Date sticky note deleted");
     return;
   }
 
@@ -3307,7 +3338,7 @@ async function deleteSelectedStickyInModal() {
 
     hydrateStickyEditorFromState();
     refreshStickyVisuals();
-    window.showToast?.("🗒 Sticky note deleted");
+    window.showToast?.("Sticky note deleted");
   } catch (err) {
     console.error("❌ Sticky delete failed", err);
     window.showToast?.("❌ Sticky delete failed", "error");
@@ -3350,7 +3381,7 @@ window.deleteEventStickyNote = async (eventRef) => {
       summary: `Sticky note deleted: ${nextEvent.title || eventRef.title || "Untitled event"}`
     });
     refreshStickyVisuals();
-    window.showToast?.("🗒 Sticky note deleted");
+    window.showToast?.("Sticky note deleted");
   } catch (err) {
     console.error("❌ Sticky delete failed", err);
     window.showToast?.("❌ Sticky delete failed", "error");
@@ -3378,7 +3409,7 @@ window.deleteDateStickyNote = async (dateKey) => {
     localOnly: true
   });
   refreshStickyVisuals();
-  window.showToast?.("🗒 Date sticky note deleted");
+  window.showToast?.("Date sticky note deleted");
 };
 
 window.deleteEvent = deleteEvent;

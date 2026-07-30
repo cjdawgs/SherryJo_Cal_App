@@ -1254,7 +1254,7 @@ class CalendarService:
 
 
 
-        log_info(f"ðŸ§ª DB VIEW ACCOUNT TOTALS | {per_account_counts}")
+        log_info(f"[SYNC] DB VIEW ACCOUNT TOTALS | {per_account_counts}")
 
 
 
@@ -1286,11 +1286,11 @@ class CalendarService:
 
             end_date   = now + relativedelta(days=90)
 
-            log_info("ðŸ“¦ Using default 90-day range")
+            log_info("[SYNC] Using default 90-day range")
 
         else:
 
-            log_info("ðŸ“¥ Using UI-provided range")
+            log_info("[SYNC] Using UI-provided range")
 
 
 
@@ -1308,9 +1308,9 @@ class CalendarService:
                 if f"{normalize_provider(acc.provider)}:{(acc.account_email or '').lower().strip()}" == account_key
             ]
 
-        log_info(f"ðŸ“… Fetch window: {safe_start.date()} â†’ {safe_end.date()}")
+        log_info(f"[SYNC] Fetch window: {safe_start.date()} -> {safe_end.date()}")
 
-        log_info(f"ðŸ‘¤ Accounts found: {len(accounts)}")
+        log_info(f"[SYNC] Accounts found: {len(accounts)}")
 
 
 
@@ -1338,7 +1338,7 @@ class CalendarService:
 
             if not token:
 
-                log_error(f"ðŸš« No token: {email}")
+                log_error(f"[SYNC] No token: {email}")
 
                 acc.last_sync = sync_time
 
@@ -1572,7 +1572,7 @@ class CalendarService:
 
             in_range = len(r["events"])
 
-            log_info(f"ðŸ§ª ACCOUNT SYNC TOTALS | {provider}:{acct_email} | raw={r['raw_count']} | in_range={in_range} | {'incremental' if r['used_incremental'] else 'full'}")
+            log_info(f"[SYNC] ACCOUNT TOTALS | {provider}:{acct_email} | raw={r['raw_count']} | in_range={in_range} | {'incremental' if r['used_incremental'] else 'full'}")
 
             account_sync_totals.append({
 
@@ -1624,7 +1624,7 @@ class CalendarService:
 
         total_m = len(ms_events)
 
-        log_info(f"âœ… Parallel fetch complete | Google:{total_g} Apple:{total_a} MS:{total_m}")
+        log_info(f"[SYNC] Parallel fetch complete | Google:{total_g} Apple:{total_a} MS:{total_m}")
 
 
 
@@ -1880,7 +1880,7 @@ class CalendarService:
 
             db.commit()
 
-            log_info(f"ðŸ”€ Dedup: merged={merged_count} promoted={promoted_count} provider events into local canonical rows")
+            log_info(f"[DEDUP] merged={merged_count} promoted={promoted_count} provider events into local canonical rows")
 
 
 
@@ -1905,7 +1905,7 @@ class CalendarService:
 
         if not isinstance(events, list):
             log_error("Invalid events payload structure")
-            return {"created": 0, "updated": 0}
+            return {"created": 0, "updated": 0, "deleted": 0, "deduped": 0, "account_sync_totals": []}
 
         created = updated = 0
 
@@ -1988,6 +1988,7 @@ class CalendarService:
         return {
             "created":             created,
             "updated":             updated,
+            "deleted":             deleted,
             "deduped":             deduped,
             "account_sync_totals": account_sync_totals,
         }

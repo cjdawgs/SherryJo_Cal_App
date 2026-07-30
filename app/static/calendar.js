@@ -80,6 +80,53 @@ function setSidebarDrawerOpen(isOpen) {
   }
 }
 
+const CONTROL_ICON_FALLBACKS = {
+  createBtn: `<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+  </svg>`,
+  accountsBtn: `<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.25 7.25 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.88 2h-3.76a.5.5 0 0 0-.49.42l-.36 2.54c-.58.23-1.13.54-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.72 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.49.42h3.76c.24 0 .45-.18.49-.42l.36-2.54c.58-.23 1.13-.54 1.63-.94l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/>
+  </svg>`
+};
+
+function hasMojibakeText(text) {
+  if (!text) return false;
+  const markerBlocks = [
+    [0x00ef, 0x00bf, 0x00bd], // replacement-character mojibake triplet
+    [0x00f0, 0x0178],
+    [0x00e2, 0x20ac, 0x201d],
+    [0x00e2, 0x20ac, 0x201c],
+    [0x00e2, 0x20ac],
+    [0x00e2, 0x2020],
+    [0x00c3],
+    [0x0393],
+    [0x00da],
+    [0x00d6]
+  ];
+  const probe = String(text);
+  return markerBlocks.some((codes) => probe.includes(String.fromCharCode(...codes)));
+}
+
+function getSafeControlIconHtml(btn) {
+  if (!btn) return "";
+
+  const svg = btn.querySelector("svg");
+  if (svg) {
+    const svgHtml = svg.outerHTML;
+    if (!hasMojibakeText(svgHtml)) {
+      return svgHtml;
+    }
+  }
+
+  const cached = btn.dataset.iconHtml || "";
+  if (cached && !hasMojibakeText(cached)) {
+    return cached;
+  }
+
+  const fallback = CONTROL_ICON_FALLBACKS[btn.id] || "";
+  return fallback;
+}
+
 function applyControlBandDensity(mode) {
   const createBtn = document.getElementById("createBtn");
   const accountsBtn = document.getElementById("accountsBtn");
@@ -87,6 +134,7 @@ function applyControlBandDensity(mode) {
   const redoBtn = document.getElementById("redoBtn");
   const syncBtn = document.getElementById("syncBtn");
   const publishBtn = document.getElementById("publishBtn");
+  const importBtn = document.getElementById("importBtn");
   const dedupBtn = document.getElementById("dedupBtn");
   const logoutBtn = document.getElementById("logoutBtn");
 
@@ -94,20 +142,20 @@ function applyControlBandDensity(mode) {
 
   const withIconLabel = (btn, label) => {
     if (!btn) return;
-    if (!btn.dataset.iconHtml) {
-      btn.dataset.iconHtml = btn.innerHTML;
-    }
-    btn.innerHTML = `${btn.dataset.iconHtml}<span class="btnLabel">${label}</span>`;
+    const iconHtml = getSafeControlIconHtml(btn);
+    btn.dataset.iconHtml = iconHtml;
+    btn.innerHTML = `${iconHtml}<span class="btnLabel">${label}</span>`;
   };
 
   if (mode === "mobile") {
-    createBtn.textContent = "＋ Create";
-    createBtn.title = "Create Event";
+    withIconLabel(createBtn, "Create / Import");
+    createBtn.title = "Create or import calendar events";
     withIconLabel(accountsBtn, "Account Menu");
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
+    if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
@@ -116,13 +164,14 @@ function applyControlBandDensity(mode) {
   }
 
   if (mode === "tablet") {
-    createBtn.textContent = "＋ Create Event";
-    createBtn.title = "Create Event";
+    withIconLabel(createBtn, "Create / Import");
+    createBtn.title = "Create or import calendar events";
     withIconLabel(accountsBtn, "Account Menu");
     withIconLabel(undoBtn, "Undo");
     withIconLabel(redoBtn, "Redo");
     withIconLabel(syncBtn, "Sync");
     withIconLabel(publishBtn, "Publish");
+    if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
     withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
     withIconLabel(logoutBtn, "Logout");
     _updateDedupBtnUI();
@@ -130,13 +179,14 @@ function applyControlBandDensity(mode) {
     return;
   }
 
-  createBtn.textContent = "➕ Create Event";
-  createBtn.title = "Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'";
+  withIconLabel(createBtn, "Create / Import");
+  createBtn.title = "Create or import calendar events";
   withIconLabel(accountsBtn, "Account Menu");
   withIconLabel(undoBtn, "Undo");
   withIconLabel(redoBtn, "Redo");
   withIconLabel(syncBtn, "Sync Now");
   withIconLabel(publishBtn, "Publish");
+  if (importBtn?.dataset.iconHtml) importBtn.innerHTML = importBtn.dataset.iconHtml;
   withIconLabel(dedupBtn, isDedupEnabled() ? "Dedup: ON" : "Dedup: OFF");
   withIconLabel(logoutBtn, "Logout");
   _updateDedupBtnUI();
@@ -801,14 +851,14 @@ async function logAppleFetchDiagnostics() {
   try {
     const res = await apiFetch("/accounts/apple/debug-fetch");
     if (!res || !res.ok) {
-      console.warn("🧪 APPLE DEBUG FETCH unavailable");
+      console.warn("[DEBUG] APPLE FETCH unavailable");
       return;
     }
 
     const data = await res.json();
-    console.log("🧪 APPLE DEBUG FETCH:", data);
+    console.log("[DEBUG] APPLE FETCH:", data);
   } catch (err) {
-    console.warn("🧪 APPLE DEBUG FETCH failed", err);
+    console.warn("[DEBUG] APPLE FETCH failed", err);
   }
 }
 
@@ -1198,7 +1248,7 @@ function safeParseDate(dt) {
   const parsed = new Date(dt);
 
   if (isNaN(parsed.getTime())) {
-    console.warn("⚠️ Failed parse:", dt);
+    console.warn("[WARN] Failed parse:", dt);
     return null;
   }
 
@@ -1237,7 +1287,9 @@ function getEventStickyCount(ev) {
 function createStickyIconElement({ count = 1, title = "Open sticky note", onOpen, onEdit, onDelete, dragPayload = null } = {}) {
   const icon = document.createElement("span");
   icon.className = "stickyEventIcon";
-  icon.textContent = "🗒";
+  icon.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
+    <path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/>
+  </svg>`;
   icon.title = title;
 
   if (dragPayload) {
@@ -1298,9 +1350,9 @@ function openSidebarStickyMenu(x, y, onOpen, onDelete, onEdit) {
   }
 
   menu.innerHTML = `
-    <div class="ctx-menu-item" data-action="open-sticky">🗒 Open Sticky</div>
-    <div class="ctx-menu-item" data-action="edit-sticky">✏️ Edit Specific Sticky</div>
-    <div class="ctx-menu-item danger" data-action="delete-sticky">🧽 Delete Specific Sticky</div>
+    <div class="ctx-menu-item" data-action="open-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M6 2h12a2 2 0 0 1 2 2v16l-4-3-4 3-4-3-4 3V4a2 2 0 0 1 2-2z"/></svg></span><span>Open Sticky</span></span></div>
+    <div class="ctx-menu-item" data-action="edit-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25zm17.71-10.04a1.003 1.003 0 0 0 0-1.42l-2.5-2.5a1.003 1.003 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 2-1.66z"/></svg></span><span>Edit Specific Sticky</span></span></div>
+    <div class="ctx-menu-item danger" data-action="delete-sticky"><span style="display:inline-flex;align-items:center;gap:6px;"><span aria-hidden="true" style="line-height:0;display:inline-flex;"><svg width="12" height="12" viewBox="0 0 24 24"><path fill="currentColor" d="M6 7h12l-1 14H7L6 7zm3-4h6l1 2h4v2H4V5h4l1-2z"/></svg></span><span>Delete Specific Sticky</span></span></div>
   `;
 
   const menuW = menu.offsetWidth || 185;
@@ -1812,7 +1864,7 @@ function showReconnectBanner(accounts) {
   header.style.marginBottom = "6px";
   const adminKeyCount = fixable.filter((acc) => Boolean(acc?.token_issue?.requires_admin)).length;
   const userTokenCount = fixable.length - adminKeyCount;
-  header.textContent = `⚠ ${fixable.length} account(s) need attention`;
+  header.textContent = `Warning: ${fixable.length} account(s) need attention`;
   const sub = document.createElement("div");
   sub.style.fontWeight = "500";
   sub.style.fontSize = "12px";
@@ -2216,9 +2268,9 @@ async function preloadEventCache({
   const backendStatus = data.account_status || {};
   const backendTotals = data.account_event_totals || {};
   console.log("🔥 BACKEND account_status:", backendStatus);
-  console.log("🧪 VIEW ACCOUNT TOTALS:", backendTotals);
+  console.log("[DEBUG] VIEW ACCOUNT TOTALS:", backendTotals);
   Object.entries(backendTotals).forEach(([k, v]) => {
-    console.log(`🧪 ACCOUNT VIEW TOTAL | ${k} | ${v}`);
+    console.log(`[DEBUG] ACCOUNT VIEW TOTAL | ${k} | ${v}`);
   });
   const existingDiagnostics = document.getElementById("accountDiagnostics");
   if (existingDiagnostics) existingDiagnostics.remove();
@@ -3286,7 +3338,7 @@ async function syncNow() {
     const accountSyncTotals = resultPayload.account_sync_totals || [];
     if (Array.isArray(accountSyncTotals) && accountSyncTotals.length) {
       accountSyncTotals.forEach((r) => {
-        console.log(`🧪 ACCOUNT SYNC TOTAL | ${r.provider}:${r.account_email} | raw=${r.raw || 0} | in_range=${r.in_range || 0} | status=${r.status || "ok"}`);
+        console.log(`[DEBUG] ACCOUNT SYNC TOTAL | ${r.provider}:${r.account_email} | raw=${r.raw || 0} | in_range=${r.in_range || 0} | status=${r.status || "ok"}`);
       });
     }
 
@@ -3571,6 +3623,87 @@ function openPublishReviewMenuForButton() {
 window.openPublishReviewMenuForButton = openPublishReviewMenuForButton;
 
 /**************************************************************
+ * ✅ IMPORT EVENTS FROM FILE
+ **************************************************************/
+async function importEventsFromFile(file, options = {}) {
+  if (!(file instanceof File)) {
+    showToast("❌ Invalid file selected", "error");
+    return;
+  }
+
+  const publishNow = Boolean(options.publishNow);
+  const publishStickyMode = String(options.publishStickyMode || "description").toLowerCase();
+  const importBtn = document.getElementById("importBtn");
+
+  if (importBtn) {
+    importBtn.disabled = true;
+    importBtn.classList.add("is-publishing");
+    const labelEl = importBtn.querySelector(".btnLabel");
+    if (labelEl) labelEl.textContent = "Importing…";
+  }
+
+  try {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const params = new URLSearchParams({
+      publish: publishNow ? "true" : "false",
+      publish_sticky_mode: publishStickyMode,
+    });
+
+    const res = await apiFetch(`/calendar/import-events?${params.toString()}`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res || !res.ok) {
+      const errMessage = String(res?.detail || res?.message || "Import failed");
+      throw new Error(errMessage);
+    }
+
+    const imported = Number(res.imported || 0);
+    const publishedEvents = Number(res.published_events || 0);
+    const publishedCreates = Number(res.published_creates || 0);
+    const publishedUpdates = Number(res.published_updates || 0);
+    const warnings = Array.isArray(res.warnings) ? res.warnings : [];
+
+    if (publishNow) {
+      showToast(
+        `✅ Imported ${imported} event${imported === 1 ? "" : "s"} • Published ${publishedEvents} event${publishedEvents === 1 ? "" : "s"} (${publishedCreates} creates, ${publishedUpdates} updates)`
+      );
+    } else {
+      showToast(`✅ Imported ${imported} local event${imported === 1 ? "" : "s"}`);
+    }
+
+    if (warnings.length) {
+      console.warn("Import warnings:", warnings);
+      showToast(`⚠️ Import completed with ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`, "info");
+    }
+
+    await preloadEventCache({
+      silent: true,
+      monthsBack: QUICK_CACHE_MONTHS_BACK,
+      monthsForward: QUICK_CACHE_MONTHS_FORWARD,
+      preserveSelectedDate: true
+    });
+    smartRefresh({ reason: "event_saved", force: true });
+    scheduleFullCacheExpansion("post_import_cache_expand");
+  } catch (err) {
+    console.error("❌ importEventsFromFile failed:", err);
+    showToast(`❌ Import failed: ${String(err?.message || "unknown error")}`, "error");
+  } finally {
+    if (importBtn) {
+      importBtn.disabled = false;
+      importBtn.classList.remove("is-publishing");
+      const labelEl = importBtn.querySelector(".btnLabel");
+      if (labelEl) labelEl.textContent = "Import";
+    }
+  }
+}
+
+window.importEventsFromFile = importEventsFromFile;
+
+/**************************************************************
  * ✅ LOGOUT
  **************************************************************/
 function logout() {
@@ -3624,7 +3757,7 @@ async function deleteEvent() {
   // Close the edit modal
   if (typeof closeCreateModal === "function") closeCreateModal();
 
-  showToast("🗑 Event deleted");
+  showToast("Event deleted");
   smartRefresh({ reason: "event_deleted", force: true });
 }
 

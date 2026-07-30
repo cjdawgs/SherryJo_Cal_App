@@ -53,6 +53,7 @@ REQUIRED_TABLES = {
     "notes",
     "date_sticky_notes",
     "event_tag_color_settings",
+    "sync_efficiency_daily_rollups",
 }
 
 

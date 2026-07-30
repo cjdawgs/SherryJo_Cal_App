@@ -95,7 +95,7 @@
         <div class="provider-col">
 
         <button class="providerBtn apple" onclick="toggleAppleForm()" title="Open Apple account setup and reconnect form." aria-label="Open Apple account setup and reconnect form.">
-            🍎 Apple
+          Apple
         </button>
 
         <div class="provider-desc">
@@ -113,7 +113,7 @@
         <div style="background:white; padding:10px; border-radius:6px; margin-top:6px; width:100%;">
 
             <p id="apple-requirements" style="background:#fffbeb; border-left:3px solid #f59e0b; padding:8px; margin:0 0 8px 0; border-radius:4px; font-size:11px; color:#78350f;">
-                <strong>Requires an App Password</strong> —
+                <strong>Requires an App Password</strong> -
                 <a href="https://support.apple.com/en-us/HT204397" target="_blank" style="color:#b45309;">create one</a>
             </p>
 
@@ -196,6 +196,25 @@
     <div class="syncHelpItem">
       <strong>Refresh Status</strong>
       <span>Reloads the latest sync health, last run details, and scheduler timing.</span>
+    </div>
+  </div>
+
+  <div id="scheduler-metrics-card" class="syncMetricsCard" aria-live="polite">
+    <div class="syncMetricsHeader">
+      <strong>Sync Efficiency</strong>
+      <span>Live scheduler and cache metrics</span>
+    </div>
+    <div class="syncMetricsAlert" id="sync-metrics-alert" hidden></div>
+    <div class="syncMetricsGrid"></div>
+    <div class="syncSparklineGrid">
+      <div class="syncSparklineCard">
+        <strong>Changes vs No-Changes (Current Week)</strong>
+        <svg id="sync-sparkline-changes" viewBox="0 0 260 70" preserveAspectRatio="none" aria-label="Changes versus no-changes trend"></svg>
+      </div>
+      <div class="syncSparklineCard">
+        <strong>Google Cache Hit Ratio (Current Week)</strong>
+        <svg id="sync-sparkline-cache" viewBox="0 0 260 70" preserveAspectRatio="none" aria-label="Google cache hit ratio trend"></svg>
+      </div>
     </div>
   </div>
 

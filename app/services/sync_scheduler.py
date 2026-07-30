@@ -25,8 +25,7 @@ import io
 import os
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
-from app.models import User, OAuthAccount, TVDiagLog   # ✅ VERY IMPORTANT (we loop users)
-from datetime import datetime, timezone
+from app.models import User, OAuthAccount, TVDiagLog, SyncEfficiencyDailyRollup   # ✅ VERY IMPORTANT (we loop users)
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -42,9 +41,153 @@ last_global_sync_started_at = None
 last_global_sync_finished_at = None
 last_global_sync_error = None
 
+# In-memory adaptive throttling state.
+# Keys are user IDs so each user can independently back off when their calendar
+# repeatedly returns no changes.
+_no_change_streak_by_user: dict[int, int] = {}
+_next_due_override_by_user: dict[int, datetime] = {}
+
+# Rolling process-lifetime counters for sync efficiency tracking.
+_sync_efficiency_counters: dict[str, int] = {
+    "changes": 0,
+    "no_changes": 0,
+}
+last_rollup_persisted_at = None
+
 
 def _verbose_sync_console() -> bool:
     return str(os.getenv("SYNC_CONSOLE_VERBOSE", "0")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _truthy_env(name: str, default: bool) -> bool:
+    """Resolve boolean environment flags with a single parser."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _adaptive_backoff_enabled() -> bool:
+    """Kill switch for adaptive no-change backoff."""
+    return _truthy_env("SYNC_ADAPTIVE_BACKOFF_ENABLED", True)
+
+
+def _adaptive_backoff_max_minutes() -> int:
+    """Upper bound for adaptive next-run delay when no changes are detected."""
+    try:
+        return max(5, int(os.getenv("SYNC_ADAPTIVE_BACKOFF_MAX_MINUTES", "60")))
+    except ValueError:
+        return 60
+
+
+def _compute_sync_window_days(accounts) -> int:
+    """Use per-account sync_range_days and clamp to a safe production window."""
+    configured_days = [
+        int(getattr(account, "sync_range_days", 30) or 30)
+        for account in accounts
+    ]
+    return max(1, min(max(configured_days) if configured_days else 30, 365))
+
+
+def _build_sync_window(window_days: int, now: datetime):
+    """Construct the exact start/end window passed into calendar_service.sync_all."""
+    return now - timedelta(days=window_days), now + timedelta(days=window_days)
+
+
+def _sync_result_has_changes(sync_result: dict | None) -> bool:
+    """Treat create/update/delete/dedup activity as material sync change."""
+    if not isinstance(sync_result, dict):
+        return True
+
+    created = int(sync_result.get("created") or 0)
+    updated = int(sync_result.get("updated") or 0)
+    deleted = int(sync_result.get("deleted") or 0)
+    deduped = int(sync_result.get("deduped") or 0)
+    return (created + updated + deleted + deduped) > 0
+
+
+def _record_sync_efficiency(had_changes: bool) -> None:
+    """Track how often sync cycles produce data changes versus no-ops."""
+    if had_changes:
+        _sync_efficiency_counters["changes"] = int(_sync_efficiency_counters.get("changes", 0)) + 1
+    else:
+        _sync_efficiency_counters["no_changes"] = int(_sync_efficiency_counters.get("no_changes", 0)) + 1
+
+
+def _collect_efficiency_snapshot() -> dict:
+    """Collect current in-memory scheduler and Google cache metrics."""
+    from app.services.google_calendar_service import GoogleCalendarService
+
+    changes = int(_sync_efficiency_counters.get("changes", 0))
+    no_changes = int(_sync_efficiency_counters.get("no_changes", 0))
+    total_cycles = changes + no_changes
+    cache = GoogleCalendarService.get_calendar_list_cache_metrics()
+
+    return {
+        "changes": changes,
+        "no_changes": no_changes,
+        "total_cycles": total_cycles,
+        "change_ratio": (changes / total_cycles) if total_cycles else None,
+        "no_change_ratio": (no_changes / total_cycles) if total_cycles else None,
+        "google_cache_hits": int(cache.get("hits") or 0),
+        "google_cache_misses": int(cache.get("misses") or 0),
+        "google_cache_total_lookups": int(cache.get("total_lookups") or 0),
+        "google_cache_hit_ratio": cache.get("hit_ratio"),
+        "google_cache_entries": int(cache.get("cache_entries") or 0),
+    }
+
+
+def persist_sync_efficiency_rollup() -> None:
+    """
+    Persist daily sync-efficiency rollup snapshots for week-over-week analysis.
+
+    This runs as a lightweight scheduler task and writes one row per UTC day,
+    upserting the latest counters for that day.
+    """
+
+    global last_rollup_persisted_at
+
+    now = datetime.now(timezone.utc)
+    snapshot_date = now.date()
+    week_start_date = snapshot_date - timedelta(days=snapshot_date.weekday())
+    snapshot = _collect_efficiency_snapshot()
+
+    db = SessionLocal()
+    try:
+        row = (
+            db.query(SyncEfficiencyDailyRollup)
+            .filter(SyncEfficiencyDailyRollup.snapshot_date == snapshot_date)
+            .first()
+        )
+
+        if row is None:
+            row = SyncEfficiencyDailyRollup(
+                snapshot_date=snapshot_date,
+                week_start_date=week_start_date,
+            )
+            db.add(row)
+
+        row.week_start_date = week_start_date
+        row.changes = snapshot["changes"]
+        row.no_changes = snapshot["no_changes"]
+        row.total_cycles = snapshot["total_cycles"]
+        row.change_ratio = snapshot["change_ratio"]
+        row.no_change_ratio = snapshot["no_change_ratio"]
+        row.google_cache_hits = snapshot["google_cache_hits"]
+        row.google_cache_misses = snapshot["google_cache_misses"]
+        row.google_cache_total_lookups = snapshot["google_cache_total_lookups"]
+        row.google_cache_hit_ratio = snapshot["google_cache_hit_ratio"]
+        row.google_cache_entries = snapshot["google_cache_entries"]
+        row.updated_at = now
+
+        db.commit()
+        last_rollup_persisted_at = now
+        logger.info("[SYNC] daily rollup persisted for %s", snapshot_date.isoformat())
+    except Exception as exc:
+        db.rollback()
+        logger.warning("[SYNC] daily rollup persist failed: %s", exc)
+    finally:
+        db.close()
 
 def _latest_account_sync_marker(account):
     candidates = [
@@ -63,11 +206,56 @@ def _is_reauth_required(account):
     return (getattr(account, "access_token", "") or "").strip() == "__REAUTH_REQUIRED__"
 
 
-def _is_user_sync_due(accounts, now):
+def _register_sync_outcome(user_id: int, accounts, had_changes: bool, now: datetime) -> None:
+    """
+    Update adaptive throttling state from the latest sync outcome.
+
+    Behavior:
+    - Changes detected: clear backoff immediately.
+    - No changes: exponentially back off up to SYNC_ADAPTIVE_BACKOFF_MAX_MINUTES.
+    """
+    if not _adaptive_backoff_enabled() or not accounts:
+        _no_change_streak_by_user.pop(user_id, None)
+        _next_due_override_by_user.pop(user_id, None)
+        _record_sync_efficiency(had_changes)
+        return
+
+    base_cadence = min(max(int(getattr(a, "sync_frequency_minutes", 5) or 5), 1) for a in accounts)
+
+    if had_changes:
+        _no_change_streak_by_user[user_id] = 0
+        _next_due_override_by_user.pop(user_id, None)
+        _record_sync_efficiency(True)
+        return
+
+    streak = int(_no_change_streak_by_user.get(user_id, 0)) + 1
+    _no_change_streak_by_user[user_id] = streak
+
+    multiplier = 2 ** min(streak, 6)
+    backoff_minutes = base_cadence * multiplier
+    backoff_minutes = min(backoff_minutes, max(base_cadence, _adaptive_backoff_max_minutes()))
+
+    _next_due_override_by_user[user_id] = now + timedelta(minutes=backoff_minutes)
+    _record_sync_efficiency(False)
+    logger.debug(
+        "[SYNC] user=%s no-change streak=%s adaptive-backoff=%s min",
+        user_id,
+        streak,
+        backoff_minutes,
+    )
+
+
+def _is_user_sync_due(user_id: int, accounts, now):
     if not accounts:
         return False, None
 
     cadence = min(max(int(getattr(account, "sync_frequency_minutes", 5) or 5), 1) for account in accounts)
+
+    if _adaptive_backoff_enabled():
+        override_due = _next_due_override_by_user.get(user_id)
+        if override_due and now < override_due:
+            return False, cadence
+
     latest_marker = max((_latest_account_sync_marker(account) for account in accounts), default=None)
 
     if latest_marker is None:
@@ -133,20 +321,43 @@ def run_event_sync():
                     if not _is_reauth_required(account)
                 ]
 
-                due, cadence = _is_user_sync_due(user_accounts, datetime.now(timezone.utc))
+                now_for_user = datetime.now(timezone.utc)
+                due, cadence = _is_user_sync_due(user.id, user_accounts, now_for_user)
                 if not due:
                     skipped += 1
                     logger.debug("[SYNC] user=%s skipped, cadence %s min not due", user.id, cadence)
                     continue
 
+                # Keep scheduler behavior aligned with manual sync: use per-account
+                # sync_range_days rather than CalendarService default range.
+                window_days = _compute_sync_window_days(user_accounts)
+                start_date, end_date = _build_sync_window(window_days, now_for_user)
+
                 # ✅ THIS IS THE FIX (was sync_events before)
                 if verbose:
-                    result = calendar_service.sync_all(db, user)
+                    result = calendar_service.sync_all(
+                        db,
+                        user,
+                        start_date=start_date,
+                        end_date=end_date,
+                    )
                     logger.info("[SYNC] user=%s %s", user.id, result)
                 else:
                     # Quiet mode: suppress noisy provider sync print spam.
                     with redirect_stdout(io.StringIO()):
-                        calendar_service.sync_all(db, user)
+                        result = calendar_service.sync_all(
+                            db,
+                            user,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+
+                _register_sync_outcome(
+                    user_id=user.id,
+                    accounts=user_accounts,
+                    had_changes=_sync_result_has_changes(result),
+                    now=datetime.now(timezone.utc),
+                )
                 synced += 1
 
             except Exception as user_error:
@@ -230,18 +441,59 @@ def start_scheduler():
         replace_existing=True
     )
 
+    scheduler.add_job(
+        persist_sync_efficiency_rollup,
+        "cron",
+        hour=0,
+        minute=5,
+        id="sync_efficiency_rollup_job",
+        replace_existing=True,
+    )
+
     scheduler.start()
 
-    logger.info("[SCHEDULER] Background sync started (every 5 min); diag prune daily")
+    logger.info("[SCHEDULER] Background sync started (every 5 min); diag prune daily; sync rollup daily")
 
 
-def get_scheduler_health():
+def get_scheduler_health(user_id: int | None = None):
+    """
+    Return scheduler runtime health plus sync efficiency observability.
+
+    Optional user_id enables per-user adaptive backoff visibility without
+    exposing other users' state.
+    """
+    from app.services.google_calendar_service import GoogleCalendarService
+
     next_run = None
     try:
         job = scheduler.get_job("event_sync_job")
         next_run = job.next_run_time.isoformat() if job and job.next_run_time else None
     except Exception:
         next_run = None
+
+    changes = int(_sync_efficiency_counters.get("changes", 0))
+    no_changes = int(_sync_efficiency_counters.get("no_changes", 0))
+    total_cycles = changes + no_changes
+
+    calendar_cache_metrics = GoogleCalendarService.get_calendar_list_cache_metrics()
+
+    adaptive_summary = {
+        "enabled": _adaptive_backoff_enabled(),
+        "max_minutes": _adaptive_backoff_max_minutes(),
+        "tracked_users": len(_no_change_streak_by_user),
+        "users_in_backoff": len(_next_due_override_by_user),
+        "last_rollup_persisted_at": last_rollup_persisted_at.isoformat() if last_rollup_persisted_at else None,
+    }
+
+    adaptive_user = None
+    if user_id is not None:
+        next_due = _next_due_override_by_user.get(user_id)
+        adaptive_user = {
+            "user_id": user_id,
+            "no_change_streak": int(_no_change_streak_by_user.get(user_id, 0)),
+            "backoff_active": bool(next_due and datetime.now(timezone.utc) < next_due),
+            "next_due_override_at": next_due.isoformat() if next_due else None,
+        }
 
     return {
         "running": scheduler.running,
@@ -250,4 +502,14 @@ def get_scheduler_health():
         "last_error": last_global_sync_error,
         "next_run_at": next_run,
         "frequency_minutes": 5,
+        "adaptive_backoff": adaptive_summary,
+        "adaptive_backoff_user": adaptive_user,
+        "efficiency": {
+            "changes": changes,
+            "no_changes": no_changes,
+            "total_cycles": total_cycles,
+            "change_ratio": (changes / total_cycles) if total_cycles else None,
+            "no_change_ratio": (no_changes / total_cycles) if total_cycles else None,
+        },
+        "google_calendar_list_cache": calendar_cache_metrics,
     }

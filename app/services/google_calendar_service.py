@@ -3,8 +3,11 @@
 # ✅ IMPORTS
 # ==================================================
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
+import hashlib
+import os
+import threading
 import requests
 from app.config import settings
 from app.config import get_google_redirect_uri
@@ -44,6 +47,124 @@ class GoogleCalendarService:
         "profile",
     ]
     REQUEST_TIMEOUT = (5, 15)
+    _CALENDAR_LIST_CACHE: dict = {}
+    _CALENDAR_LIST_CACHE_LOCK = threading.Lock()
+    _CALENDAR_LIST_CACHE_METRICS: dict[str, int] = {
+        "hits": 0,
+        "misses": 0,
+    }
+
+    @staticmethod
+    def _truthy(value: str | None, default: bool = False) -> bool:
+        if value is None:
+            return default
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _calendar_list_cache_enabled(cls) -> bool:
+        """Kill switch for calendar discovery cache."""
+        return cls._truthy(os.getenv("SYNC_GOOGLE_CALENDARLIST_CACHE_ENABLED"), True)
+
+    @classmethod
+    def _calendar_list_cache_ttl_seconds(cls) -> int:
+        """TTL for calendar discovery cache entries."""
+        try:
+            return max(60, int(os.getenv("SYNC_GOOGLE_CALENDARLIST_CACHE_TTL_SECONDS", "21600")))
+        except ValueError:
+            return 21600
+
+    @staticmethod
+    def _is_system_calendar(calendar_id: str | None) -> bool:
+        cid = str(calendar_id or "").lower()
+        return bool(
+            cid and (
+                "holiday" in cid or
+                "@group.v.calendar.google.com" in cid or
+                "#" in cid
+            )
+        )
+
+    @classmethod
+    def _calendar_cache_key(cls, access_token: str, account_email: str | None) -> str:
+        """Scope cache by token hash + account so entries remain tenant-safe."""
+        token_hash = hashlib.sha256(str(access_token or "").encode("utf-8")).hexdigest()[:16]
+        acct = str(account_email or "primary").lower().strip() or "primary"
+        return f"{token_hash}:{acct}"
+
+    def _discover_calendar_ids(self, headers: dict, access_token: str, account_email: str | None) -> list[str]:
+        """
+        Centralized calendar discovery with TTL cache.
+
+        Source of truth for which calendar IDs are queried in both full and
+        incremental fetch flows.
+        """
+        base_ids = ["primary"]
+        normalized_account = (account_email or "").lower().strip()
+        if normalized_account and normalized_account != "primary":
+            base_ids.append(normalized_account)
+
+        cache_enabled = self._calendar_list_cache_enabled()
+        cache_key = self._calendar_cache_key(access_token, normalized_account)
+        now = datetime.now(timezone.utc)
+
+        if cache_enabled:
+            with self._CALENDAR_LIST_CACHE_LOCK:
+                cached = self._CALENDAR_LIST_CACHE.get(cache_key)
+                if cached and cached.get("expires_at") and cached["expires_at"] > now:
+                    self._CALENDAR_LIST_CACHE_METRICS["hits"] = int(self._CALENDAR_LIST_CACHE_METRICS.get("hits", 0)) + 1
+                    cached_ids = list(cached.get("calendar_ids") or [])
+                    merged = list(dict.fromkeys(base_ids + cached_ids))
+                    return [cid for cid in merged if not self._is_system_calendar(cid)]
+
+        self._CALENDAR_LIST_CACHE_METRICS["misses"] = int(self._CALENDAR_LIST_CACHE_METRICS.get("misses", 0)) + 1
+
+        discovered_ids = list(base_ids)
+        try:
+            cl_resp = requests.get(
+                "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+                headers=headers,
+                timeout=self.REQUEST_TIMEOUT,
+            )
+            if cl_resp.status_code == 200:
+                for cal in cl_resp.json().get("items", []):
+                    cid = (cal.get("id") or "").lower().strip()
+                    if not cid or self._is_system_calendar(cid):
+                        continue
+                    if cid not in discovered_ids:
+                        discovered_ids.append(cid)
+            else:
+                logger.warning("[SYNC] Google calendarList failed (%s)", cl_resp.status_code)
+        except Exception as exc:
+            logger.error("[SYNC] Google calendarList failed: %s", exc)
+
+        discovered_ids = [cid for cid in discovered_ids if not self._is_system_calendar(cid)]
+
+        if cache_enabled:
+            ttl_seconds = self._calendar_list_cache_ttl_seconds()
+            with self._CALENDAR_LIST_CACHE_LOCK:
+                self._CALENDAR_LIST_CACHE[cache_key] = {
+                    "calendar_ids": list(discovered_ids),
+                    "expires_at": now + timedelta(seconds=ttl_seconds),
+                }
+
+        return discovered_ids
+
+    @classmethod
+    def get_calendar_list_cache_metrics(cls) -> dict:
+        """Return calendar discovery cache counters and hit ratio."""
+        with cls._CALENDAR_LIST_CACHE_LOCK:
+            hits = int(cls._CALENDAR_LIST_CACHE_METRICS.get("hits", 0))
+            misses = int(cls._CALENDAR_LIST_CACHE_METRICS.get("misses", 0))
+            total = hits + misses
+            return {
+                "enabled": cls._calendar_list_cache_enabled(),
+                "ttl_seconds": cls._calendar_list_cache_ttl_seconds(),
+                "hits": hits,
+                "misses": misses,
+                "total_lookups": total,
+                "hit_ratio": (hits / total) if total else None,
+                "cache_entries": len(cls._CALENDAR_LIST_CACHE),
+            }
 
     # ==================================================
     # ✅ BUILD AUTH URL (CRITICAL FIXES INCLUDED)
@@ -188,50 +309,12 @@ class GoogleCalendarService:
                 end_date = end_date.replace(tzinfo=timezone.utc)
             params["timeMax"] = end_date.isoformat()
 
-        calendar_id = account_email or "primary"
-
-        # ✅ STEP 1: GET ALL CALENDARS
-        cal_list_resp = requests.get(
-            "https://www.googleapis.com/calendar/v3/users/me/calendarList",
+        calendar_ids = self._discover_calendar_ids(
             headers=headers,
-            timeout=self.REQUEST_TIMEOUT,
+            access_token=access_token,
+            account_email=account_email,
         )
 
-        calendars = []
-
-        if cal_list_resp.status_code == 200:
-            calendars = cal_list_resp.json().get("items", [])
-        else:
-            logger.warning("⚠️ Calendar list failed — falling back to direct calendars")
-
-        # ✅ ALWAYS include these (critical)
-        calendar_ids = ["primary"]
-
-        if account_email and account_email != "primary":
-            calendar_ids.append(account_email.lower())
-
-        #/**************************************************************
-        #* ✅ HARD FILTER SYSTEM CALENDARS (CRITICAL FIX)
-        #* Prevents Google holiday + system calendar failures
-        #**************************************************************/
-        for c in calendars:
-            cid = (c.get("id") or "").lower()
-
-            if not cid:
-                continue
-
-            # ✅ BLOCK ALL SYSTEM CALENDARS
-            if (
-                "holiday" in cid or
-                "@group.v.calendar.google.com" in cid or
-                "#" in cid   # ✅ catches regional calendars like en.usa#
-            ):
-                logger.debug(f"⏭ Skipping system calendar at source: {cid}")
-                continue
-
-            if cid not in calendar_ids:
-                calendar_ids.append(cid)        
-                
         logger.debug("🧪 CALENDAR IDS USED: %s", calendar_ids)
 
         all_events = []
@@ -321,28 +404,12 @@ class GoogleCalendarService:
         cancelled_ids: list = []
         used_incremental = False
 
-        # ── discover calendars ──────────────────────────────────────────
-        calendar_ids = ["primary"]
-        if account_email and account_email.lower() != "primary":
-            calendar_ids.append(account_email.lower())
-
-        try:
-            cl_resp = requests.get(
-                "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-                headers=headers,
-                timeout=self.REQUEST_TIMEOUT,
-            )
-            if cl_resp.status_code == 200:
-                for c in cl_resp.json().get("items", []):
-                    cid = (c.get("id") or "").lower()
-                    if not cid:
-                        continue
-                    if "holiday" in cid or "@group.v.calendar.google.com" in cid or "#" in cid:
-                        continue
-                    if cid not in calendar_ids:
-                        calendar_ids.append(cid)
-        except Exception as e:
-            logger.error(f"⚠️ Google calendarList failed: {e}")
+        # ── discover calendars (with TTL cache) ────────────────────────
+        calendar_ids = self._discover_calendar_ids(
+            headers=headers,
+            access_token=access_token,
+            account_email=account_email,
+        )
 
         # ── fetch each calendar (incremental when token available) ──────
         start_iso = start_date.isoformat() if start_date else None
@@ -350,7 +417,7 @@ class GoogleCalendarService:
 
         for cal_id in calendar_ids:
             cid_lower = cal_id.lower()
-            if "holiday" in cid_lower or "@group.v.calendar.google.com" in cid_lower or "#" in cid_lower:
+            if self._is_system_calendar(cid_lower):
                 continue
 
             token_for_cal = sync_state.get(cal_id)
