@@ -70,25 +70,45 @@
           <!-- ✅ ACTION BUTTONS -->
           <div class="actionButtons">
 
-            <!-- ✅ UPDATED BUTTON (clearer + tooltip) -->
-            <button id="createBtn"
-              title="Example: 'Doctor Appointment at 3pm' or 'Team Meeting 10:00–11:00'">
-              <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-              </svg>
-            </button>
+            <!-- ✅ UPDATED BUTTON (Create / Import split action) -->
+            <div id="createMenuShell" class="createMenuShell">
+              <button id="createBtn"
+                title="Create a new event or import events from a file"
+                aria-haspopup="menu"
+                aria-expanded="false"
+                type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 15H5V9h14v10zm-8-7h2v2h2v2h-2v2h-2v-2H9v-2h2v-2z"/>
+                </svg>
+                <span class="btnLabel">Create / Import</span>
+              </button>
+              <div id="createActionMenu" class="createActionMenu" role="menu" aria-label="Create or import actions">
+                <button id="createNewEventBtn" type="button" role="menuitem">
+                  <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 15H5V9h14v10zm-8-7h2v2h2v2h-2v2h-2v-2H9v-2h2v-2z"/>
+                  </svg>
+                  <span>Create Event</span>
+                </button>
+                <button id="importEventsMenuBtn" type="button" role="menuitem">
+                  <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                    <path fill="currentColor" d="M5 20h14v-2H5v2zm7-16-5.5 5.5h3.5V16h4V9.5H17.5L12 4z"/>
+                  </svg>
+                  <span>Import Events</span>
+                </button>
+              </div>
+            </div>
 
             <div id="mobileQuickStack" class="mobileQuickStack" aria-label="Quick account actions">
               <button id="manageAccountsQuickBtn" class="mobileAccountActionBtn" title="Manage connected accounts" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="currentColor" d="M20 17.17V21h-3.83l-1.76-1.76a6 6 0 0 1-2.41.75V17.9a4 4 0 1 0-3.98-4.3H6a6 6 0 1 1 8.78 5.3L16.83 17H20zM4 20v-2c0-2.21 3.13-4 7-4 .35 0 .7.02 1.03.06a6.02 6.02 0 0 0-.03.64v1.41c-.33-.07-.66-.11-1-.11-2.76 0-5 .9-5 2v2H4z"/>
+                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="currentColor" d="M16 11c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 3-1.34 3-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm-4 6c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4v-1z"/>
                 </svg>
                 <span class="btnLabel">Manage</span>
               </button>
 
               <button id="adminQuickBtn" class="mobileAccountActionBtn hidden" title="Open admin dashboard" type="button">
-                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-                  <path fill="currentColor" d="M12 2 3 7v6c0 5.25 3.67 10.18 9 11 5.33-.82 9-5.75 9-11V7l-9-5zm0 2.18L19 8v5c0 4.19-2.72 8.1-7 8.93C7.72 21.1 5 17.19 5 13V8l7-3.82zM8.5 12a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm7 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM8 16h8v2H8z"/>
+                <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
+                  <path fill="currentColor" d="M12 2 4 5v6c0 5.25 3.67 10.18 8 11 4.33-.82 8-5.75 8-11V5l-8-3zm-1 13-3-3 1.41-1.41L11 12.17l4.59-4.58L17 9l-6 6z"/>
                 </svg>
                 <span class="btnLabel">Admin</span>
               </button>

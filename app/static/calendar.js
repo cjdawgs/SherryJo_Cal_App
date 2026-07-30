@@ -82,7 +82,7 @@ function setSidebarDrawerOpen(isOpen) {
 
 const CONTROL_ICON_FALLBACKS = {
   createBtn: `<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-    <path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+    <path fill="currentColor" d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.1 0-2 .9-2 2v13c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 15H5V9h14v10zm-8-7h2v2h2v2h-2v2h-2v-2H9v-2h2v-2z"/>
   </svg>`,
   accountsBtn: `<svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
     <path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.25 7.25 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 13.88 2h-3.76a.5.5 0 0 0-.49.42l-.36 2.54c-.58.23-1.13.54-1.63.94l-2.39-.96a.5.5 0 0 0-.61.22L2.72 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.5.4 1.05.72 1.63.94l.36 2.54c.04.24.25.42.49.42h3.76c.24 0 .45-.18.49-.42l.36-2.54c.58-.23 1.13-.54 1.63-.94l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5z"/>
@@ -130,6 +130,7 @@ function getSafeControlIconHtml(btn) {
 function applyControlBandDensity(mode) {
   const createBtn = document.getElementById("createBtn");
   const accountsBtn = document.getElementById("accountsBtn");
+  const createMenuShell = document.getElementById("createMenuShell");
   const undoBtn = document.getElementById("undoBtn");
   const redoBtn = document.getElementById("redoBtn");
   const syncBtn = document.getElementById("syncBtn");
@@ -191,6 +192,52 @@ function applyControlBandDensity(mode) {
   withIconLabel(logoutBtn, "Logout");
   _updateDedupBtnUI();
   updatePublishButtonState();
+}
+
+function wireCreateActionMenu() {
+  const createBtn = document.getElementById("createBtn");
+  const createMenuShell = document.getElementById("createMenuShell");
+  const createNewEventBtn = document.getElementById("createNewEventBtn");
+  const importEventsMenuBtn = document.getElementById("importEventsMenuBtn");
+  const importBtn = document.getElementById("importBtn");
+  const importFileInput = document.getElementById("importFileInput");
+
+  if (!createBtn || !createMenuShell || createMenuShell.dataset.bound === "1") {
+    return;
+  }
+
+  createMenuShell.dataset.bound = "1";
+
+  createBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    createMenuShell.classList.toggle("open");
+    createBtn.setAttribute("aria-expanded", createMenuShell.classList.contains("open") ? "true" : "false");
+  });
+
+  createNewEventBtn?.addEventListener("click", () => {
+    createMenuShell.classList.remove("open");
+    createBtn.setAttribute("aria-expanded", "false");
+    if (window.isModalOpen) return;
+    openCreateModal();
+  });
+
+  importEventsMenuBtn?.addEventListener("click", () => {
+    createMenuShell.classList.remove("open");
+    createBtn.setAttribute("aria-expanded", "false");
+    importBtn?.click();
+  });
+
+  importBtn?.addEventListener("click", () => {
+    importFileInput?.click();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!createMenuShell.contains(event.target)) {
+      createMenuShell.classList.remove("open");
+      createBtn.setAttribute("aria-expanded", "false");
+    }
+  });
 }
 
 function applyLayoutMode({ forceViewSwitch = false } = {}) {

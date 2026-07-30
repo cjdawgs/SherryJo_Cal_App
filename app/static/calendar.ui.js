@@ -2227,10 +2227,9 @@ function updateUndoRedoButtonStates() {
 }
 
 function bindUIEvents() {
-  document.getElementById("createBtn")?.addEventListener("click", () => {
-    if (window.isModalOpen) return;
-    openCreateModal();
-  });
+  if (typeof window.wireCreateActionMenu === "function") {
+    window.wireCreateActionMenu();
+  }
 
   const accountsBtn = document.getElementById("accountsBtn");
   const gearMenuShell = document.getElementById("gearMenuShell");
@@ -2500,10 +2499,6 @@ function bindUIEvents() {
     if (typeof window.openPublishReviewMenu === "function") {
       window.openPublishReviewMenu(event.clientX, event.clientY);
     }
-  });
-
-  document.getElementById("importBtn")?.addEventListener("click", () => {
-    document.getElementById("importFileInput")?.click();
   });
 
   document.getElementById("importFileInput")?.addEventListener("change", async (event) => {
