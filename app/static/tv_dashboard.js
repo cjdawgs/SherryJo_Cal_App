@@ -861,11 +861,11 @@ function ensureStyles() {
   .tv-month-cell.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.24); transform: translateY(-1px) scale(1.01); }
   .tv-month-cell:hover { border-color: rgba(255,255,255,0.24); }
   .tv-month-cell, .tv-day-card { position: relative; min-width: 0; overflow: hidden; }
-  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 14px; height: 14px; border-radius: 2px; background: #ffe26a; border: 1px solid rgba(145,112,18,0.96); box-shadow: 0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 4px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
-  .tv-sticky-indicator::before { content: 'S'; font-size: 8px; font-weight: 800; color: rgba(48,34,0,0.9); line-height: 1; }
-  .tv-sticky-indicator::after { content: ''; position: absolute; right: 0; top: 0; width: 0; height: 0; border-left: 5px solid transparent; border-top: 5px solid rgba(255,255,255,0.72); }
+  .tv-sticky-indicator { position: absolute; top: 4px; right: 4px; z-index: 4; width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.28); background: rgba(255,255,255,0.12) center/contain no-repeat url('/static/icons/sticky-note-mini.svg'); box-shadow: 0 1px 5px rgba(0,0,0,0.35); display: inline-flex; align-items: center; justify-content: center; }
+  .tv-sticky-indicator::before,
+  .tv-sticky-indicator::after { content: none; }
   .tv-inline-sticky-badge { position: static; width: 16px; height: 16px; border-radius: 3px; margin-left: 6px; vertical-align: middle; }
-  .tv-inline-sticky-badge::before { font-size: 8px; }
+  .tv-inline-sticky-badge::before { content: none; }
   .tv-month-sticky-indicator { top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 4px; font-size: 9px; font-weight: 800; color: rgba(48,34,0,0.95); }
   .tv-month-sticky-indicator::before,
   .tv-month-sticky-indicator::after { content: none; }
@@ -875,7 +875,7 @@ function ensureStyles() {
   .tv-month-preview { position: relative; border: 1px solid rgba(201,219,244,0.22); border-radius: 7px; padding: 2px 5px; font-size: 10px; opacity: 0.96; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2; }
   .tv-month-preview-time { opacity: 0.92; margin-right: 4px; font-weight: 700; }
   .tv-month-preview-title { opacity: 0.96; }
-  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(145,112,18,0.9); background: rgba(255,226,106,0.98); color: rgba(48,34,0,0.9); font-size: 7px; font-weight: 800; }
+  .tv-inline-sticky { display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px; border-radius: 2px; margin-left: 4px; border: 1px solid rgba(255,255,255,0.24); background: rgba(255,255,255,0.12) center/contain no-repeat url('/static/icons/sticky-note-mini.svg'); color: transparent; font-size: 0; }
   .tv-editor { margin-top: 10px; border: 1px solid rgba(79,140,255,0.35); border-radius: 10px; padding: 10px; background: rgba(79,140,255,0.08); }
   .tv-editor-title { font-size: 12px; text-transform: uppercase; letter-spacing: 1.3px; opacity: 0.8; margin-bottom: 8px; }
   .tv-field { border: 1px solid rgba(255,255,255,0.09); border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; }
@@ -2929,7 +2929,53 @@ function parseCompositeAccountKey(value) {
       account: normalizeAccountIdentifier(rest.join('|')),
     };
   }
+  const atIdx = raw.indexOf('@');
+  if (atIdx > 0) {
+    const left = raw.slice(0, atIdx);
+    const right = raw.slice(atIdx);
+    const providerMatch = left.match(/(google|microsoft|apple|local)[^a-z0-9]*$/i);
+    if (providerMatch && right.includes('.')) {
+      return {
+        source: normalizeAccountSource(providerMatch[1]),
+        account: normalizeAccountIdentifier(`${left.slice(providerMatch.index + providerMatch[1].length)}${right}`.replace(/^[^a-z0-9]+/i, '')),
+      };
+    }
+  }
+  const sourcePrefixMatch = raw.match(/^(google|microsoft|apple|local)[_|\-](.+)$/i);
+  if (sourcePrefixMatch) {
+    return {
+      source: normalizeAccountSource(sourcePrefixMatch[1]),
+      account: normalizeAccountIdentifier(sourcePrefixMatch[2]),
+    };
+  }
   return null;
+}
+
+function extractExternalAccountIdentity(ev) {
+  const candidates = [];
+  const rawMaps = [
+    ev?.external_ids,
+    ev?.externalIds,
+    ev?.extendedProps?.external_ids,
+    ev?.extendedProps?.externalIds,
+  ];
+  for (const rawMap of rawMaps) {
+    if (!rawMap || typeof rawMap !== 'object') continue;
+    for (const key of Object.keys(rawMap)) {
+      const parsed = parseCompositeAccountKey(key);
+      if (!parsed) continue;
+      const account = normalizeAccountIdentifier(parsed.account);
+      if (!account || account === 'local') continue;
+      candidates.push({
+        source: normalizeAccountSource(parsed.source),
+        account,
+      });
+    }
+  }
+  if (!candidates.length) return null;
+  const sourceHint = normalizeAccountSource(ev?.source || ev?.provider || ev?.extendedProps?.source || 'local');
+  const exactSource = candidates.find((item) => item.source === sourceHint);
+  return exactSource || candidates[0];
 }
 
 function eventAccountIdentity(ev) {
@@ -2946,10 +2992,12 @@ function eventAccountIdentity(ev) {
     || ev?.extendedProps?.account_key
     || ev?.extendedProps?.accountKey,
   );
+  const externalIdentity = extractExternalAccountIdentity(ev);
 
   const source = normalizeAccountSource(
     composite?.source
     || sourceComposite?.source
+    || externalIdentity?.source
     || rawSource
     || 'local',
   );
@@ -2962,6 +3010,7 @@ function eventAccountIdentity(ev) {
     || ev?.email
     || ev?.extendedProps?.account_email
     || ev?.extendedProps?.accountEmail
+    || externalIdentity?.account
     || sourceComposite?.account
     || source,
   ) || source;

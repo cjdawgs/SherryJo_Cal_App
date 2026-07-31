@@ -470,6 +470,7 @@ class TestTVEventsEndpoint:
             account_email="colorized@realmail.test",
             color="#AABBCC",
             color_enabled=True,
+            external_ids={"google:colorized@realmail.test": "g_evt_123"},
         ))
         db.commit()
 
@@ -486,9 +487,53 @@ class TestTVEventsEndpoint:
         event = day["events"][0]
         assert event["color"] == "#AABBCC"
         assert event["color_enabled"] is True
+        assert event["external_ids"]["google:colorized@realmail.test"] == "g_evt_123"
         assert event["extendedProps"]["eventColor"] == "#AABBCC"
         assert event["extendedProps"]["eventColorEnabled"] is True
         assert event["extendedProps"]["account_key"] == "google:colorized@realmail.test"
+        assert event["extendedProps"]["external_ids"]["google:colorized@realmail.test"] == "g_evt_123"
+
+    def test_events_payload_exposes_external_identity_for_local_canonical_rows(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Canonical Local Event",
+            start_time=datetime(2026, 9, 18, 14, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 9, 18, 15, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+            source="local",
+            account_email="local",
+            color="#22AA77",
+            color_enabled=True,
+            external_ids={
+                "google:owner@realmail.test": "g_evt_999",
+                "microsoft:owner@realmail.test": "ms_evt_888",
+            },
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-09-18", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events", headers=auth_headers)
+        assert resp.status_code == 200
+        payload = resp.json()
+        day = next(d for d in payload["days"] if d["date"] == "2026-09-18")
+        event = day["events"][0]
+
+        assert event["source"] == "local"
+        assert event["account_key"] == "local:local"
+        assert event["color"] == "#22AA77"
+        assert event["external_ids"]["google:owner@realmail.test"] == "g_evt_999"
+        assert event["extendedProps"]["external_ids"]["microsoft:owner@realmail.test"] == "ms_evt_888"
 
     def test_events_grouped_by_date(self, client, auth_headers, db):
         from app.models import Event, User

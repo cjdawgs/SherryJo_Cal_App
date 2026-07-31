@@ -391,6 +391,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
 
     color = getattr(event, "color", None)
     color_enabled = bool(getattr(event, "color_enabled", False))
+    external_ids = dict(getattr(event, "external_ids", None) or {})
 
     return {
         "id": event.id,
@@ -405,6 +406,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "account_key": account_key,
         "color": color,
         "color_enabled": color_enabled,
+        "external_ids": external_ids,
         "hasSticky": has_sticky,
         "extendedProps": {
             "backendId": event.id,
@@ -412,6 +414,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
             "account": account_email or None,
             "accountKey": account_key,
             "account_key": account_key,
+            "external_ids": external_ids,
             "description": event.description or "",
             "tags": getattr(event, "tags", None) or [],
             "eventColor": color,

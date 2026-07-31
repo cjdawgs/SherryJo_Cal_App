@@ -86,6 +86,9 @@ def test_tv_dashboard_exposes_account_chip_filtering_and_sticky_icons():
         "toggleMultiAccountFilter",
         "hasSticky",
         "tv-sticky-indicator",
+        "extractExternalAccountIdentity",
+        "external_ids",
+        "sticky-note-mini.svg",
     ]
     for token in required_tokens:
         assert token in text
