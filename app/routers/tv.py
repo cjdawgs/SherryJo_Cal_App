@@ -389,6 +389,9 @@ def _serialize_event_for_tv(event: Event) -> dict:
         # Legacy rows sometimes embed source+account in Event.source.
         account_key = source_text
 
+    color = getattr(event, "color", None)
+    color_enabled = bool(getattr(event, "color_enabled", False))
+
     return {
         "id": event.id,
         "title": event.title or "",
@@ -397,9 +400,23 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "description": event.description or "",
         "source": source,
         "accountEmail": getattr(event, "account_email", None),
+        "account_email": account_email or None,
         "accountKey": account_key,
-        "color": getattr(event, "color", None),
+        "account_key": account_key,
+        "color": color,
+        "color_enabled": color_enabled,
         "hasSticky": has_sticky,
+        "extendedProps": {
+            "backendId": event.id,
+            "source": source_provider,
+            "account": account_email or None,
+            "accountKey": account_key,
+            "account_key": account_key,
+            "description": event.description or "",
+            "tags": getattr(event, "tags", None) or [],
+            "eventColor": color,
+            "eventColorEnabled": color_enabled,
+        },
     }
 
 

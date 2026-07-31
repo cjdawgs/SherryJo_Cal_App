@@ -453,6 +453,43 @@ class TestTVEventsEndpoint:
         assert target.get("account_key") == "google:colorized@realmail.test"
         assert target.get("color") == "#112233"
 
+    def test_events_payload_preserves_color_metadata_for_tv(self, client, auth_headers, db):
+        from app.models import Event
+        from app.security import decode_token
+
+        token = auth_headers["Authorization"].split(" ")[1]
+        payload = decode_token(token)
+        user_id = payload["user_id"]
+
+        db.add(Event(
+            title="Color Metadata Event",
+            start_time=datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 9, 15, 11, 0, tzinfo=timezone.utc),
+            owner_id=user_id,
+            source="google",
+            account_email="colorized@realmail.test",
+            color="#AABBCC",
+            color_enabled=True,
+        ))
+        db.commit()
+
+        client.patch(
+            "/tv/state",
+            json={"selectedDate": "2026-09-15", "currentView": "day"},
+            headers=auth_headers,
+        )
+
+        resp = client.get("/tv/events", headers=auth_headers)
+        assert resp.status_code == 200
+        payload = resp.json()
+        day = next(d for d in payload["days"] if d["date"] == "2026-09-15")
+        event = day["events"][0]
+        assert event["color"] == "#AABBCC"
+        assert event["color_enabled"] is True
+        assert event["extendedProps"]["eventColor"] == "#AABBCC"
+        assert event["extendedProps"]["eventColorEnabled"] is True
+        assert event["extendedProps"]["account_key"] == "google:colorized@realmail.test"
+
     def test_events_grouped_by_date(self, client, auth_headers, db):
         from app.models import Event, User
         from app.security import decode_token
