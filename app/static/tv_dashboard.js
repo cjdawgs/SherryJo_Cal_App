@@ -6,7 +6,7 @@ const TOKEN_KEY = 'tv_token';
 const POLL_MS = 600000;
 const TV_FETCH_TIMEOUT_MS = 12000;
 const AUTO_REFRESH_FAILURE_BACKOFF_MS = 60000;
-const MIN_SYNC_VISUAL_MS = 900;
+const MIN_SYNC_VISUAL_MS = 500;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
 const DATE_AUTO_ADVANCE_DEBOUNCE_MS = 5000;
@@ -371,6 +371,7 @@ const state = {
     itemIndex: 0,
   },
   monthDates: [],
+  monthDatesAnchorKey: '',
   accountLegend: [],
   serverAccounts: [],
   accountColorMap: {},
@@ -388,6 +389,10 @@ const state = {
   cachedAccountsAt: 0,
   legendSourceDays: null,
   legendSourceAccounts: null,
+  renderEventsCache: {},
+  renderItemsCache: {},
+  selectedDatePatchTimer: null,
+  selectedDatePatchValue: '',
 };
 
 let dom = {};
@@ -1554,6 +1559,11 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.cachedAccountsAt = 0;
   state.legendSourceDays = null;
   state.legendSourceAccounts = null;
+  state.renderEventsCache = {};
+  state.renderItemsCache = {};
+  if (state.selectedDatePatchTimer) clearTimeout(state.selectedDatePatchTimer);
+  state.selectedDatePatchTimer = null;
+  state.selectedDatePatchValue = '';
   state.lastObservedDayKey = null;
   closeUtilityPanel();
   state.userEmail = null;
@@ -2290,8 +2300,15 @@ function onSelect() {
   if (state.currentView === 'month' && state.focus.region === 'main') {
     const date = getFocusedMonthDate();
     if (!date) return;
+    const hadDayData = Boolean(state.dayMap && state.dayMap[date]);
+    state.selectedDate = date;
+    syncFocusAfterData();
     state.monthDetailOpen = true;
-    patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
+    render();
+    patchTvState({ selectedDate: date }, { recordHistory: true }).catch(() => null);
+    if (!hadDayData) {
+      refreshEvents(true, { stateOverride: { selectedDate: date, currentView: state.currentView } });
+    }
     return;
   }
 
@@ -2408,7 +2425,10 @@ function handleMonthArrow(key) {
   idx = Math.max(0, Math.min(41, idx));
   state.focus.monthIndex = idx;
   const date = getFocusedMonthDate();
-  if (date) patchTvState({ selectedDate: date }, { recordHistory: true });
+  if (date) {
+    state.selectedDate = date;
+    queueSelectedDatePatch(date);
+  }
   render();
 }
 
@@ -2958,7 +2978,10 @@ function focusNext() {
     } else {
       state.focus.monthIndex = (state.focus.monthIndex + 1) % 42;
       const date = getFocusedMonthDate();
-      if (date) patchTvState({ selectedDate: date });
+      if (date) {
+        state.selectedDate = date;
+        queueSelectedDatePatch(date);
+      }
     }
     render();
     return;
@@ -2978,7 +3001,10 @@ function focusPrev() {
     } else {
       state.focus.monthIndex = (state.focus.monthIndex - 1 + 42) % 42;
       const date = getFocusedMonthDate();
-      if (date) patchTvState({ selectedDate: date });
+      if (date) {
+        state.selectedDate = date;
+        queueSelectedDatePatch(date);
+      }
     }
     render();
     return;
@@ -3028,6 +3054,19 @@ function syncFocusedEventWithState(item) {
 function getFocusedMonthDate() {
   const date = state.monthDates[state.focus.monthIndex];
   return date || null;
+}
+
+function queueSelectedDatePatch(dateKey) {
+  const normalized = String(dateKey || '').trim();
+  if (!normalized) return;
+  state.selectedDatePatchValue = normalized;
+  if (state.selectedDatePatchTimer) clearTimeout(state.selectedDatePatchTimer);
+  state.selectedDatePatchTimer = setTimeout(() => {
+    const nextDate = state.selectedDatePatchValue;
+    state.selectedDatePatchTimer = null;
+    if (!nextDate) return;
+    patchTvState({ selectedDate: nextDate }, { recordHistory: false }).catch(() => null);
+  }, 140);
 }
 
 function normalizeAccountSource(value) {
@@ -3254,8 +3293,16 @@ function sortEventsAsc(events) {
 }
 
 function filteredEventsForDay(day) {
+  const dateKey = String(day?.date || '');
+  if (dateKey && state.renderEventsCache && state.renderEventsCache[dateKey]) {
+    return state.renderEventsCache[dateKey];
+  }
   const allEvents = sortEventsAsc(day.events || []);
-  return allEvents.filter(ev => isAccountVisibleForEvent(ev));
+  const filtered = allEvents.filter(ev => isAccountVisibleForEvent(ev));
+  if (dateKey && state.renderEventsCache) {
+    state.renderEventsCache[dateKey] = filtered;
+  }
+  return filtered;
 }
 
 function extractStickyText(payload) {
@@ -3422,11 +3469,19 @@ function computeTvSnapshotDelta(prevIndex, nextIndex) {
 }
 
 function itemsForDate(dateKey) {
+  const normalizedDateKey = String(dateKey || '');
+  if (normalizedDateKey && state.renderItemsCache && state.renderItemsCache[normalizedDateKey]) {
+    return state.renderItemsCache[normalizedDateKey];
+  }
   const day = state.dayMap[dateKey];
   if (!day) return [];
   const events = filteredEventsForDay(day).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
   const sticky = (day.stickyNotes || []).map((s, i) => ({ type: 'sticky', id: s.id || `sticky-${i}`, date: dateKey, sticky: s, index: i }));
-  return [...events, ...sticky];
+  const merged = [...events, ...sticky];
+  if (normalizedDateKey && state.renderItemsCache) {
+    state.renderItemsCache[normalizedDateKey] = merged;
+  }
+  return merged;
 }
 
 function itemsForSelectedDate() {
@@ -3441,6 +3496,8 @@ function getFocusedItem() {
 }
 
 function render() {
+  state.renderEventsCache = {};
+  state.renderItemsCache = {};
   syncAccountLegend();
   renderHeader();
   renderAccountLegend();
@@ -3570,6 +3627,28 @@ function handleZoomHoldKeyUp(key) {
 }
 
 function syncAccountLegend() {
+  const daysRef = state.days;
+  const accountsRef = state.serverAccounts;
+
+  const reconcileSelectedAccountKeys = () => {
+    if (!state.selectedAccountKeys.length) return;
+    const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}:${item.account}`));
+    state.selectedAccountKeys = state.selectedAccountKeys
+      .map((key) => {
+        const parsed = parseCompositeAccountKey(key);
+        if (!parsed) return String(key || '').trim().toLowerCase();
+        const src = normalizeAccountSource(parsed.source);
+        const acct = normalizeAccountIdentifier(parsed.account) || src;
+        return `${src}:${acct}`;
+      })
+      .filter(key => allowed.has(key));
+  };
+
+  if (state.legendSourceDays === daysRef && state.legendSourceAccounts === accountsRef) {
+    reconcileSelectedAccountKeys();
+    return;
+  }
+
   const isPlaceholderAccount = (value) => {
     const email = String(value || '').trim().toLowerCase();
     if (!email) return false;
@@ -3614,18 +3693,9 @@ function syncAccountLegend() {
   state.accountLegend = Array.from(map.values());
   state.accountColorMap = colorMap;
   state.accountEmailColorMap = emailColorMap;
-  if (state.selectedAccountKeys.length) {
-    const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}:${item.account}`));
-    state.selectedAccountKeys = state.selectedAccountKeys
-      .map((key) => {
-        const parsed = parseCompositeAccountKey(key);
-        if (!parsed) return String(key || '').trim().toLowerCase();
-        const src = normalizeAccountSource(parsed.source);
-        const acct = normalizeAccountIdentifier(parsed.account) || src;
-        return `${src}:${acct}`;
-      })
-      .filter(key => allowed.has(key));
-  }
+  state.legendSourceDays = daysRef;
+  state.legendSourceAccounts = accountsRef;
+  reconcileSelectedAccountKeys();
 }
 
 function resolveEventColor(ev) {
@@ -3840,7 +3910,12 @@ function renderWeekView() {
 }
 
 function renderMonthView() {
-  state.monthDates = buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
+  const anchorDate = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const monthAnchorKey = `${anchorDate.getFullYear()}-${String(anchorDate.getMonth() + 1).padStart(2, '0')}`;
+  if (!state.monthDates.length || state.monthDatesAnchorKey !== monthAnchorKey) {
+    state.monthDates = buildMonthDates(anchorDate);
+    state.monthDatesAnchorKey = monthAnchorKey;
+  }
   const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
   const weekDates = buildWeekDates(selected);
   return `
