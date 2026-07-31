@@ -5,6 +5,7 @@ const TOKEN_KEY = 'tv_token';
 // lifecycle recovery handles FireOS/Silk timer suspension.
 const POLL_MS = 60000;
 const TV_FETCH_TIMEOUT_MS = 20000;
+const MIN_SYNC_VISUAL_MS = 900;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
 const DATE_AUTO_ADVANCE_DEBOUNCE_MS = 5000;
@@ -301,6 +302,7 @@ const state = {
   staleMode: false,
   lastStaleReason: '',
   syncInProgress: false,
+  syncVisualStartedAt: 0,
   syncStatusTone: null,
   syncStatusUntil: 0,
   syncStatusTimer: null,
@@ -898,6 +900,21 @@ function ensureStyles() {
   }
   .tv-last-updated.tv-sync-ok { border-color: rgba(130, 191, 148, 0.28); background: rgba(130, 191, 148, 0.12); }
   .tv-last-updated.tv-sync-fail { border-color: rgba(197, 120, 120, 0.28); background: rgba(197, 120, 120, 0.12); }
+  .tv-last-updated.syncing {
+    color: rgba(154, 196, 255, 0.96);
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(85, 150, 255, 0.46);
+    background: rgba(85, 150, 255, 0.14);
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    animation: tv-sync-working-pulse 0.9s ease-in-out infinite;
+  }
+  @keyframes tv-sync-working-pulse {
+    0% { opacity: 0.64; }
+    50% { opacity: 1; }
+    100% { opacity: 0.64; }
+  }
   .tv-status-chip { font-size: 11px; letter-spacing: 0.35px; text-transform: uppercase; color: rgba(218, 230, 244, 0.84); }
   .tv-status-chip.subtle { color: rgba(168, 185, 208, 0.74); }
   .tv-status-sep { color: rgba(168, 185, 208, 0.62); margin: 0 4px; }
@@ -1389,8 +1406,12 @@ function setPairStatus(message) {
 }
 
 function applySyncVisualState() {
-  if (!dom.accountLegend) return;
-  dom.accountLegend.classList.toggle('syncing', Boolean(state.syncInProgress));
+  if (dom.accountLegend) {
+    dom.accountLegend.classList.toggle('syncing', Boolean(state.syncInProgress));
+  }
+  if (dom.lastUpdated) {
+    dom.lastUpdated.classList.toggle('syncing', Boolean(state.syncInProgress));
+  }
 }
 
 function setSyncStatus(ok, message) {
@@ -1559,7 +1580,6 @@ async function fetchTvState() {
 }
 
 async function refreshEvents(force = false, options = {}) {
-  const showSync = Boolean(options && options.showSync);
   const stateOverride = options && options.stateOverride ? options.stateOverride : null;
   if (document.hidden && !force) {
     return;
@@ -1577,10 +1597,10 @@ async function refreshEvents(force = false, options = {}) {
   }
 
   state.eventsRequestInFlight = true;
-  if (showSync) {
-    state.syncInProgress = true;
-    applySyncVisualState();
-  }
+  state.syncInProgress = true;
+  state.syncVisualStartedAt = Date.now();
+  applySyncVisualState();
+  renderFooterHint();
   const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
   const eventsUrl = buildEventsRequestUrl(stateOverride);
   let res = await authFetch(eventsUrl, {
@@ -1605,12 +1625,10 @@ async function refreshEvents(force = false, options = {}) {
       const networkMessage = state.lastAuthFetchError && state.lastAuthFetchError.message
         ? state.lastAuthFetchError.message
         : 'Network request failed';
-      if (showSync) {
-        if (state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
-          setSyncStatus(false, 'Sync delayed - keeping last known data');
-        } else {
-          setSyncStatus(false, 'Sync Failed');
-        }
+      if (state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
+        setSyncStatus(false, 'Sync delayed - keeping last known data');
+      } else {
+        setSyncStatus(false, 'Sync Failed');
       }
       renderFooterHint(`Network issue: ${networkMessage}`);
       return;
@@ -1624,7 +1642,7 @@ async function refreshEvents(force = false, options = {}) {
         const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate);
         if (hydrated) render();
       }
-      if (showSync) setSyncStatus(true, 'Sync Succeed - No changes detected');
+      setSyncStatus(true, 'Sync Succeed - No changes detected');
       return;
     }
 
@@ -1635,7 +1653,7 @@ async function refreshEvents(force = false, options = {}) {
 
     if (!res.ok) {
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
-      if (showSync) setSyncStatus(false, 'Sync Failed');
+      setSyncStatus(false, 'Sync Failed');
       return;
     }
 
@@ -1731,20 +1749,24 @@ async function refreshEvents(force = false, options = {}) {
       render();
     }
 
-    if (showSync) {
-      if (staleData) {
-        setSyncStatus(false, "Sync delayed - keeping last known data");
-      } else if (totalItems > 0) {
-        setSyncStatus(true, 'Sync Succeed');
-      } else {
-        setSyncStatus(true, 'Sync Succeed - No data in current view window');
-      }
+    if (staleData) {
+      setSyncStatus(false, "Sync delayed - keeping last known data");
+    } else if (totalItems > 0) {
+      setSyncStatus(true, 'Sync Succeed');
+    } else {
+      setSyncStatus(true, 'Sync Succeed - No data in current view window');
     }
   } finally {
     state.eventsRequestInFlight = false;
-    if (showSync) {
+    if (state.syncInProgress) {
+      const elapsed = Date.now() - (state.syncVisualStartedAt || Date.now());
+      if (elapsed < MIN_SYNC_VISUAL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_SYNC_VISUAL_MS - elapsed));
+      }
       state.syncInProgress = false;
+      state.syncVisualStartedAt = 0;
       applySyncVisualState();
+      renderFooterHint();
     }
     if (state.eventsRefreshQueued) {
       const queuedForce = state.queuedRefreshForce;
@@ -2903,7 +2925,20 @@ function normalizeAccountSource(value) {
 }
 
 function normalizeAccountIdentifier(value) {
-  const raw = String(value || '').trim().toLowerCase();
+  let raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  raw = raw.replace(/^mailto:/, '');
+  raw = raw.replace(/^['\"]+|['\"]+$/g, '');
+
+  // Canonicalize Gmail aliases so account colors still match when dots/+tags differ.
+  if (isEmailLikeAccount(raw)) {
+    const [localPart, domainPart] = raw.split('@');
+    const domain = String(domainPart || '').trim();
+    if (domain === 'googlemail.com' || domain === 'gmail.com') {
+      const canonicalLocal = String(localPart || '').split('+')[0].replace(/\./g, '');
+      return `${canonicalLocal}@gmail.com`;
+    }
+  }
   return raw;
 }
 
@@ -2928,17 +2963,38 @@ function parseCompositeAccountKey(value) {
     const [left, ...rest] = raw.split(':');
     const right = rest.join(':').trim();
     if (right) {
+      const leftNormalized = normalizeAccountIdentifier(left);
+      const rightNormalized = normalizeAccountIdentifier(right);
+      const leftLooksEmail = isEmailLikeAccount(leftNormalized);
+      const rightLooksProvider = ['google', 'microsoft', 'apple', 'local'].includes(normalizeAccountSource(right));
+      if (leftLooksEmail && rightLooksProvider) {
+        return {
+          source: normalizeAccountSource(right),
+          account: leftNormalized,
+        };
+      }
       return {
         source: normalizeAccountSource(left),
-        account: normalizeAccountIdentifier(right),
+        account: rightNormalized,
       };
     }
   }
   if (raw.includes('|')) {
     const [left, ...rest] = raw.split('|');
+    const right = rest.join('|');
+    const leftNormalized = normalizeAccountIdentifier(left);
+    const rightNormalized = normalizeAccountIdentifier(right);
+    const leftLooksEmail = isEmailLikeAccount(leftNormalized);
+    const rightLooksProvider = ['google', 'microsoft', 'apple', 'local'].includes(normalizeAccountSource(right));
+    if (leftLooksEmail && rightLooksProvider) {
+      return {
+        source: normalizeAccountSource(right),
+        account: leftNormalized,
+      };
+    }
     return {
       source: normalizeAccountSource(left),
-      account: normalizeAccountIdentifier(rest.join('|')),
+      account: rightNormalized,
     };
   }
   const atIdx = raw.indexOf('@');
@@ -3436,6 +3492,17 @@ function resolveEventColor(ev) {
   const identity = eventAccountIdentity(ev);
   const exact = state.accountColorMap[identity.key];
   if (exact) return exact;
+
+  // Fallback for legacy key formats where source/account order varied.
+  const normalizedTargetAccount = normalizeAccountIdentifier(identity.account);
+  for (const [rawKey, color] of Object.entries(state.accountColorMap || {})) {
+    if (!color) continue;
+    const parsed = parseCompositeAccountKey(rawKey);
+    if (!parsed) continue;
+    if (normalizeAccountSource(parsed.source) !== identity.source) continue;
+    if (normalizeAccountIdentifier(parsed.account) === normalizedTargetAccount) return color;
+  }
+
   const direct = normalizeHexColor(ev.color);
   if (direct) return direct;
   return providerFallbackColor(identity.source);
@@ -3808,14 +3875,21 @@ function renderFooterHint(extra) {
   if (!dom.statusEl || !dom.lastUpdated) return;
   const modeLabel = isLockedMode() ? 'LOCKED' : isCursorMode() ? 'CURSOR' : 'NAV';
   dom.statusEl.innerHTML = `<span class="tv-status-chip">Mode ${modeLabel}</span><span class="tv-status-sep">•</span><span class="tv-status-chip">Zoom ${state.zoomLevel}%</span>`;
+  if (state.syncInProgress) {
+    dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
+    dom.lastUpdated.classList.add('syncing');
+    dom.lastUpdated.textContent = 'Syncing...';
+    return;
+  }
   const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
   if (hasSyncStatus) {
     dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
     dom.lastUpdated.classList.toggle('tv-sync-ok', state.syncStatusTone === 'ok');
     dom.lastUpdated.classList.toggle('tv-sync-fail', state.syncStatusTone === 'fail');
+    dom.lastUpdated.classList.remove('syncing');
     return;
   }
-  dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
+  dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail', 'syncing');
   dom.lastUpdated.textContent = extra || buildDynamicRemoteHelpText();
 }
 
