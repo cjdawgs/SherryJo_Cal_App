@@ -1259,6 +1259,13 @@ function startPolling() {
   state.lastObservedDayKey = toISO(new Date());
   if (!state.selectedDate) state.selectedDate = toISO(new Date());
   render();
+  setTimeout(() => {
+    if (!dom.tvMain) return;
+    if (String(dom.tvMain.innerHTML || '').trim().length > 0) return;
+    if (tvDiag) tvDiag.log('startup_blank_guard_triggered', `view=${state.currentView} date=${state.selectedDate || 'n/a'}`);
+    render();
+    ensureMainNotBlank('startup-guard');
+  }, 120);
   if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
@@ -3501,16 +3508,44 @@ function getFocusedItem() {
   return items[idx];
 }
 
+function ensureMainNotBlank(reason = '') {
+  if (!dom.tvMain) return;
+  const hasContent = String(dom.tvMain.innerHTML || '').trim().length > 0;
+  if (hasContent) return;
+  const selectedLabel = escapeHtml(
+    parseLocalDate(state.selectedDate || toISO(new Date())).toLocaleDateString([], {
+      weekday: 'long', month: 'short', day: '2-digit', year: 'numeric',
+    }),
+  );
+  dom.tvMain.classList.add('tv-view-day');
+  dom.tvMain.innerHTML = `
+    <div class="tv-shell">
+      <div class="tv-empty" style="padding:14px;">Loading dashboard view for ${selectedLabel}...${reason ? ` (${escapeHtml(reason)})` : ''}</div>
+    </div>`;
+}
+
 function render() {
-  state.renderEventsCache = {};
-  state.renderItemsCache = {};
-  syncAccountLegend();
-  renderHeader();
-  renderAccountLegend();
-  applySyncVisualState();
-  renderMain();
-  renderFooterHint();
-  applyZoom();
+  try {
+    state.renderEventsCache = {};
+    state.renderItemsCache = {};
+    syncAccountLegend();
+    renderHeader();
+    renderAccountLegend();
+    applySyncVisualState();
+    renderMain();
+    ensureMainNotBlank('render-empty');
+    renderFooterHint();
+    applyZoom();
+  } catch (err) {
+    window.__TV_LAST_RENDER_ERROR__ = {
+      message: String(err && err.message ? err.message : err || 'unknown render error'),
+      stack: String(err && err.stack ? err.stack : ''),
+      at: new Date().toISOString(),
+    };
+    if (tvDiag) tvDiag.log('render_exception', window.__TV_LAST_RENDER_ERROR__.message);
+    ensureMainNotBlank('render-exception');
+    renderFooterHint('Render recovered with fallback');
+  }
 }
 
 function initZoomEngine() {
