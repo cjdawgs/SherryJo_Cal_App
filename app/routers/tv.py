@@ -616,18 +616,58 @@ def _group_events_by_date(events: list[Event]) -> list[dict]:
     ]
 
 
-def _group_serialized_events_by_date(events: list[dict]) -> dict[str, list]:
-    """Group already-serialized event dicts by their start date key."""
+def _group_serialized_events_by_date(
+    events: list[dict],
+    window_start_date,
+    window_end_date,
+) -> dict[str, list]:
+    """
+    Group already-serialized events by every overlapping date in the view window.
+
+    This mirrors desktop behavior for multi-day/inclusive events so entries that
+    span multiple days appear on each affected day card in TV day/week/month.
+    """
     buckets: dict[str, list] = defaultdict(list)
+    window_start_dt = datetime.combine(window_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    window_end_exclusive = datetime.combine(window_end_date + timedelta(days=1), datetime.min.time()).replace(tzinfo=timezone.utc)
+
     for event in events or []:
         if not isinstance(event, dict):
             continue
+
         start_raw = event.get("start") or event.get("start_time")
         start_dt = ensure_utc(parse_iso_datetime(start_raw))
         if not start_dt:
             continue
-        date_key = start_dt.date().isoformat()
-        buckets[date_key].append(event)
+
+        end_raw = event.get("end") or event.get("end_time")
+        end_dt = ensure_utc(parse_iso_datetime(end_raw))
+        if not end_dt or end_dt < start_dt:
+            end_dt = start_dt
+
+        # Most all-day events are end-exclusive at midnight; preserve that shape.
+        if end_dt > start_dt and end_dt.time() == datetime.min.time():
+            event_end_exclusive = end_dt
+        else:
+            event_end_exclusive = end_dt + timedelta(microseconds=1)
+
+        overlap_start = max(start_dt, window_start_dt)
+        overlap_end_exclusive = min(event_end_exclusive, window_end_exclusive)
+        if overlap_start >= overlap_end_exclusive:
+            continue
+
+        cursor = overlap_start.date()
+        last_date = (overlap_end_exclusive - timedelta(microseconds=1)).date()
+        while cursor <= last_date:
+            buckets[cursor.isoformat()].append(event)
+            cursor = cursor + timedelta(days=1)
+
+    for key, rows in buckets.items():
+        buckets[key] = sorted(
+            rows,
+            key=lambda item: ensure_utc(parse_iso_datetime(item.get("start") or item.get("start_time"))) or window_start_dt,
+        )
+
     return buckets
 
 
@@ -1277,7 +1317,11 @@ def get_tv_events(
                     )
                     events = []
 
-        by_date_events = _group_serialized_events_by_date(events)
+        by_date_events = _group_serialized_events_by_date(
+            events,
+            window_start_date,
+            window_end_date,
+        )
         try:
             sticky_rows = (
                 db.query(DateStickyNote)
