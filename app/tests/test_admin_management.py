@@ -125,7 +125,11 @@ def test_admin_system_overview_payload(client, monkeypatch):
 
     current_sha = "a" * 40
     monkeypatch.setenv("RENDER_GIT_COMMIT", current_sha)
-    monkeypatch.setattr(admin_router, "_fetch_github_latest_commit", lambda repo, branch: current_sha)
+    monkeypatch.setattr(
+        admin_router,
+        "_fetch_github_latest_commit_probe",
+        lambda repo, branch: {"commit": current_sha, "error": None, "error_code": None, "http_status": 200},
+    )
 
     headers = _admin_headers(client)
 
@@ -155,6 +159,8 @@ def test_admin_system_overview_payload(client, monkeypatch):
     assert deployment["status"] == "synced"
     assert deployment["current_commit"] == current_sha
     assert deployment["github_latest_commit"] == current_sha
+    assert deployment["github_error"] is None
+    assert deployment["branch_url"]
     assert deployment["manual_deploy_available"] in {True, False}
 
 
@@ -207,7 +213,11 @@ def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypte
 
     monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
     monkeypatch.setenv("RENDER_GIT_COMMIT", "b" * 40)
-    monkeypatch.setattr(admin_router, "_fetch_github_latest_commit", lambda repo, branch: "b" * 40)
+    monkeypatch.setattr(
+        admin_router,
+        "_fetch_github_latest_commit_probe",
+        lambda repo, branch: {"commit": "b" * 40, "error": None, "error_code": None, "http_status": 200},
+    )
 
     res = client.get("/admin/system/overview", headers=headers)
     assert res.status_code == 200
@@ -217,6 +227,27 @@ def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypte
     assert security.get("encrypted_credentials_present") is True
     assert security.get("token_encryption_key_configured") is False
     assert security.get("missing_key_with_encrypted_credentials") is True
+
+
+def test_admin_system_overview_reports_github_verification_failure_detail(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "c" * 40)
+    monkeypatch.setattr(
+        admin_router,
+        "_fetch_github_latest_commit_probe",
+        lambda repo, branch: {"commit": None, "error": "Timed out contacting GitHub.", "error_code": "timeout", "http_status": None},
+    )
+
+    res = client.get("/admin/system/overview", headers=headers)
+    assert res.status_code == 200
+
+    deployment = res.json()["deployment"]
+    assert deployment["status"] == "unknown"
+    assert deployment["github_latest_commit"] is None
+    assert deployment["github_error"] == "Timed out contacting GitHub."
+    assert deployment["github_error_code"] == "timeout"
 
 
 def test_admin_current_user_failures_today_reports_plain_english_summary(client, db, monkeypatch):

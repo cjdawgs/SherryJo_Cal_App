@@ -163,7 +163,16 @@ def _github_repo_settings() -> tuple[str, str]:
     return repo, branch
 
 
-def _fetch_github_latest_commit(repo: str, branch: str) -> str | None:
+def _github_repo_urls(repo: str, branch: str) -> dict:
+    base = f"https://github.com/{repo}"
+    return {
+        "repository_url": base,
+        "branch_url": f"{base}/commits/{branch}",
+        "compare_base_url": f"{base}/compare",
+    }
+
+
+def _fetch_github_latest_commit_probe(repo: str, branch: str) -> dict:
     url = f"https://api.github.com/repos/{repo}/commits/{branch}"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -177,13 +186,31 @@ def _fetch_github_latest_commit(repo: str, branch: str) -> str | None:
     try:
         with urlopen(request, timeout=5) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        return _normalize_git_sha(payload.get("sha"))
-    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            status_code = getattr(response, "status", None) or response.getcode() or 200
+        commit = _normalize_git_sha(payload.get("sha"))
+        return {
+            "commit": commit,
+            "error": None if commit else "GitHub API returned a response but no commit SHA.",
+            "error_code": None if commit else "missing_sha",
+            "http_status": status_code,
+        }
+    except HTTPError as exc:
+        error_code = "rate_limited" if int(getattr(exc, "code", 0) or 0) == 403 else "http_error"
+        detail = f"GitHub API HTTP {getattr(exc, 'code', 'error')}"
         logger.warning("Deployment sync GitHub lookup failed: %s", exc)
-        return None
+        return {"commit": None, "error": detail, "error_code": error_code, "http_status": getattr(exc, "code", None)}
+    except URLError as exc:
+        logger.warning("Deployment sync GitHub lookup failed: %s", exc)
+        return {"commit": None, "error": f"Network error contacting GitHub: {exc.reason}", "error_code": "network_error", "http_status": None}
+    except TimeoutError as exc:
+        logger.warning("Deployment sync GitHub lookup failed: %s", exc)
+        return {"commit": None, "error": "Timed out contacting GitHub.", "error_code": "timeout", "http_status": None}
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.warning("Deployment sync GitHub lookup failed: %s", exc)
+        return {"commit": None, "error": "GitHub API response could not be parsed.", "error_code": "invalid_response", "http_status": None}
     except Exception as exc:
         logger.warning("Deployment sync GitHub lookup failed: %s", exc)
-        return None
+        return {"commit": None, "error": f"Unexpected GitHub verification error: {exc}", "error_code": "unexpected_error", "http_status": None}
 
 
 def _render_dashboard_url() -> str:
@@ -198,9 +225,11 @@ def _render_deploy_hook_url() -> str | None:
 def _deployment_sync_payload() -> dict:
     current_commit, current_commit_source = _current_deployment_commit()
     github_repo, github_branch = _github_repo_settings()
-    github_latest_commit = _fetch_github_latest_commit(github_repo, github_branch)
+    github_probe = _fetch_github_latest_commit_probe(github_repo, github_branch)
+    github_latest_commit = github_probe.get("commit")
     dashboard_url = _render_dashboard_url()
     deploy_hook_url = _render_deploy_hook_url()
+    github_urls = _github_repo_urls(github_repo, github_branch)
 
     if current_commit and github_latest_commit:
         status = "synced" if current_commit == github_latest_commit else "out_of_sync"
@@ -216,15 +245,32 @@ def _deployment_sync_payload() -> dict:
     else:
         message = "Unable to verify deployment sync from the running app."
 
+    compare_url = None
+    current_commit_url = None
+    latest_commit_url = None
+    if current_commit:
+        current_commit_url = f"{github_urls['repository_url']}/commit/{current_commit}"
+    if github_latest_commit:
+        latest_commit_url = f"{github_urls['repository_url']}/commit/{github_latest_commit}"
+    if current_commit and github_latest_commit and current_commit != github_latest_commit:
+        compare_url = f"{github_urls['compare_base_url']}/{current_commit}...{github_latest_commit}"
+
     return {
         "repository": github_repo,
         "branch": github_branch,
         "current_commit": current_commit,
         "current_commit_source": current_commit_source,
         "github_latest_commit": github_latest_commit,
+        "github_error": github_probe.get("error"),
+        "github_error_code": github_probe.get("error_code"),
+        "github_http_status": github_probe.get("http_status"),
         "status": status,
         "message": message,
         "render_dashboard_url": dashboard_url,
+        **github_urls,
+        "current_commit_url": current_commit_url,
+        "latest_commit_url": latest_commit_url,
+        "compare_url": compare_url,
         "manual_deploy_available": bool(deploy_hook_url),
         "manual_deploy_endpoint": "/admin/system/render/redeploy" if deploy_hook_url else None,
         "manual_deploy_hint": "Trigger the Render deploy hook from this admin app." if deploy_hook_url else "Open the Render dashboard and trigger a manual deploy there.",

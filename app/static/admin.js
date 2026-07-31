@@ -66,9 +66,12 @@ const el = {
   deploymentSyncRepoBranch: document.getElementById("deploymentSyncRepoBranch"),
   deploymentSyncSource: document.getElementById("deploymentSyncSource"),
   deploymentSyncCheckedAt: document.getElementById("deploymentSyncCheckedAt"),
+  deploymentSyncDetail: document.getElementById("deploymentSyncDetail"),
   deploymentSyncMessage: document.getElementById("deploymentSyncMessage"),
   deploymentSyncHint: document.getElementById("deploymentSyncHint"),
   deploymentSyncRefreshBtn: document.getElementById("deploymentSyncRefreshBtn"),
+  deploymentSyncGithubBtn: document.getElementById("deploymentSyncGithubBtn"),
+  deploymentSyncCompareBtn: document.getElementById("deploymentSyncCompareBtn"),
   deploymentSyncResolveBtn: document.getElementById("deploymentSyncResolveBtn"),
   securityWarningBanner: document.getElementById("securityWarningBanner"),
   runCurrentUserFailureCheckBtn: document.getElementById("runCurrentUserFailureCheckBtn"),
@@ -164,6 +167,25 @@ async function resolveDeploymentSync() {
   }
 
   const targetUrl = deployment.render_dashboard_url || "https://dashboard.render.com/";
+  window.open(targetUrl, "_blank", "noopener,noreferrer");
+}
+
+function openDeploymentGithub() {
+  const deployment = state.overview?.deployment || {};
+  const targetUrl = deployment.latest_commit_url
+    || deployment.branch_url
+    || deployment.repository_url
+    || `https://github.com/${deployment.repository || "cjdawgs/SherryJo_Cal_App"}`;
+  window.open(targetUrl, "_blank", "noopener,noreferrer");
+}
+
+function openDeploymentCompare() {
+  const deployment = state.overview?.deployment || {};
+  const targetUrl = deployment.compare_url || deployment.branch_url || deployment.repository_url;
+  if (!targetUrl) {
+    setStatus("No GitHub compare URL is available yet.", true);
+    return;
+  }
   window.open(targetUrl, "_blank", "noopener,noreferrer");
 }
 
@@ -388,12 +410,26 @@ function renderSystemOverview(data) {
     el.deploymentSyncCheckedAt.textContent = raw ? new Date(raw).toLocaleString() : new Date().toLocaleString();
   }
 
+  if (el.deploymentSyncDetail) {
+    const detail = deployment.github_error
+      || (deployment.github_latest_commit ? "GitHub commit lookup succeeded." : "Waiting for verification result.");
+    el.deploymentSyncDetail.textContent = detail;
+  }
+
   if (el.deploymentSyncMessage) {
     el.deploymentSyncMessage.textContent = deployment.message || "Deployment sync check not available.";
   }
 
   if (el.deploymentSyncHint) {
-    el.deploymentSyncHint.textContent = deployment.manual_deploy_hint || "Open the Render dashboard and trigger a manual deploy there.";
+    if (isSynced) {
+      el.deploymentSyncHint.textContent = "Render and GitHub are aligned. No deploy action is needed.";
+    } else if (isOutOfSync) {
+      el.deploymentSyncHint.textContent = deployment.manual_deploy_hint || "Render is behind GitHub. Trigger or open a deploy now.";
+    } else {
+      el.deploymentSyncHint.textContent = deployment.github_error
+        ? `Verification failed: ${deployment.github_error}`
+        : (deployment.manual_deploy_hint || "Open the Render dashboard and trigger a manual deploy there.");
+    }
   }
 
   if (el.deploymentSyncResolveBtn) {
@@ -402,6 +438,15 @@ function renderSystemOverview(data) {
       ? "In Sync"
       : (deployment.manual_deploy_available ? "Trigger Redeploy" : "Open Render");
     el.deploymentSyncResolveBtn.classList.toggle("is-danger", isOutOfSync);
+  }
+
+  if (el.deploymentSyncGithubBtn) {
+    el.deploymentSyncGithubBtn.disabled = !deployment.branch_url && !deployment.repository_url;
+  }
+
+  if (el.deploymentSyncCompareBtn) {
+    el.deploymentSyncCompareBtn.disabled = !deployment.compare_url && !deployment.branch_url && !deployment.repository_url;
+    el.deploymentSyncCompareBtn.textContent = deployment.compare_url ? "Compare" : "Open Commits";
   }
 
   if (el.deploymentSyncRefreshBtn) {
@@ -1783,6 +1828,8 @@ function bindEvents() {
   });
 
   el.deploymentSyncRefreshBtn?.addEventListener("click", refreshDeploymentSync);
+  el.deploymentSyncGithubBtn?.addEventListener("click", openDeploymentGithub);
+  el.deploymentSyncCompareBtn?.addEventListener("click", openDeploymentCompare);
   el.deploymentSyncResolveBtn?.addEventListener("click", resolveDeploymentSync);
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);

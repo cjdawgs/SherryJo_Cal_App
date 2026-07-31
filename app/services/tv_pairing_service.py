@@ -12,7 +12,6 @@ Design rules:
 """
 
 import secrets
-import string
 import logging
 import json
 from datetime import datetime, timedelta, timezone
@@ -30,7 +29,8 @@ logger = logging.getLogger(__name__)
 # ─────────────────────────────────────────────────
 
 PAIRING_CODE_TTL_SECONDS = 600       # 10 minutes
-PAIRING_CODE_ALPHABET = string.ascii_uppercase + string.digits
+# Exclude visually ambiguous glyphs so manual TV entry is reliable.
+PAIRING_CODE_ALPHABET = "ACDEFGHJKMNPQRTUVWXYZ"
 PAIRING_CODES_SECRET_NAME = "tv_pairing_codes_v1"
 
 
@@ -135,7 +135,7 @@ class _PairingStore:
     # ── code generation ────────────────────────────
 
     def _generate_code(self) -> str:
-        """ABCD-1234 format — 8 random alphanumeric chars."""
+        """ABCD-EFGH format — 8 random uppercase letters with no ambiguous glyphs."""
         raw = "".join(secrets.choice(PAIRING_CODE_ALPHABET) for _ in range(8))
         return f"{raw[:4]}-{raw[4:]}"
 

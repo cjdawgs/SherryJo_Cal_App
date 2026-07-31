@@ -66,14 +66,24 @@ def _register_and_login(client) -> dict:
 
 class TestPairingStore:
     def test_generate_code_format(self):
-        from app.services.tv_pairing_service import _PairingStore
+        from app.services.tv_pairing_service import _PairingStore, PAIRING_CODE_ALPHABET
         store = _PairingStore()
         result = store.create_code(user_id=1)
         code = result["pairingCode"]
         assert len(code) == 9
         assert code[4] == "-"
-        assert code[:4].isalnum()
-        assert code[5:].isalnum()
+        assert all(ch in PAIRING_CODE_ALPHABET for ch in code.replace("-", ""))
+
+    def test_generate_code_excludes_ambiguous_characters(self):
+        from app.services.tv_pairing_service import _PairingStore
+
+        store = _PairingStore()
+        blocked = set("0O1IL58BS")
+        observed = set()
+        for _ in range(32):
+            observed.update(store.create_code(user_id=1)["pairingCode"].replace("-", ""))
+
+        assert not (observed & blocked)
 
     def test_redeem_valid_code(self):
         from app.services.tv_pairing_service import _PairingStore
