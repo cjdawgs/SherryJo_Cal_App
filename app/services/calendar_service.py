@@ -429,6 +429,92 @@ def _fetch_ms_incremental(token: str, start_date, end_date, delta_link: str = No
 
     new_delta_link = None
 
+    windows_tz_map = {
+        "eastern standard time": "America/New_York",
+        "central standard time": "America/Chicago",
+        "mountain standard time": "America/Denver",
+        "pacific standard time": "America/Los_Angeles",
+        "utc": "UTC",
+        "gmt standard time": "Europe/London",
+    }
+
+    def _resolve_graph_timezone(name: str | None):
+
+        raw = (name or "").strip()
+
+        if not raw:
+
+            return timezone.utc
+
+        # Graph may send IANA names such as "America/New_York".
+        try:
+
+            return pytz.timezone(raw)
+
+        except Exception:
+
+            pass
+
+        mapped = windows_tz_map.get(raw.lower())
+
+        if mapped:
+
+            try:
+
+                return pytz.timezone(mapped)
+
+            except Exception:
+
+                pass
+
+        lowered = raw.lower()
+
+        if "eastern" in lowered:
+
+            return pytz.timezone("US/Eastern")
+
+        if "central" in lowered:
+
+            return pytz.timezone("US/Central")
+
+        if "mountain" in lowered:
+
+            return pytz.timezone("US/Mountain")
+
+        if "pacific" in lowered:
+
+            return pytz.timezone("US/Pacific")
+
+        logger.warning("[MS_SYNC] Unrecognized Graph timeZone '%s'; using UTC fallback", raw)
+
+        return timezone.utc
+
+    def _graph_dt_to_utc(dt_text: str, tz_name: str | None):
+
+        dt_raw = str(dt_text or "").strip()
+
+        if not dt_raw:
+
+            return None
+
+        parsed = datetime.fromisoformat(dt_raw)
+
+        if parsed.tzinfo is not None:
+
+            return parsed.astimezone(timezone.utc)
+
+        tz_obj = _resolve_graph_timezone(tz_name)
+
+        if hasattr(tz_obj, "localize"):
+
+            localized = tz_obj.localize(parsed)
+
+        else:
+
+            localized = parsed.replace(tzinfo=tz_obj)
+
+        return localized.astimezone(timezone.utc)
+
 
 
     def _full_fetch():
@@ -551,31 +637,11 @@ def _fetch_ms_incremental(token: str, start_date, end_date, delta_link: str = No
 
                 try:
 
-                    import pytz as _pytz
+                    dt = _graph_dt_to_utc(dt_str, tz_name)
 
-                    dt_naive = datetime.fromisoformat(dt_str)
+                    if dt is None:
 
-                    if tz_name:
-
-                        def _map(n):
-
-                            if "Eastern"  in n: return _pytz.timezone("US/Eastern")
-
-                            if "Central"  in n: return _pytz.timezone("US/Central")
-
-                            if "Mountain" in n: return _pytz.timezone("US/Mountain")
-
-                            if "Pacific"  in n: return _pytz.timezone("US/Pacific")
-
-                            return _pytz.utc
-
-                        dt = _map(tz_name).localize(dt_naive).astimezone(timezone.utc)
-
-                    else:
-
-                        dt = dt_naive.replace(tzinfo=timezone.utc)
-
-
+                        continue
 
                     end_dt = None
 
@@ -583,13 +649,7 @@ def _fetch_ms_incremental(token: str, start_date, end_date, delta_link: str = No
 
                     if end_str:
 
-                        end_naive = datetime.fromisoformat(end_str)
-
-                        end_tz = end_obj.get("timeZone")
-
-                        end_dt = (_map(end_tz).localize(end_naive).astimezone(timezone.utc)
-
-                                  if end_tz else end_naive.replace(tzinfo=timezone.utc))
+                        end_dt = _graph_dt_to_utc(end_str, end_obj.get("timeZone"))
 
                 except Exception:
 
