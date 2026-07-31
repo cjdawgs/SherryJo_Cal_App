@@ -52,6 +52,14 @@ def test_tv_dashboard_prevents_overlapping_events_requests():
     assert "if (state.eventsRequestInFlight)" in text
 
 
+def test_tv_dashboard_normalizes_pairing_codes_with_dash_separator():
+    text = _tv_js_text()
+    assert "function normalizePairingCode(raw)" in text
+    assert "replace(/[^A-Za-z0-9]/g, '')" in text
+    assert "return `${compact.slice(0, 4)}-${compact.slice(4)}`;" in text
+    assert "XXXX-XXXX" in text
+
+
 def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
     text = _tv_js_text()
     required_tokens = [

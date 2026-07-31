@@ -55,8 +55,6 @@ const wakeLock = (() => {
       return;
     }
     // If we already hold a live sentinel, nothing to do.
-    key: `${source}:${account}`,
-
     try {
       console.log('[WakeLock] Status: Requested');
       _sentinel = await navigator.wakeLock.request('screen');
@@ -521,6 +519,8 @@ function cacheDom() {
     screenDash: document.getElementById('screen-dashboard'),
     pairInput: document.getElementById('pair-code-input'),
     pairBtn: document.getElementById('pair-btn'),
+    pairAutoBtn: document.getElementById('pair-auto-btn'),
+    pairStatus: document.getElementById('pair-status'),
     pairError: document.getElementById('pair-error'),
     tvMain: document.getElementById('tv-main'),
     dateHeader: document.getElementById('tv-date-header'),
@@ -1030,6 +1030,20 @@ async function init() {
   initZoomEngine();
 
   if (dom.pairBtn) dom.pairBtn.addEventListener('click', handlePair);
+  if (dom.pairAutoBtn) dom.pairAutoBtn.addEventListener('click', async () => {
+    if (dom.pairAutoBtn.disabled) return;
+    dom.pairAutoBtn.disabled = true;
+    setPairStatus('Trying the secure same-network shortcut…');
+    const paired = await attemptLanAutoPair();
+    if (paired) {
+      setPairStatus('Secure auto-connect succeeded.');
+      transitionTo('dashboard');
+      await bootstrapFromBackend();
+      return;
+    }
+    setPairStatus('Auto-connect unavailable here. Enter the code from Admin.');
+    dom.pairAutoBtn.disabled = false;
+  });
   if (dom.pairInput) {
     dom.pairInput.addEventListener('input', handleCodeInput);
     dom.pairInput.addEventListener('keydown', e => {
@@ -1318,6 +1332,15 @@ function handleCodeInput(e) {
   let v = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
   if (v.length > 4) v = `${v.slice(0, 4)}-${v.slice(4)}`;
   e.target.value = v;
+  if (v.length === 9) {
+    const canAutoSubmit = dom.pairBtn && !dom.pairBtn.disabled;
+    if (canAutoSubmit) {
+      setPairStatus('Code detected. Connecting…');
+      void handlePair();
+    }
+  } else {
+    setPairStatus('');
+  }
 }
 
 function normalizePairingCode(raw) {
@@ -1330,6 +1353,11 @@ function setPairError(message) {
   if (!dom.pairError) return;
   dom.pairError.textContent = message || '';
   dom.pairError.style.display = message ? 'block' : 'none';
+}
+
+function setPairStatus(message) {
+  if (!dom.pairStatus) return;
+  dom.pairStatus.textContent = message || '';
 }
 
 function applySyncVisualState() {
@@ -1390,6 +1418,7 @@ async function openAdminDashboardPanel() {
 
 async function handlePair() {
   if (!dom.pairInput || !dom.pairBtn) return;
+  if (dom.pairBtn.disabled) return;
   const code = normalizePairingCode(dom.pairInput.value);
   dom.pairInput.value = code;
   if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
@@ -1398,6 +1427,8 @@ async function handlePair() {
   }
 
   dom.pairBtn.disabled = true;
+  if (dom.pairAutoBtn) dom.pairAutoBtn.disabled = true;
+  setPairStatus('Connecting securely…');
   setPairError('');
   try {
     const res = await fetch('/tv/pair', {
@@ -1416,8 +1447,10 @@ async function handlePair() {
     await bootstrapFromBackend();
   } catch (err) {
     setPairError(err.message || 'Pairing failed.');
+    setPairStatus('');
   } finally {
     dom.pairBtn.disabled = false;
+    if (dom.pairAutoBtn) dom.pairAutoBtn.disabled = false;
   }
 }
 

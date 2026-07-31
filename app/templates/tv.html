@@ -167,6 +167,28 @@
       cursor: not-allowed;
     }
 
+    .pair-btn.secondary {
+      background: transparent;
+      border: 1.5px solid rgba(255, 255, 255, 0.14);
+      color: var(--text);
+    }
+
+    .pair-btn.secondary:hover:not(:disabled) {
+      opacity: 1;
+      border-color: var(--accent);
+      color: var(--accent);
+      background: rgba(79, 140, 255, 0.08);
+    }
+
+    .pair-status {
+      font-size: 14px;
+      color: var(--text-muted);
+      text-align: center;
+      line-height: 1.6;
+      min-height: 22px;
+      margin-bottom: 12px;
+    }
+
     .pair-error {
       font-size: 15px;
       color: var(--red);
@@ -633,10 +655,12 @@
       <input id="pair-code-input" class="pair-input" type="text" maxlength="9" autocomplete="off" spellcheck="false"
         inputmode="text" placeholder="XXXX-XXXX" />
       <button id="pair-btn" class="pair-btn" type="button">Connect</button>
+      <button id="pair-auto-btn" class="pair-btn secondary" type="button">Try same-network auto-connect</button>
+      <div id="pair-status" class="pair-status"></div>
       <div id="pair-error" class="pair-error"></div>
       <div class="pair-hint">
         Codes are one-time use and expire in 10 minutes.<br />
-        This device stays connected until you choose Log Out.
+        This device stays connected until you choose Log Out or the TV token is revoked.
       </div>
     </div>
   </div>
