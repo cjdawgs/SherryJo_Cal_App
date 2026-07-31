@@ -3,8 +3,9 @@ import { createTvZoomEngine } from './tv_zoom_engine.js';
 const TOKEN_KEY = 'tv_token';
 // TV state remains backend-driven. Poll often enough for a wall display while
 // lifecycle recovery handles FireOS/Silk timer suspension.
-const POLL_MS = 60000;
-const TV_FETCH_TIMEOUT_MS = 20000;
+const POLL_MS = 600000;
+const TV_FETCH_TIMEOUT_MS = 12000;
+const AUTO_REFRESH_FAILURE_BACKOFF_MS = 60000;
 const MIN_SYNC_VISUAL_MS = 900;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
@@ -14,6 +15,7 @@ const REMOTE_CAPABILITIES_STORAGE_KEY = 'tv_remote_capabilities_v1';
 const REMOTE_ACTION_ECHO_MS = 1400;
 const UPDATE_RELOAD_DELAY_MS = 9000;
 const VIEW_PAYLOAD_CACHE_LIMIT = 24;
+const DAY_WINDOW_CACHE_LIMIT = 140;
 const TV_VIEW_NAMES = new Set(['day', '3-day', 'week', 'month']);
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
@@ -303,6 +305,7 @@ const state = {
   lastStaleReason: '',
   syncInProgress: false,
   syncVisualStartedAt: 0,
+  autoRefreshBackoffUntil: 0,
   syncStatusTone: null,
   syncStatusUntil: 0,
   syncStatusTimer: null,
@@ -371,6 +374,7 @@ const state = {
   accountLegend: [],
   serverAccounts: [],
   accountColorMap: {},
+  accountEmailColorMap: {},
   selectedAccountKeys: [],
   accountChipPressTimer: null,
   accountChipPressFired: false,
@@ -378,6 +382,10 @@ const state = {
   accountChipClickCount: 0,
   viewPayloadCache: {},
   viewPayloadCacheOrder: [],
+  dayWindowCache: {},
+  dayWindowCacheOrder: [],
+  cachedAccounts: [],
+  cachedAccountsAt: 0,
   legendSourceDays: null,
   legendSourceAccounts: null,
 };
@@ -504,7 +512,7 @@ tvDiag = (() => {
 antiSleep.setRafGapCb((deltaMs) => {
   tvDiag.log('raf_gap', `${Math.round(deltaMs / 1000)}s gap \u2014 OS may be throttling renderer`);
   if (deltaMs >= POLL_MS && state.token && document.visibilityState === 'visible') {
-    refreshEvents(true);
+    refreshEvents();
   }
 });
 
@@ -1124,7 +1132,7 @@ async function init() {
       return;
     }
     if (!document.hidden) {
-      refreshEvents(true);
+      refreshEvents();
       // Re-acquire wake lock — the OS always releases it when the tab hides.
       if (state.token) wakeLock.reacquire();
       if (state.sleepGuardEnabled !== false) {
@@ -1144,7 +1152,7 @@ async function init() {
   window.addEventListener('focus', () => {
     if (tvDiag) tvDiag.log('window_focus', `vis=${document.visibilityState}`);
     if (state.token && document.visibilityState === 'visible') {
-      refreshEvents(true);
+      refreshEvents();
       wakeLock.reacquire();
       if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
@@ -1158,7 +1166,7 @@ async function init() {
   window.addEventListener('pageshow', (e) => {
     if (tvDiag) tvDiag.log('pageshow', `persisted=${e.persisted}`);
     if (state.token && document.visibilityState === 'visible') {
-      refreshEvents(true);
+      refreshEvents();
       wakeLock.reacquire();
       if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); }
     }
@@ -1173,11 +1181,11 @@ async function init() {
   });
   document.addEventListener('resume', () => {
     if (tvDiag) tvDiag.log('page_resume', 'page resumed from frozen state');
-    if (state.token) { refreshEvents(true); wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
+    if (state.token) { refreshEvents(); wakeLock.reacquire(); if (state.sleepGuardEnabled !== false) { antiSleep.start(); antiSleep.restartVideo(); } }
   });
 
   window.addEventListener('online', () => {
-    if (state.token) refreshEvents(true);
+    if (state.token) refreshEvents();
   });
 
   // beforeunload — last sync opportunity before page is torn down
@@ -1522,6 +1530,7 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.editorDirty = false;
   state.monthDetailOpen = false;
   state.syncInProgress = false;
+  state.autoRefreshBackoffUntil = 0;
   if (state.syncStatusTimer) clearTimeout(state.syncStatusTimer);
   state.syncStatusTimer = null;
   state.syncStatusTone = null;
@@ -1529,6 +1538,7 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.serverAccounts = [];
   state.accountLegend = [];
   state.accountColorMap = {};
+  state.accountEmailColorMap = {};
   state.selectedAccountKeys = [];
   state.accountChipPressFired = false;
   if (state.accountChipPressTimer) clearTimeout(state.accountChipPressTimer);
@@ -1538,6 +1548,10 @@ function handleUnpair(reason = 'user_unpair_requested') {
   state.accountChipClickCount = 0;
   state.viewPayloadCache = {};
   state.viewPayloadCacheOrder = [];
+  state.dayWindowCache = {};
+  state.dayWindowCacheOrder = [];
+  state.cachedAccounts = [];
+  state.cachedAccountsAt = 0;
   state.legendSourceDays = null;
   state.legendSourceAccounts = null;
   state.lastObservedDayKey = null;
@@ -1580,19 +1594,26 @@ async function fetchTvState() {
 }
 
 async function refreshEvents(force = false, options = {}) {
+  const manualSync = Boolean(options && options.showSync);
   const stateOverride = options && options.stateOverride ? options.stateOverride : null;
+  const highPriorityRefresh = Boolean(manualSync || stateOverride);
+  const automatedRefresh = !manualSync && !stateOverride && !force;
   if (document.hidden && !force) {
     return;
   }
 
   const nowMs = Date.now();
+  if (automatedRefresh && state.autoRefreshBackoffUntil && nowMs < state.autoRefreshBackoffUntil) {
+    return;
+  }
   if (!force && state.lastEventsFetchAt && (nowMs - state.lastEventsFetchAt) < POLL_MS) {
     return;
   }
 
   if (state.eventsRequestInFlight) {
     state.eventsRefreshQueued = true;
-    state.queuedRefreshForce = state.queuedRefreshForce || force;
+    // Only preserve forced follow-up fetches for explicit user sync or state-change refreshes.
+    state.queuedRefreshForce = state.queuedRefreshForce || highPriorityRefresh;
     return;
   }
 
@@ -1610,7 +1631,7 @@ async function refreshEvents(force = false, options = {}) {
     suppressNetworkHint: true,
   });
 
-  if (!res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
+  if (manualSync && !res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
     if (tvDiag) tvDiag.log('tv_events_timeout_retry', `retrying /tv/events after timeout (${state.lastAuthFetchError.message})`);
     res = await authFetch(eventsUrl, {
       cache: 'no-store',
@@ -1622,6 +1643,8 @@ async function refreshEvents(force = false, options = {}) {
 
   try {
     if (!res) {
+      state.lastEventsFetchAt = Date.now();
+      if (automatedRefresh) state.autoRefreshBackoffUntil = Date.now() + AUTO_REFRESH_FAILURE_BACKOFF_MS;
       const networkMessage = state.lastAuthFetchError && state.lastAuthFetchError.message
         ? state.lastAuthFetchError.message
         : 'Network request failed';
@@ -1638,6 +1661,7 @@ async function refreshEvents(force = false, options = {}) {
 
     if (res.status === 304) {
       state.lastEventsFetchAt = Date.now();
+      state.autoRefreshBackoffUntil = 0;
       if (!state.days.length) {
         const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate);
         if (hydrated) render();
@@ -1652,6 +1676,8 @@ async function refreshEvents(force = false, options = {}) {
     }
 
     if (!res.ok) {
+      state.lastEventsFetchAt = Date.now();
+      if (automatedRefresh) state.autoRefreshBackoffUntil = Date.now() + AUTO_REFRESH_FAILURE_BACKOFF_MS;
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
       setSyncStatus(false, 'Sync Failed');
       return;
@@ -1660,6 +1686,7 @@ async function refreshEvents(force = false, options = {}) {
     const data = await res.json().catch(() => ({}));
     processServerVersionSignal(res, data);
     state.lastEventsFetchAt = Date.now();
+    state.autoRefreshBackoffUntil = 0;
     const staleData = Boolean(data.staleData);
     const incomingDays = normalizeTvDays(data.days);
     const previousSelectedDate = state.selectedDate;
@@ -2369,28 +2396,37 @@ function shiftByView(direction) {
     d.setMonth(d.getMonth() + direction);
     state.selectedDate = toISO(d);
     state.monthDetailOpen = false;
-    hydrateFromViewCache(state.currentView, state.selectedDate);
+    const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate)
+      || hydrateFromDayWindowCache(state.currentView, state.selectedDate);
     render();
     patchTvState({ selectedDate: toISO(d) }, { recordHistory: true }).catch(() => null);
-    refreshEvents(true, { stateOverride: { selectedDate: toISO(d), currentView: state.currentView } });
+    if (!hydrated) {
+      refreshEvents(true, { stateOverride: { selectedDate: toISO(d), currentView: state.currentView } });
+    }
     return;
   }
   const next = offsetDate(d, direction * delta);
   state.selectedDate = toISO(next);
-  hydrateFromViewCache(state.currentView, state.selectedDate);
+  const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate)
+    || hydrateFromDayWindowCache(state.currentView, state.selectedDate);
   render();
   patchTvState({ selectedDate: toISO(next) }, { recordHistory: true }).catch(() => null);
-  refreshEvents(true, { stateOverride: { selectedDate: toISO(next), currentView: state.currentView } });
+  if (!hydrated) {
+    refreshEvents(true, { stateOverride: { selectedDate: toISO(next), currentView: state.currentView } });
+  }
 }
 
 function goToday() {
   closeEditor(true);
   state.monthDetailOpen = false;
   state.selectedDate = toISO(new Date());
-  hydrateFromViewCache(state.currentView, state.selectedDate);
+  const hydrated = hydrateFromViewCache(state.currentView, state.selectedDate)
+    || hydrateFromDayWindowCache(state.currentView, state.selectedDate);
   render();
   patchTvState({ selectedDate: toISO(new Date()) }, { recordHistory: true }).catch(() => null);
-  refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: state.currentView } });
+  if (!hydrated) {
+    refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: state.currentView } });
+  }
 }
 
 function setView(viewName, options = {}) {
@@ -2407,10 +2443,13 @@ function setView(viewName, options = {}) {
     };
   }
   if (viewName !== 'month') state.monthDetailOpen = false;
-  hydrateFromViewCache(viewName, state.selectedDate);
+  const hydrated = hydrateFromViewCache(viewName, state.selectedDate)
+    || hydrateFromDayWindowCache(viewName, state.selectedDate);
   render();
   patchTvState({ currentView: viewName }, { recordHistory: true }).catch(() => null);
-  refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: viewName } });
+  if (!hydrated) {
+    refreshEvents(true, { stateOverride: { selectedDate: state.selectedDate, currentView: viewName } });
+  }
 }
 
 function goBackAction() {
@@ -2462,13 +2501,67 @@ function buildViewCacheKey(viewName, selectedDate) {
   return `${view}|${date}`;
 }
 
+function expectedDatesForView(viewName, selectedDate) {
+  const anchor = parseLocalDate(selectedDate || state.selectedDate || toISO(new Date()));
+  const view = String(viewName || state.currentView || 'day');
+  if (view === 'month') return buildMonthDates(anchor);
+  if (view === 'week') return buildWeekDates(anchor);
+  if (view === '3-day') return buildThreeDayDates(anchor);
+  return [toISO(anchor)];
+}
+
+function cacheDayWindow(days, accounts, cachedAt = Date.now()) {
+  if (!Array.isArray(days) || !days.length) return;
+  for (const day of days) {
+    const dateKey = String(day?.date || '').trim();
+    if (!dateKey) continue;
+    state.dayWindowCache[dateKey] = { day, cachedAt };
+    state.dayWindowCacheOrder = state.dayWindowCacheOrder.filter((entry) => entry !== dateKey);
+    state.dayWindowCacheOrder.push(dateKey);
+  }
+  while (state.dayWindowCacheOrder.length > DAY_WINDOW_CACHE_LIMIT) {
+    const staleKey = state.dayWindowCacheOrder.shift();
+    if (staleKey) delete state.dayWindowCache[staleKey];
+  }
+  state.cachedAccounts = Array.isArray(accounts) ? accounts : [];
+  state.cachedAccountsAt = cachedAt;
+}
+
+function hydrateFromDayWindowCache(viewName, selectedDate) {
+  const neededDates = expectedDatesForView(viewName, selectedDate);
+  if (!neededDates.length) return false;
+  const now = Date.now();
+  const maxAgeMs = POLL_MS;
+  const days = [];
+  for (const dateKey of neededDates) {
+    const entry = state.dayWindowCache[dateKey];
+    if (!entry || !entry.day) return false;
+    if (now - Number(entry.cachedAt || 0) > maxAgeMs) return false;
+    days.push(entry.day);
+  }
+
+  state.days = days;
+  if (Array.isArray(state.cachedAccounts) && now - Number(state.cachedAccountsAt || 0) <= maxAgeMs) {
+    state.serverAccounts = state.cachedAccounts;
+  }
+  state.legendSourceDays = null;
+  state.legendSourceAccounts = null;
+  state.dayMap = {};
+  for (const day of state.days) {
+    if (day && day.date) state.dayMap[day.date] = day;
+  }
+  return true;
+}
+
 function rememberViewPayload(viewName, selectedDate, days, accounts) {
   const key = buildViewCacheKey(viewName, selectedDate);
+  const cachedAt = Date.now();
   state.viewPayloadCache[key] = {
     days: Array.isArray(days) ? days : [],
     accounts: Array.isArray(accounts) ? accounts : [],
-    cachedAt: Date.now(),
+    cachedAt,
   };
+  cacheDayWindow(days, accounts, cachedAt);
   state.viewPayloadCacheOrder = state.viewPayloadCacheOrder.filter((entryKey) => entryKey !== key);
   state.viewPayloadCacheOrder.push(key);
   while (state.viewPayloadCacheOrder.length > VIEW_PAYLOAD_CACHE_LIMIT) {
@@ -3046,6 +3139,14 @@ function extractExternalAccountIdentity(ev) {
   return exactSource || candidates[0];
 }
 
+function shouldPreferExternalIdentity(source, account) {
+  const normalizedSource = normalizeAccountSource(source || 'local');
+  const normalizedAccount = normalizeAccountIdentifier(account);
+  if (!normalizedAccount) return true;
+  if (normalizedAccount === 'local') return true;
+  return isGenericProviderBucket(normalizedSource, normalizedAccount);
+}
+
 function eventAccountIdentity(ev) {
   const rawSource = (
     ev?.source
@@ -3070,7 +3171,7 @@ function eventAccountIdentity(ev) {
     || 'local',
   );
 
-  const account = normalizeAccountIdentifier(
+  let account = normalizeAccountIdentifier(
     composite?.account
     || ev?.accountEmail
     || ev?.account_email
@@ -3083,10 +3184,16 @@ function eventAccountIdentity(ev) {
     || source,
   ) || source;
 
+  let resolvedSource = source;
+  if (externalIdentity && shouldPreferExternalIdentity(resolvedSource, account)) {
+    resolvedSource = normalizeAccountSource(externalIdentity.source || resolvedSource);
+    account = normalizeAccountIdentifier(externalIdentity.account) || account;
+  }
+
   return {
-    source,
+    source: resolvedSource,
     account,
-    key: `${source}:${account}`,
+    key: `${resolvedSource}:${account}`,
   };
 }
 
@@ -3447,6 +3554,7 @@ function syncAccountLegend() {
 
   const map = new Map();
   const colorMap = {};
+  const emailColorMap = {};
 
   for (const account of (state.serverAccounts || [])) {
     const identity = serverAccountIdentity(account);
@@ -3454,6 +3562,10 @@ function syncAccountLegend() {
     const color = normalizeHexColor(account.color) || providerFallbackColor(identity.source);
     map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
     colorMap[identity.key] = color;
+    const normalizedEmail = normalizeAccountIdentifier(account?.account_email || account?.accountEmail || account?.email);
+    if (normalizedEmail && !emailColorMap[normalizedEmail]) {
+      emailColorMap[normalizedEmail] = color;
+    }
   }
 
   for (const day of state.days) {
@@ -3461,6 +3573,7 @@ function syncAccountLegend() {
       const identity = eventAccountIdentity(ev);
       if (isPlaceholderAccount(identity.account)) continue;
       const eventColor = normalizeHexColor(ev.color);
+      const normalizedEmail = normalizeAccountIdentifier(ev?.account_email || ev?.accountEmail || ev?.extendedProps?.account_email || ev?.extendedProps?.accountEmail);
       if (!map.has(identity.key)) {
         map.set(identity.key, {
           key: identity.key,
@@ -3470,10 +3583,12 @@ function syncAccountLegend() {
         });
       }
       if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
+      if (eventColor && normalizedEmail && !emailColorMap[normalizedEmail]) emailColorMap[normalizedEmail] = eventColor;
     }
   }
   state.accountLegend = Array.from(map.values());
   state.accountColorMap = colorMap;
+  state.accountEmailColorMap = emailColorMap;
   if (state.selectedAccountKeys.length) {
     const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}:${item.account}`));
     state.selectedAccountKeys = state.selectedAccountKeys
@@ -3493,6 +3608,17 @@ function resolveEventColor(ev) {
   const exact = state.accountColorMap[identity.key];
   if (exact) return exact;
 
+  const normalizedEventEmail = normalizeAccountIdentifier(
+    ev?.account_email
+    || ev?.accountEmail
+    || ev?.extendedProps?.account_email
+    || ev?.extendedProps?.accountEmail,
+  );
+  if (normalizedEventEmail) {
+    const byEmail = state.accountEmailColorMap[normalizedEventEmail];
+    if (byEmail) return byEmail;
+  }
+
   // Fallback for legacy key formats where source/account order varied.
   const normalizedTargetAccount = normalizeAccountIdentifier(identity.account);
   for (const [rawKey, color] of Object.entries(state.accountColorMap || {})) {
@@ -3503,7 +3629,7 @@ function resolveEventColor(ev) {
     if (normalizeAccountIdentifier(parsed.account) === normalizedTargetAccount) return color;
   }
 
-  const direct = normalizeHexColor(ev.color);
+  const direct = normalizeHexColor(ev.color) || normalizeHexColor(ev?.extendedProps?.eventColor);
   if (direct) return direct;
   return providerFallbackColor(identity.source);
 }

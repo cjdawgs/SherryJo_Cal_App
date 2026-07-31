@@ -94,6 +94,17 @@ def test_tv_dashboard_exposes_account_chip_filtering_and_sticky_icons():
         assert token in text
 
 
+def test_tv_dashboard_prefers_external_identity_when_local_identity_is_placeholder():
+    text = _tv_js_text()
+    required_tokens = [
+        "function shouldPreferExternalIdentity(source, account)",
+        "normalizedAccount === 'local'",
+        "externalIdentity && shouldPreferExternalIdentity(resolvedSource, account)",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
 def test_tv_dashboard_color_rendering_paths_cover_month_and_shared_views():
     text = _tv_js_text()
     required_tokens = [
