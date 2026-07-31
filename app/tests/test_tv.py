@@ -30,14 +30,14 @@ def _reset_tv_stores():
     pairing_store._codes.clear()
     tv_state_store._states.clear()
     tv_router._tv_events_snapshot_cache.clear()
-    tv_router._lan_autopair_ctx["user_id"] = None
-    tv_router._lan_autopair_ctx["expires_at"] = None
+    tv_router._lan_autopair_ctx.clear()
+    tv_router._lan_autopair_ctx.update({"user_id": None, "expires_at": None, "client_fingerprint": None})
     yield
     pairing_store._codes.clear()
     tv_state_store._states.clear()
     tv_router._tv_events_snapshot_cache.clear()
-    tv_router._lan_autopair_ctx["user_id"] = None
-    tv_router._lan_autopair_ctx["expires_at"] = None
+    tv_router._lan_autopair_ctx.clear()
+    tv_router._lan_autopair_ctx.update({"user_id": None, "expires_at": None, "client_fingerprint": None})
 
 
 # ─────────────────────────────────────────────────
@@ -237,6 +237,23 @@ class TestAutoPairEndpoint:
         events = client.get("/tv/events", headers=tv_headers)
         assert events.status_code == 200
         assert events.json()["selectedDate"] == "2026-07-30"
+
+    def test_auto_pair_succeeds_when_forwarded_public_ip_matches_generate_request(self, client, auth_headers):
+        forwarded_headers = {**auth_headers, "x-forwarded-for": "203.0.113.10"}
+
+        gen = client.post("/tv/generate-code", headers=forwarded_headers)
+        assert gen.status_code == 200
+
+        pair = client.post("/tv/auto-pair", headers={"x-forwarded-for": "203.0.113.10"})
+        assert pair.status_code == 200
+        assert pair.json().get("token")
+
+    def test_auto_pair_rejects_mismatched_forwarded_public_ip(self, client, auth_headers):
+        gen = client.post("/tv/generate-code", headers={**auth_headers, "x-forwarded-for": "203.0.113.10"})
+        assert gen.status_code == 200
+
+        pair = client.post("/tv/auto-pair", headers={"x-forwarded-for": "198.51.100.9"})
+        assert pair.status_code == 404
 
 
 class TestKioskToken:

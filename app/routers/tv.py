@@ -60,6 +60,7 @@ _TV_BUILD_FALLBACK = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
 _lan_autopair_ctx: dict[str, Optional[object]] = {
     "user_id": None,
     "expires_at": None,
+    "client_fingerprint": None,
 }
 
 
@@ -86,25 +87,83 @@ def _is_private_or_loopback_host(host: Optional[str]) -> bool:
         return False
 
 
+def _request_client_candidates(request: Request) -> list[str]:
+    candidates: list[str] = []
+
+    x_forwarded_for = str(request.headers.get("x-forwarded-for") or "").strip()
+    if x_forwarded_for:
+        for part in x_forwarded_for.split(","):
+            value = part.strip()
+            if value:
+                candidates.append(value)
+
+    for header_name in ("x-real-ip", "cf-connecting-ip"):
+        value = str(request.headers.get(header_name) or "").strip()
+        if value:
+            candidates.append(value)
+
+    forwarded = str(request.headers.get("forwarded") or "").strip()
+    if forwarded:
+        for match in re.finditer(r"for=\"?([^;\",]+)", forwarded, flags=re.IGNORECASE):
+            value = match.group(1).strip()
+            if value.startswith("[") and value.endswith("]"):
+                value = value[1:-1]
+            if value:
+                candidates.append(value)
+
+    client_host = getattr(request.client, "host", None)
+    if client_host:
+        candidates.append(str(client_host).strip())
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        value = raw.strip().lower()
+        if not value:
+            continue
+        if value.startswith("[") and value.endswith("]"):
+            value = value[1:-1]
+        if value.startswith("::ffff:"):
+            value = value.split(":")[-1]
+        if value not in seen:
+            seen.add(value)
+            normalized.append(value)
+    return normalized
+
+
+def _request_client_fingerprint(request: Request) -> str | None:
+    for candidate in _request_client_candidates(request):
+        if candidate and candidate not in {"unknown", "testclient"}:
+            return candidate
+    return None
+
+
 def _auto_pair_enabled() -> bool:
     raw = str(os.getenv("TV_TRUST_LAN_AUTO_PAIR", "1")).strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
-def _mark_lan_autopair_principal(user_id: int) -> None:
+def _mark_lan_autopair_principal(user_id: int, request: Request | None = None) -> None:
     ttl_min = int(str(os.getenv("TV_LAN_AUTO_PAIR_TTL_MINUTES", "10")).strip() or "10")
     ttl_min = max(1, min(ttl_min, 120))
     _lan_autopair_ctx["user_id"] = user_id
     _lan_autopair_ctx["expires_at"] = datetime.now(timezone.utc) + timedelta(minutes=ttl_min)
+    _lan_autopair_ctx["client_fingerprint"] = _request_client_fingerprint(request) if request is not None else None
 
 
 def _resolve_lan_autopair_principal(request: Request) -> Optional[int]:
     if not _auto_pair_enabled():
         return None
 
-    client_host = getattr(request.client, "host", None)
-    if not _is_private_or_loopback_host(client_host):
-        return None
+    request_candidates = _request_client_candidates(request)
+    request_fingerprint = _request_client_fingerprint(request)
+    trusted_fingerprint = str(_lan_autopair_ctx.get("client_fingerprint") or "").strip().lower()
+    if trusted_fingerprint:
+        if not request_fingerprint or request_fingerprint != trusted_fingerprint:
+            return None
+    elif not any(_is_private_or_loopback_host(candidate) for candidate in request_candidates):
+        if not request_fingerprint:
+            return None
 
     user_id = _lan_autopair_ctx.get("user_id")
     expires_at = _lan_autopair_ctx.get("expires_at")
@@ -113,6 +172,7 @@ def _resolve_lan_autopair_principal(request: Request) -> Optional[int]:
     if datetime.now(timezone.utc) > expires_at:
         _lan_autopair_ctx["user_id"] = None
         _lan_autopair_ctx["expires_at"] = None
+        _lan_autopair_ctx["client_fingerprint"] = None
         return None
 
     return int(user_id)
@@ -895,6 +955,7 @@ def get_tv_diag(
 
 @router.post("/generate-code", response_model=GeneratePairCodeResponse)
 def generate_pairing_code(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -907,7 +968,7 @@ def generate_pairing_code(
     logger.info("TV_PAIR_REQUEST user_id=%s", current_user.id)
 
     result = pairing_store.create_code(current_user.id, db=db)
-    _mark_lan_autopair_principal(current_user.id)
+    _mark_lan_autopair_principal(current_user.id, request=request)
     return result
 
 

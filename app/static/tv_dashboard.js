@@ -2969,480 +2969,481 @@ function eventAccountIdentity(ev) {
   return {
     source,
     account,
-    key: `${source}|${account}`,
     key: `${source}:${account}`,
-  }
+  };
+}
 
-  function serverAccountIdentity(account) {
-    const rawKey = account?.account_key || account?.accountKey;
-    const composite = parseCompositeAccountKey(rawKey);
-    const source = normalizeAccountSource(composite?.source || account?.provider || account?.source || 'local');
-    const normalizedAccount = normalizeAccountIdentifier(composite?.account || account?.accountEmail || account?.account_email || account?.email || source) || source;
-    return {
-      source,
-      account: normalizedAccount,
-      key: `${source}|${normalizedAccount}`,
-      key: `${source}:${normalizedAccount}`,
-    };
-  }
+function serverAccountIdentity(account) {
+  const rawKey = account?.account_key || account?.accountKey;
+  const composite = parseCompositeAccountKey(rawKey);
+  const source = normalizeAccountSource(composite?.source || account?.provider || account?.source || 'local');
+  const normalizedAccount = normalizeAccountIdentifier(
+    composite?.account || account?.accountEmail || account?.account_email || account?.email || source,
+  ) || source;
+  return {
+    source,
+    account: normalizedAccount,
+    key: `${source}:${normalizedAccount}`,
+  };
+}
 
-  function eventAccountKey(ev) {
-    return eventAccountIdentity(ev).key;
-  }
+function eventAccountKey(ev) {
+  return eventAccountIdentity(ev).key;
+}
 
-  function isAccountVisibleForEvent(ev) {
-    if (!state.selectedAccountKeys.length) return true;
-    return state.selectedAccountKeys.includes(eventAccountKey(ev));
-  }
+function isAccountVisibleForEvent(ev) {
+  if (!state.selectedAccountKeys.length) return true;
+  return state.selectedAccountKeys.includes(eventAccountKey(ev));
+}
 
-  function sortEventsAsc(events) {
-    return [...(events || [])].sort((a, b) => {
-      const aTs = Date.parse(a.start || '') || 0;
-      const bTs = Date.parse(b.start || '') || 0;
-      return aTs - bTs;
-    });
-  }
+function sortEventsAsc(events) {
+  return [...(events || [])].sort((a, b) => {
+    const aTs = Date.parse(a.start || '') || 0;
+    const bTs = Date.parse(b.start || '') || 0;
+    return aTs - bTs;
+  });
+}
 
-  function filteredEventsForDay(day) {
-    const allEvents = sortEventsAsc(day.events || []);
-    return allEvents.filter(ev => isAccountVisibleForEvent(ev));
-  }
+function filteredEventsForDay(day) {
+  const allEvents = sortEventsAsc(day.events || []);
+  return allEvents.filter(ev => isAccountVisibleForEvent(ev));
+}
 
-  function extractStickyText(payload) {
-    if (typeof payload === 'string') return payload.trim();
-    if (!payload || typeof payload !== 'object') return '';
-    const keys = ['content', 'text', 'note', 'title', 'body', 'message'];
-    for (const key of keys) {
-      const value = payload[key];
-      if (value == null) continue;
-      const text = String(value).trim();
-      if (text) return text;
-    }
-    return '';
+function extractStickyText(payload) {
+  if (typeof payload === 'string') return payload.trim();
+  if (!payload || typeof payload !== 'object') return '';
+  const keys = ['content', 'text', 'note', 'title', 'body', 'message'];
+  for (const key of keys) {
+    const value = payload[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
   }
+  return '';
+}
 
-  function normalizeStickyEntry(entry) {
-    if (typeof entry === 'string') {
-      const content = entry.trim();
-      if (!content) return null;
-      return { id: `sticky-${Date.now()}`, content, color: '#F7E68A' };
-    }
-    if (!entry || typeof entry !== 'object') return null;
-    const content = extractStickyText(entry);
+function normalizeStickyEntry(entry) {
+  if (typeof entry === 'string') {
+    const content = entry.trim();
     if (!content) return null;
+    return { id: `sticky-${Date.now()}`, content, color: '#F7E68A' };
+  }
+  if (!entry || typeof entry !== 'object') return null;
+  const content = extractStickyText(entry);
+  if (!content) return null;
+  return {
+    ...entry,
+    content,
+    color: String(entry.color || '#F7E68A'),
+  };
+}
+
+function normalizeStickyEntries(rawEntries) {
+  if (!rawEntries) return [];
+  let items = rawEntries;
+  if (typeof rawEntries === 'string') {
+    const txt = rawEntries.trim();
+    if (!txt || txt === '[]' || txt === '{}' || txt.toLowerCase() === 'null') return [];
+    try {
+      items = JSON.parse(txt);
+    } catch {
+      items = [txt];
+    }
+  }
+  if (!Array.isArray(items)) items = [items];
+  return items.map(normalizeStickyEntry).filter(Boolean);
+}
+
+function eventHasStickyPayload(event) {
+  if (!event || typeof event !== 'object') return false;
+
+  const explicit = event.hasSticky;
+  if (explicit === true) return true;
+  if (typeof explicit === 'string') {
+    const normalized = explicit.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  }
+
+  if (normalizeStickyEntries(event.stickyNotes).length) return true;
+  if (normalizeStickyEntries(event.sticky_notes).length) return true;
+  if (normalizeStickyEntries(event.stickyNote).length) return true;
+  if (normalizeStickyEntries(event.sticky_note).length) return true;
+
+  if (Array.isArray(event.notes)) {
+    return event.notes.some((note) => Boolean(extractStickyText(note)));
+  }
+  if (typeof event.noteCount === 'number' && event.noteCount > 0) return true;
+  if (typeof event.note_count === 'number' && event.note_count > 0) return true;
+
+  return false;
+}
+
+function normalizeTvDays(daysPayload) {
+  if (!Array.isArray(daysPayload)) return [];
+  return daysPayload.map((day) => {
+    const rawEvents = Array.isArray(day?.events) ? day.events : [];
+    const stickyNotes = normalizeStickyEntries(day?.stickyNotes ?? day?.sticky_notes);
+    const events = rawEvents.map((ev) => ({
+      ...ev,
+      hasSticky: eventHasStickyPayload(ev),
+    }));
     return {
-      ...entry,
-      content,
-      color: String(entry.color || '#F7E68A'),
+      ...day,
+      stickyNotes,
+      events,
+    };
+  });
+}
+
+function buildTvSnapshotIndex(days) {
+  const index = {};
+  for (const day of (days || [])) {
+    const dateKey = String(day?.date || '');
+
+    const events = Array.isArray(day?.events) ? day.events : [];
+    for (const ev of events) {
+      const eventIdentity = ev?.id != null
+        ? String(ev.id)
+        : `${dateKey}|${String(ev?.start || '')}|${String(ev?.end || '')}|${String(ev?.title || '')}`;
+      const eventKey = `event:${eventIdentity}`;
+      index[eventKey] = [
+        dateKey,
+        String(ev?.title || ''),
+        String(ev?.start || ''),
+        String(ev?.end || ''),
+        String(ev?.description || ''),
+        ev?.hasSticky ? '1' : '0',
+        String(ev?.updatedAt || ev?.updated_at || ''),
+      ].join('|');
+    }
+
+    const stickyNotes = Array.isArray(day?.stickyNotes) ? day.stickyNotes : [];
+    for (let i = 0; i < stickyNotes.length; i += 1) {
+      const sticky = stickyNotes[i] || {};
+      const stickyIdentity = sticky.id != null
+        ? String(sticky.id)
+        : `${i}|${String(sticky.content || '')}`;
+      const stickyKey = `sticky:${dateKey}:${stickyIdentity}`;
+      index[stickyKey] = [
+        dateKey,
+        String(sticky.content || ''),
+        String(sticky.color || ''),
+        String(sticky.updatedAt || sticky.updated_at || ''),
+      ].join('|');
+    }
+  }
+  return index;
+}
+
+function buildTvSnapshotSignature(index) {
+  const keys = Object.keys(index || {}).sort();
+  return keys.map((key) => `${key}=${index[key]}`).join(';');
+}
+
+function computeTvSnapshotDelta(prevIndex, nextIndex) {
+  if (!prevIndex || typeof prevIndex !== 'object') {
+    return {
+      added: Object.keys(nextIndex || {}).length,
+      updated: 0,
+      deleted: 0,
     };
   }
 
-  function normalizeStickyEntries(rawEntries) {
-    if (!rawEntries) return [];
-    let items = rawEntries;
-    if (typeof rawEntries === 'string') {
-      const txt = rawEntries.trim();
-      if (!txt || txt === '[]' || txt === '{}' || txt.toLowerCase() === 'null') return [];
-      try {
-        items = JSON.parse(txt);
-      } catch {
-        items = [txt];
-      }
+  let added = 0;
+  let updated = 0;
+  let deleted = 0;
+
+  for (const key of Object.keys(nextIndex || {})) {
+    if (!(key in prevIndex)) {
+      added += 1;
+      continue;
     }
-    if (!Array.isArray(items)) items = [items];
-    return items.map(normalizeStickyEntry).filter(Boolean);
-  }
-
-  function eventHasStickyPayload(event) {
-    if (!event || typeof event !== 'object') return false;
-
-    const explicit = event.hasSticky;
-    if (explicit === true) return true;
-    if (typeof explicit === 'string') {
-      const normalized = explicit.trim().toLowerCase();
-      if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
-    }
-
-    if (normalizeStickyEntries(event.stickyNotes).length) return true;
-    if (normalizeStickyEntries(event.sticky_notes).length) return true;
-    if (normalizeStickyEntries(event.stickyNote).length) return true;
-    if (normalizeStickyEntries(event.sticky_note).length) return true;
-
-    if (Array.isArray(event.notes)) {
-      return event.notes.some((note) => Boolean(extractStickyText(note)));
-    }
-    if (typeof event.noteCount === 'number' && event.noteCount > 0) return true;
-    if (typeof event.note_count === 'number' && event.note_count > 0) return true;
-
-    return false;
-  }
-
-  function normalizeTvDays(daysPayload) {
-    if (!Array.isArray(daysPayload)) return [];
-    return daysPayload.map((day) => {
-      const rawEvents = Array.isArray(day?.events) ? day.events : [];
-      const stickyNotes = normalizeStickyEntries(day?.stickyNotes ?? day?.sticky_notes);
-      const events = rawEvents.map((ev) => ({
-        ...ev,
-        hasSticky: eventHasStickyPayload(ev),
-      }));
-      return {
-        ...day,
-        stickyNotes,
-        events,
-      };
-    });
-  }
-
-  function buildTvSnapshotIndex(days) {
-    const index = {};
-    for (const day of (days || [])) {
-      const dateKey = String(day?.date || '');
-
-      const events = Array.isArray(day?.events) ? day.events : [];
-      for (const ev of events) {
-        const eventIdentity = ev?.id != null
-          ? String(ev.id)
-          : `${dateKey}|${String(ev?.start || '')}|${String(ev?.end || '')}|${String(ev?.title || '')}`;
-        const eventKey = `event:${eventIdentity}`;
-        index[eventKey] = [
-          dateKey,
-          String(ev?.title || ''),
-          String(ev?.start || ''),
-          String(ev?.end || ''),
-          String(ev?.description || ''),
-          ev?.hasSticky ? '1' : '0',
-          String(ev?.updatedAt || ev?.updated_at || ''),
-        ].join('|');
-      }
-
-      const stickyNotes = Array.isArray(day?.stickyNotes) ? day.stickyNotes : [];
-      for (let i = 0; i < stickyNotes.length; i += 1) {
-        const sticky = stickyNotes[i] || {};
-        const stickyIdentity = sticky.id != null
-          ? String(sticky.id)
-          : `${i}|${String(sticky.content || '')}`;
-        const stickyKey = `sticky:${dateKey}:${stickyIdentity}`;
-        index[stickyKey] = [
-          dateKey,
-          String(sticky.content || ''),
-          String(sticky.color || ''),
-          String(sticky.updatedAt || sticky.updated_at || ''),
-        ].join('|');
-      }
-    }
-    return index;
-  }
-
-  function buildTvSnapshotSignature(index) {
-    const keys = Object.keys(index || {}).sort();
-    return keys.map((key) => `${key}=${index[key]}`).join(';');
-  }
-
-  function computeTvSnapshotDelta(prevIndex, nextIndex) {
-    if (!prevIndex || typeof prevIndex !== 'object') {
-      return {
-        added: Object.keys(nextIndex || {}).length,
-        updated: 0,
-        deleted: 0,
-      };
-    }
-
-    let added = 0;
-    let updated = 0;
-    let deleted = 0;
-
-    for (const key of Object.keys(nextIndex || {})) {
-      if (!(key in prevIndex)) {
-        added += 1;
-        continue;
-      }
-      if (prevIndex[key] !== nextIndex[key]) {
-        updated += 1;
-      }
-    }
-
-    for (const key of Object.keys(prevIndex)) {
-      if (!(key in (nextIndex || {}))) {
-        deleted += 1;
-      }
-    }
-
-    return { added, updated, deleted };
-  }
-
-  function itemsForDate(dateKey) {
-    const day = state.dayMap[dateKey];
-    if (!day) return [];
-    const events = filteredEventsForDay(day).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
-    const sticky = (day.stickyNotes || []).map((s, i) => ({ type: 'sticky', id: s.id || `sticky-${i}`, date: dateKey, sticky: s, index: i }));
-    return [...events, ...sticky];
-  }
-
-  function itemsForSelectedDate() {
-    return itemsForDate(state.selectedDate);
-  }
-
-  function getFocusedItem() {
-    const items = itemsForSelectedDate();
-    if (!items.length) return null;
-    const idx = Math.max(0, Math.min(items.length - 1, state.focus.itemIndex));
-    return items[idx];
-  }
-
-  function render() {
-    syncAccountLegend();
-    renderHeader();
-    renderAccountLegend();
-    renderMain();
-    renderFooterHint();
-    applyZoom();
-  }
-
-  function initZoomEngine() {
-    if (zoomEngine) return;
-    zoomEngine = createTvZoomEngine();
-    const restored = zoomEngine.restore();
-    state.zoomLevel = restored.currentZoomLevel;
-    state.defaultZoomLevel = restored.defaultZoomLevel;
-  }
-
-  function syncZoomState() {
-    if (!zoomEngine) return;
-    state.zoomLevel = zoomEngine.getZoomLevel();
-    state.defaultZoomLevel = zoomEngine.getDefaultZoomLevel();
-  }
-
-  function announceZoomChange(kind) {
-    syncZoomState();
-    renderFooterHint();
-    if (tvDiag) {
-      if (kind === 'default') {
-        tvDiag.log('default_zoom_changed', `defaultZoom=${state.defaultZoomLevel}%`);
-      } else {
-        tvDiag.log('zoom_changed', `zoom=${state.zoomLevel}%`);
-      }
+    if (prevIndex[key] !== nextIndex[key]) {
+      updated += 1;
     }
   }
 
-  function zoomIn() {
-    if (!zoomEngine || !zoomEngine.zoomIn()) return false;
-    announceZoomChange('current');
-    return true;
+  for (const key of Object.keys(prevIndex)) {
+    if (!(key in (nextIndex || {}))) {
+      deleted += 1;
+    }
   }
 
-  function zoomOut() {
-    if (!zoomEngine || !zoomEngine.zoomOut()) return false;
-    announceZoomChange('current');
-    return true;
-  }
+  return { added, updated, deleted };
+}
 
-  function resetZoom() {
-    if (!zoomEngine || !zoomEngine.resetZoom()) return false;
-    announceZoomChange('current');
-    renderFooterHint('Zoom reset to 100%');
-    return true;
-  }
+function itemsForDate(dateKey) {
+  const day = state.dayMap[dateKey];
+  if (!day) return [];
+  const events = filteredEventsForDay(day).map(ev => ({ type: 'event', id: ev.id, date: dateKey, event: ev }));
+  const sticky = (day.stickyNotes || []).map((s, i) => ({ type: 'sticky', id: s.id || `sticky-${i}`, date: dateKey, sticky: s, index: i }));
+  return [...events, ...sticky];
+}
 
-  function saveCurrentZoomAsDefault() {
-    if (!zoomEngine) return false;
-    const changed = zoomEngine.saveDefaultZoomLevel();
-    syncZoomState();
-    renderFooterHint(changed ? `Home default zoom saved at ${state.defaultZoomLevel}%` : `Home default already ${state.defaultZoomLevel}%`);
-    if (tvDiag && changed) {
+function itemsForSelectedDate() {
+  return itemsForDate(state.selectedDate);
+}
+
+function getFocusedItem() {
+  const items = itemsForSelectedDate();
+  if (!items.length) return null;
+  const idx = Math.max(0, Math.min(items.length - 1, state.focus.itemIndex));
+  return items[idx];
+}
+
+function render() {
+  syncAccountLegend();
+  renderHeader();
+  renderAccountLegend();
+  renderMain();
+  renderFooterHint();
+  applyZoom();
+}
+
+function initZoomEngine() {
+  if (zoomEngine) return;
+  zoomEngine = createTvZoomEngine();
+  const restored = zoomEngine.restore();
+  state.zoomLevel = restored.currentZoomLevel;
+  state.defaultZoomLevel = restored.defaultZoomLevel;
+}
+
+function syncZoomState() {
+  if (!zoomEngine) return;
+  state.zoomLevel = zoomEngine.getZoomLevel();
+  state.defaultZoomLevel = zoomEngine.getDefaultZoomLevel();
+}
+
+function announceZoomChange(kind) {
+  syncZoomState();
+  renderFooterHint();
+  if (tvDiag) {
+    if (kind === 'default') {
       tvDiag.log('default_zoom_changed', `defaultZoom=${state.defaultZoomLevel}%`);
-    }
-    return changed;
-  }
-
-  function applyHomeZoomPreference() {
-    if (!zoomEngine || !zoomEngine.applyHomeZoomPreference()) return false;
-    announceZoomChange('current');
-    return true;
-  }
-
-  function clearSelectLongPressState() {
-    if (state.longPressTimer) {
-      clearTimeout(state.longPressTimer);
-      state.longPressTimer = null;
-    }
-    state.longPressTriggered = false;
-  }
-
-  function clearZoomHoldState() {
-    if (state.zoomHold.timer) {
-      clearTimeout(state.zoomHold.timer);
-      state.zoomHold.timer = null;
-    }
-    state.zoomHold.key = null;
-    state.zoomHold.triggered = false;
-  }
-
-  function clearRemoteHoldState() {
-    clearSelectLongPressState();
-    clearZoomHoldState();
-  }
-
-  function handleZoomHoldKeyDown(key) {
-    if (!isVolumeForwardKey(key) && !isVolumeReverseKey(key)) return false;
-
-    if (state.zoomHold.key === key) return true;
-
-    clearZoomHoldState();
-
-    state.zoomHold.key = key;
-    state.zoomHold.triggered = false;
-    state.zoomHold.timer = setTimeout(() => {
-      state.zoomHold.timer = null;
-      state.zoomHold.triggered = true;
-      if (isVolumeForwardKey(key)) {
-        showRemoteAction('Zoom In');
-        zoomIn();
-      } else {
-        showRemoteAction('Zoom Out');
-        zoomOut();
-      }
-    }, LONG_PRESS_MS);
-    return true;
-  }
-
-  function handleZoomHoldKeyUp(key) {
-    if (state.zoomHold.key !== key) return false;
-
-    const wasTriggered = state.zoomHold.triggered;
-    clearZoomHoldState();
-
-    if (wasTriggered) return true;
-    if (isVolumeForwardKey(key)) focusNext();
-    else focusPrev();
-    return true;
-  }
-
-  function syncAccountLegend() {
-    const isPlaceholderAccount = (value) => {
-      const email = String(value || '').trim().toLowerCase();
-      if (!email) return false;
-      if (email === 'test' || email === 'test@example.com') return true;
-      return email.endsWith('@example.com');
-    };
-
-    const map = new Map();
-    const colorMap = {};
-
-    for (const account of (state.serverAccounts || [])) {
-      const identity = serverAccountIdentity(account);
-      if (isPlaceholderAccount(identity.account)) continue;
-      const color = normalizeHexColor(account.color) || providerFallbackColor(identity.source);
-      map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
-      colorMap[identity.key] = color;
-    }
-
-    for (const day of state.days) {
-      for (const ev of (day.events || [])) {
-        const identity = eventAccountIdentity(ev);
-        if (isPlaceholderAccount(identity.account)) continue;
-        const eventColor = normalizeHexColor(ev.color);
-        if (!map.has(identity.key)) {
-          map.set(identity.key, {
-            key: identity.key,
-            source: identity.source,
-            account: identity.account,
-            color: eventColor || providerFallbackColor(identity.source),
-          });
-        }
-        if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
-      }
-    }
-    state.accountLegend = Array.from(map.values());
-    state.accountColorMap = colorMap;
-    if (state.selectedAccountKeys.length) {
-      const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}:${item.account}`));
-      state.selectedAccountKeys = state.selectedAccountKeys
-        .map((key) => {
-          const parsed = parseCompositeAccountKey(key);
-          if (!parsed) return String(key || '').trim().toLowerCase();
-          const src = normalizeAccountSource(parsed.source);
-          const acct = normalizeAccountIdentifier(parsed.account) || src;
-          return `${src}:${acct}`;
-        })
-        .filter(key => allowed.has(key));
-    }
-  }
-
-  function resolveEventColor(ev) {
-    const identity = eventAccountIdentity(ev);
-    const exact = state.accountColorMap[identity.key];
-    if (exact) return exact;
-    const direct = normalizeHexColor(ev.color);
-    if (direct) return direct;
-    return providerFallbackColor(identity.source);
-  }
-
-  function renderAccountLegend() {
-    if (!dom.accountLegend) return;
-    if (!state.accountLegend.length) {
-      dom.accountLegend.innerHTML = '<div class="tv-account-chip">No account legend available</div>';
-      return;
-    }
-    const filtered = state.selectedAccountKeys.length > 0;
-    const chips = state.accountLegend.map(item => {
-      const bg = softColor(item.color, 0.2);
-      const border = softColor(item.color, 0.55);
-      const key = item.key || `${item.source}|${item.account}`;
-      const active = !filtered || state.selectedAccountKeys.includes(key);
-      return `<div class="tv-account-chip ${active ? 'active' : 'inactive'}" data-tv-click="account-chip" data-account-key="${escapeHtml(key)}" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
-    }).join('');
-    const userEmailChip = state.userEmail
-      ? `<div class="tv-account-chip user-email-chip"><span>${escapeHtml(state.userEmail)}</span></div>`
-      : '';
-    dom.accountLegend.innerHTML = `${chips}<div class="tv-account-spacer"></div>${userEmailChip}`;
-  }
-
-  function renderHeader() {
-    if (dom.dateHeader) {
-      const d = parseLocalDate(state.selectedDate || toISO(new Date()));
-      dom.dateHeader.textContent = `${currentViewLabel(state.currentView).toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
-    }
-    if (dom.headerUserEmail) {
-      dom.headerUserEmail.textContent = '';
-      dom.headerUserEmail.style.display = 'none';
-    }
-  }
-
-  function currentViewLabel(viewName) {
-    if (viewName === '3-day') return '3-Day';
-    if (viewName === 'week') return 'Week';
-    if (viewName === 'month') return 'Month';
-    return 'Day';
-  }
-
-  function renderMain() {
-    if (!dom.tvMain) return;
-    dom.tvMain.classList.toggle('tv-editor-active', Boolean(state.editor));
-    dom.tvMain.classList.remove('tv-view-day', 'tv-view-three-day', 'tv-view-week', 'tv-view-month');
-    if (state.currentView === 'month') {
-      dom.tvMain.classList.add('tv-view-month');
-      dom.tvMain.innerHTML = renderMonthView();
-    } else if (state.currentView === 'week') {
-      dom.tvMain.classList.add('tv-view-week');
-      dom.tvMain.innerHTML = renderWeekView();
-    } else if (state.currentView === '3-day') {
-      dom.tvMain.classList.add('tv-view-three-day');
-      dom.tvMain.innerHTML = renderThreeDayView();
     } else {
-      dom.tvMain.classList.add('tv-view-day');
-      dom.tvMain.innerHTML = renderSingleDayView();
-    }
-    if (state.editor) {
-      const holder = dom.tvMain.querySelector('.tv-right-editor-anchor') || dom.tvMain.querySelector('.tv-editor-anchor');
-      if (holder) holder.innerHTML = renderEditor();
+      tvDiag.log('zoom_changed', `zoom=${state.zoomLevel}%`);
     }
   }
+}
 
-  function renderThreeDayView() {
-    const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
-    const dayDates = buildThreeDayDates(selected);
-    return `
+function zoomIn() {
+  if (!zoomEngine || !zoomEngine.zoomIn()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function zoomOut() {
+  if (!zoomEngine || !zoomEngine.zoomOut()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function resetZoom() {
+  if (!zoomEngine || !zoomEngine.resetZoom()) return false;
+  announceZoomChange('current');
+  renderFooterHint('Zoom reset to 100%');
+  return true;
+}
+
+function saveCurrentZoomAsDefault() {
+  if (!zoomEngine) return false;
+  const changed = zoomEngine.saveDefaultZoomLevel();
+  syncZoomState();
+  renderFooterHint(changed ? `Home default zoom saved at ${state.defaultZoomLevel}%` : `Home default already ${state.defaultZoomLevel}%`);
+  if (tvDiag && changed) {
+    tvDiag.log('default_zoom_changed', `defaultZoom=${state.defaultZoomLevel}%`);
+  }
+  return changed;
+}
+
+function applyHomeZoomPreference() {
+  if (!zoomEngine || !zoomEngine.applyHomeZoomPreference()) return false;
+  announceZoomChange('current');
+  return true;
+}
+
+function clearSelectLongPressState() {
+  if (state.longPressTimer) {
+    clearTimeout(state.longPressTimer);
+    state.longPressTimer = null;
+  }
+  state.longPressTriggered = false;
+}
+
+function clearZoomHoldState() {
+  if (state.zoomHold.timer) {
+    clearTimeout(state.zoomHold.timer);
+    state.zoomHold.timer = null;
+  }
+  state.zoomHold.key = null;
+  state.zoomHold.triggered = false;
+}
+
+function clearRemoteHoldState() {
+  clearSelectLongPressState();
+  clearZoomHoldState();
+}
+
+function handleZoomHoldKeyDown(key) {
+  if (!isVolumeForwardKey(key) && !isVolumeReverseKey(key)) return false;
+
+  if (state.zoomHold.key === key) return true;
+
+  clearZoomHoldState();
+
+  state.zoomHold.key = key;
+  state.zoomHold.triggered = false;
+  state.zoomHold.timer = setTimeout(() => {
+    state.zoomHold.timer = null;
+    state.zoomHold.triggered = true;
+    if (isVolumeForwardKey(key)) {
+      showRemoteAction('Zoom In');
+      zoomIn();
+    } else {
+      showRemoteAction('Zoom Out');
+      zoomOut();
+    }
+  }, LONG_PRESS_MS);
+  return true;
+}
+
+function handleZoomHoldKeyUp(key) {
+  if (state.zoomHold.key !== key) return false;
+
+  const wasTriggered = state.zoomHold.triggered;
+  clearZoomHoldState();
+
+  if (wasTriggered) return true;
+  if (isVolumeForwardKey(key)) focusNext();
+  else focusPrev();
+  return true;
+}
+
+function syncAccountLegend() {
+  const isPlaceholderAccount = (value) => {
+    const email = String(value || '').trim().toLowerCase();
+    if (!email) return false;
+    if (email === 'test' || email === 'test@example.com') return true;
+    return email.endsWith('@example.com');
+  };
+
+  const map = new Map();
+  const colorMap = {};
+
+  for (const account of (state.serverAccounts || [])) {
+    const identity = serverAccountIdentity(account);
+    if (isPlaceholderAccount(identity.account)) continue;
+    const color = normalizeHexColor(account.color) || providerFallbackColor(identity.source);
+    map.set(identity.key, { key: identity.key, source: identity.source, account: identity.account, color });
+    colorMap[identity.key] = color;
+  }
+
+  for (const day of state.days) {
+    for (const ev of (day.events || [])) {
+      const identity = eventAccountIdentity(ev);
+      if (isPlaceholderAccount(identity.account)) continue;
+      const eventColor = normalizeHexColor(ev.color);
+      if (!map.has(identity.key)) {
+        map.set(identity.key, {
+          key: identity.key,
+          source: identity.source,
+          account: identity.account,
+          color: eventColor || providerFallbackColor(identity.source),
+        });
+      }
+      if (eventColor && !colorMap[identity.key]) colorMap[identity.key] = eventColor;
+    }
+  }
+  state.accountLegend = Array.from(map.values());
+  state.accountColorMap = colorMap;
+  if (state.selectedAccountKeys.length) {
+    const allowed = new Set(state.accountLegend.map(item => item.key || `${item.source}:${item.account}`));
+    state.selectedAccountKeys = state.selectedAccountKeys
+      .map((key) => {
+        const parsed = parseCompositeAccountKey(key);
+        if (!parsed) return String(key || '').trim().toLowerCase();
+        const src = normalizeAccountSource(parsed.source);
+        const acct = normalizeAccountIdentifier(parsed.account) || src;
+        return `${src}:${acct}`;
+      })
+      .filter(key => allowed.has(key));
+  }
+}
+
+function resolveEventColor(ev) {
+  const identity = eventAccountIdentity(ev);
+  const exact = state.accountColorMap[identity.key];
+  if (exact) return exact;
+  const direct = normalizeHexColor(ev.color);
+  if (direct) return direct;
+  return providerFallbackColor(identity.source);
+}
+
+function renderAccountLegend() {
+  if (!dom.accountLegend) return;
+  if (!state.accountLegend.length) {
+    dom.accountLegend.innerHTML = '<div class="tv-account-chip">No account legend available</div>';
+    return;
+  }
+  const filtered = state.selectedAccountKeys.length > 0;
+  const chips = state.accountLegend.map(item => {
+    const bg = softColor(item.color, 0.2);
+    const border = softColor(item.color, 0.55);
+    const key = item.key || `${item.source}|${item.account}`;
+    const active = !filtered || state.selectedAccountKeys.includes(key);
+    return `<div class="tv-account-chip ${active ? 'active' : 'inactive'}" data-tv-click="account-chip" data-account-key="${escapeHtml(key)}" style="background:${bg}; border-color:${border};"><span class="tv-account-dot" style="background:${item.color};"></span><span>${escapeHtml(item.source)}: ${escapeHtml(item.account)}</span></div>`;
+  }).join('');
+  const userEmailChip = state.userEmail
+    ? `<div class="tv-account-chip user-email-chip"><span>${escapeHtml(state.userEmail)}</span></div>`
+    : '';
+  dom.accountLegend.innerHTML = `${chips}<div class="tv-account-spacer"></div>${userEmailChip}`;
+}
+
+function renderHeader() {
+  if (dom.dateHeader) {
+    const d = parseLocalDate(state.selectedDate || toISO(new Date()));
+    dom.dateHeader.textContent = `${currentViewLabel(state.currentView).toUpperCase()} • ${d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}`;
+  }
+  if (dom.headerUserEmail) {
+    dom.headerUserEmail.textContent = '';
+    dom.headerUserEmail.style.display = 'none';
+  }
+}
+
+function currentViewLabel(viewName) {
+  if (viewName === '3-day') return '3-Day';
+  if (viewName === 'week') return 'Week';
+  if (viewName === 'month') return 'Month';
+  return 'Day';
+}
+
+function renderMain() {
+  if (!dom.tvMain) return;
+  dom.tvMain.classList.toggle('tv-editor-active', Boolean(state.editor));
+  dom.tvMain.classList.remove('tv-view-day', 'tv-view-three-day', 'tv-view-week', 'tv-view-month');
+  if (state.currentView === 'month') {
+    dom.tvMain.classList.add('tv-view-month');
+    dom.tvMain.innerHTML = renderMonthView();
+  } else if (state.currentView === 'week') {
+    dom.tvMain.classList.add('tv-view-week');
+    dom.tvMain.innerHTML = renderWeekView();
+  } else if (state.currentView === '3-day') {
+    dom.tvMain.classList.add('tv-view-three-day');
+    dom.tvMain.innerHTML = renderThreeDayView();
+  } else {
+    dom.tvMain.classList.add('tv-view-day');
+    dom.tvMain.innerHTML = renderSingleDayView();
+  }
+  if (state.editor) {
+    const holder = dom.tvMain.querySelector('.tv-right-editor-anchor') || dom.tvMain.querySelector('.tv-editor-anchor');
+    if (holder) holder.innerHTML = renderEditor();
+  }
+}
+
+function renderThreeDayView() {
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const dayDates = buildThreeDayDates(selected);
+  return `
     <div class="tv-shell">
       ${renderLeftSidebar()}
       <div>
@@ -3452,32 +3453,32 @@ function eventAccountIdentity(ev) {
       </div>
       ${renderRightRail(state.selectedDate, buildWeekDates(selected))}
     </div>`;
-  }
+}
 
-  function renderSingleDayView() {
-    const selectedDateKey = state.selectedDate || toISO(new Date());
-    const selected = parseLocalDate(selectedDateKey);
-    const day = dayData(selectedDateKey);
-    const schedule = buildDaySchedule(day, selectedDateKey);
-    const weekDates = buildWeekDates(selected);
-    const allDayItems = schedule.allDayEvents;
-    const timedItems = schedule.timedEvents;
-    const stickyNotes = Array.isArray(day.stickyNotes) ? day.stickyNotes : [];
-    const freeBlocks = schedule.freeBlocks;
-    const daySections = state.daySectionState || { allDay: true, freeTime: true, sticky: true };
-    const allDayCollapsed = daySections.allDay !== false;
-    const freeTimeCollapsed = daySections.freeTime !== false;
-    const stickyCollapsed = daySections.sticky !== false;
-    const timedColumnCount = getTimedEventColumnCount(timedItems.length);
-    const timedRowCount = Math.max(1, Math.ceil(timedItems.length / timedColumnCount));
-    const busyMinutes = timedItems.reduce((total, ev) => total + minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)), 0);
-    const summaryBits = [
-      `${allDayItems.length} all-day`,
-      `${timedItems.length} timed`,
-      `${stickyNotes.length} sticky`,
-      `${busyMinutes} busy min`,
-    ];
-    return `
+function renderSingleDayView() {
+  const selectedDateKey = state.selectedDate || toISO(new Date());
+  const selected = parseLocalDate(selectedDateKey);
+  const day = dayData(selectedDateKey);
+  const schedule = buildDaySchedule(day, selectedDateKey);
+  const weekDates = buildWeekDates(selected);
+  const allDayItems = schedule.allDayEvents;
+  const timedItems = schedule.timedEvents;
+  const stickyNotes = Array.isArray(day.stickyNotes) ? day.stickyNotes : [];
+  const freeBlocks = schedule.freeBlocks;
+  const daySections = state.daySectionState || { allDay: true, freeTime: true, sticky: true };
+  const allDayCollapsed = daySections.allDay !== false;
+  const freeTimeCollapsed = daySections.freeTime !== false;
+  const stickyCollapsed = daySections.sticky !== false;
+  const timedColumnCount = getTimedEventColumnCount(timedItems.length);
+  const timedRowCount = Math.max(1, Math.ceil(timedItems.length / timedColumnCount));
+  const busyMinutes = timedItems.reduce((total, ev) => total + minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)), 0);
+  const summaryBits = [
+    `${allDayItems.length} all-day`,
+    `${timedItems.length} timed`,
+    `${stickyNotes.length} sticky`,
+    `${busyMinutes} busy min`,
+  ];
+  return `
     <div class="tv-shell">
       ${renderLeftSidebar()}
       <div class="tv-single-day-pane">
@@ -3541,12 +3542,12 @@ function eventAccountIdentity(ev) {
       </div>
       ${renderRightRail(selectedDateKey, weekDates)}
     </div>`;
-  }
+}
 
-  function renderWeekView() {
-    const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
-    const weekDates = buildWeekDates(selected);
-    return `
+function renderWeekView() {
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const weekDates = buildWeekDates(selected);
+  return `
     <div class="tv-shell">
       ${renderLeftSidebar()}
       <div>
@@ -3556,13 +3557,13 @@ function eventAccountIdentity(ev) {
       </div>
       ${renderRightRail(state.selectedDate, weekDates)}
     </div>`;
-  }
+}
 
-  function renderMonthView() {
-    state.monthDates = buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
-    const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
-    const weekDates = buildWeekDates(selected);
-    return `
+function renderMonthView() {
+  state.monthDates = buildMonthDates(parseLocalDate(state.selectedDate || toISO(new Date())));
+  const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const weekDates = buildWeekDates(selected);
+  return `
   <div class="tv-shell month ${state.monthDetailOpen ? 'has-popout' : ''}">
     ${renderLeftSidebar()}
     <div>
@@ -3574,680 +3575,680 @@ function eventAccountIdentity(ev) {
     </div>
     ${state.monthDetailOpen ? renderRightRail(state.selectedDate, weekDates, 'month-popout') : ''}
   </div>`;
-  }
+}
 
-  function renderDayCard(day, selected, contextDay = false) {
-    const date = parseLocalDate(day.date);
-    const items = itemsForDate(day.date);
-    const dayEvents = day.events || [];
-    const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && eventHasStickyPayload(ev)));
-    const now = new Date();
-    const cards = items.length
-      ? items.map((item, idx) => {
-        const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
-        if (item.type === 'event') {
-          const ev = item.event;
-          const eventColor = resolveEventColor(ev);
-          const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
-          const border = softColor(eventColor, focused ? 0.7 : 0.5);
-          const eventStickyIndicator = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-          return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
-        }
-        return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
-      }).join('')
-      : `<div class="tv-empty">No events or sticky notes</div>`;
-
-    const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
-    return `<div class="tv-day-card ${selected ? 'selected' : ''} ${contextDay ? 'context-day' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
-  }
-
-  function buildDaySchedule(day, dateKey) {
-    const selectedDate = parseLocalDate(dateKey);
-    const dayStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 7, 0, 0, 0);
-    const dayEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 19, 0, 0, 0);
-    const events = filteredEventsForDay(day).slice().sort((left, right) => parseDateTime(left.start) - parseDateTime(right.start));
-    const allDayEvents = events.filter(isAllDayLikeEvent);
-    const timedEvents = events.filter((ev) => !isAllDayLikeEvent(ev));
-    const freeBlocks = [];
-    let cursor = new Date(dayStart);
-
-    for (const ev of timedEvents) {
-      const evStart = clampDateTimeToDay(parseDateTime(ev.start), dayStart, dayEnd);
-      const evEnd = clampDateTimeToDay(parseDateTime(ev.end), dayStart, dayEnd);
-      if (evStart - cursor >= 15 * 60000) {
-        freeBlocks.push({ start: new Date(cursor), end: new Date(evStart) });
-      }
-      if (evEnd > cursor) {
-        cursor = new Date(evEnd);
-      }
-    }
-
-    if (dayEnd - cursor >= 15 * 60000) {
-      freeBlocks.push({ start: new Date(cursor), end: new Date(dayEnd) });
-    }
-
-    return { allDayEvents, timedEvents, freeBlocks };
-  }
-
-  function clampDateTimeToDay(dateValue, dayStart, dayEnd) {
-    const time = dateValue instanceof Date && !Number.isNaN(dateValue.getTime()) ? dateValue : new Date(dayStart);
-    if (time < dayStart) return new Date(dayStart);
-    if (time > dayEnd) return new Date(dayEnd);
-    return time;
-  }
-
-  function isAllDayLikeEvent(ev) {
-    if (!ev || typeof ev !== 'object') return false;
-    const explicit = ev.allDay ?? ev.all_day ?? ev.isAllDay ?? ev.is_all_day;
-    if (explicit === true) return true;
-    if (typeof explicit === 'string') {
-      const normalized = explicit.trim().toLowerCase();
-      if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
-    }
-
-    const start = parseDateTime(ev.start);
-    const end = parseDateTime(ev.end || ev.start);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
-    const durationMinutes = minutesBetween(start, end);
-    const startMinutes = start.getHours() * 60 + start.getMinutes();
-    const endMinutes = end.getHours() * 60 + end.getMinutes();
-    return durationMinutes >= 20 * 60 && startMinutes === 0 && (endMinutes === 0 || endMinutes >= 23 * 60);
-  }
-
-  function minutesBetween(start, end) {
-    return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
-  }
-
-  function formatDuration(minutes) {
-    const total = Math.max(0, Math.round(Number(minutes) || 0));
-    const hours = Math.floor(total / 60);
-    const mins = total % 60;
-    if (hours && mins) return `${hours}h ${mins}m`;
-    if (hours) return `${hours}h`;
-    return `${mins}m`;
-  }
-
-  function renderEventSummaryCard(ev, bucket, index = 0) {
-    const eventColor = resolveEventColor(ev);
-    const now = new Date();
-    const bg = softColor(eventColor, bucket === 'all-day' ? 0.26 : eventIsNow(ev, now) ? 0.34 : 0.2);
-    const border = softColor(eventColor, 0.56);
-    const duration = formatDuration(minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)));
-    const sticky = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-    const timeLine = bucket === 'all-day'
-      ? 'All day'
-      : `${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}`;
-    const contextLine = bucket === 'all-day'
-      ? `Duration ${escapeHtml(duration)}`
-      : `Duration ${escapeHtml(duration)} • ${eventIsNow(ev, now) ? 'In progress' : eventIsUpcoming(ev, now) ? 'Upcoming' : 'Completed'}`;
-    return `<div class="tv-day-event-card ${bucket}" data-tv-click="item" data-item-type="event" data-item-index="${index}" data-event-id="${ev.id}" style="background:${bg}; border-color:${border}">${sticky}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${timeLine}</div><div class="tv-item-sub">${escapeHtml(ev.description || '') || contextLine}</div></div>`;
-  }
-
-  function renderFreeBlockCard(block) {
-    const startLabel = block.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const endLabel = block.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const duration = formatDuration(minutesBetween(block.start, block.end));
-    return `<div class="tv-day-event-card free"><div class="tv-item-title">Free Block</div><div class="tv-item-sub">${escapeHtml(startLabel)} - ${escapeHtml(endLabel)}</div><div class="tv-item-sub">Open for ${escapeHtml(duration)}</div></div>`;
-  }
-
-  function getTimedEventColumnCount(eventCount) {
-    const count = Math.max(0, Math.trunc(Number(eventCount) || 0));
-    const width = typeof window !== 'undefined' ? window.innerWidth : 0;
-    const widthLimit = width >= 1700 ? 4 : width >= 1400 ? 3 : width >= 1100 ? 2 : 1;
-
-    if (count >= 18) return Math.min(4, widthLimit);
-    if (count >= 10) return Math.min(3, widthLimit);
-    if (count >= 4) return Math.min(2, widthLimit);
-    return 1;
-  }
-
-  function renderStickySummaryCard(sticky, index = 0) {
-    const color = normalizeHexColor(sticky.color) || '#F7E68A';
-    return `<div class="tv-day-event-card sticky" data-tv-click="item" data-item-type="sticky" data-item-index="${index}" style="background:${softColor(color, 0.28)}; border-color:${softColor(color, 0.62)}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(sticky.content || '')}</div></div>`;
-  }
-
-  function renderMonthCell(day, idx) {
-    const date = parseLocalDate(day.date);
-    const anchor = parseLocalDate(state.selectedDate || toISO(new Date()));
-    const focused = state.focus.region === 'main' && state.focus.monthIndex === idx;
-    const inMonth = date.getMonth() === anchor.getMonth();
-    const selected = day.date === state.selectedDate;
-    const dayEvents = filteredEventsForDay(day);
-    const stickyNoteCount = Array.isArray(day.stickyNotes) ? day.stickyNotes.length : 0;
-    const stickyEventCount = (day.events || []).filter(ev => ev && (ev.hasSticky || eventHasStickyPayload(ev))).length;
-    const totalStickyCount = stickyNoteCount + stickyEventCount;
-    const hasDaySticky = totalStickyCount > 0;
-    const stickyBadgeText = totalStickyCount > 1 ? String(Math.min(totalStickyCount, 9)) : 'S';
-    const stickyIndicator = hasDaySticky
-      ? `<span class="tv-sticky-indicator tv-month-sticky-indicator" aria-label="${escapeHtml(`${totalStickyCount} sticky note${totalStickyCount === 1 ? '' : 's'} present`)}">${escapeHtml(stickyBadgeText)}</span>`
-      : '';
-    const count = dayEvents.length + (day.stickyNotes || []).length;
-    const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
-    const previewHtml = dayEvents.length
-      ? `<div class="tv-month-preview-list">${dayEvents.slice(0, 4).map(ev => {
+function renderDayCard(day, selected, contextDay = false) {
+  const date = parseLocalDate(day.date);
+  const items = itemsForDate(day.date);
+  const dayEvents = day.events || [];
+  const hasDaySticky = Boolean((day.stickyNotes || []).length || dayEvents.some(ev => ev && eventHasStickyPayload(ev)));
+  const now = new Date();
+  const cards = items.length
+    ? items.map((item, idx) => {
+      const focused = day.date === state.selectedDate && idx === state.focus.itemIndex && state.focus.region === 'main';
+      if (item.type === 'event') {
+        const ev = item.event;
         const eventColor = resolveEventColor(ev);
-        const bg = softColor(eventColor, 0.2);
-        const border = softColor(eventColor, 0.52);
-        const stickyFlag = eventHasStickyPayload(ev) ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
-        return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
-      }).join('')}</div>`
-      : '<div class="tv-month-preview">No events</div>';
-    return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div>${previewHtml}</div>`;
-  }
+        const bg = softColor(eventColor, eventIsNow(ev, now) ? 0.34 : 0.2);
+        const border = softColor(eventColor, focused ? 0.7 : 0.5);
+        const eventStickyIndicator = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+        return `<div class="tv-item ${focused ? 'focused' : ''} ${eventIsNow(ev, now) ? 'now' : ''} ${eventIsUpcoming(ev, now) ? 'next' : ''}" style="background:${bg}; border-color:${border}" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(day.date)}" data-item-index="${idx}" data-event-id="${ev.id}">${eventStickyIndicator}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}</div><div class="tv-item-sub">${escapeHtml(ev.description || '')}</div></div>`;
+      }
+      return `<div class="tv-item ${focused ? 'focused' : ''}" data-tv-click="item" data-item-type="sticky" data-date="${escapeHtml(day.date)}" data-item-index="${idx}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(item.sticky.content || '')}</div></div>`;
+    }).join('')
+    : `<div class="tv-empty">No events or sticky notes</div>`;
 
-  function renderEditor() {
-    if (!state.editor) return '';
-    const fieldsHtml = state.editor.fields.map((f, idx) => `<div class="tv-field ${idx === state.editor.fieldIndex ? 'focused' : ''}" data-tv-click="field" data-field-index="${idx}"><div class="tv-field-name">${escapeHtml(f.label)}</div><div class="tv-field-value">${escapeHtml(formatFieldValue(f.key, state.editor.data[f.key]))}</div></div>`).join('');
-    return `<div class="tv-editor"><div class="tv-editor-title">Inline Editing</div>${fieldsHtml}<div class="tv-hint-chip">UP/DOWN field • LEFT/RIGHT change • SELECT save • ESC cancel</div></div>`;
-  }
+  const stickyIndicator = hasDaySticky ? '<span class="tv-sticky-indicator" aria-label="Sticky note"></span>' : '';
+  return `<div class="tv-day-card ${selected ? 'selected' : ''} ${contextDay ? 'context-day' : ''}" data-tv-click="day" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-day-head">${date.toLocaleDateString([], { weekday: 'long' })}</div><div class="tv-day-num">${date.getDate()}</div><div class="tv-item-list">${cards}</div><div class="tv-editor-anchor"></div></div>`;
+}
 
-  function renderFooterHint(extra) {
-    if (!dom.statusEl || !dom.lastUpdated) return;
-    const modeLabel = isLockedMode() ? 'LOCKED' : isCursorMode() ? 'CURSOR' : 'NAV';
-    dom.statusEl.innerHTML = `<span class="tv-status-chip">Mode ${modeLabel}</span><span class="tv-status-sep">•</span><span class="tv-status-chip">Zoom ${state.zoomLevel}%</span>`;
-    const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
-    if (hasSyncStatus) {
-      dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
-      dom.lastUpdated.classList.toggle('tv-sync-ok', state.syncStatusTone === 'ok');
-      dom.lastUpdated.classList.toggle('tv-sync-fail', state.syncStatusTone === 'fail');
-      return;
+function buildDaySchedule(day, dateKey) {
+  const selectedDate = parseLocalDate(dateKey);
+  const dayStart = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 7, 0, 0, 0);
+  const dayEnd = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 19, 0, 0, 0);
+  const events = filteredEventsForDay(day).slice().sort((left, right) => parseDateTime(left.start) - parseDateTime(right.start));
+  const allDayEvents = events.filter(isAllDayLikeEvent);
+  const timedEvents = events.filter((ev) => !isAllDayLikeEvent(ev));
+  const freeBlocks = [];
+  let cursor = new Date(dayStart);
+
+  for (const ev of timedEvents) {
+    const evStart = clampDateTimeToDay(parseDateTime(ev.start), dayStart, dayEnd);
+    const evEnd = clampDateTimeToDay(parseDateTime(ev.end), dayStart, dayEnd);
+    if (evStart - cursor >= 15 * 60000) {
+      freeBlocks.push({ start: new Date(cursor), end: new Date(evStart) });
     }
-    dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
-    dom.lastUpdated.textContent = extra || buildDynamicRemoteHelpText();
+    if (evEnd > cursor) {
+      cursor = new Date(evEnd);
+    }
   }
 
-  function enterEventEditor(item, mode) {
-    const ev = item ? item.event : null;
-    const start = ev ? ev.start : `${state.selectedDate}T09:00:00+00:00`;
-    const end = ev ? ev.end : `${state.selectedDate}T10:00:00+00:00`;
-    state.editor = {
-      type: 'event',
-      mode,
-      eventId: ev ? ev.id : null,
-      date: item ? item.date : state.selectedDate,
-      fieldIndex: 0,
-      fields: [
-        { key: 'title', label: 'Title' },
-        { key: 'start', label: 'Start Time' },
-        { key: 'end', label: 'End Time' },
-        { key: 'description', label: 'Description' },
-      ],
-      data: {
-        title: ev ? (ev.title || 'New Event') : 'New Event',
-        start,
-        end,
-        description: ev ? (ev.description || '') : '',
-      },
-    };
-    state.editorDirty = false;
+  if (dayEnd - cursor >= 15 * 60000) {
+    freeBlocks.push({ start: new Date(cursor), end: new Date(dayEnd) });
+  }
+
+  return { allDayEvents, timedEvents, freeBlocks };
+}
+
+function clampDateTimeToDay(dateValue, dayStart, dayEnd) {
+  const time = dateValue instanceof Date && !Number.isNaN(dateValue.getTime()) ? dateValue : new Date(dayStart);
+  if (time < dayStart) return new Date(dayStart);
+  if (time > dayEnd) return new Date(dayEnd);
+  return time;
+}
+
+function isAllDayLikeEvent(ev) {
+  if (!ev || typeof ev !== 'object') return false;
+  const explicit = ev.allDay ?? ev.all_day ?? ev.isAllDay ?? ev.is_all_day;
+  if (explicit === true) return true;
+  if (typeof explicit === 'string') {
+    const normalized = explicit.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+  }
+
+  const start = parseDateTime(ev.start);
+  const end = parseDateTime(ev.end || ev.start);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return false;
+  const durationMinutes = minutesBetween(start, end);
+  const startMinutes = start.getHours() * 60 + start.getMinutes();
+  const endMinutes = end.getHours() * 60 + end.getMinutes();
+  return durationMinutes >= 20 * 60 && startMinutes === 0 && (endMinutes === 0 || endMinutes >= 23 * 60);
+}
+
+function minutesBetween(start, end) {
+  return Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+}
+
+function formatDuration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return `${hours}h ${mins}m`;
+  if (hours) return `${hours}h`;
+  return `${mins}m`;
+}
+
+function renderEventSummaryCard(ev, bucket, index = 0) {
+  const eventColor = resolveEventColor(ev);
+  const now = new Date();
+  const bg = softColor(eventColor, bucket === 'all-day' ? 0.26 : eventIsNow(ev, now) ? 0.34 : 0.2);
+  const border = softColor(eventColor, 0.56);
+  const duration = formatDuration(minutesBetween(parseDateTime(ev.start), parseDateTime(ev.end)));
+  const sticky = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+  const timeLine = bucket === 'all-day'
+    ? 'All day'
+    : `${escapeHtml(formatTime(ev.start))} - ${escapeHtml(formatTime(ev.end))}`;
+  const contextLine = bucket === 'all-day'
+    ? `Duration ${escapeHtml(duration)}`
+    : `Duration ${escapeHtml(duration)} • ${eventIsNow(ev, now) ? 'In progress' : eventIsUpcoming(ev, now) ? 'Upcoming' : 'Completed'}`;
+  return `<div class="tv-day-event-card ${bucket}" data-tv-click="item" data-item-type="event" data-item-index="${index}" data-event-id="${ev.id}" style="background:${bg}; border-color:${border}">${sticky}<div class="tv-item-title">${escapeHtml(ev.title || 'Untitled')}</div><div class="tv-item-sub">${timeLine}</div><div class="tv-item-sub">${escapeHtml(ev.description || '') || contextLine}</div></div>`;
+}
+
+function renderFreeBlockCard(block) {
+  const startLabel = block.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const endLabel = block.end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const duration = formatDuration(minutesBetween(block.start, block.end));
+  return `<div class="tv-day-event-card free"><div class="tv-item-title">Free Block</div><div class="tv-item-sub">${escapeHtml(startLabel)} - ${escapeHtml(endLabel)}</div><div class="tv-item-sub">Open for ${escapeHtml(duration)}</div></div>`;
+}
+
+function getTimedEventColumnCount(eventCount) {
+  const count = Math.max(0, Math.trunc(Number(eventCount) || 0));
+  const width = typeof window !== 'undefined' ? window.innerWidth : 0;
+  const widthLimit = width >= 1700 ? 4 : width >= 1400 ? 3 : width >= 1100 ? 2 : 1;
+
+  if (count >= 18) return Math.min(4, widthLimit);
+  if (count >= 10) return Math.min(3, widthLimit);
+  if (count >= 4) return Math.min(2, widthLimit);
+  return 1;
+}
+
+function renderStickySummaryCard(sticky, index = 0) {
+  const color = normalizeHexColor(sticky.color) || '#F7E68A';
+  return `<div class="tv-day-event-card sticky" data-tv-click="item" data-item-type="sticky" data-item-index="${index}" style="background:${softColor(color, 0.28)}; border-color:${softColor(color, 0.62)}"><div class="tv-item-title">Sticky Note</div><div class="tv-item-sub">${escapeHtml(sticky.content || '')}</div></div>`;
+}
+
+function renderMonthCell(day, idx) {
+  const date = parseLocalDate(day.date);
+  const anchor = parseLocalDate(state.selectedDate || toISO(new Date()));
+  const focused = state.focus.region === 'main' && state.focus.monthIndex === idx;
+  const inMonth = date.getMonth() === anchor.getMonth();
+  const selected = day.date === state.selectedDate;
+  const dayEvents = filteredEventsForDay(day);
+  const stickyNoteCount = Array.isArray(day.stickyNotes) ? day.stickyNotes.length : 0;
+  const stickyEventCount = (day.events || []).filter(ev => ev && (ev.hasSticky || eventHasStickyPayload(ev))).length;
+  const totalStickyCount = stickyNoteCount + stickyEventCount;
+  const hasDaySticky = totalStickyCount > 0;
+  const stickyBadgeText = totalStickyCount > 1 ? String(Math.min(totalStickyCount, 9)) : 'S';
+  const stickyIndicator = hasDaySticky
+    ? `<span class="tv-sticky-indicator tv-month-sticky-indicator" aria-label="${escapeHtml(`${totalStickyCount} sticky note${totalStickyCount === 1 ? '' : 's'} present`)}">${escapeHtml(stickyBadgeText)}</span>`
+    : '';
+  const count = dayEvents.length + (day.stickyNotes || []).length;
+  const countLabel = count ? `${count} item${count === 1 ? '' : 's'}` : '&nbsp;';
+  const previewHtml = dayEvents.length
+    ? `<div class="tv-month-preview-list">${dayEvents.slice(0, 4).map(ev => {
+      const eventColor = resolveEventColor(ev);
+      const bg = softColor(eventColor, 0.2);
+      const border = softColor(eventColor, 0.52);
+      const stickyFlag = eventHasStickyPayload(ev) ? '<span class="tv-inline-sticky" aria-label="Event sticky note">S</span>' : '';
+      return `<div class="tv-month-preview" style="background:${bg}; border-color:${border}"><span class="tv-month-preview-time">${escapeHtml(formatTime(ev.start))}</span><span class="tv-month-preview-title">${escapeHtml(ev.title || 'Untitled')}</span>${stickyFlag}</div>`;
+    }).join('')}</div>`
+    : '<div class="tv-month-preview">No events</div>';
+  return `<div class="tv-month-cell ${focused ? 'focused' : ''} ${selected ? 'selected' : ''} ${inMonth ? '' : 'outside'}" data-tv-click="month-cell" data-month-index="${idx}" data-date="${escapeHtml(day.date)}">${stickyIndicator}<div class="tv-month-date">${date.getDate()}</div><div class="tv-month-count">${countLabel}</div>${previewHtml}</div>`;
+}
+
+function renderEditor() {
+  if (!state.editor) return '';
+  const fieldsHtml = state.editor.fields.map((f, idx) => `<div class="tv-field ${idx === state.editor.fieldIndex ? 'focused' : ''}" data-tv-click="field" data-field-index="${idx}"><div class="tv-field-name">${escapeHtml(f.label)}</div><div class="tv-field-value">${escapeHtml(formatFieldValue(f.key, state.editor.data[f.key]))}</div></div>`).join('');
+  return `<div class="tv-editor"><div class="tv-editor-title">Inline Editing</div>${fieldsHtml}<div class="tv-hint-chip">UP/DOWN field • LEFT/RIGHT change • SELECT save • ESC cancel</div></div>`;
+}
+
+function renderFooterHint(extra) {
+  if (!dom.statusEl || !dom.lastUpdated) return;
+  const modeLabel = isLockedMode() ? 'LOCKED' : isCursorMode() ? 'CURSOR' : 'NAV';
+  dom.statusEl.innerHTML = `<span class="tv-status-chip">Mode ${modeLabel}</span><span class="tv-status-sep">•</span><span class="tv-status-chip">Zoom ${state.zoomLevel}%</span>`;
+  const hasSyncStatus = state.syncStatusTone && Date.now() < state.syncStatusUntil;
+  if (hasSyncStatus) {
+    dom.lastUpdated.textContent = state.syncStatusMessage || (state.syncStatusTone === 'ok' ? 'Sync Succeed' : 'Sync Failed');
+    dom.lastUpdated.classList.toggle('tv-sync-ok', state.syncStatusTone === 'ok');
+    dom.lastUpdated.classList.toggle('tv-sync-fail', state.syncStatusTone === 'fail');
+    return;
+  }
+  dom.lastUpdated.classList.remove('tv-sync-ok', 'tv-sync-fail');
+  dom.lastUpdated.textContent = extra || buildDynamicRemoteHelpText();
+}
+
+function enterEventEditor(item, mode) {
+  const ev = item ? item.event : null;
+  const start = ev ? ev.start : `${state.selectedDate}T09:00:00+00:00`;
+  const end = ev ? ev.end : `${state.selectedDate}T10:00:00+00:00`;
+  state.editor = {
+    type: 'event',
+    mode,
+    eventId: ev ? ev.id : null,
+    date: item ? item.date : state.selectedDate,
+    fieldIndex: 0,
+    fields: [
+      { key: 'title', label: 'Title' },
+      { key: 'start', label: 'Start Time' },
+      { key: 'end', label: 'End Time' },
+      { key: 'description', label: 'Description' },
+    ],
+    data: {
+      title: ev ? (ev.title || 'New Event') : 'New Event',
+      start,
+      end,
+      description: ev ? (ev.description || '') : '',
+    },
+  };
+  state.editorDirty = false;
+  render();
+}
+
+function enterStickyEditor(item, mode) {
+  const sticky = item ? item.sticky : { content: 'New sticky note', color: STICKY_COLORS[0] };
+  state.editor = {
+    type: 'sticky',
+    mode,
+    stickyId: item ? item.id : null,
+    stickyIndex: item ? item.index : null,
+    date: item ? item.date : state.selectedDate,
+    fieldIndex: 0,
+    fields: [
+      { key: 'content', label: 'Title' },
+      { key: 'color', label: 'Color' },
+      { key: 'description', label: 'Description' },
+    ],
+    data: {
+      content: sticky.content || 'New sticky note',
+      color: sticky.color || STICKY_COLORS[0],
+      description: sticky.description || '',
+    },
+  };
+  state.editorDirty = false;
+  render();
+}
+
+function handleEditorKey(key) {
+  if (!state.editor) return false;
+  if (key === 'ArrowUp') {
+    state.editor.fieldIndex = (state.editor.fieldIndex - 1 + state.editor.fields.length) % state.editor.fields.length;
     render();
+    return true;
   }
-
-  function enterStickyEditor(item, mode) {
-    const sticky = item ? item.sticky : { content: 'New sticky note', color: STICKY_COLORS[0] };
-    state.editor = {
-      type: 'sticky',
-      mode,
-      stickyId: item ? item.id : null,
-      stickyIndex: item ? item.index : null,
-      date: item ? item.date : state.selectedDate,
-      fieldIndex: 0,
-      fields: [
-        { key: 'content', label: 'Title' },
-        { key: 'color', label: 'Color' },
-        { key: 'description', label: 'Description' },
-      ],
-      data: {
-        content: sticky.content || 'New sticky note',
-        color: sticky.color || STICKY_COLORS[0],
-        description: sticky.description || '',
-      },
-    };
-    state.editorDirty = false;
+  if (key === 'ArrowDown') {
+    state.editor.fieldIndex = (state.editor.fieldIndex + 1) % state.editor.fields.length;
     render();
+    return true;
   }
-
-  function handleEditorKey(key) {
-    if (!state.editor) return false;
-    if (key === 'ArrowUp') {
-      state.editor.fieldIndex = (state.editor.fieldIndex - 1 + state.editor.fields.length) % state.editor.fields.length;
-      render();
-      return true;
-    }
-    if (key === 'ArrowDown') {
-      state.editor.fieldIndex = (state.editor.fieldIndex + 1) % state.editor.fields.length;
-      render();
-      return true;
-    }
-    if (key === 'ArrowLeft') {
-      adjustEditorValue(-1);
-      render();
-      return true;
-    }
-    if (key === 'ArrowRight') {
-      adjustEditorValue(1);
-      render();
-      return true;
-    }
-    if (key === 'Escape' || key === 'Backspace') {
-      state.editor = null;
-      state.editorDirty = false;
-      render();
-      return true;
-    }
-    return false;
+  if (key === 'ArrowLeft') {
+    adjustEditorValue(-1);
+    render();
+    return true;
   }
-
-  function handleMainClick(e) {
-    const t = e.target.closest('[data-tv-click]');
-    if (!t) {
-      if (state.currentView === 'month' && state.monthDetailOpen) {
-        state.monthDetailOpen = false;
-        render();
-      }
-      return;
-    }
-
-    const role = t.getAttribute('data-tv-click');
-    if (state.editor && role !== 'field') {
-      const navRoles = ['control', 'sidebar', 'day', 'month-cell'];
-      closeEditor(navRoles.includes(role));
-      if (state.editor) return;
-    }
-
-    if (role === 'sidebar') {
-      const idx = Number(t.getAttribute('data-sidebar-index') || 0);
-      state.focus.region = 'sidebar';
-      state.focus.sidebarIndex = idx;
-      state.monthDetailOpen = false;
-      onSelect();
-      return;
-    }
-
-    if (role === 'account-chip') {
-      const key = t.getAttribute('data-account-key') || '';
-      if (state.accountChipPressFired) {
-        state.accountChipPressFired = false;
-        return;
-      }
-      clickAccountChip(key, Boolean(e.ctrlKey || e.metaKey));
-      return;
-    }
-
-    if (role === 'month-cell') {
-      const idx = Number(t.getAttribute('data-month-index') || 0);
-      const date = t.getAttribute('data-date');
-      state.focus.region = 'main';
-      state.focus.monthIndex = idx;
-      if (date) {
-        closeUtilityPanel();
-        if (state.monthDetailOpen && state.selectedDate === date) {
-          state.monthDetailOpen = false;
-          render();
-          return;
-        }
-        state.monthDetailOpen = true;
-        patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => {
-          render();
-          refreshEvents(true);
-        });
-      }
-      return;
-    }
-
-    if (role === 'day') {
-      const date = t.getAttribute('data-date');
-      if (date) {
-        closeUtilityPanel();
-        state.monthDetailOpen = false;
-        patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
-      }
-      return;
-    }
-
-    if (role === 'day-toggle') {
-      const section = t.getAttribute('data-section');
-      if (section && state.daySectionState && Object.prototype.hasOwnProperty.call(state.daySectionState, section)) {
-        state.daySectionState = {
-          ...state.daySectionState,
-          [section]: !state.daySectionState[section],
-        };
-        render();
-      }
-      return;
-    }
-
-    if (role === 'item') {
-      const date = t.getAttribute('data-date');
-      const idx = Number(t.getAttribute('data-item-index') || 0);
-      if (date) state.selectedDate = date;
-      state.focus.region = 'main';
-      state.focus.itemIndex = idx;
-      render();
-      onSelect();
-      return;
-    }
-
-    if (role === 'field' && state.editor) {
-      const idx = Number(t.getAttribute('data-field-index') || 0);
-      state.editor.fieldIndex = idx;
-      render();
-      return;
-    }
-
-    if (role === 'control') {
-      const control = t.getAttribute('data-control');
-      if (control === 'close-panel') {
-        closeUtilityPanel();
-        render();
-        return;
-      }
-      if (control === 'prev') {
-        shiftByView(-1);
-        return;
-      }
-      if (control === 'next') {
-        shiftByView(1);
-        return;
-      }
-      if (control === 'today') {
-        goToday();
-        return;
-      }
-      if (control === 'back') {
-        goBackAction();
-        return;
-      }
-      if (control === 'view-day') {
-        state.monthDetailOpen = false;
-        setView('day', { applyHomeZoom: true });
-        return;
-      }
-      if (control === 'view-three-day') {
-        closeUtilityPanel();
-        state.monthDetailOpen = false;
-        setView('3-day');
-        return;
-      }
-      if (control === 'view-week') {
-        closeUtilityPanel();
-        state.monthDetailOpen = false;
-        setView('week');
-        return;
-      }
-      closeUtilityPanel();
-      if (control === 'view-month') {
-        setView('month');
-        return;
-      }
-      if (control === 'save-zoom-default') {
-        saveCurrentZoomAsDefault();
-        return;
-      }
-      if (control === 'toggle-cursor-mode') {
-        toggleCursorMode();
-        return;
-      }
-      if (control === 'toggle-lock-mode') {
-        toggleLockMode();
-        return;
-      }
-      if (control === 'zoom-in') {
-        zoomIn();
-        return;
-      }
-      if (control === 'zoom-out') {
-        zoomOut();
-        return;
-      }
-      if (control === 'restore-home-zoom') {
-        applyHomeZoomPreference();
-        renderFooterHint(`Home zoom restored to ${state.zoomLevel}%`);
-        return;
-      }
-      if (control === 'zoom-reset') {
-        resetZoom();
-        return;
-      }
-      closeUtilityPanel();
-      if (control === 'exit') {
-        exitTvAction();
-      }
-    }
+  if (key === 'ArrowRight') {
+    adjustEditorValue(1);
+    render();
+    return true;
   }
-
-  function clickCursorTarget(mode) {
-    if (!state.cursor.visible) return;
-    const el = document.elementFromPoint(state.cursor.x, state.cursor.y);
-    if (!el) return;
-    if (mode === 'right') {
-      const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 2 });
-      el.dispatchEvent(ev);
-      return;
-    }
-    const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 0 });
-    el.dispatchEvent(click);
-  }
-
-  function adjustEditorValue(direction) {
-    const field = state.editor.fields[state.editor.fieldIndex].key;
-    const data = state.editor.data;
-
-    if (field === 'start' || field === 'end') {
-      const d = parseDateTime(data[field]);
-      d.setMinutes(d.getMinutes() + (15 * direction));
-      data[field] = d.toISOString();
-      state.editorDirty = true;
-      return;
-    }
-
-    if (field === 'title') {
-      data.title = cycleValue(TITLE_PRESETS, data.title, direction);
-      state.editorDirty = true;
-      return;
-    }
-
-    if (field === 'description') {
-      data.description = cycleValue(DESC_PRESETS, data.description, direction);
-      state.editorDirty = true;
-      return;
-    }
-
-    if (field === 'content') {
-      data.content = cycleValue(STICKY_PRESETS, data.content, direction);
-      state.editorDirty = true;
-      return;
-    }
-
-    if (field === 'color') {
-      data.color = cycleValue(STICKY_COLORS, data.color, direction);
-      state.editorDirty = true;
-    }
-  }
-
-  function cycleValue(values, current, direction) {
-    const i = values.indexOf(current);
-    if (i < 0) return values[0];
-    let next = i + direction;
-    if (next < 0) next = values.length - 1;
-    if (next >= values.length) next = 0;
-    return values[next];
-  }
-
-  function createEventAndEdit() { enterEventEditor(null, 'create'); }
-  function createStickyAndEdit() { enterStickyEditor(null, 'create'); }
-
-  async function saveEditor() {
-    if (!state.editor) return;
-
-    if (state.editor.type === 'event') {
-      const payload = {
-        title: state.editor.data.title,
-        description: state.editor.data.description,
-        start: state.editor.data.start,
-        end: state.editor.data.end,
-        date: state.editor.date,
-      };
-
-      if (state.editor.mode === 'create') {
-        await authFetch('/tv/events', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        await authFetch(`/tv/events/${state.editor.eventId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
-    } else {
-      const dateKey = state.editor.date || state.selectedDate;
-      const day = state.dayMap[dateKey] || { stickyNotes: [] };
-      const list = (day.stickyNotes || []).map(x => ({
-        id: x.id,
-        content: x.content,
-        color: x.color,
-        createdAt: x.createdAt,
-        updatedAt: x.updatedAt,
-      }));
-
-      if (state.editor.mode === 'create') {
-        list.push({
-          id: `sticky-${Date.now()}`,
-          content: state.editor.data.content,
-          color: state.editor.data.color,
-        });
-      } else {
-        const idx = list.findIndex(x => x.id === state.editor.stickyId);
-        if (idx >= 0) {
-          list[idx].content = state.editor.data.content;
-          list[idx].color = state.editor.data.color;
-        }
-      }
-
-      await authFetch(`/tv/date-sticky/${dateKey}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sticky_notes: list }),
-      });
-    }
-
+  if (key === 'Escape' || key === 'Backspace') {
     state.editor = null;
     state.editorDirty = false;
-    await refreshEvents(true);
+    render();
+    return true;
   }
+  return false;
+}
 
-  function parseDateTime(value) {
-    const d = new Date(value);
-    if (isNaN(d.getTime())) return new Date();
-    return d;
-  }
-
-  function formatFieldValue(key, value) {
-    if (key === 'start' || key === 'end') return formatTime(value);
-    return value || '';
-  }
-
-  function formatTime(iso) {
-    const d = parseDateTime(iso);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
-
-  function parseLocalDate(str) {
-    if (!str || typeof str !== 'string' || str.length < 10) return new Date();
-    const [y, m, d] = str.slice(0, 10).split('-').map(Number);
-    if (![y, m, d].every(Number.isFinite)) return new Date();
-    return new Date(y, m - 1, d);
-  }
-
-  function offsetDate(d, delta) {
-    const n = new Date(d);
-    n.setDate(n.getDate() + delta);
-    return n;
-  }
-
-  function toISO(d) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  }
-
-  function eventIsNow(ev, now) {
-    const s = parseDateTime(ev.start);
-    const e = parseDateTime(ev.end);
-    return s <= now && now <= e;
-  }
-
-  function eventIsUpcoming(ev, now) {
-    const s = parseDateTime(ev.start);
-    return s > now;
-  }
-
-  function normalizeHexColor(hex) {
-    if (!hex || typeof hex !== 'string') return null;
-    const raw = hex.trim().replace('#', '');
-    if (/^[0-9a-fA-F]{3}$/.test(raw)) {
-      return `#${raw.split('').map(ch => ch + ch).join('').toUpperCase()}`;
+function handleMainClick(e) {
+  const t = e.target.closest('[data-tv-click]');
+  if (!t) {
+    if (state.currentView === 'month' && state.monthDetailOpen) {
+      state.monthDetailOpen = false;
+      render();
     }
-    if (/^[0-9a-fA-F]{6}$/.test(raw)) {
-      return `#${raw.toUpperCase()}`;
-    }
-    return null;
+    return;
   }
 
-  function providerFallbackColor(source) {
-    const normalized = normalizeAccountSource(source);
-    if (normalized === 'google') return '#34A853';
-    if (normalized === 'microsoft') return '#2563EB';
-    if (normalized === 'apple') return '#EF4444';
-    if (normalized === 'local') return '#7CA3AF';
-    return '#8EA4C4';
+  const role = t.getAttribute('data-tv-click');
+  if (state.editor && role !== 'field') {
+    const navRoles = ['control', 'sidebar', 'day', 'month-cell'];
+    closeEditor(navRoles.includes(role));
+    if (state.editor) return;
   }
 
-  function buildEventsRequestUrl(stateOverride = null) {
-    const params = new URLSearchParams();
-    const selectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '').trim();
-    if (selectedDate) {
-      params.set('selectedDate', selectedDate);
-    }
-
-    const requestedViewRaw = String((stateOverride && stateOverride.currentView) || state.currentView || '').trim().toLowerCase();
-    if (TV_VIEW_NAMES.has(requestedViewRaw)) {
-      params.set('currentView', requestedViewRaw);
-    }
-
-    const query = params.toString();
-    return query ? `/tv/events?${query}` : '/tv/events';
+  if (role === 'sidebar') {
+    const idx = Number(t.getAttribute('data-sidebar-index') || 0);
+    state.focus.region = 'sidebar';
+    state.focus.sidebarIndex = idx;
+    state.monthDetailOpen = false;
+    onSelect();
+    return;
   }
 
-  function hexToRgb(hex) {
-    const n = normalizeHexColor(hex);
-    if (!n) return null;
-    return {
-      r: parseInt(n.slice(1, 3), 16),
-      g: parseInt(n.slice(3, 5), 16),
-      b: parseInt(n.slice(5, 7), 16),
+  if (role === 'account-chip') {
+    const key = t.getAttribute('data-account-key') || '';
+    if (state.accountChipPressFired) {
+      state.accountChipPressFired = false;
+      return;
+    }
+    clickAccountChip(key, Boolean(e.ctrlKey || e.metaKey));
+    return;
+  }
+
+  if (role === 'month-cell') {
+    const idx = Number(t.getAttribute('data-month-index') || 0);
+    const date = t.getAttribute('data-date');
+    state.focus.region = 'main';
+    state.focus.monthIndex = idx;
+    if (date) {
+      closeUtilityPanel();
+      if (state.monthDetailOpen && state.selectedDate === date) {
+        state.monthDetailOpen = false;
+        render();
+        return;
+      }
+      state.monthDetailOpen = true;
+      patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => {
+        render();
+        refreshEvents(true);
+      });
+    }
+    return;
+  }
+
+  if (role === 'day') {
+    const date = t.getAttribute('data-date');
+    if (date) {
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
+      patchTvState({ selectedDate: date }, { recordHistory: true }).then(() => refreshEvents(true));
+    }
+    return;
+  }
+
+  if (role === 'day-toggle') {
+    const section = t.getAttribute('data-section');
+    if (section && state.daySectionState && Object.prototype.hasOwnProperty.call(state.daySectionState, section)) {
+      state.daySectionState = {
+        ...state.daySectionState,
+        [section]: !state.daySectionState[section],
+      };
+      render();
+    }
+    return;
+  }
+
+  if (role === 'item') {
+    const date = t.getAttribute('data-date');
+    const idx = Number(t.getAttribute('data-item-index') || 0);
+    if (date) state.selectedDate = date;
+    state.focus.region = 'main';
+    state.focus.itemIndex = idx;
+    render();
+    onSelect();
+    return;
+  }
+
+  if (role === 'field' && state.editor) {
+    const idx = Number(t.getAttribute('data-field-index') || 0);
+    state.editor.fieldIndex = idx;
+    render();
+    return;
+  }
+
+  if (role === 'control') {
+    const control = t.getAttribute('data-control');
+    if (control === 'close-panel') {
+      closeUtilityPanel();
+      render();
+      return;
+    }
+    if (control === 'prev') {
+      shiftByView(-1);
+      return;
+    }
+    if (control === 'next') {
+      shiftByView(1);
+      return;
+    }
+    if (control === 'today') {
+      goToday();
+      return;
+    }
+    if (control === 'back') {
+      goBackAction();
+      return;
+    }
+    if (control === 'view-day') {
+      state.monthDetailOpen = false;
+      setView('day', { applyHomeZoom: true });
+      return;
+    }
+    if (control === 'view-three-day') {
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
+      setView('3-day');
+      return;
+    }
+    if (control === 'view-week') {
+      closeUtilityPanel();
+      state.monthDetailOpen = false;
+      setView('week');
+      return;
+    }
+    closeUtilityPanel();
+    if (control === 'view-month') {
+      setView('month');
+      return;
+    }
+    if (control === 'save-zoom-default') {
+      saveCurrentZoomAsDefault();
+      return;
+    }
+    if (control === 'toggle-cursor-mode') {
+      toggleCursorMode();
+      return;
+    }
+    if (control === 'toggle-lock-mode') {
+      toggleLockMode();
+      return;
+    }
+    if (control === 'zoom-in') {
+      zoomIn();
+      return;
+    }
+    if (control === 'zoom-out') {
+      zoomOut();
+      return;
+    }
+    if (control === 'restore-home-zoom') {
+      applyHomeZoomPreference();
+      renderFooterHint(`Home zoom restored to ${state.zoomLevel}%`);
+      return;
+    }
+    if (control === 'zoom-reset') {
+      resetZoom();
+      return;
+    }
+    closeUtilityPanel();
+    if (control === 'exit') {
+      exitTvAction();
+    }
+  }
+}
+
+function clickCursorTarget(mode) {
+  if (!state.cursor.visible) return;
+  const el = document.elementFromPoint(state.cursor.x, state.cursor.y);
+  if (!el) return;
+  if (mode === 'right') {
+    const ev = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 2 });
+    el.dispatchEvent(ev);
+    return;
+  }
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true, clientX: state.cursor.x, clientY: state.cursor.y, button: 0 });
+  el.dispatchEvent(click);
+}
+
+function adjustEditorValue(direction) {
+  const field = state.editor.fields[state.editor.fieldIndex].key;
+  const data = state.editor.data;
+
+  if (field === 'start' || field === 'end') {
+    const d = parseDateTime(data[field]);
+    d.setMinutes(d.getMinutes() + (15 * direction));
+    data[field] = d.toISOString();
+    state.editorDirty = true;
+    return;
+  }
+
+  if (field === 'title') {
+    data.title = cycleValue(TITLE_PRESETS, data.title, direction);
+    state.editorDirty = true;
+    return;
+  }
+
+  if (field === 'description') {
+    data.description = cycleValue(DESC_PRESETS, data.description, direction);
+    state.editorDirty = true;
+    return;
+  }
+
+  if (field === 'content') {
+    data.content = cycleValue(STICKY_PRESETS, data.content, direction);
+    state.editorDirty = true;
+    return;
+  }
+
+  if (field === 'color') {
+    data.color = cycleValue(STICKY_COLORS, data.color, direction);
+    state.editorDirty = true;
+  }
+}
+
+function cycleValue(values, current, direction) {
+  const i = values.indexOf(current);
+  if (i < 0) return values[0];
+  let next = i + direction;
+  if (next < 0) next = values.length - 1;
+  if (next >= values.length) next = 0;
+  return values[next];
+}
+
+function createEventAndEdit() { enterEventEditor(null, 'create'); }
+function createStickyAndEdit() { enterStickyEditor(null, 'create'); }
+
+async function saveEditor() {
+  if (!state.editor) return;
+
+  if (state.editor.type === 'event') {
+    const payload = {
+      title: state.editor.data.title,
+      description: state.editor.data.description,
+      start: state.editor.data.start,
+      end: state.editor.data.end,
+      date: state.editor.date,
     };
+
+    if (state.editor.mode === 'create') {
+      await authFetch('/tv/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await authFetch(`/tv/events/${state.editor.eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
+  } else {
+    const dateKey = state.editor.date || state.selectedDate;
+    const day = state.dayMap[dateKey] || { stickyNotes: [] };
+    const list = (day.stickyNotes || []).map(x => ({
+      id: x.id,
+      content: x.content,
+      color: x.color,
+      createdAt: x.createdAt,
+      updatedAt: x.updatedAt,
+    }));
+
+    if (state.editor.mode === 'create') {
+      list.push({
+        id: `sticky-${Date.now()}`,
+        content: state.editor.data.content,
+        color: state.editor.data.color,
+      });
+    } else {
+      const idx = list.findIndex(x => x.id === state.editor.stickyId);
+      if (idx >= 0) {
+        list[idx].content = state.editor.data.content;
+        list[idx].color = state.editor.data.color;
+      }
+    }
+
+    await authFetch(`/tv/date-sticky/${dateKey}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sticky_notes: list }),
+    });
   }
 
-  function softColor(hex, alpha = 0.2) {
-    const rgb = hexToRgb(hex);
-    if (!rgb) return `rgba(142,164,196,${alpha})`;
-    return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+  state.editor = null;
+  state.editorDirty = false;
+  await refreshEvents(true);
+}
+
+function parseDateTime(value) {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return new Date();
+  return d;
+}
+
+function formatFieldValue(key, value) {
+  if (key === 'start' || key === 'end') return formatTime(value);
+  return value || '';
+}
+
+function formatTime(iso) {
+  const d = parseDateTime(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function parseLocalDate(str) {
+  if (!str || typeof str !== 'string' || str.length < 10) return new Date();
+  const [y, m, d] = str.slice(0, 10).split('-').map(Number);
+  if (![y, m, d].every(Number.isFinite)) return new Date();
+  return new Date(y, m - 1, d);
+}
+
+function offsetDate(d, delta) {
+  const n = new Date(d);
+  n.setDate(n.getDate() + delta);
+  return n;
+}
+
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function eventIsNow(ev, now) {
+  const s = parseDateTime(ev.start);
+  const e = parseDateTime(ev.end);
+  return s <= now && now <= e;
+}
+
+function eventIsUpcoming(ev, now) {
+  const s = parseDateTime(ev.start);
+  return s > now;
+}
+
+function normalizeHexColor(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const raw = hex.trim().replace('#', '');
+  if (/^[0-9a-fA-F]{3}$/.test(raw)) {
+    return `#${raw.split('').map(ch => ch + ch).join('').toUpperCase()}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(raw)) {
+    return `#${raw.toUpperCase()}`;
+  }
+  return null;
+}
+
+function providerFallbackColor(source) {
+  const normalized = normalizeAccountSource(source);
+  if (normalized === 'google') return '#34A853';
+  if (normalized === 'microsoft') return '#2563EB';
+  if (normalized === 'apple') return '#EF4444';
+  if (normalized === 'local') return '#7CA3AF';
+  return '#8EA4C4';
+}
+
+function buildEventsRequestUrl(stateOverride = null) {
+  const params = new URLSearchParams();
+  const selectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '').trim();
+  if (selectedDate) {
+    params.set('selectedDate', selectedDate);
   }
 
-  function escapeHtml(val) {
-    return String(val == null ? '' : val)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+  const requestedViewRaw = String((stateOverride && stateOverride.currentView) || state.currentView || '').trim().toLowerCase();
+  if (TV_VIEW_NAMES.has(requestedViewRaw)) {
+    params.set('currentView', requestedViewRaw);
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    void init();
-  });
+  const query = params.toString();
+  return query ? `/tv/events?${query}` : '/tv/events';
+}
+
+function hexToRgb(hex) {
+  const n = normalizeHexColor(hex);
+  if (!n) return null;
+  return {
+    r: parseInt(n.slice(1, 3), 16),
+    g: parseInt(n.slice(3, 5), 16),
+    b: parseInt(n.slice(5, 7), 16),
+  };
+}
+
+function softColor(hex, alpha = 0.2) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return `rgba(142,164,196,${alpha})`;
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+}
+
+function escapeHtml(val) {
+  return String(val == null ? '' : val)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  void init();
+});
