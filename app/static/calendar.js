@@ -1003,7 +1003,27 @@ function buildAccountKey(ev) {
 
 window.buildAccountKey = buildAccountKey;
 
+function getExternalIdsDedupFingerprint(ev) {
+  const externalIds =
+    (ev && typeof ev.external_ids === "object" && ev.external_ids) ||
+    (ev?.extendedProps && typeof ev.extendedProps.external_ids === "object" && ev.extendedProps.external_ids) ||
+    null;
+
+  if (!externalIds) return "";
+
+  const entries = Object.entries(externalIds)
+    .filter(([k, v]) => String(k || "").trim() && String(v || "").trim())
+    .map(([k, v]) => `${String(k).trim().toLowerCase()}=${String(v).trim()}`)
+    .sort();
+
+  if (!entries.length) return "";
+  return `ext|${entries.join("|")}`;
+}
+
 function getDisplayDedupKey(ev) {
+  const extFingerprint = getExternalIdsDedupFingerprint(ev);
+  if (extFingerprint) return extFingerprint;
+
   const title = String(ev?.title || "").trim().toLowerCase().replace(/\s+/g, " ");
   const start = ev?.start ? new Date(ev.start) : null;
 

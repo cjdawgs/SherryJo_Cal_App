@@ -3328,7 +3328,27 @@ function persistTvDedupSetting() {
   }
 }
 
+function tvExternalIdsDedupFingerprint(ev) {
+  const externalIds =
+    (ev && typeof ev.external_ids === 'object' && ev.external_ids) ||
+    (ev?.extendedProps && typeof ev.extendedProps.external_ids === 'object' && ev.extendedProps.external_ids) ||
+    null;
+
+  if (!externalIds) return '';
+
+  const entries = Object.entries(externalIds)
+    .filter(([k, v]) => String(k || '').trim() && String(v || '').trim())
+    .map(([k, v]) => `${String(k).trim().toLowerCase()}=${String(v).trim()}`)
+    .sort();
+
+  if (!entries.length) return '';
+  return `ext|${entries.join('|')}`;
+}
+
 function tvDedupKeyForEvent(ev) {
+  const extFingerprint = tvExternalIdsDedupFingerprint(ev);
+  if (extFingerprint) return extFingerprint;
+
   const title = String(ev?.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const start = ev?.start ? new Date(ev.start) : null;
   if (!title || !start || Number.isNaN(start.getTime())) {
