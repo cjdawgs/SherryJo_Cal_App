@@ -1598,6 +1598,8 @@ async function refreshEvents(force = false, options = {}) {
   const stateOverride = options && options.stateOverride ? options.stateOverride : null;
   const highPriorityRefresh = Boolean(manualSync || stateOverride);
   const automatedRefresh = !manualSync && !stateOverride && !force;
+  const requestSelectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '');
+  const requestCurrentView = String((stateOverride && stateOverride.currentView) || state.currentView || 'day');
   if (document.hidden && !force) {
     return;
   }
@@ -1689,6 +1691,29 @@ async function refreshEvents(force = false, options = {}) {
     state.autoRefreshBackoffUntil = 0;
     const staleData = Boolean(data.staleData);
     const incomingDays = normalizeTvDays(data.days);
+    const responseSelectedDate = String(data.selectedDate || requestSelectedDate || state.selectedDate || '');
+    const responseCurrentView = String(data.currentView || requestCurrentView || state.currentView || 'day');
+    const responseAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+
+    // If the user moved to a different date/view while this request was in flight,
+    // treat this response as stale for the active viewport and cache it only.
+    if (!stateOverride) {
+      const viewportChangedSinceRequest = String(state.selectedDate || '') !== requestSelectedDate
+        || String(state.currentView || 'day') !== requestCurrentView;
+      if (viewportChangedSinceRequest) {
+        if (!staleData && incomingDays.length) {
+          rememberViewPayload(responseCurrentView, responseSelectedDate, incomingDays, responseAccounts);
+        }
+        if (tvDiag) {
+          tvDiag.log(
+            'tv_events_discarded_stale_view',
+            `requested=${requestCurrentView}:${requestSelectedDate} active=${state.currentView}:${state.selectedDate}`,
+          );
+        }
+        return;
+      }
+    }
+
     const previousSelectedDate = state.selectedDate;
     const previousCurrentView = state.currentView;
     const wasStaleMode = state.staleMode;
@@ -1696,13 +1721,13 @@ async function refreshEvents(force = false, options = {}) {
     let dataChanged = false;
     let staleTransitionChanged = false;
 
-    if (data.selectedDate) state.selectedDate = data.selectedDate;
-    if (data.currentView) state.currentView = data.currentView;
+    if (stateOverride && responseSelectedDate) state.selectedDate = responseSelectedDate;
+    if (stateOverride && responseCurrentView) state.currentView = responseCurrentView;
 
     let acceptedDays = false;
     if (!staleData) {
       state.days = incomingDays;
-      state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.serverAccounts = responseAccounts;
       state.legendSourceDays = null;
       state.legendSourceAccounts = null;
       state.dayMap = {};
@@ -1711,7 +1736,7 @@ async function refreshEvents(force = false, options = {}) {
     } else if (!state.days.length && incomingDays.length) {
       // First usable payload after startup can still be accepted even when marked stale.
       state.days = incomingDays;
-      state.serverAccounts = Array.isArray(data.accounts) ? data.accounts : [];
+      state.serverAccounts = responseAccounts;
       state.legendSourceDays = null;
       state.legendSourceAccounts = null;
       state.dayMap = {};
@@ -1740,8 +1765,8 @@ async function refreshEvents(force = false, options = {}) {
       state.lastDataSnapshotIndex = nextIndex;
       state.lastDataSignature = nextSignature;
       rememberViewPayload(
-        data.currentView || state.currentView,
-        data.selectedDate || state.selectedDate,
+        responseCurrentView || state.currentView,
+        responseSelectedDate || state.selectedDate,
         state.days,
         state.serverAccounts,
       );
