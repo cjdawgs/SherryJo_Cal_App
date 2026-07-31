@@ -1257,6 +1257,8 @@ function startPolling() {
   stopAll();
   state.sessionStartAt = Date.now();
   state.lastObservedDayKey = toISO(new Date());
+  if (!state.selectedDate) state.selectedDate = toISO(new Date());
+  render();
   if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
   refreshEvents(true);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
@@ -1585,7 +1587,10 @@ function handleLogoutClick() {
 
 async function fetchTvState() {
   const res = await authFetch('/tv/state');
-  if (!res) return;
+  if (!res) {
+    if (!state.selectedDate) state.selectedDate = toISO(new Date());
+    return;
+  }
   const data = await res.json().catch(() => ({}));
   processServerVersionSignal(res, data);
   state.selectedDate = data.selectedDate || null;
@@ -1666,6 +1671,7 @@ async function refreshEvents(force = false, options = {}) {
         setSyncStatus(false, 'Sync Failed');
       }
       renderFooterHint(`Network issue: ${networkMessage}`);
+      if (!state.days.length) render();
       return;
     }
 
