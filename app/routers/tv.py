@@ -37,6 +37,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, User
 from app.security import create_persistent_token, create_token
+from app.services.calendar_service import CalendarService
 from app.services.tv_pairing_service import pairing_store, tv_state_store
 from app.services.multi_account_oauth_service import normalize_provider
 from app.utils.colors import default_account_color
@@ -45,6 +46,7 @@ from app.utils import ensure_utc, parse_iso_datetime
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/tv", tags=["tv"])
+calendar_service = CalendarService()
 
 # Per-user last known-good /tv/events payload cache. This is used only as a
 # transient safety net during backend/read failures so the TV UI does not clear.
@@ -612,6 +614,21 @@ def _group_events_by_date(events: list[Event]) -> list[dict]:
         {"date": date_key, "events": buckets[date_key]}
         for date_key in sorted(buckets.keys())
     ]
+
+
+def _group_serialized_events_by_date(events: list[dict]) -> dict[str, list]:
+    """Group already-serialized event dicts by their start date key."""
+    buckets: dict[str, list] = defaultdict(list)
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        start_raw = event.get("start") or event.get("start_time")
+        start_dt = ensure_utc(parse_iso_datetime(start_raw))
+        if not start_dt:
+            continue
+        date_key = start_dt.date().isoformat()
+        buckets[date_key].append(event)
+    return buckets
 
 
 def _events_in_window(events: list[Event], start: datetime, end: datetime) -> list[Event]:
@@ -1218,33 +1235,49 @@ def get_tv_events(
                 current_user.id,
             )
 
+        events: list[dict] = []
         try:
-            events = (
-                db.query(Event)
-                .filter(
-                    _event_owner_filter(current_user.id),
-                    Event.start_time >= window_start,
-                    Event.start_time <= window_end,
-                )
-                .order_by(Event.start_time)
-                .all()
+            events = calendar_service.get_events_from_db(
+                db,
+                current_user,
+                window_start,
+                window_end,
+                dedup_enabled=False,
             )
-        except SQLAlchemyError:
+        except Exception:
             logger.exception(
-                "TV_EVENTS_FETCH_DB_WINDOW_QUERY_FAILED user_id=%s; falling back to Python filtering",
+                "TV_EVENTS_FETCH_CALENDAR_SERVICE_FAILED user_id=%s; falling back to direct event query",
                 current_user.id,
             )
             try:
-                all_events = db.query(Event).filter(_event_owner_filter(current_user.id)).all()
-                events = _events_in_window(all_events, window_start, window_end)
+                event_rows = (
+                    db.query(Event)
+                    .filter(
+                        _event_owner_filter(current_user.id),
+                        Event.start_time >= window_start,
+                        Event.start_time <= window_end,
+                    )
+                    .order_by(Event.start_time)
+                    .all()
+                )
+                events = [_serialize_event_for_tv(event) for event in event_rows]
             except SQLAlchemyError:
                 logger.exception(
-                    "TV_EVENTS_FETCH_DB_ALL_EVENTS_FAILED user_id=%s; using empty events",
+                    "TV_EVENTS_FETCH_DB_WINDOW_QUERY_FAILED user_id=%s; falling back to Python filtering",
                     current_user.id,
                 )
-                events = []
+                try:
+                    all_events = db.query(Event).filter(_event_owner_filter(current_user.id)).all()
+                    event_rows = _events_in_window(all_events, window_start, window_end)
+                    events = [_serialize_event_for_tv(event) for event in event_rows]
+                except SQLAlchemyError:
+                    logger.exception(
+                        "TV_EVENTS_FETCH_DB_ALL_EVENTS_FAILED user_id=%s; using empty events",
+                        current_user.id,
+                    )
+                    events = []
 
-        by_date_events = {day["date"]: day["events"] for day in _group_events_by_date(events)}
+        by_date_events = _group_serialized_events_by_date(events)
         try:
             sticky_rows = (
                 db.query(DateStickyNote)
