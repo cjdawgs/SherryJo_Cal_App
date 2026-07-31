@@ -12,6 +12,7 @@ const DEFAULT_ZOOM_LEVEL = 100;
 const DATE_AUTO_ADVANCE_DEBOUNCE_MS = 5000;
 const INPUT_MODE_STORAGE_KEY = 'tv_input_mode';
 const REMOTE_CAPABILITIES_STORAGE_KEY = 'tv_remote_capabilities_v1';
+const DEDUP_STORAGE_KEY = 'calendar_dedup_enabled';
 const REMOTE_ACTION_ECHO_MS = 1400;
 const UPDATE_RELOAD_DELAY_MS = 9000;
 const VIEW_PAYLOAD_CACHE_LIMIT = 24;
@@ -338,6 +339,15 @@ const state = {
     visible: false,
   },
   remoteCapabilities: createDefaultRemoteCapabilities(),
+  dedupEnabled: (() => {
+    try {
+      const stored = window.localStorage?.getItem(DEDUP_STORAGE_KEY);
+      if (stored === null) return true;
+      return stored !== '0' && stored !== 'false';
+    } catch {
+      return true;
+    }
+  })(),
   remoteActionTimer: null,
   clientAppVersion: CLIENT_APP_VERSION,
   serverAppVersion: CLIENT_APP_VERSION,
@@ -762,6 +772,10 @@ function ensureStyles() {
   .tv-side-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .tv-side-btn.primary { background: rgba(26,115,232,0.16); border-color: rgba(26,115,232,0.44); }
   .tv-side-btn.warn { border-color: rgba(255,159,10,0.45); color: #ffd9a0; background: rgba(255,159,10,0.14); }
+  .tv-side-btn.dedup-on { border-color: rgba(61,153,91,0.58); background: rgba(38,95,56,0.32); color: rgba(202,242,214,0.96); }
+  .tv-side-btn.dedup-off { border-color: rgba(165,86,86,0.58); background: rgba(104,48,48,0.34); color: rgba(249,210,210,0.95); }
+  .tv-side-btn.dedup-on.focused { border-color: rgba(88,184,122,0.88); box-shadow: 0 0 0 2px rgba(61,153,91,0.26); }
+  .tv-side-btn.dedup-off.focused { border-color: rgba(208,116,116,0.88); box-shadow: 0 0 0 2px rgba(165,86,86,0.26); }
   .tv-history-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .tv-sidebar-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 2px 0; }
   .tv-sidebar-footer { display: flex; flex-direction: column; gap: 8px; }
@@ -2663,6 +2677,8 @@ function renderLeftSidebar() {
   const syncIndex = side.findIndex(item => item.key === 'sync');
   const undoIndex = side.findIndex(item => item.key === 'undo');
   const redoIndex = side.findIndex(item => item.key === 'redo');
+  const dedupeIndex = side.findIndex(item => item.key === 'dedupe-toggle');
+  const dedupeItem = dedupeIndex >= 0 ? side[dedupeIndex] : null;
   const primary = side.filter(item => item.group === 'primary');
   const footer = side.filter(item => item.group === 'footer');
   return `
@@ -2675,6 +2691,7 @@ function renderLeftSidebar() {
           ${undoIndex >= 0 ? `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === undoIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${undoIndex}" ${side[undoIndex].disabled ? 'disabled' : ''}>${escapeHtml(side[undoIndex].label)}</button>` : ''}
           ${redoIndex >= 0 ? `<button class="tv-side-btn ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === redoIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${redoIndex}" ${side[redoIndex].disabled ? 'disabled' : ''}>${escapeHtml(side[redoIndex].label)}</button>` : ''}
         </div>
+        ${dedupeItem ? `<button class="tv-side-btn ${dedupeItem.dedupOn ? 'dedup-on' : 'dedup-off'} ${state.focus.region === 'sidebar' && state.focus.sidebarIndex === dedupeIndex ? 'focused' : ''}" type="button" data-tv-click="sidebar" data-sidebar-index="${dedupeIndex}" aria-pressed="${dedupeItem.dedupOn ? 'true' : 'false'}">${escapeHtml(dedupeItem.label)}</button>` : ''}
         <div class="tv-sidebar-divider"></div>
         ${primary.map(item => {
     const idx = side.findIndex(x => x.key === item.key);
@@ -2892,10 +2909,12 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
 }
 
 function sidebarItems() {
+  const dedupOn = isTvDedupEnabled();
   const items = [
     { key: 'sync', label: 'Sync', group: 'top', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }, { recordHistory: false }).then(() => refreshEvents(true, { showSync: true })) },
     { key: 'undo', label: 'Undo', group: 'history', action: () => undoTvState(), disabled: !state.history.past.length },
     { key: 'redo', label: 'Redo', group: 'history', action: () => redoTvState(), disabled: !state.history.future.length },
+    { key: 'dedupe-toggle', label: dedupOn ? 'Dedup: ON' : 'Dedup: OFF', group: 'history', action: () => toggleTvDedup(), dedupOn },
     { key: 'create-event', label: 'Create Event', group: 'primary', action: () => createEventAndEdit() },
     { key: 'create-sticky', label: 'Create Sticky', group: 'primary', action: () => createStickyAndEdit() },
     { key: 'jump-today', label: 'Jump Today', group: 'primary', action: () => goToday() },
@@ -3297,6 +3316,48 @@ function eventAccountKey(ev) {
   return eventAccountIdentity(ev).key;
 }
 
+function isTvDedupEnabled() {
+  return state.dedupEnabled !== false;
+}
+
+function persistTvDedupSetting() {
+  try {
+    window.localStorage?.setItem(DEDUP_STORAGE_KEY, isTvDedupEnabled() ? '1' : '0');
+  } catch {
+    // Ignore storage write errors; runtime state still updates immediately.
+  }
+}
+
+function tvDedupKeyForEvent(ev) {
+  const title = String(ev?.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const start = ev?.start ? new Date(ev.start) : null;
+  if (!title || !start || Number.isNaN(start.getTime())) {
+    return String(ev?.id || ev?.extendedProps?.backendId || '').trim() || 'missing-dedup-key';
+  }
+  const startMinute = new Date(start);
+  startMinute.setSeconds(0, 0);
+  return `${title}|${startMinute.toISOString().slice(0, 16)}`;
+}
+
+function dedupeTvEventsForDisplay(events) {
+  if (!isTvDedupEnabled()) return events;
+  const seen = new Set();
+  return (events || []).filter((ev) => {
+    const key = tvDedupKeyForEvent(ev);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function toggleTvDedup() {
+  state.dedupEnabled = !isTvDedupEnabled();
+  persistTvDedupSetting();
+  if (tvDiag) tvDiag.log('tv_dedup_toggled', state.dedupEnabled ? 'on' : 'off');
+  setSyncStatus(true, state.dedupEnabled ? 'Dedup enabled' : 'Dedup disabled');
+  render();
+}
+
 function isAccountVisibleForEvent(ev) {
   if (!state.selectedAccountKeys.length) return true;
   return state.selectedAccountKeys.includes(eventAccountKey(ev));
@@ -3316,7 +3377,8 @@ function filteredEventsForDay(day) {
     return state.renderEventsCache[dateKey];
   }
   const allEvents = sortEventsAsc(day.events || []);
-  const filtered = allEvents.filter(ev => isAccountVisibleForEvent(ev));
+  const visible = allEvents.filter(ev => isAccountVisibleForEvent(ev));
+  const filtered = dedupeTvEventsForDisplay(visible);
   if (dateKey && state.renderEventsCache) {
     state.renderEventsCache[dateKey] = filtered;
   }
