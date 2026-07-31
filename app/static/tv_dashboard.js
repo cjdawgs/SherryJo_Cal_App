@@ -1046,11 +1046,21 @@ async function init() {
   });
   if (dom.pairInput) {
     dom.pairInput.addEventListener('input', handleCodeInput);
+    dom.pairInput.addEventListener('change', handleCodeInput);
+    dom.pairInput.addEventListener('blur', handleCodeInput);
+    dom.pairInput.addEventListener('keyup', handleCodeInput);
+    dom.pairInput.addEventListener('paste', (e) => {
+      e.preventDefault();
+      const pasted = e.clipboardData?.getData('text') || window.clipboardData?.getData('Text') || '';
+      syncPairInputValue(pasted, { sourceEvent: 'paste' });
+    });
     dom.pairInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') {
         e.preventDefault();
         handlePair();
+        return;
       }
+      window.setTimeout(() => syncPairInputValue(dom.pairInput.value, { sourceEvent: 'keydown' }), 0);
     });
   }
   if (dom.disconnectBtn) dom.disconnectBtn.addEventListener('click', handleLogoutClick);
@@ -1329,24 +1339,30 @@ function enforceSleepTimeout() {
 }
 
 function handleCodeInput(e) {
-  let v = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
-  if (v.length > 4) v = `${v.slice(0, 4)}-${v.slice(4)}`;
-  e.target.value = v;
-  if (v.length === 9) {
-    const canAutoSubmit = dom.pairBtn && !dom.pairBtn.disabled;
-    if (canAutoSubmit) {
-      setPairStatus('Code detected. Connecting…');
-      void handlePair();
-    }
-  } else {
-    setPairStatus('');
-  }
+  syncPairInputValue(e?.target?.value, { sourceEvent: e?.type || 'input' });
 }
 
 function normalizePairingCode(raw) {
   const compact = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
   if (compact.length !== 8) return '';
   return `${compact.slice(0, 4)}-${compact.slice(4)}`;
+}
+
+function syncPairInputValue(rawValue, options = {}) {
+  if (!dom.pairInput) return '';
+  let v = String(rawValue || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 8);
+  if (v.length > 4) v = `${v.slice(0, 4)}-${v.slice(4)}`;
+  dom.pairInput.value = v;
+  if (v.length === 9) {
+    const canAutoSubmit = dom.pairBtn && !dom.pairBtn.disabled;
+    if (canAutoSubmit && options.sourceEvent !== 'keyup') {
+      setPairStatus('Code detected. Connecting…');
+      void handlePair();
+    }
+  } else {
+    setPairStatus('');
+  }
+  return v;
 }
 
 function setPairError(message) {

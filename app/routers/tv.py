@@ -129,10 +129,13 @@ def tv_dashboard(request: Request):
     Authentication is handled client-side: the JS reads a JWT from
     localStorage('tv_token') and uses it for all subsequent API calls.
     """
-    return _templates.TemplateResponse(request, "tv.html", {
+    response = _templates.TemplateResponse(request, "tv.html", {
         "request": request,
         "app_version": _get_tv_app_version(),
     })
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 # ─────────────────────────────────────────────────
@@ -162,18 +165,24 @@ def tv_kiosk(request: Request, token: str, db: Session = Depends(get_db)):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired kiosk token. Generate a new one from Admin.")
 
-    return _templates.TemplateResponse(request, "tv_kiosk.html", {
+    response = _templates.TemplateResponse(request, "tv_kiosk.html", {
         "request":     request,
         "kiosk_token": token,
         "app_version": _get_tv_app_version(),
     })
+    response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    return response
 
 
 @router.get("/version")
 def get_tv_version(
     current_user: User = Depends(get_current_user),
 ):
-    return {"appVersion": _get_tv_app_version()}
+    return JSONResponse(
+        content={"appVersion": _get_tv_app_version()},
+        headers={"Cache-Control": "no-store, max-age=0, must-revalidate", "Pragma": "no-cache"},
+    )
 
 
 @router.post("/generate-kiosk-token")

@@ -37,3 +37,19 @@ def test_tv_static_bundle_has_single_canonical_filenames():
 
     assert dashboard_candidates == ["tv_dashboard.js"]
     assert mode_candidates == ["tv_mode.js"]
+
+
+def test_tv_pages_disable_html_caching(client, auth_headers):
+    dashboard_res = client.get("/tv/dashboard")
+    assert dashboard_res.status_code == 200
+    assert "no-store" in dashboard_res.headers.get("cache-control", "").lower()
+    assert dashboard_res.headers.get("pragma", "").lower() == "no-cache"
+
+    kiosk_token_res = client.post("/tv/generate-kiosk-token", headers=auth_headers)
+    assert kiosk_token_res.status_code == 200
+    kiosk_token = kiosk_token_res.json()["token"]
+
+    kiosk_res = client.get(f"/tv/kiosk?token={kiosk_token}")
+    assert kiosk_res.status_code == 200
+    assert "no-store" in kiosk_res.headers.get("cache-control", "").lower()
+    assert kiosk_res.headers.get("pragma", "").lower() == "no-cache"

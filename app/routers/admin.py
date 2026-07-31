@@ -1,8 +1,11 @@
 import os
 import re
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -43,6 +46,10 @@ REDACTED_PLACEHOLDER = "***"
 
 # The browser is a read-only inspection aid, not an export tool.
 MAX_TABLE_ROWS = 200
+DEFAULT_GITHUB_REPOSITORY = "cjdawgs/SherryJo_Cal_App"
+DEFAULT_GITHUB_BRANCH = "main"
+DEFAULT_RENDER_DASHBOARD_URL = "https://dashboard.render.com/"
+RENDER_DEPLOY_HOOK_ENV = "RENDER_DEPLOY_HOOK_URL"
 
 
 class RuntimeTokenEncryptionKeyUpdate(BaseModel):
@@ -133,6 +140,120 @@ def _parse_iso_date_or_422(raw_value: str, field_name: str) -> datetime:
         return datetime.fromisoformat(f"{str(raw_value).strip()}T00:00:00+00:00")
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"{field_name} must be YYYY-MM-DD.") from exc
+
+
+def _normalize_git_sha(value: str | None) -> str | None:
+    candidate = str(value or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{7,40}", candidate):
+        return candidate
+    return None
+
+
+def _current_deployment_commit() -> tuple[str | None, str]:
+    for env_name in ("RENDER_GIT_COMMIT", "APP_VERSION", "SOURCE_VERSION", "RENDER_COMMIT_SHA", "GITHUB_SHA"):
+        candidate = _normalize_git_sha(os.getenv(env_name))
+        if candidate:
+            return candidate, env_name
+    return None, "unknown"
+
+
+def _github_repo_settings() -> tuple[str, str]:
+    repo = str(os.getenv("GITHUB_REPOSITORY", DEFAULT_GITHUB_REPOSITORY) or DEFAULT_GITHUB_REPOSITORY).strip()
+    branch = str(os.getenv("GITHUB_BRANCH", DEFAULT_GITHUB_BRANCH) or DEFAULT_GITHUB_BRANCH).strip() or DEFAULT_GITHUB_BRANCH
+    return repo, branch
+
+
+def _fetch_github_latest_commit(repo: str, branch: str) -> str | None:
+    url = f"https://api.github.com/repos/{repo}/commits/{branch}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "SherryJo-Cal-App",
+    }
+    token = str(os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = UrlRequest(url, headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        return _normalize_git_sha(payload.get("sha"))
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("Deployment sync GitHub lookup failed: %s", exc)
+        return None
+    except Exception as exc:
+        logger.warning("Deployment sync GitHub lookup failed: %s", exc)
+        return None
+
+
+def _render_dashboard_url() -> str:
+    return str(os.getenv("RENDER_DASHBOARD_URL", DEFAULT_RENDER_DASHBOARD_URL) or DEFAULT_RENDER_DASHBOARD_URL).strip()
+
+
+def _render_deploy_hook_url() -> str | None:
+    value = str(os.getenv(RENDER_DEPLOY_HOOK_ENV, "") or "").strip()
+    return value or None
+
+
+def _deployment_sync_payload() -> dict:
+    current_commit, current_commit_source = _current_deployment_commit()
+    github_repo, github_branch = _github_repo_settings()
+    github_latest_commit = _fetch_github_latest_commit(github_repo, github_branch)
+    dashboard_url = _render_dashboard_url()
+    deploy_hook_url = _render_deploy_hook_url()
+
+    if current_commit and github_latest_commit:
+        status = "synced" if current_commit == github_latest_commit else "out_of_sync"
+    elif current_commit or github_latest_commit:
+        status = "unknown"
+    else:
+        status = "unknown"
+
+    if status == "synced":
+        message = "Render deployment matches the latest GitHub commit."
+    elif status == "out_of_sync":
+        message = "Render deployment is not on the latest GitHub commit yet."
+    else:
+        message = "Unable to verify deployment sync from the running app."
+
+    return {
+        "repository": github_repo,
+        "branch": github_branch,
+        "current_commit": current_commit,
+        "current_commit_source": current_commit_source,
+        "github_latest_commit": github_latest_commit,
+        "status": status,
+        "message": message,
+        "render_dashboard_url": dashboard_url,
+        "manual_deploy_available": bool(deploy_hook_url),
+        "manual_deploy_endpoint": "/admin/system/render/redeploy" if deploy_hook_url else None,
+        "manual_deploy_hint": "Trigger the Render deploy hook from this admin app." if deploy_hook_url else "Open the Render dashboard and trigger a manual deploy there.",
+    }
+
+
+def _trigger_render_deploy_hook() -> dict:
+    deploy_hook_url = _render_deploy_hook_url()
+    if not deploy_hook_url:
+        raise HTTPException(status_code=400, detail="RENDER_DEPLOY_HOOK_URL is not configured.")
+
+    request = UrlRequest(deploy_hook_url, data=b"", method="POST")
+    try:
+        with urlopen(request, timeout=10) as response:
+            body = response.read().decode("utf-8", errors="ignore").strip()
+            status_code = getattr(response, "status", None) or response.getcode() or 200
+        return {
+            "triggered": True,
+            "status_code": status_code,
+            "message": "Render deploy hook triggered.",
+            "response": body[:500] if body else "",
+            "render_dashboard_url": _render_dashboard_url(),
+        }
+    except (HTTPError, URLError, TimeoutError) as exc:
+        logger.warning("Render deploy hook failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Failed to trigger Render deploy hook: {exc}") from exc
+    except Exception as exc:
+        logger.warning("Render deploy hook failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Failed to trigger Render deploy hook: {exc}") from exc
 
 
 def _extract_publish_reason(details: str | None) -> str:
@@ -522,7 +643,15 @@ def admin_system_overview(
             ],
         },
         "security": security_info,
+        "deployment": _deployment_sync_payload(),
     }
+
+
+@router.post("/system/render/redeploy")
+def admin_trigger_render_redeploy(
+    admin_user: User = Depends(require_admin),
+):
+    return _trigger_render_deploy_hook()
 
 
 @router.get("/system/table/{table_name}/rows")

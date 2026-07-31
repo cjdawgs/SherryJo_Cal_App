@@ -59,6 +59,17 @@ const el = {
   providerOpsList: document.getElementById("providerOpsList"),
   overviewLastUpdated: document.getElementById("overviewLastUpdated"),
   copyOverviewBtn: document.getElementById("copyOverviewBtn"),
+  deploymentSyncPanel: document.getElementById("deploymentSyncPanel"),
+  deploymentSyncStatusPill: document.getElementById("deploymentSyncStatusPill"),
+  deploymentSyncCurrentCommit: document.getElementById("deploymentSyncCurrentCommit"),
+  deploymentSyncGithubCommit: document.getElementById("deploymentSyncGithubCommit"),
+  deploymentSyncRepoBranch: document.getElementById("deploymentSyncRepoBranch"),
+  deploymentSyncSource: document.getElementById("deploymentSyncSource"),
+  deploymentSyncCheckedAt: document.getElementById("deploymentSyncCheckedAt"),
+  deploymentSyncMessage: document.getElementById("deploymentSyncMessage"),
+  deploymentSyncHint: document.getElementById("deploymentSyncHint"),
+  deploymentSyncRefreshBtn: document.getElementById("deploymentSyncRefreshBtn"),
+  deploymentSyncResolveBtn: document.getElementById("deploymentSyncResolveBtn"),
   securityWarningBanner: document.getElementById("securityWarningBanner"),
   runCurrentUserFailureCheckBtn: document.getElementById("runCurrentUserFailureCheckBtn"),
   currentUserFailureCheckStamp: document.getElementById("currentUserFailureCheckStamp"),
@@ -101,6 +112,59 @@ function updateFailureFixAvailability(hasLiveIssue) {
       ? "This applies the key now and saves it for automatic restart bootstrap. After it succeeds, the page rechecks automatically and marks the issue resolved in green."
       : "This fix is currently inactive because there is no live credential decryption issue to repair in this running app.";
   }
+}
+
+function shortCommit(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "unavailable";
+  }
+  return text.length > 12 ? text.slice(0, 12) : text;
+}
+
+async function refreshDeploymentSync() {
+  await loadSystemOverview();
+}
+
+async function resolveDeploymentSync() {
+  const deployment = state.overview?.deployment || {};
+  if (deployment.manual_deploy_available && deployment.manual_deploy_endpoint) {
+    if (el.deploymentSyncResolveBtn) {
+      el.deploymentSyncResolveBtn.disabled = true;
+      el.deploymentSyncResolveBtn.textContent = "Triggering...";
+    }
+
+    const res = await apiRequest(deployment.manual_deploy_endpoint, { method: "POST" });
+    if (!res) {
+      setStatus("Unable to trigger the Render deploy hook.", true);
+      if (el.deploymentSyncResolveBtn) {
+        el.deploymentSyncResolveBtn.disabled = false;
+        el.deploymentSyncResolveBtn.textContent = "Trigger Redeploy";
+      }
+      return;
+    }
+
+    const data = await res.json();
+    if (handleAdminForbidden(res, data)) {
+      return;
+    }
+
+    if (!res.ok) {
+      setStatus(data.detail || "Unable to trigger the Render deploy hook.", true);
+      if (el.deploymentSyncResolveBtn) {
+        el.deploymentSyncResolveBtn.disabled = false;
+        el.deploymentSyncResolveBtn.textContent = "Trigger Redeploy";
+      }
+      return;
+    }
+
+    setStatus(data.message || "Render deploy hook triggered.");
+    await loadSystemOverview();
+    return;
+  }
+
+  const targetUrl = deployment.render_dashboard_url || "https://dashboard.render.com/";
+  window.open(targetUrl, "_blank", "noopener,noreferrer");
 }
 
 let adminWindowControlsReady = false;
@@ -221,9 +285,14 @@ function renderSystemOverview(data) {
 
   const db = data?.database || {};
   const security = data?.security || {};
+  const deployment = data?.deployment || {};
   const tables = Array.isArray(data?.tables) ? data.tables : [];
   const userOps = Array.isArray(data?.admin_operations?.users) ? data.admin_operations.users : [];
   const providerOps = Array.isArray(data?.admin_operations?.providers) ? data.admin_operations.providers : [];
+  const deploymentStatus = String(deployment?.status || "unknown");
+  const isSynced = deploymentStatus === "synced";
+  const isOutOfSync = deploymentStatus === "out_of_sync";
+  const isUnknown = !isSynced && !isOutOfSync;
 
   if (el.dbTypeText) {
     el.dbTypeText.textContent = `${db.label || "Unknown"} (${db.engine || "unknown"})`;
@@ -283,6 +352,60 @@ function renderSystemOverview(data) {
       el.securityWarningBanner.textContent = "";
       el.securityWarningBanner.classList.remove("is-success");
     }
+  }
+
+  if (el.deploymentSyncPanel) {
+    el.deploymentSyncPanel.classList.toggle("is-synced", isSynced);
+    el.deploymentSyncPanel.classList.toggle("is-out-of-sync", isOutOfSync);
+    el.deploymentSyncPanel.classList.toggle("is-unknown", isUnknown);
+  }
+
+  if (el.deploymentSyncStatusPill) {
+    el.deploymentSyncStatusPill.textContent = isSynced ? "In sync" : (isOutOfSync ? "Out of sync" : "Unable to verify");
+    el.deploymentSyncStatusPill.classList.toggle("is-synced", isSynced);
+    el.deploymentSyncStatusPill.classList.toggle("is-out-of-sync", isOutOfSync);
+    el.deploymentSyncStatusPill.classList.toggle("is-unknown", isUnknown);
+  }
+
+  if (el.deploymentSyncCurrentCommit) {
+    el.deploymentSyncCurrentCommit.textContent = shortCommit(deployment.current_commit);
+  }
+
+  if (el.deploymentSyncGithubCommit) {
+    el.deploymentSyncGithubCommit.textContent = shortCommit(deployment.github_latest_commit);
+  }
+
+  if (el.deploymentSyncRepoBranch) {
+    el.deploymentSyncRepoBranch.textContent = `${deployment.repository || "unknown repo"} / ${deployment.branch || "main"}`;
+  }
+
+  if (el.deploymentSyncSource) {
+    el.deploymentSyncSource.textContent = deployment.current_commit_source || "unknown";
+  }
+
+  if (el.deploymentSyncCheckedAt) {
+    const raw = data?.generated_at;
+    el.deploymentSyncCheckedAt.textContent = raw ? new Date(raw).toLocaleString() : new Date().toLocaleString();
+  }
+
+  if (el.deploymentSyncMessage) {
+    el.deploymentSyncMessage.textContent = deployment.message || "Deployment sync check not available.";
+  }
+
+  if (el.deploymentSyncHint) {
+    el.deploymentSyncHint.textContent = deployment.manual_deploy_hint || "Open the Render dashboard and trigger a manual deploy there.";
+  }
+
+  if (el.deploymentSyncResolveBtn) {
+    el.deploymentSyncResolveBtn.disabled = isSynced;
+    el.deploymentSyncResolveBtn.textContent = isSynced
+      ? "In Sync"
+      : (deployment.manual_deploy_available ? "Trigger Redeploy" : "Open Render");
+    el.deploymentSyncResolveBtn.classList.toggle("is-danger", isOutOfSync);
+  }
+
+  if (el.deploymentSyncRefreshBtn) {
+    el.deploymentSyncRefreshBtn.disabled = false;
   }
 }
 
@@ -1658,6 +1781,9 @@ function bindEvents() {
       setStatus("Copy failed. Browser blocked clipboard access.", true);
     }
   });
+
+  el.deploymentSyncRefreshBtn?.addEventListener("click", refreshDeploymentSync);
+  el.deploymentSyncResolveBtn?.addEventListener("click", resolveDeploymentSync);
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
   el.applyTokenEncryptionKeyBtn?.addEventListener("click", applyTokenEncryptionKey);

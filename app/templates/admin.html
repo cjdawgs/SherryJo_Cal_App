@@ -329,6 +329,198 @@
       opacity: 0.72;
       margin: 0 0 8px;
     }
+
+    .deployment-sync-panel {
+      margin: 0 0 12px;
+      border-width: 2px;
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .deployment-sync-panel.is-synced {
+      border-color: #7abf8f;
+      background: #edf9f0;
+      color: #175c33;
+    }
+
+    .deployment-sync-panel.is-synced .muted-line,
+    .deployment-sync-panel.is-synced p,
+    .deployment-sync-panel.is-synced strong {
+      color: #175c33;
+    }
+
+    .deployment-sync-panel.is-out-of-sync {
+      border-color: #ef4444;
+      background: #fff1f2;
+      color: #9f1239;
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.14) inset;
+    }
+
+    .deployment-sync-panel.is-out-of-sync .muted-line,
+    .deployment-sync-panel.is-out-of-sync p,
+    .deployment-sync-panel.is-out-of-sync strong {
+      color: #9f1239;
+    }
+
+    .deployment-sync-panel.is-unknown {
+      border-color: #cbd5e1;
+      background: #f8fafc;
+      color: #475569;
+    }
+
+    .deployment-sync-panel.is-unknown .muted-line,
+    .deployment-sync-panel.is-unknown p,
+    .deployment-sync-panel.is-unknown strong {
+      color: #475569;
+    }
+
+    .deployment-sync-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+
+    .deployment-sync-header h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .deployment-sync-header p {
+      margin: 4px 0 0;
+      font-size: 12px;
+      line-height: 1.5;
+      color: inherit;
+      opacity: 0.82;
+    }
+
+    .deployment-sync-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(0, 0, 0, 0.08);
+      font-size: 12px;
+      font-weight: 700;
+      background: #eef2f7;
+      color: #334155;
+      white-space: nowrap;
+    }
+
+    .deployment-sync-pill.is-synced {
+      background: #dff4e7;
+      color: #14532d;
+      border-color: #8ec79c;
+    }
+
+    .deployment-sync-pill.is-out-of-sync {
+      background: #fee2e2;
+      color: #991b1b;
+      border-color: #ef4444;
+    }
+
+    .deployment-sync-pill.is-unknown {
+      background: #e2e8f0;
+      color: #475569;
+      border-color: #cbd5e1;
+    }
+
+    .deployment-sync-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
+      gap: 10px;
+    }
+
+    @media (max-width: 980px) {
+      .deployment-sync-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .deployment-sync-card {
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .deployment-sync-lines {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+    }
+
+    .deployment-sync-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .deployment-sync-label {
+      min-width: 120px;
+      font-weight: 700;
+      color: inherit;
+    }
+
+    .deployment-sync-code {
+      font-family: monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+
+    .deployment-sync-message {
+      margin: 10px 0 0;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .deployment-sync-actions-card {
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 10px;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.72);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      justify-content: space-between;
+    }
+
+    .deployment-sync-actions-card p {
+      margin: 0;
+      font-size: 12px;
+      line-height: 1.55;
+      color: inherit;
+      opacity: 0.85;
+    }
+
+    .deployment-sync-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .deployment-sync-actions button {
+      min-height: 36px;
+    }
+
+    .deployment-sync-actions button.is-danger {
+      border-color: #b91c1c;
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .deployment-sync-actions button.is-danger:hover:not(:disabled) {
+      background: #dc2626;
+    }
+
+    .deployment-sync-actions button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
@@ -358,6 +550,35 @@
         <span id="tvSleepAdminStatus" class="tv-sleep-admin-status">&mdash;</span>
       </div>
     </header>
+
+    <section class="panel deployment-sync-panel is-unknown" id="deploymentSyncPanel">
+      <div class="deployment-sync-header">
+        <div>
+          <h2>Deployment Sync</h2>
+          <p>Confirms whether the Render deployment matches the latest GitHub commit before you trust the TV dashboard.</p>
+        </div>
+        <span id="deploymentSyncStatusPill" class="deployment-sync-pill is-unknown">Checking sync...</span>
+      </div>
+      <div class="deployment-sync-grid">
+        <div class="deployment-sync-card">
+          <div class="deployment-sync-lines">
+            <div class="deployment-sync-row"><span class="deployment-sync-label">Current Render build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
+            <div class="deployment-sync-row"><span class="deployment-sync-label">GitHub latest commit</span><span id="deploymentSyncGithubCommit" class="deployment-sync-code">Loading...</span></div>
+            <div class="deployment-sync-row"><span class="deployment-sync-label">Repository / branch</span><span id="deploymentSyncRepoBranch" class="deployment-sync-code">Loading...</span></div>
+            <div class="deployment-sync-row"><span class="deployment-sync-label">Version source</span><span id="deploymentSyncSource" class="deployment-sync-code">Loading...</span></div>
+            <div class="deployment-sync-row"><span class="deployment-sync-label">Last checked</span><span id="deploymentSyncCheckedAt" class="deployment-sync-code">Loading...</span></div>
+          </div>
+          <p id="deploymentSyncMessage" class="deployment-sync-message">Loading deployment sync status...</p>
+        </div>
+        <div class="deployment-sync-actions-card">
+          <p id="deploymentSyncHint">This card turns bright red when Render is behind GitHub, and stays grey/green when the deployment is current.</p>
+          <div class="deployment-sync-actions">
+            <button id="deploymentSyncRefreshBtn" class="ghost-btn" type="button">Recheck Sync</button>
+            <button id="deploymentSyncResolveBtn" class="is-danger" type="button">Resolve / Open Render</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <section class="panel" id="tvMonitorPanel">
       <details id="tvMonitorDetails">

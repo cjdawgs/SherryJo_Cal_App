@@ -120,7 +120,13 @@ def test_admin_system_overview_requires_admin_role(client):
     assert denied.status_code == 403
 
 
-def test_admin_system_overview_payload(client):
+def test_admin_system_overview_payload(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    current_sha = "a" * 40
+    monkeypatch.setenv("RENDER_GIT_COMMIT", current_sha)
+    monkeypatch.setattr(admin_router, "_fetch_github_latest_commit", lambda repo, branch: current_sha)
+
     headers = _admin_headers(client)
 
     res = client.get("/admin/system/overview", headers=headers)
@@ -145,8 +151,48 @@ def test_admin_system_overview_payload(client):
     assert isinstance(ops.get("users"), list)
     assert isinstance(ops.get("providers"), list)
 
+    deployment = payload["deployment"]
+    assert deployment["status"] == "synced"
+    assert deployment["current_commit"] == current_sha
+    assert deployment["github_latest_commit"] == current_sha
+    assert deployment["manual_deploy_available"] in {True, False}
+
+
+def test_admin_render_redeploy_endpoint_uses_hook(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("RENDER_DEPLOY_HOOK_URL", "https://example.invalid/render-hook")
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"ok"
+
+        def getcode(self):
+            return 200
+
+    monkeypatch.setattr(admin_router, "urlopen", lambda request, timeout=10: _FakeResponse())
+
+    res = client.post("/admin/system/render/redeploy", headers=headers)
+    assert res.status_code == 200
+
+    payload = res.json()
+    assert payload["triggered"] is True
+    assert payload["status_code"] == 200
+    assert payload["render_dashboard_url"]
+
 
 def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypted(client, db, monkeypatch):
+    from app.routers import admin as admin_router
+
     headers = _admin_headers(client)
     owner = _register_user(client, role="staff")
 
@@ -160,6 +206,8 @@ def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypte
     db.commit()
 
     monkeypatch.setattr(settings, "token_encryption_key", None, raising=False)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "b" * 40)
+    monkeypatch.setattr(admin_router, "_fetch_github_latest_commit", lambda repo, branch: "b" * 40)
 
     res = client.get("/admin/system/overview", headers=headers)
     assert res.status_code == 200
