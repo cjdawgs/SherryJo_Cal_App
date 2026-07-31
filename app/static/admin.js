@@ -10,6 +10,7 @@ const state = {
   currentUserFailureCheck: null,
   failureHistory: null,
   tokenKeyRepairStatus: null,
+  deploymentSyncStatus: null,
   tableQuery: null,
   purgeMeta: {
     users: {},
@@ -60,6 +61,7 @@ const el = {
   overviewLastUpdated: document.getElementById("overviewLastUpdated"),
   copyOverviewBtn: document.getElementById("copyOverviewBtn"),
   deploymentSyncPanel: document.getElementById("deploymentSyncPanel"),
+  deploymentSyncDetails: document.getElementById("deploymentSyncDetails"),
   deploymentSyncStatusPill: document.getElementById("deploymentSyncStatusPill"),
   deploymentSyncCurrentCommit: document.getElementById("deploymentSyncCurrentCommit"),
   deploymentSyncGithubCommit: document.getElementById("deploymentSyncGithubCommit"),
@@ -315,6 +317,7 @@ function renderSystemOverview(data) {
   const isSynced = deploymentStatus === "synced";
   const isOutOfSync = deploymentStatus === "out_of_sync";
   const isUnknown = !isSynced && !isOutOfSync;
+  const previousDeploymentStatus = state.deploymentSyncStatus;
 
   if (el.dbTypeText) {
     el.dbTypeText.textContent = `${db.label || "Unknown"} (${db.engine || "unknown"})`;
@@ -381,6 +384,11 @@ function renderSystemOverview(data) {
     el.deploymentSyncPanel.classList.toggle("is-out-of-sync", isOutOfSync);
     el.deploymentSyncPanel.classList.toggle("is-unknown", isUnknown);
   }
+
+  if (el.deploymentSyncDetails && previousDeploymentStatus !== deploymentStatus) {
+    el.deploymentSyncDetails.open = !isSynced;
+  }
+  state.deploymentSyncStatus = deploymentStatus;
 
   if (el.deploymentSyncStatusPill) {
     el.deploymentSyncStatusPill.textContent = isSynced ? "In sync" : (isOutOfSync ? "Out of sync" : "Unable to verify");

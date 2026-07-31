@@ -336,6 +336,15 @@
       transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
     }
 
+    .deployment-sync-panel > details > summary {
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .deployment-sync-panel > details > summary::-webkit-details-marker {
+      display: none;
+    }
+
     .deployment-sync-panel.is-synced {
       border-color: #7abf8f;
       background: #edf9f0;
@@ -552,35 +561,39 @@
     </header>
 
     <section class="panel deployment-sync-panel is-unknown" id="deploymentSyncPanel">
-      <div class="deployment-sync-header">
-        <div>
-          <h2>Deployment Sync</h2>
-          <p>Confirms whether the Render deployment matches the latest GitHub commit before you trust the TV dashboard.</p>
-        </div>
-        <span id="deploymentSyncStatusPill" class="deployment-sync-pill is-unknown">Checking sync...</span>
-      </div>
-      <div class="deployment-sync-grid">
-        <div class="deployment-sync-card">
-          <div class="deployment-sync-lines">
-            <div class="deployment-sync-row"><span class="deployment-sync-label">Current Render build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
-            <div class="deployment-sync-row"><span class="deployment-sync-label">GitHub latest commit</span><span id="deploymentSyncGithubCommit" class="deployment-sync-code">Loading...</span></div>
-            <div class="deployment-sync-row"><span class="deployment-sync-label">Repository / branch</span><span id="deploymentSyncRepoBranch" class="deployment-sync-code">Loading...</span></div>
-            <div class="deployment-sync-row"><span class="deployment-sync-label">Version source</span><span id="deploymentSyncSource" class="deployment-sync-code">Loading...</span></div>
-            <div class="deployment-sync-row"><span class="deployment-sync-label">Last checked</span><span id="deploymentSyncCheckedAt" class="deployment-sync-code">Loading...</span></div>
-            <div class="deployment-sync-row"><span class="deployment-sync-label">Verification detail</span><span id="deploymentSyncDetail" class="deployment-sync-code">Loading...</span></div>
+      <details id="deploymentSyncDetails" open>
+        <summary>
+          <div class="deployment-sync-header">
+            <div>
+              <h2>Deployment Sync</h2>
+              <p>Confirms whether the Render deployment matches the latest GitHub commit before you trust the TV dashboard.</p>
+            </div>
+            <span id="deploymentSyncStatusPill" class="deployment-sync-pill is-unknown">Checking sync...</span>
           </div>
-          <p id="deploymentSyncMessage" class="deployment-sync-message">Loading deployment sync status...</p>
-        </div>
-        <div class="deployment-sync-actions-card">
-          <p id="deploymentSyncHint">This card turns bright red when Render is behind GitHub, and stays grey/green when the deployment is current.</p>
-          <div class="deployment-sync-actions">
-            <button id="deploymentSyncRefreshBtn" class="ghost-btn" type="button">Recheck Sync</button>
-            <button id="deploymentSyncGithubBtn" class="ghost-btn" type="button">Open GitHub</button>
-            <button id="deploymentSyncCompareBtn" class="ghost-btn" type="button">Compare</button>
-            <button id="deploymentSyncResolveBtn" class="is-danger" type="button">Resolve / Open Render</button>
+        </summary>
+        <div class="deployment-sync-grid">
+          <div class="deployment-sync-card">
+            <div class="deployment-sync-lines">
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Current Render build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">GitHub latest commit</span><span id="deploymentSyncGithubCommit" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Repository / branch</span><span id="deploymentSyncRepoBranch" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Version source</span><span id="deploymentSyncSource" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Last checked</span><span id="deploymentSyncCheckedAt" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Verification detail</span><span id="deploymentSyncDetail" class="deployment-sync-code">Loading...</span></div>
+            </div>
+            <p id="deploymentSyncMessage" class="deployment-sync-message">Loading deployment sync status...</p>
+          </div>
+          <div class="deployment-sync-actions-card">
+            <p id="deploymentSyncHint">This card turns bright red when Render is behind GitHub, and stays grey/green when the deployment is current.</p>
+            <div class="deployment-sync-actions">
+              <button id="deploymentSyncRefreshBtn" class="ghost-btn" type="button">Recheck Sync</button>
+              <button id="deploymentSyncGithubBtn" class="ghost-btn" type="button">Open GitHub</button>
+              <button id="deploymentSyncCompareBtn" class="ghost-btn" type="button">Compare</button>
+              <button id="deploymentSyncResolveBtn" class="is-danger" type="button">Resolve / Open Render</button>
+            </div>
           </div>
         </div>
-      </div>
+      </details>
     </section>
 
     <section class="panel" id="tvMonitorPanel">

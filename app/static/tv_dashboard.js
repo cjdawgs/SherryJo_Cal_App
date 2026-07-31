@@ -758,7 +758,8 @@ function ensureStyles() {
   .tv-account-chip.user-email-chip { margin-left: auto; border-style: dashed; background: rgba(255,255,255,0.03); color: rgba(168, 185, 208, 0.92); border-color: rgba(201,219,244,0.2); }
   .tv-account-chip:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.35); }
   .tv-account-legend.syncing .tv-account-chip { animation: tv-sync-chip-pulse 1.1s ease-in-out infinite; }
-  @keyframes tv-sync-chip-pulse { 0% { opacity: 0.55; } 50% { opacity: 1; } 100% { opacity: 0.55; } }
+  .tv-account-legend.syncing .tv-account-chip { border-color: rgba(26,115,232,0.46); box-shadow: 0 0 0 1px rgba(26,115,232,0.12), 0 0 14px rgba(26,115,232,0.14); }
+  @keyframes tv-sync-chip-pulse { 0% { opacity: 0.62; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-1px); } 100% { opacity: 0.62; transform: translateY(0); } }
   .tv-account-dot { width: 8px; height: 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.45); flex-shrink: 0; }
   .tv-main-grid { min-width: 0; display: grid; gap: 8px; }
   .tv-main-grid.day { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -886,6 +887,17 @@ function ensureStyles() {
   .tv-hint-chip { font-size: 11px; opacity: 0.8; }
   .tv-sync-ok { color: rgba(130, 191, 148, 0.88); }
   .tv-sync-fail { color: rgba(197, 120, 120, 0.88); }
+  .tv-last-updated.tv-sync-ok,
+  .tv-last-updated.tv-sync-fail {
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    background: rgba(255,255,255,0.04);
+  }
+  .tv-last-updated.tv-sync-ok { border-color: rgba(130, 191, 148, 0.28); background: rgba(130, 191, 148, 0.12); }
+  .tv-last-updated.tv-sync-fail { border-color: rgba(197, 120, 120, 0.28); background: rgba(197, 120, 120, 0.12); }
   .tv-status-chip { font-size: 11px; letter-spacing: 0.35px; text-transform: uppercase; color: rgba(218, 230, 244, 0.84); }
   .tv-status-chip.subtle { color: rgba(168, 185, 208, 0.74); }
   .tv-status-sep { color: rgba(168, 185, 208, 0.62); margin: 0 4px; }
@@ -3244,6 +3256,7 @@ function render() {
   syncAccountLegend();
   renderHeader();
   renderAccountLegend();
+  applySyncVisualState();
   renderMain();
   renderFooterHint();
   applyZoom();
