@@ -16,6 +16,7 @@ const REMOTE_ACTION_ECHO_MS = 1400;
 const UPDATE_RELOAD_DELAY_MS = 9000;
 const VIEW_PAYLOAD_CACHE_LIMIT = 24;
 const DAY_WINDOW_CACHE_LIMIT = 140;
+const VIEW_PAYLOAD_MAX_AGE_MS = 120000;
 const TV_VIEW_NAMES = new Set(['day', '3-day', 'week', 'month']);
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
@@ -2632,6 +2633,10 @@ function hydrateFromViewCache(viewName, selectedDate) {
   const key = buildViewCacheKey(viewName, selectedDate);
   const cached = state.viewPayloadCache[key];
   if (!cached) return false;
+  const cachedAt = Number(cached.cachedAt || 0);
+  if (!cachedAt || (Date.now() - cachedAt) > VIEW_PAYLOAD_MAX_AGE_MS) {
+    return false;
+  }
   state.days = Array.isArray(cached.days) ? cached.days : [];
   state.serverAccounts = Array.isArray(cached.accounts) ? cached.accounts : [];
   state.legendSourceDays = null;
