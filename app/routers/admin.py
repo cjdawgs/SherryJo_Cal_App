@@ -2,7 +2,9 @@ import os
 import re
 import json
 import logging
+import subprocess
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from urllib.parse import urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
@@ -18,6 +20,7 @@ from app.database import DATABASE_URL, engine, get_db
 from app.config import settings
 from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, User
+from app.security import verify_password
 from app.services.asset_urls import asset_url
 from app.utils.crypto import TokenEncryptionError, reset_cipher_cache, unseal
 from app.utils.runtime_token_key_store import persist_token_encryption_key
@@ -49,11 +52,18 @@ MAX_TABLE_ROWS = 200
 DEFAULT_GITHUB_REPOSITORY = "cjdawgs/SherryJo_Cal_App"
 DEFAULT_GITHUB_BRANCH = "main"
 DEFAULT_RENDER_DASHBOARD_URL = "https://dashboard.render.com/"
+DEFAULT_CLOUDFLARE_DASHBOARD_URL = "https://dash.cloudflare.com/"
 RENDER_DEPLOY_HOOK_ENV = "RENDER_DEPLOY_HOOK_URL"
+CLOUDFLARE_DEPLOY_HOOK_ENV = "CLOUDFLARE_DEPLOY_HOOK_URL"
+GIT_COMMIT_SCRIPT_ENV = "ADMIN_GIT_COMMIT_SCRIPT"
 
 
 class RuntimeTokenEncryptionKeyUpdate(BaseModel):
     token_encryption_key: str
+
+
+class GitCommitPushRequest(BaseModel):
+    password: str
 
 
 def redact_row(row: dict) -> dict:
@@ -222,14 +232,64 @@ def _render_deploy_hook_url() -> str | None:
     return value or None
 
 
-def _deployment_sync_payload() -> dict:
+def _cloudflare_dashboard_url() -> str:
+    return str(os.getenv("CLOUDFLARE_DASHBOARD_URL", DEFAULT_CLOUDFLARE_DASHBOARD_URL) or DEFAULT_CLOUDFLARE_DASHBOARD_URL).strip()
+
+
+def _cloudflare_deploy_hook_url() -> str | None:
+    value = str(os.getenv(CLOUDFLARE_DEPLOY_HOOK_ENV, "") or "").strip()
+    return value or None
+
+
+def _active_deployment_platform(request: Request | None) -> str:
+    if request and str(request.headers.get("x-sherryjo-edge") or "").lower() == "cloudflare":
+        return "cloudflare"
+    return "render"
+
+
+def _git_commit_script_path() -> Path | None:
+    configured = str(os.getenv(GIT_COMMIT_SCRIPT_ENV, "") or "").strip()
+    candidates = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    candidates.append(Path(BASE_DIR).parents[2] / "Commit_SherryJo_Cal_App.ps1")
+
+    for path in candidates:
+        candidate = path.resolve()
+        if candidate.suffix.lower() == ".ps1" and candidate.is_file():
+            return candidate
+    return None
+
+
+def _repository_controls_payload() -> dict:
+    script_path = _git_commit_script_path()
+    available = script_path is not None and os.name == "nt"
+    return {
+        "commit_push_available": available,
+        "commit_push_endpoint": "/admin/system/github/commit-push" if available else None,
+        "commit_push_requires_password": True,
+        "commit_push_hint": (
+            "Launch the approved PowerShell commit workflow on this desktop."
+            if available
+            else f"Set {GIT_COMMIT_SCRIPT_ENV} to the approved .ps1 path on a Windows desktop to enable this action."
+        ),
+        "fetch_pull_targets": [
+            {"id": "desktop", "label": "Local desktop", "status": "planned", "available": False},
+            {"id": "codespace", "label": "GitHub Codespace", "status": "planned", "available": False},
+        ],
+    }
+
+
+def _deployment_sync_payload(request: Request | None = None) -> dict:
     current_commit, current_commit_source = _current_deployment_commit()
     github_repo, github_branch = _github_repo_settings()
     github_probe = _fetch_github_latest_commit_probe(github_repo, github_branch)
     github_latest_commit = github_probe.get("commit")
     dashboard_url = _render_dashboard_url()
     deploy_hook_url = _render_deploy_hook_url()
+    cloudflare_deploy_hook_url = _cloudflare_deploy_hook_url()
     github_urls = _github_repo_urls(github_repo, github_branch)
+    active_platform = _active_deployment_platform(request)
 
     if current_commit and github_latest_commit:
         status = "synced" if current_commit == github_latest_commit else "out_of_sync"
@@ -239,9 +299,9 @@ def _deployment_sync_payload() -> dict:
         status = "unknown"
 
     if status == "synced":
-        message = "Render deployment matches the latest GitHub commit."
+        message = f"{('Cloudflare edge / Render origin' if active_platform == 'cloudflare' else 'Render deployment')} matches the latest GitHub commit."
     elif status == "out_of_sync":
-        message = "Render deployment is not on the latest GitHub commit yet."
+        message = f"{('Cloudflare edge / Render origin' if active_platform == 'cloudflare' else 'Render deployment')} is not on the latest GitHub commit yet."
     else:
         message = "Unable to verify deployment sync from the running app."
 
@@ -266,6 +326,26 @@ def _deployment_sync_payload() -> dict:
         "github_http_status": github_probe.get("http_status"),
         "status": status,
         "message": message,
+        "active_platform": active_platform,
+        "active_platform_label": "Cloudflare edge / Render origin" if active_platform == "cloudflare" else "Render origin",
+        "platforms": [
+            {
+                "id": "render",
+                "label": "Render origin",
+                "role": "Application origin",
+                "dashboard_url": dashboard_url,
+                "manual_deploy_available": bool(deploy_hook_url),
+                "manual_deploy_endpoint": "/admin/system/render/redeploy" if deploy_hook_url else None,
+            },
+            {
+                "id": "cloudflare",
+                "label": "Cloudflare edge",
+                "role": "Public edge proxy",
+                "dashboard_url": _cloudflare_dashboard_url(),
+                "manual_deploy_available": bool(cloudflare_deploy_hook_url),
+                "manual_deploy_endpoint": "/admin/system/cloudflare/redeploy" if cloudflare_deploy_hook_url else None,
+            },
+        ],
         "render_dashboard_url": dashboard_url,
         **github_urls,
         "current_commit_url": current_commit_url,
@@ -274,6 +354,7 @@ def _deployment_sync_payload() -> dict:
         "manual_deploy_available": bool(deploy_hook_url),
         "manual_deploy_endpoint": "/admin/system/render/redeploy" if deploy_hook_url else None,
         "manual_deploy_hint": "Trigger the Render deploy hook from this admin app." if deploy_hook_url else "Open the Render dashboard and trigger a manual deploy there.",
+        "repository_controls": _repository_controls_payload(),
     }
 
 
@@ -300,6 +381,49 @@ def _trigger_render_deploy_hook() -> dict:
     except Exception as exc:
         logger.warning("Render deploy hook failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"Failed to trigger Render deploy hook: {exc}") from exc
+
+
+def _trigger_cloudflare_deploy_hook() -> dict:
+    deploy_hook_url = _cloudflare_deploy_hook_url()
+    if not deploy_hook_url:
+        raise HTTPException(status_code=400, detail=f"{CLOUDFLARE_DEPLOY_HOOK_ENV} is not configured.")
+
+    request = UrlRequest(deploy_hook_url, data=b"", method="POST")
+    try:
+        with urlopen(request, timeout=10) as response:
+            body = response.read().decode("utf-8", errors="ignore").strip()
+            status_code = getattr(response, "status", None) or response.getcode() or 200
+        return {
+            "triggered": True,
+            "status_code": status_code,
+            "message": "Cloudflare deploy hook triggered.",
+            "response": body[:500] if body else "",
+            "cloudflare_dashboard_url": _cloudflare_dashboard_url(),
+        }
+    except (HTTPError, URLError, TimeoutError) as exc:
+        logger.warning("Cloudflare deploy hook failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Failed to trigger Cloudflare deploy hook: {exc}") from exc
+    except Exception as exc:
+        logger.warning("Cloudflare deploy hook failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Failed to trigger Cloudflare deploy hook: {exc}") from exc
+
+
+def _launch_git_commit_script() -> dict:
+    script_path = _git_commit_script_path()
+    if script_path is None or os.name != "nt":
+        raise HTTPException(status_code=409, detail="The approved desktop commit script is not available in this runtime.")
+
+    try:
+        subprocess.Popen(
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path)],
+            cwd=str(script_path.parent),
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+    except OSError as exc:
+        logger.warning("Approved Git commit script launch failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to launch the approved Git commit workflow.") from exc
+
+    return {"launched": True, "message": "Approved commit and push workflow opened in PowerShell."}
 
 
 def _extract_publish_reason(details: str | None) -> str:
@@ -659,6 +783,7 @@ def admin_tv_stale_refresh_summary(
 
 @router.get("/system/overview")
 def admin_system_overview(
+    request: Request,
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
@@ -689,7 +814,7 @@ def admin_system_overview(
             ],
         },
         "security": security_info,
-        "deployment": _deployment_sync_payload(),
+        "deployment": _deployment_sync_payload(request),
     }
 
 
@@ -698,6 +823,23 @@ def admin_trigger_render_redeploy(
     admin_user: User = Depends(require_admin),
 ):
     return _trigger_render_deploy_hook()
+
+
+@router.post("/system/cloudflare/redeploy")
+def admin_trigger_cloudflare_redeploy(
+    admin_user: User = Depends(require_admin),
+):
+    return _trigger_cloudflare_deploy_hook()
+
+
+@router.post("/system/github/commit-push")
+def admin_launch_git_commit_push(
+    payload: GitCommitPushRequest,
+    admin_user: User = Depends(require_admin),
+):
+    if not verify_password(payload.password, admin_user.hashed_password):
+        raise HTTPException(status_code=403, detail="Admin password is incorrect.")
+    return _launch_git_commit_script()
 
 
 @router.get("/system/table/{table_name}/rows")

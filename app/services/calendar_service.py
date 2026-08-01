@@ -1238,6 +1238,8 @@ class CalendarService:
 
                 "color": ev.color,
 
+                "color_enabled": bool(getattr(ev, "color_enabled", False)),
+
                 "tags": ev.tags or [],
 
                 "sticky_note": ev.sticky_note,

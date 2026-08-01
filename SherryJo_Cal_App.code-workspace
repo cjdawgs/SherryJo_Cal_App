@@ -19,7 +19,7 @@
 		// --- Python Specific Settings ---
 		// It's a good practice to specify a default interpreter for the project.
 		// This often points to a virtual environment's Python executable.
-		"python.defaultInterpreterPath": ".venv\\Scripts\\python.exe",
+		"python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
 		// Enable and configure a linter (e.g., pylint)
 		"python.linting.enabled": true,
 		"python.linting.pylintEnabled": true,

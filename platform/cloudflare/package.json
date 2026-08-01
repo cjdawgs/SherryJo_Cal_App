@@ -1,0 +1,10 @@
+{
+    "name": "sherryjo-cloudflare-edge",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "check": "node --check src/worker.js",
+        "test": "node --test test/*.test.js"
+    }
+}

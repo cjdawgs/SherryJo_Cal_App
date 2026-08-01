@@ -14,6 +14,55 @@ on:
   workflow_dispatch:
 
 jobs:
+  deployment-contract:
+    runs-on: ubuntu-latest
+    env:
+      ADMIN_SETUP_CODE: test-admin-code
+      BASE_URL: https://calendar.example.com
+      DATABASE_URL: postgresql+psycopg2://user:pass@db.example.com/app
+      DB_TYPE: postgres
+      DISABLE_SQLITE_FALLBACK: "1"
+      GOOGLE_CLIENT_ID: test-client-id
+      GOOGLE_CLIENT_SECRET: test-client-secret
+      GOOGLE_REDIRECT_URI: https://calendar.example.com/auth/google/callback
+      JWT_ALGORITHM: HS256
+      JWT_SECRET_KEY: test-jwt-secret
+      MS_CLIENT_ID: test-client-id
+      MS_CLIENT_SECRET: test-client-secret
+      MS_REDIRECT_URI: https://calendar.example.com/ms/callback
+      MS_TENANT_ID: test-tenant-id
+      ORIGIN_BASE_URL: https://sherryjo-cal-app.onrender.com
+      REQUIRE_DB_KIND: postgres
+      TOKEN_ENCRYPTION_KEY: test-token-encryption-key
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate both deployment contracts
+        run: python deployment/platform_contract.py --target all
+
+      - name: Validate Render Python build
+        run: python -m compileall -q app deployment
+
+      - name: Test Cloudflare edge contract
+        run: node --test platform/cloudflare/test/*.test.js
+
+      - name: Validate Cloudflare Worker bundle
+        run: npx --yes wrangler@4 deploy --dry-run
+
+      - name: Validate Alembic migration graph
+        run: |
+          pip install -r requirements.txt
+          alembic heads
+
   pytest:
     runs-on: ubuntu-latest
 
@@ -51,7 +100,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -60,12 +109,4 @@ jobs:
           pip install pytest
 
       - name: Run test suite
-        # Two checks are deselected because they fail on main for reasons
-        # unrelated to application behaviour, and fixing them is a separate
-        # change: the asset-hash cache keys on mtime (so a same-instant rewrite
-        # reuses the hash), and the JS parenthesis counter mis-parses
-        # calendar.js. Everything else, including the security suite, must pass.
-        run: |
-          pytest app/tests -q \
-            --deselect app/tests/test_asset_urls.py::test_asset_url_hash_changes_when_file_changes \
-            --deselect app/tests/test_js_syntax.py::test_js_parentheses_balanced
+        run: pytest app/tests -q

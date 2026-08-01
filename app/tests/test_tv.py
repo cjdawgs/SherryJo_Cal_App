@@ -646,17 +646,17 @@ class TestTVEventsEndpoint:
             headers=auth_headers,
         )
 
-        original_group = tv_router._group_events_by_date
+        original_group = tv_router._group_serialized_events_by_date
 
         def _boom(*_args, **_kwargs):
             raise SQLAlchemyError("synthetic db failure")
 
-        monkeypatch.setattr(tv_router, "_group_events_by_date", _boom)
+        monkeypatch.setattr(tv_router, "_group_serialized_events_by_date", _boom)
 
         try:
             resp = client.get("/tv/events", headers=auth_headers)
         finally:
-            monkeypatch.setattr(tv_router, "_group_events_by_date", original_group)
+            monkeypatch.setattr(tv_router, "_group_serialized_events_by_date", original_group)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -694,16 +694,16 @@ class TestTVEventsEndpoint:
         assert seed_payload.get("staleData") is False
         assert any(day.get("events") for day in seed_payload.get("days", []))
 
-        original_group = tv_router._group_events_by_date
+        original_group = tv_router._group_serialized_events_by_date
 
         def _boom(*_args, **_kwargs):
             raise RuntimeError("synthetic grouping failure")
 
-        monkeypatch.setattr(tv_router, "_group_events_by_date", _boom)
+        monkeypatch.setattr(tv_router, "_group_serialized_events_by_date", _boom)
         try:
             stale = client.get("/tv/events", headers=auth_headers)
         finally:
-            monkeypatch.setattr(tv_router, "_group_events_by_date", original_group)
+            monkeypatch.setattr(tv_router, "_group_serialized_events_by_date", original_group)
 
         assert stale.status_code == 200
         stale_payload = stale.json()

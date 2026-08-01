@@ -1,0 +1,44 @@
+services:
+  - type: web
+    name: sherryjo-cal-app
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: DB_TYPE
+        value: postgres
+      - key: DISABLE_SQLITE_FALLBACK
+        value: "1"
+      - key: REQUIRE_DB_KIND
+        value: postgres
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ADMIN_SETUP_CODE
+        sync: false
+      - key: BASE_URL
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false
+      - key: JWT_SECRET_KEY
+        sync: false
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+      - key: MS_REDIRECT_URI
+        sync: false
+      - key: MS_TENANT_ID
+        sync: false
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false

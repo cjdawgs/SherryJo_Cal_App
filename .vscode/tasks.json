@@ -140,7 +140,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -200,7 +200,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -210,7 +210,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -220,7 +220,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -230,7 +230,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
+				"python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
 			],
 			"isBackground": false
 		},
@@ -240,7 +240,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys/dep-d8ugdi3isgbc73bocjfg';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
+				"python -c \"import os,urllib.request,json;u='https://api.render.com/v1/services/srv-d8sfeke8bjmc738bhgm0/deploys/dep-d8ugdi3isgbc73bocjfg';req=urllib.request.Request(u,headers={'Authorization':'Bearer '+os.environ['RENDER_API_KEY'],'Accept':'application/json'});r=urllib.request.urlopen(req,timeout=30);print(r.status);b=r.read().decode('utf-8','replace');print(b[:1200])\""
 			],
 			"isBackground": false
 		},
@@ -250,7 +250,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -360,7 +360,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -420,7 +420,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -520,7 +520,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -590,7 +590,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -640,7 +640,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -690,7 +690,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -740,7 +740,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -830,7 +830,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -950,7 +950,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1060,7 +1060,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"git push origin main && set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1070,7 +1070,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1100,7 +1100,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"git push origin main && set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1130,7 +1130,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"git push origin main && set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1140,7 +1140,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1170,7 +1170,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"git push origin main && set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"git push origin main && set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -1180,7 +1180,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set RENDER_API_KEY=rnd_f2kliECLptZk4BntIju0fTuTVdNn&& set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
+				"set RENDER_SERVICE_ID=srv-d8sfeke8bjmc738bhgm0&& set APP_BASE_URL=https://sherryjo-cal-app.onrender.com&& python scripts\\render_deploy_and_verify.py"
 			],
 			"isBackground": false
 		},
@@ -2192,7 +2192,7 @@
 				"-ExecutionPolicy",
 				"Bypass",
 				"-File",
-				"${workspaceFolder}/scripts/Commit_SherryJo_Calendar_App.ps1"
+				"${workspaceFolder}/../../Commit_SherryJo_Cal_App.ps1"
 			],
 			"isBackground": false,
 			"presentation": {

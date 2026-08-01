@@ -425,6 +425,47 @@ def _serialize_event_for_tv(event: Event) -> dict:
     }
 
 
+def _adapt_calendar_event_for_tv(event: dict) -> dict:
+    """Add TV response fields to a calendar-service event dictionary."""
+    adapted = dict(event)
+    source = str(adapted.get("source") or "local")
+    source_provider = normalize_provider(source)
+    account_email = str(adapted.get("account_email") or "").strip().lower()
+    account_key = adapted.get("account_key") or (
+        f"{source_provider}:{account_email}" if account_email else None
+    )
+    external_ids = dict(adapted.get("external_ids") or {})
+    color = adapted.get("color")
+    color_enabled = bool(adapted.get("color_enabled", False))
+    has_sticky = _sticky_payload_has_content(adapted.get("sticky_note")) or _sticky_payload_has_content(
+        adapted.get("sticky_notes")
+    )
+
+    adapted.update({
+        "source": source,
+        "accountEmail": account_email or None,
+        "account_email": account_email or None,
+        "accountKey": account_key,
+        "account_key": account_key,
+        "external_ids": external_ids,
+        "color_enabled": color_enabled,
+        "hasSticky": has_sticky,
+        "extendedProps": {
+            "backendId": adapted.get("id"),
+            "source": source_provider,
+            "account": account_email or None,
+            "accountKey": account_key,
+            "account_key": account_key,
+            "external_ids": external_ids,
+            "description": adapted.get("description") or "",
+            "tags": adapted.get("tags") or [],
+            "eventColor": color,
+            "eventColorEnabled": color_enabled,
+        },
+    })
+    return adapted
+
+
 def _normalize_sticky_notes(payload) -> list[dict]:
     if payload is None:
         return []
@@ -1282,8 +1323,9 @@ def get_tv_events(
                 current_user,
                 window_start,
                 window_end,
-                dedup_enabled=False,
+                dedup_enabled=True,
             )
+            events = [_adapt_calendar_event_for_tv(event) for event in events]
         except Exception:
             logger.exception(
                 "TV_EVENTS_FETCH_CALENDAR_SERVICE_FAILED user_id=%s; falling back to direct event query",

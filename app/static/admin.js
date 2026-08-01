@@ -75,6 +75,13 @@ const el = {
   deploymentSyncGithubBtn: document.getElementById("deploymentSyncGithubBtn"),
   deploymentSyncCompareBtn: document.getElementById("deploymentSyncCompareBtn"),
   deploymentSyncResolveBtn: document.getElementById("deploymentSyncResolveBtn"),
+  deploymentSyncPlatform: document.getElementById("deploymentSyncPlatform"),
+  deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
+  deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
+  gitCommitPasswordInput: document.getElementById("gitCommitPasswordInput"),
+  gitCommitPushBtn: document.getElementById("gitCommitPushBtn"),
+  gitCommitPushHint: document.getElementById("gitCommitPushHint"),
+  gitFetchPullTargets: document.getElementById("gitFetchPullTargets"),
   securityWarningBanner: document.getElementById("securityWarningBanner"),
   runCurrentUserFailureCheckBtn: document.getElementById("runCurrentUserFailureCheckBtn"),
   currentUserFailureCheckStamp: document.getElementById("currentUserFailureCheckStamp"),
@@ -133,15 +140,20 @@ async function refreshDeploymentSync() {
 
 async function resolveDeploymentSync() {
   const deployment = state.overview?.deployment || {};
-  if (deployment.manual_deploy_available && deployment.manual_deploy_endpoint) {
+  const platforms = Array.isArray(deployment.platforms) ? deployment.platforms : [];
+  const activeTarget = platforms.find((item) => item.id === deployment.active_platform) || {};
+  const deployAvailable = activeTarget.manual_deploy_available ?? deployment.manual_deploy_available;
+  const deployEndpoint = activeTarget.manual_deploy_endpoint || deployment.manual_deploy_endpoint;
+  const platformLabel = activeTarget.label || deployment.active_platform_label || "deployment";
+  if (deployAvailable && deployEndpoint) {
     if (el.deploymentSyncResolveBtn) {
       el.deploymentSyncResolveBtn.disabled = true;
       el.deploymentSyncResolveBtn.textContent = "Triggering...";
     }
 
-    const res = await apiRequest(deployment.manual_deploy_endpoint, { method: "POST" });
+    const res = await apiRequest(deployEndpoint, { method: "POST" });
     if (!res) {
-      setStatus("Unable to trigger the Render deploy hook.", true);
+      setStatus(`Unable to trigger the ${platformLabel} deploy hook.`, true);
       if (el.deploymentSyncResolveBtn) {
         el.deploymentSyncResolveBtn.disabled = false;
         el.deploymentSyncResolveBtn.textContent = "Trigger Redeploy";
@@ -155,7 +167,7 @@ async function resolveDeploymentSync() {
     }
 
     if (!res.ok) {
-      setStatus(data.detail || "Unable to trigger the Render deploy hook.", true);
+      setStatus(data.detail || `Unable to trigger the ${platformLabel} deploy hook.`, true);
       if (el.deploymentSyncResolveBtn) {
         el.deploymentSyncResolveBtn.disabled = false;
         el.deploymentSyncResolveBtn.textContent = "Trigger Redeploy";
@@ -163,13 +175,43 @@ async function resolveDeploymentSync() {
       return;
     }
 
-    setStatus(data.message || "Render deploy hook triggered.");
+    setStatus(data.message || `${platformLabel} deploy hook triggered.`);
     await loadSystemOverview();
     return;
   }
 
-  const targetUrl = deployment.render_dashboard_url || "https://dashboard.render.com/";
+  const targetUrl = activeTarget.dashboard_url || deployment.render_dashboard_url || "https://dashboard.render.com/";
   window.open(targetUrl, "_blank", "noopener,noreferrer");
+}
+
+async function launchGitCommitPush() {
+  const controls = state.overview?.deployment?.repository_controls || {};
+  const password = String(el.gitCommitPasswordInput?.value || "");
+  if (!password) {
+    setStatus("Enter your current admin login password.", true);
+    return;
+  }
+  if (!controls.commit_push_endpoint) {
+    setStatus(controls.commit_push_hint || "Commit and push is unavailable in this runtime.", true);
+    return;
+  }
+
+  el.gitCommitPushBtn.disabled = true;
+  el.gitCommitPushBtn.textContent = "Opening workflow...";
+  const res = await apiRequest(controls.commit_push_endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  });
+  const data = res ? await res.json() : {};
+  el.gitCommitPasswordInput.value = "";
+  if (!res || !res.ok) {
+    setStatus(data.detail || "Unable to open the commit and push workflow.", true);
+  } else {
+    setStatus(data.message || "Commit and push workflow opened.");
+  }
+  el.gitCommitPushBtn.disabled = !controls.commit_push_available;
+  el.gitCommitPushBtn.textContent = "Open Commit & Push Workflow";
 }
 
 function openDeploymentGithub() {
@@ -401,6 +443,21 @@ function renderSystemOverview(data) {
     el.deploymentSyncCurrentCommit.textContent = shortCommit(deployment.current_commit);
   }
 
+  if (el.deploymentSyncPlatform) {
+    el.deploymentSyncPlatform.textContent = deployment.active_platform_label || "Unknown platform";
+  }
+
+  if (el.deploymentSyncCurrentLabel) {
+    el.deploymentSyncCurrentLabel.textContent = deployment.active_platform === "cloudflare" ? "Origin build at edge" : "Current Render build";
+  }
+
+  if (el.deploymentSyncPlatformSummary) {
+    const platforms = Array.isArray(deployment.platforms) ? deployment.platforms : [];
+    el.deploymentSyncPlatformSummary.textContent = platforms.length
+      ? platforms.map((item) => `${item.label}: ${item.role}`).join(" | ")
+      : "Render origin";
+  }
+
   if (el.deploymentSyncGithubCommit) {
     el.deploymentSyncGithubCommit.textContent = shortCommit(deployment.github_latest_commit);
   }
@@ -430,7 +487,7 @@ function renderSystemOverview(data) {
 
   if (el.deploymentSyncHint) {
     if (isSynced) {
-      el.deploymentSyncHint.textContent = "Render and GitHub are aligned. No deploy action is needed.";
+      el.deploymentSyncHint.textContent = `${deployment.active_platform_label || "Deployment"} and GitHub are aligned. No deploy action is needed.`;
     } else if (isOutOfSync) {
       el.deploymentSyncHint.textContent = deployment.manual_deploy_hint || "Render is behind GitHub. Trigger or open a deploy now.";
     } else {
@@ -441,10 +498,14 @@ function renderSystemOverview(data) {
   }
 
   if (el.deploymentSyncResolveBtn) {
+    const platforms = Array.isArray(deployment.platforms) ? deployment.platforms : [];
+    const activeTarget = platforms.find((item) => item.id === deployment.active_platform) || {};
+    const deployAvailable = activeTarget.manual_deploy_available ?? deployment.manual_deploy_available;
+    const targetLabel = activeTarget.label || "Render";
     el.deploymentSyncResolveBtn.disabled = isSynced;
     el.deploymentSyncResolveBtn.textContent = isSynced
       ? "In Sync"
-      : (deployment.manual_deploy_available ? "Trigger Redeploy" : "Open Render");
+      : (deployAvailable ? `Deploy ${targetLabel}` : `Open ${targetLabel}`);
     el.deploymentSyncResolveBtn.classList.toggle("is-danger", isOutOfSync);
   }
 
@@ -459,6 +520,26 @@ function renderSystemOverview(data) {
 
   if (el.deploymentSyncRefreshBtn) {
     el.deploymentSyncRefreshBtn.disabled = false;
+  }
+
+  const repositoryControls = deployment.repository_controls || {};
+  if (el.gitCommitPushHint) {
+    el.gitCommitPushHint.textContent = repositoryControls.commit_push_hint || "Repository controls are unavailable in this runtime.";
+  }
+  if (el.gitCommitPasswordInput) {
+    el.gitCommitPasswordInput.disabled = !repositoryControls.commit_push_available;
+  }
+  if (el.gitCommitPushBtn) {
+    el.gitCommitPushBtn.disabled = !repositoryControls.commit_push_available;
+  }
+  if (el.gitFetchPullTargets) {
+    const targets = Array.isArray(repositoryControls.fetch_pull_targets) ? repositoryControls.fetch_pull_targets : [];
+    el.gitFetchPullTargets.innerHTML = targets.map((target) => `
+      <div class="git-future-target">
+        <span><strong>${escapeHtml(target.label)}</strong><small>${escapeHtml(target.status || "planned")}</small></span>
+        <button class="ghost-btn" type="button" disabled>Fetch / Pull</button>
+      </div>
+    `).join("");
   }
 }
 
@@ -1839,6 +1920,7 @@ function bindEvents() {
   el.deploymentSyncGithubBtn?.addEventListener("click", openDeploymentGithub);
   el.deploymentSyncCompareBtn?.addEventListener("click", openDeploymentCompare);
   el.deploymentSyncResolveBtn?.addEventListener("click", resolveDeploymentSync);
+  el.gitCommitPushBtn?.addEventListener("click", launchGitCommitPush);
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
   el.applyTokenEncryptionKeyBtn?.addEventListener("click", applyTokenEncryptionKey);

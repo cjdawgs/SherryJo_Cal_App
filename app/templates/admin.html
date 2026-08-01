@@ -530,6 +530,70 @@
       opacity: 0.5;
       cursor: not-allowed;
     }
+
+    .repository-control-panel {
+      margin: 0 0 12px;
+      border-color: #94a3b8;
+      background: #f8fafc;
+    }
+
+    .repository-control-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+      gap: 18px;
+      padding-top: 14px;
+      border-top: 1px solid #d7e0ea;
+    }
+
+    .repository-control-body h3 {
+      margin: 0 0 6px;
+      font-size: 14px;
+    }
+
+    .repository-control-body p {
+      margin: 0 0 10px;
+      color: #526579;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .git-confirm-row,
+    .git-future-target {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .git-confirm-row input {
+      flex: 1 1 190px;
+      min-width: 0;
+    }
+
+    .git-future-target {
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid #d7e0ea;
+    }
+
+    .git-future-target span {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .git-future-target small {
+      color: #64748b;
+      text-transform: uppercase;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 760px) {
+      .repository-control-body {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -566,7 +630,7 @@
           <div class="deployment-sync-header">
             <div>
               <h2>Deployment Sync</h2>
-              <p>Confirms whether the Render deployment matches the latest GitHub commit before you trust the TV dashboard.</p>
+              <p>Confirms whether the active Cloudflare or Render delivery path matches the latest GitHub commit before you trust the TV dashboard.</p>
             </div>
             <span id="deploymentSyncStatusPill" class="deployment-sync-pill is-unknown">Checking sync...</span>
           </div>
@@ -574,12 +638,14 @@
         <div class="deployment-sync-grid">
           <div class="deployment-sync-card">
             <div class="deployment-sync-lines">
-              <div class="deployment-sync-row"><span class="deployment-sync-label">Current Render build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Active route</span><span id="deploymentSyncPlatform" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span id="deploymentSyncCurrentLabel" class="deployment-sync-label">Current build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">GitHub latest commit</span><span id="deploymentSyncGithubCommit" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Repository / branch</span><span id="deploymentSyncRepoBranch" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Version source</span><span id="deploymentSyncSource" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Last checked</span><span id="deploymentSyncCheckedAt" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Verification detail</span><span id="deploymentSyncDetail" class="deployment-sync-code">Loading...</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Delivery topology</span><span id="deploymentSyncPlatformSummary" class="deployment-sync-code">Loading...</span></div>
             </div>
             <p id="deploymentSyncMessage" class="deployment-sync-message">Loading deployment sync status...</p>
           </div>
@@ -590,6 +656,30 @@
               <button id="deploymentSyncGithubBtn" class="ghost-btn" type="button">Open GitHub</button>
               <button id="deploymentSyncCompareBtn" class="ghost-btn" type="button">Compare</button>
               <button id="deploymentSyncResolveBtn" class="is-danger" type="button">Resolve / Open Render</button>
+            </div>
+          </div>
+        </div>
+      </details>
+    </section>
+
+    <section class="panel repository-control-panel" id="repositoryControlPanel">
+      <details id="repositoryControlDetails">
+        <summary>GitHub Repository Control</summary>
+        <div class="repository-control-body">
+          <div>
+            <h3>Commit &amp; Push</h3>
+            <p id="gitCommitPushHint">Checking whether the approved desktop commit workflow is available...</p>
+            <div class="git-confirm-row">
+              <input id="gitCommitPasswordInput" type="password" placeholder="Admin login password" autocomplete="current-password">
+              <button id="gitCommitPushBtn" type="button" disabled>Open Commit &amp; Push Workflow</button>
+            </div>
+          </div>
+          <div>
+            <h3>Fetch &amp; Pull</h3>
+            <p>Mirrored targets are reserved here for controlled synchronization in a future release.</p>
+            <div id="gitFetchPullTargets">
+              <div class="git-future-target"><span><strong>Local desktop</strong><small>planned</small></span><button class="ghost-btn" type="button" disabled>Fetch / Pull</button></div>
+              <div class="git-future-target"><span><strong>GitHub Codespace</strong><small>planned</small></span><button class="ghost-btn" type="button" disabled>Fetch / Pull</button></div>
             </div>
           </div>
         </div>

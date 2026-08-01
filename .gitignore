@@ -37,6 +37,7 @@ dist/
 
 # Node / JavaScript
 node_modules/
+.wrangler/
 
 # OS Junk
 .DS_Store

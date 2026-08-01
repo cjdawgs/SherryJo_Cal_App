@@ -162,6 +162,31 @@ def test_admin_system_overview_payload(client, monkeypatch):
     assert deployment["github_error"] is None
     assert deployment["branch_url"]
     assert deployment["manual_deploy_available"] in {True, False}
+    assert deployment["active_platform"] == "render"
+    assert {platform["id"] for platform in deployment["platforms"]} == {"render", "cloudflare"}
+    assert len(deployment["repository_controls"]["fetch_pull_targets"]) == 2
+
+
+def test_admin_system_overview_detects_cloudflare_edge(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    current_sha = "d" * 40
+    monkeypatch.setenv("RENDER_GIT_COMMIT", current_sha)
+    monkeypatch.setattr(
+        admin_router,
+        "_fetch_github_latest_commit_probe",
+        lambda repo, branch: {"commit": current_sha, "error": None, "error_code": None, "http_status": 200},
+    )
+
+    headers = _admin_headers(client)
+    headers["x-sherryjo-edge"] = "cloudflare"
+    res = client.get("/admin/system/overview", headers=headers)
+
+    assert res.status_code == 200
+    deployment = res.json()["deployment"]
+    assert deployment["active_platform"] == "cloudflare"
+    assert deployment["active_platform_label"] == "Cloudflare edge / Render origin"
+    assert "Cloudflare edge / Render origin" in deployment["message"]
 
 
 def test_admin_render_redeploy_endpoint_uses_hook(client, monkeypatch):
@@ -194,6 +219,60 @@ def test_admin_render_redeploy_endpoint_uses_hook(client, monkeypatch):
     assert payload["triggered"] is True
     assert payload["status_code"] == 200
     assert payload["render_dashboard_url"]
+
+
+def test_admin_cloudflare_redeploy_endpoint_uses_hook(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("CLOUDFLARE_DEPLOY_HOOK_URL", "https://example.invalid/cloudflare-hook")
+
+    class _FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"queued"
+
+        def getcode(self):
+            return 200
+
+    monkeypatch.setattr(admin_router, "urlopen", lambda request, timeout=10: _FakeResponse())
+
+    res = client.post("/admin/system/cloudflare/redeploy", headers=headers)
+    assert res.status_code == 200
+    assert res.json()["message"] == "Cloudflare deploy hook triggered."
+
+
+def test_admin_git_commit_push_requires_current_admin_password(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    launched = []
+    monkeypatch.setattr(admin_router, "_launch_git_commit_script", lambda: launched.append(True) or {"launched": True})
+
+    denied = client.post(
+        "/admin/system/github/commit-push",
+        headers=headers,
+        json={"password": "wrong-password"},
+    )
+    assert denied.status_code == 403
+    assert launched == []
+
+    allowed = client.post(
+        "/admin/system/github/commit-push",
+        headers=headers,
+        json={"password": admin["password"]},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["launched"] is True
+    assert launched == [True]
 
 
 def test_admin_system_overview_flags_missing_token_key_when_credentials_encrypted(client, db, monkeypatch):

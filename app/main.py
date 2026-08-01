@@ -4,6 +4,7 @@
 # ==================================================
 
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request
 from fastapi.openapi.utils import get_openapi
@@ -15,6 +16,7 @@ from sqlalchemy import inspect, text
 from datetime import datetime, timezone
 
 from app.database import engine, Base
+from app.config import settings
 from app.db_security import enforce_row_level_security, seal_stored_credentials
 from app.logging_config import configure_logging
 from app.services.asset_urls import asset_import_map_json, asset_url
@@ -99,17 +101,27 @@ def evaluate_schema_health(db_engine=engine):
         }
 
 
+def build_allowed_origins(base_url: str) -> list[str]:
+    origins = [
+        "https://sherryjo-cal-app.onrender.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+    parsed = urlsplit(str(base_url or "").strip())
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        configured_origin = f"{parsed.scheme}://{parsed.netloc}"
+        if configured_origin not in origins:
+            origins.append(configured_origin)
+    return origins
+
+
 # ==================================================
 # ✅ ENABLE CORS (ALLOW FRONTEND TO CALL API)
 # ==================================================
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://sherryjo-cal-app.onrender.com",
-        "http://localhost:8000",
-        "http://127.0.0.1:8000",
-    ],
+    allow_origins=build_allowed_origins(settings.BASE_URL),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -1,0 +1,11 @@
+name = "sherryjo-calendar-edge"
+main = "platform/cloudflare/src/worker.js"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+[vars]
+ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
