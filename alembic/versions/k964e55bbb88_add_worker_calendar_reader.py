@@ -61,10 +61,9 @@ def upgrade_statements() -> tuple[str, ...]:
         f"""
         DO $$
         BEGIN
-            EXECUTE format(
-                'GRANT CONNECT ON DATABASE %I TO {WORKER_ROLE}',
-                current_database()
-            );
+            EXECUTE 'GRANT CONNECT ON DATABASE '
+                || quote_ident(current_database())
+                || ' TO {WORKER_ROLE}';
         END $$
         """,
         f"REVOKE CREATE ON SCHEMA public FROM {WORKER_ROLE}",
@@ -124,7 +123,7 @@ def upgrade_statements() -> tuple[str, ...]:
         WHERE user_id = public.worker_app_user_id()
           AND COALESCE(is_service_provider, false) = false
           AND access_token <> 'admin-placeholder-token'
-          AND lower(account_email) NOT LIKE '%@example.com'
+                    AND right(lower(account_email), 12) <> '@example.com'
         """,
         f"REVOKE ALL ON TABLE public.{ACCOUNT_STATUS_VIEW} FROM PUBLIC",
         f"GRANT SELECT (account_key, account_status) ON TABLE public.{ACCOUNT_STATUS_VIEW} TO {WORKER_ROLE}",
@@ -156,10 +155,9 @@ def downgrade_statements() -> tuple[str, ...]:
         f"""
         DO $$
         BEGIN
-            EXECUTE format(
-                'REVOKE CONNECT ON DATABASE %I FROM {WORKER_ROLE}',
-                current_database()
-            );
+            EXECUTE 'REVOKE CONNECT ON DATABASE '
+                || quote_ident(current_database())
+                || ' FROM {WORKER_ROLE}';
         END $$
         """,
         f"DROP ROLE IF EXISTS {WORKER_ROLE}",

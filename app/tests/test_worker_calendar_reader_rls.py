@@ -54,6 +54,7 @@ def worker_rls_engine():
     engine = create_engine(TEST_DATABASE_URL)
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE public.events ENABLE ROW LEVEL SECURITY")
         for statement in MIGRATION.upgrade_statements():
             conn.exec_driver_sql(statement)
     yield engine
@@ -80,9 +81,10 @@ def worker_rls_rows(worker_rls_engine):
         ).scalars().all()
         conn.execute(
             text(
-                "INSERT INTO events (title, start_time, owner_id, source, account_email) "
-                "VALUES (:title_a, now(), :user_a, 'local', 'local'), "
-                "       (:title_b, now(), :user_b, 'local', 'local')"
+                "INSERT INTO events "
+                "(title, start_time, owner_id, source, account_email, color_enabled) "
+                "VALUES (:title_a, now(), :user_a, 'local', 'local', false), "
+                "       (:title_b, now(), :user_b, 'local', 'local', false)"
             ),
             {
                 "title_a": f"Worker A {suffix}",
@@ -94,9 +96,10 @@ def worker_rls_rows(worker_rls_engine):
         conn.execute(
             text(
                 "INSERT INTO oauth_accounts "
-                "(user_id, provider, account_email, access_token, status, is_service_provider) "
-                "VALUES (:user_a, 'gmail', :email_a, 'token-a', 'ok', false), "
-                "       (:user_b, 'outlook', :email_b, '__REAUTH_REQUIRED__', 'error', false)"
+                "(user_id, provider, account_email, access_token, status, is_service_provider, "
+                " sync_frequency_minutes, sync_range_days) "
+                "VALUES (:user_a, 'gmail', :email_a, 'token-a', 'ok', false, 5, 30), "
+                "       (:user_b, 'outlook', :email_b, '__REAUTH_REQUIRED__', 'error', false, 5, 30)"
             ),
             {
                 "user_a": user_ids[0],
@@ -126,7 +129,7 @@ def test_worker_role_is_passwordless_and_cannot_bypass_rls(worker_rls_engine):
             text(
                 "SELECT rolcanlogin, rolsuper, rolcreatedb, rolcreaterole, "
                 "rolinherit, rolbypassrls, rolpassword "
-                "FROM pg_roles WHERE rolname = 'worker_calendar_reader'"
+                "FROM pg_authid WHERE rolname = 'worker_calendar_reader'"
             )
         ).one()
 
