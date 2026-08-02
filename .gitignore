@@ -9,7 +9,6 @@ __pycache__/
 .venv-1/
 venv/
 Lib/
-scripts/
 
 # Environment Files (Machine-specific secrets)
 .env
