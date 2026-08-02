@@ -8,8 +8,6 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
       - key: DB_TYPE
         value: postgres
       - key: DISABLE_SQLITE_FALLBACK

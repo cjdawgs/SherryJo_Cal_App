@@ -70,7 +70,7 @@ jobs:
 
             - uses: actions/setup-python@v5
               with:
-                  python-version: "3.11"
+                  python-version: "3.x"
 
             - uses: actions/setup-node@v4
               with:
@@ -118,7 +118,7 @@ jobs:
 
             - uses: actions/setup-python@v5
               with:
-                  python-version: "3.11"
+                  python-version: "3.x"
 
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
@@ -151,7 +151,7 @@ jobs:
 
             - uses: actions/setup-python@v5
               with:
-                  python-version: "3.11"
+                  python-version: "3.x"
 
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
@@ -205,7 +205,7 @@ jobs:
 
             - uses: actions/setup-python@v5
               with:
-                  python-version: "3.11"
+                  python-version: "3.x"
 
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
@@ -239,7 +239,7 @@ jobs:
 
             - uses: actions/setup-python@v5
               with:
-                  python-version: "3.11"
+                  python-version: "3.x"
 
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
