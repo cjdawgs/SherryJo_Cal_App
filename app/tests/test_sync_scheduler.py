@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.models import SyncEfficiencyDailyRollup, TVDiagLog
 from app.services import sync_scheduler
+from app.services.google_calendar_service import GoogleCalendarService
 
 
 NOW = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
@@ -340,6 +342,53 @@ def test_start_scheduler_registers_job(monkeypatch):
     assert jobs["sync_efficiency_rollup_job"]["hour"] == 0
     assert jobs["sync_efficiency_rollup_job"]["minute"] == 5
     scheduler.start.assert_called_once()
+
+
+def test_prune_tv_diag_log_deletes_only_expired_rows(monkeypatch, db):
+    expired = TVDiagLog(
+        ts_server=datetime.now(timezone.utc) - timedelta(days=30),
+        event="expired",
+    )
+    current = TVDiagLog(
+        ts_server=datetime.now(timezone.utc) - timedelta(days=1),
+        event="current",
+    )
+    db.add_all([expired, current])
+    db.commit()
+    monkeypatch.setenv("TV_DIAG_RETENTION_DAYS", "14")
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: db)
+
+    sync_scheduler.prune_tv_diag_log()
+
+    assert [row.event for row in db.query(TVDiagLog).all()] == ["current"]
+
+
+def test_sync_efficiency_rollup_updates_one_row_per_day(monkeypatch, db, reset_sync_state):
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: db)
+    monkeypatch.setattr(
+        GoogleCalendarService,
+        "get_calendar_list_cache_metrics",
+        lambda: {
+            "hits": 3,
+            "misses": 1,
+            "total_lookups": 4,
+            "hit_ratio": 0.75,
+            "cache_entries": 2,
+        },
+    )
+    sync_scheduler._sync_efficiency_counters.update(changes=2, no_changes=6)
+
+    sync_scheduler.persist_sync_efficiency_rollup()
+    sync_scheduler._sync_efficiency_counters.update(changes=3, no_changes=7)
+    sync_scheduler.persist_sync_efficiency_rollup()
+
+    rows = db.query(SyncEfficiencyDailyRollup).all()
+    assert len(rows) == 1
+    assert rows[0].changes == 3
+    assert rows[0].no_changes == 7
+    assert rows[0].total_cycles == 10
+    assert rows[0].google_cache_hit_ratio == 0.75
+    assert sync_scheduler.last_rollup_persisted_at is not None
 
 
 def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):

@@ -169,6 +169,7 @@ def test_admin_system_overview_payload(client, monkeypatch):
 
 def test_admin_system_overview_detects_cloudflare_edge(client, monkeypatch):
     from app.routers import admin as admin_router
+    from app import config
 
     current_sha = "d" * 40
     monkeypatch.setenv("RENDER_GIT_COMMIT", current_sha)
@@ -177,9 +178,16 @@ def test_admin_system_overview_detects_cloudflare_edge(client, monkeypatch):
         "_fetch_github_latest_commit_probe",
         lambda repo, branch: {"commit": current_sha, "error": None, "error_code": None, "http_status": 200},
     )
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URLS", "https://canary.example.com")
+    monkeypatch.setattr(config.settings, "EDGE_PROXY_SECRET", "trusted-edge-secret")
 
     headers = _admin_headers(client)
-    headers["x-sherryjo-edge"] = "cloudflare"
+    headers.update({
+        "x-sherryjo-edge": "cloudflare",
+        "x-sherryjo-edge-auth": "trusted-edge-secret",
+        "x-forwarded-host": "canary.example.com",
+        "x-forwarded-proto": "https",
+    })
     res = client.get("/admin/system/overview", headers=headers)
 
     assert res.status_code == 200
@@ -187,6 +195,16 @@ def test_admin_system_overview_detects_cloudflare_edge(client, monkeypatch):
     assert deployment["active_platform"] == "cloudflare"
     assert deployment["active_platform_label"] == "Cloudflare edge / Render origin"
     assert "Cloudflare edge / Render origin" in deployment["message"]
+
+
+def test_admin_system_overview_rejects_forged_cloudflare_marker(client):
+    headers = _admin_headers(client)
+    headers["x-sherryjo-edge"] = "cloudflare"
+
+    res = client.get("/admin/system/overview", headers=headers)
+
+    assert res.status_code == 200
+    assert res.json()["deployment"]["active_platform"] == "render"
 
 
 def test_admin_render_redeploy_endpoint_uses_hook(client, monkeypatch):

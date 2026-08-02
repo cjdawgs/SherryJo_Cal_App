@@ -17,7 +17,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.database import DATABASE_URL, engine, get_db
-from app.config import settings
+from app.config import is_trusted_edge_request, settings
 from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, User
 from app.security import verify_password
@@ -242,7 +242,7 @@ def _cloudflare_deploy_hook_url() -> str | None:
 
 
 def _active_deployment_platform(request: Request | None) -> str:
-    if request and str(request.headers.get("x-sherryjo-edge") or "").lower() == "cloudflare":
+    if is_trusted_edge_request(request):
         return "cloudflare"
     return "render"
 

@@ -3,6 +3,9 @@
     "version": "0.1.0",
     "private": true,
     "type": "module",
+    "dependencies": {
+        "pg": "^8.22.0"
+    },
     "scripts": {
         "check": "node --check src/worker.js",
         "test": "node --test test/*.test.js"

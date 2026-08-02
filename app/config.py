@@ -1,6 +1,7 @@
 # --------------------------------------------------
 # Standard Library Imports
 # --------------------------------------------------
+import hmac
 import logging
 import os
 from typing import Any
@@ -78,6 +79,8 @@ class Settings(BaseSettings):
     MS_REDIRECT_URI: str
 
     BASE_URL: str = "http://127.0.0.1:8000"
+    PUBLIC_BASE_URLS: str = ""
+    EDGE_PROXY_SECRET: str | None = None
 
     
     # ✅ ADD THESE 3 LINES for the "google_calendar_service" config
@@ -88,6 +91,13 @@ class Settings(BaseSettings):
     # Security settings
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
+    jwt_issuer: str = "sherryjo-calendar"
+    jwt_audience: str = "sherryjo-calendar-app"
+    jwt_private_key: str | None = None
+    jwt_active_kid: str | None = None
+    jwt_public_keys_json: str | None = None
+    jwt_clock_skew_seconds: int = 30
+    jwt_max_lifetime_seconds: int = 3600
 
     # Credential encryption at rest (see app/utils/crypto.py).
     # Comma-separated Fernet keys; the first one encrypts, the rest decrypt.
@@ -113,17 +123,60 @@ def _normalize_base_url(base_url: str) -> str:
     return str(base_url or "").strip().rstrip("/")
 
 
+def _allowed_public_base_urls() -> set[str]:
+    candidates = [settings.BASE_URL, *str(settings.PUBLIC_BASE_URLS or "").split(",")]
+    allowed = set()
+    for candidate in candidates:
+        normalized = _normalize_base_url(candidate)
+        parsed = urlsplit(normalized)
+        if parsed.scheme in {"http", "https"} and parsed.netloc and not parsed.path:
+            allowed.add(normalized)
+    return allowed
+
+
+def _trusted_forwarded_base_url(request: Any = None) -> str | None:
+    if request is None or not settings.EDGE_PROXY_SECRET:
+        return None
+
+    headers = getattr(request, "headers", {})
+    if str(headers.get("x-sherryjo-edge") or "").strip().lower() != "cloudflare":
+        return None
+
+    supplied_secret = str(headers.get("x-sherryjo-edge-auth") or "")
+    if not hmac.compare_digest(supplied_secret, settings.EDGE_PROXY_SECRET):
+        return None
+
+    forwarded_host = str(headers.get("x-forwarded-host") or "").strip()
+    forwarded_proto = str(headers.get("x-forwarded-proto") or "").strip().lower()
+    if not forwarded_host or forwarded_proto != "https":
+        return None
+
+    forwarded_base = _normalize_base_url(f"https://{forwarded_host}")
+    if forwarded_base not in _allowed_public_base_urls():
+        return None
+    return forwarded_base
+
+
+def is_trusted_edge_request(request: Any = None) -> bool:
+    return _trusted_forwarded_base_url(request) is not None
+
+
 def resolve_runtime_base_url(request: Any = None) -> str:
     """
     Resolve externally reachable base URL with strong precedence rules.
 
     Order:
-    1) Explicit BASE_URL env when it is non-localhost
-    2) Forwarded headers / request host (works for DevTunnel/reverse proxies)
-    3) Explicit BASE_URL env (including local fallback)
-    4) localhost default
+    1) Authenticated Cloudflare forwarded host from the explicit public allowlist
+    2) Explicit BASE_URL env when it is non-localhost
+    3) Forwarded headers / request host for local development
+    4) Explicit BASE_URL env (including local fallback)
+    5) localhost default
     """
     configured_base_url = _normalize_base_url(settings.BASE_URL)
+
+    trusted_forwarded_base = _trusted_forwarded_base_url(request)
+    if trusted_forwarded_base:
+        return trusted_forwarded_base
 
     # Respect explicit non-local URLs first.
     lowered = configured_base_url.lower()
@@ -187,11 +240,34 @@ REQUIRED_PRODUCTION_ENV_VALUES = {
 }
 
 
+def _oauth_callback_configuration_errors() -> list[str]:
+    callback_paths = {
+        "GOOGLE_REDIRECT_URI": "/auth/google/callback",
+        "MS_REDIRECT_URI": "/ms/callback",
+    }
+    errors = []
+
+    allowed_origins = _allowed_public_base_urls()
+    for name, callback_path in callback_paths.items():
+        configured = _normalize_base_url(getattr(settings, name, ""))
+        expected = {f"{origin}{callback_path}" for origin in allowed_origins}
+        if configured and configured not in expected:
+            errors.append(f"{name} (must use an allowed public origin and path {callback_path})")
+
+    if settings.PUBLIC_BASE_URLS and not settings.EDGE_PROXY_SECRET:
+        errors.append("EDGE_PROXY_SECRET (required when PUBLIC_BASE_URLS is configured)")
+
+    return errors
+
+
 def missing_production_configuration() -> list:
     """Names of required production settings that are unset or misconfigured."""
     missing = [
         key for key in REQUIRED_PRODUCTION_SETTINGS if not getattr(settings, key, None)
     ]
+
+    if settings.BASE_URL:
+        missing.extend(_oauth_callback_configuration_errors())
 
     missing.extend(
         name for name in REQUIRED_PRODUCTION_ENV_VARS if not (os.getenv(name) or "").strip()

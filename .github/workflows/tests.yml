@@ -12,8 +12,40 @@ on:
       - main
   pull_request:
   workflow_dispatch:
+    inputs:
+      run_hosted_smoke:
+        description: Run the read-only Render/Cloudflare hosted smoke checks
+        required: true
+        default: false
+        type: boolean
+      run_authenticated_smoke:
+        description: Run reversible authenticated smoke checks using the designated test account
+        required: true
+        default: false
+        type: boolean
+      render_url:
+        description: Direct Render origin URL
+        required: true
+        default: https://sherryjo-cal-app.onrender.com
+        type: string
+      cloudflare_url:
+        description: Cloudflare Worker URL
+        required: true
+        default: https://sherryjo-calendar-edge.realty-cal.workers.dev
+        type: string
 
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   deployment-contract:
     runs-on: ubuntu-latest
     env:
@@ -57,6 +89,9 @@ jobs:
 
       - name: Validate Cloudflare Worker bundle
         run: npx --yes wrangler@4 deploy --dry-run
+
+      - name: Validate Cloudflare canary bundle
+        run: npx --yes wrangler@4 deploy --dry-run --env canary
 
       - name: Validate Alembic migration graph
         run: |
@@ -110,3 +145,79 @@ jobs:
 
       - name: Run test suite
         run: pytest app/tests -q
+
+  hosted-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_hosted_smoke }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install smoke dependency
+        run: python -m pip install websockets==16.1
+
+      - name: Run read-only hosted smoke checks
+        run: >-
+          python deployment/shadow_parity.py
+          --render-url "${{ inputs.render_url }}"
+          --cloudflare-url "${{ inputs.cloudflare_url }}"
+          --json-output hosted-smoke-report.json
+
+      - name: Upload hosted smoke report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-smoke-report-${{ github.run_attempt }}
+          path: hosted-smoke-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+  authenticated-smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_authenticated_smoke }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SMOKE_EMAIL_SECRET_NAME: SHERRYJO_SMOKE_EMAIL
+      SMOKE_PASSWORD_SECRET_NAME: SHERRYJO_SMOKE_PASSWORD
+    permissions:
+      contents: read
+    concurrency:
+      group: sherryjo-authenticated-smoke
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install smoke dependency
+        run: python -m pip install websockets==16.1
+
+      - name: Run reversible authenticated smoke checks
+        env:
+          SHERRYJO_SMOKE_EMAIL: ${{ secrets[env.SMOKE_EMAIL_SECRET_NAME] }}
+          SHERRYJO_SMOKE_PASSWORD: ${{ secrets[env.SMOKE_PASSWORD_SECRET_NAME] }}
+        run: >-
+          python deployment/authenticated_smoke.py
+          --allow-remote
+          --render-url "${{ inputs.render_url }}"
+          --cloudflare-url "${{ inputs.cloudflare_url }}"
+          --json-output authenticated-smoke-report.json
+
+      - name: Upload authenticated smoke report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: authenticated-smoke-report-${{ github.run_attempt }}
+          path: authenticated-smoke-report.json
+          if-no-files-found: error
+          retention-days: 14

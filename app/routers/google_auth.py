@@ -60,7 +60,7 @@ def google_login(request: Request, token: str, reconnect: str = Query(None)):
     state = encode_oauth_state(user_id, reconnect_email, SECRET_KEY)
 
     # Prefer service helper so tests can patch build_auth_url directly.
-    url = service.build_auth_url(state)
+    url = service.build_auth_url(state, redirect_uri=get_google_redirect_uri(request))
 
     # Keep reconnect hint support in the generated URL.
     if reconnect_email:

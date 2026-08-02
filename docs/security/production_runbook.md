@@ -40,7 +40,7 @@ the migration chain. If the Render database role cannot alter the schema, run
 `docs/security/rls_layer1.sql` once in the Supabase SQL editor instead; it is
 idempotent and ends with a verification query.
 
-This enables RLS on all eight tables and strips every grant from the `anon` and
+This enables RLS on all registered application tables and strips every grant from the `anon` and
 `authenticated` roles, which is what closes the public PostgREST surface at
 `https://<project>.supabase.co/rest/v1/*`. The application connects as the table
 owner and therefore bypasses RLS, so no application behaviour changes.
@@ -66,7 +66,7 @@ curl -s -H "apikey: $SUPABASE_ANON_KEY" \
 # expect: permission denied for table oauth_accounts
 
 # Startup log should contain
-#   🔒 [RLS] Row Level Security enforced on 8 tables.
+#   🔒 [RLS] Row Level Security enforced on the registered application tables.
 #   🔐 [CRYPTO] Sealed credentials for N oauth_accounts row(s).
 ```
 

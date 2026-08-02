@@ -14,6 +14,8 @@ from app.models import Event, Note, OAuthAccount, DateStickyNote, EventTagColorS
 from app.deps import get_current_user, require_admin
 
 from app.services.calendar_service import CalendarService, normalize_provider
+from app.adapters.calendar_read_sqlalchemy import SQLAlchemyCalendarReadAdapter
+from app.application.calendar_read import CalendarReadQuery, CalendarReadUseCase
 from app.services.multi_account_oauth_service import (
     MultiAccountOAuthService,
     ensure_valid_token,
@@ -999,50 +1001,13 @@ def get_unified_calendar(
         end_date = now + timedelta(days=range_days)
         logger.debug(f"[SYNC] RANGE WINDOW: +/-{range_days} days")
 
-    events = []
-    account_event_totals = {}
-    account_status = {}
-
-    try:
-        # ✅ FAST READ PATH
-        events = calendar_service.get_events_from_db(
-            db,
-            current_user,
-            start_date,
-            end_date,
+    adapter = SQLAlchemyCalendarReadAdapter(db, calendar_service)
+    use_case = CalendarReadUseCase(adapter)
+    return use_case.execute(
+        CalendarReadQuery(
+            user_id=current_user.id,
+            start=start_date,
+            end=end_date,
             dedup_enabled=dedup,
         )
-
-        for ev in events:
-            key = ev.get("account_key")
-            if not key:
-                continue
-            account_event_totals[key] = account_event_totals.get(key, 0) + 1
-
-        logger.debug(f"⚡ FAST DB EVENTS: {len(events)}")
-
-    except Exception as e:
-        logger.error("❌ [UNIFIED] events fetch failed: %s", e)
-        events = []
-        account_event_totals = {}
-
-    try:
-        accounts = MultiAccountOAuthService.get_user_accounts(db, current_user.id)
-
-        for acc in accounts:
-            try:
-                provider = normalize_provider(acc.provider)
-                key = f"{provider}:{(acc.account_email or '').lower().strip()}"
-                account_status[key] = resolve_account_status(acc)
-            except Exception as inner:
-                logger.error("⚠️ [UNIFIED] account status failed: %s", inner)
-
-    except Exception as e:
-        logger.error("❌ [UNIFIED] account status block failed: %s", e)
-        account_status = {}
-
-    return {
-        "events": events,
-        "account_status": account_status,
-        "account_event_totals": account_event_totals
-    }
+    )

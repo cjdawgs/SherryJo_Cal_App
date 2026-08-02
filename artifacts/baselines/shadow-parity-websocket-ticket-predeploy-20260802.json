@@ -1,0 +1,182 @@
+{
+  "render_url": "https://sherryjo-cal-app.onrender.com",
+  "cloudflare_url": "https://sherryjo-calendar-edge.realty-cal.workers.dev",
+  "passed": true,
+  "passed_checks": 16,
+  "total_checks": 16,
+  "failures": [],
+  "results": [
+    {
+      "case": "health_get",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 52,
+      "cloudflare_bytes": 52,
+      "render_sha256": "972019cacfd7",
+      "cloudflare_sha256": "972019cacfd7"
+    },
+    {
+      "case": "health_head",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 0,
+      "cloudflare_bytes": 0,
+      "render_sha256": "e3b0c44298fc",
+      "cloudflare_sha256": "e3b0c44298fc"
+    },
+    {
+      "case": "health_with_cookie",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 52,
+      "cloudflare_bytes": 52,
+      "render_sha256": "972019cacfd7",
+      "cloudflare_sha256": "972019cacfd7"
+    },
+    {
+      "case": "favicon",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 204,
+      "cloudflare_status": 204,
+      "render_bytes": 0,
+      "cloudflare_bytes": 0,
+      "render_sha256": "e3b0c44298fc",
+      "cloudflare_sha256": "e3b0c44298fc"
+    },
+    {
+      "case": "admin_redirect",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 307,
+      "cloudflare_status": 307,
+      "render_bytes": 0,
+      "cloudflare_bytes": 0,
+      "render_sha256": "e3b0c44298fc",
+      "cloudflare_sha256": "e3b0c44298fc"
+    },
+    {
+      "case": "login_page",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 11996,
+      "cloudflare_bytes": 11996,
+      "render_sha256": "7378259a6edc",
+      "cloudflare_sha256": "7378259a6edc"
+    },
+    {
+      "case": "static_javascript",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 73667,
+      "cloudflare_bytes": 73667,
+      "render_sha256": "7971318a543b",
+      "cloudflare_sha256": "7971318a543b"
+    },
+    {
+      "case": "openapi_large_response",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 200,
+      "cloudflare_status": 200,
+      "render_bytes": 64676,
+      "cloudflare_bytes": 64676,
+      "render_sha256": "036ca02f990c",
+      "cloudflare_sha256": "036ca02f990c"
+    },
+    {
+      "case": "invalid_login",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 401,
+      "cloudflare_status": 401,
+      "render_bytes": 49,
+      "cloudflare_bytes": 49,
+      "render_sha256": "51cd5448ca76",
+      "cloudflare_sha256": "51cd5448ca76"
+    },
+    {
+      "case": "google_callback_invalid_state",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 400,
+      "cloudflare_status": 400,
+      "render_bytes": 26,
+      "cloudflare_bytes": 26,
+      "render_sha256": "ecbe425d7df4",
+      "cloudflare_sha256": "ecbe425d7df4"
+    },
+    {
+      "case": "microsoft_callback_invalid_state",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 400,
+      "cloudflare_status": 400,
+      "render_bytes": 26,
+      "cloudflare_bytes": 26,
+      "render_sha256": "ecbe425d7df4",
+      "cloudflare_sha256": "ecbe425d7df4"
+    },
+    {
+      "case": "protected_api",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 401,
+      "cloudflare_status": 401,
+      "render_bytes": 30,
+      "cloudflare_bytes": 30,
+      "render_sha256": "cfec9feffbcc",
+      "cloudflare_sha256": "cfec9feffbcc"
+    },
+    {
+      "case": "multipart_auth_rejection",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 401,
+      "cloudflare_status": 401,
+      "render_bytes": 30,
+      "cloudflare_bytes": 30,
+      "render_sha256": "cfec9feffbcc",
+      "cloudflare_sha256": "cfec9feffbcc"
+    },
+    {
+      "case": "cors_preflight",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 400,
+      "cloudflare_status": 400,
+      "render_bytes": 22,
+      "cloudflare_bytes": 22,
+      "render_sha256": "f80399859bbd",
+      "cloudflare_sha256": "f80399859bbd"
+    },
+    {
+      "case": "worker_native_platform_status",
+      "passed": true,
+      "failed_checks": [],
+      "render_status": 404,
+      "cloudflare_status": 200,
+      "cloudflare_sha256": "f60bbd6e9b2a"
+    },
+    {
+      "case": "websocket_invalid_token_rejection",
+      "passed": true,
+      "render_status": 403,
+      "cloudflare_status": 403
+    }
+  ],
+  "known_platform_caveats": [
+    "workers.dev returns Cloudflare error 1010 for Python urllib's default user-agent; browser and curl identities pass.",
+    "Operator-authenticated read/write, multipart import, and WebSocket evidence is recorded separately without storing a token."
+  ]
+}

@@ -52,3 +52,6 @@ Thumbs.db
 # Backups & Archives
 *.zip
 _backup_before_force/
+
+# Local validation evidence
+artifacts/cloudflare-migration-charter-status-2026-08-01.xlsx

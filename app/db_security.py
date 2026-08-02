@@ -12,7 +12,7 @@ application is unaffected; the public data API (PostgREST / anon key) is not.
 import logging
 from sqlalchemy import inspect, text
 
-from app.utils.crypto import encryption_enabled, seal
+from app.utils.crypto import encryption_enabled, rotate
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ RLS_TABLES = (
     "sync_efficiency_daily_rollups",
     "tv_diag_log",
     "app_runtime_secrets",
+    "websocket_tickets",
 )
 
 PUBLIC_API_ROLES = ("anon", "authenticated")
@@ -107,8 +108,8 @@ def seal_stored_credentials(engine) -> dict:
             ).fetchall()
 
             for row_id, access_token, refresh_token in rows:
-                sealed_access = seal(access_token)
-                sealed_refresh = seal(refresh_token)
+                sealed_access = rotate(access_token)
+                sealed_refresh = rotate(refresh_token)
 
                 if sealed_access == access_token and sealed_refresh == refresh_token:
                     continue

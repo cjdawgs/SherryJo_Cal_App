@@ -115,6 +115,30 @@ def unseal(value: Optional[str]) -> Optional[str]:
         ) from exc
 
 
+def rotate(value: Optional[str]) -> Optional[str]:
+    """Re-encrypt a sealed credential with the first configured key."""
+    if value is None or value == "" or value in SENTINEL_VALUES:
+        return value
+
+    if not value.startswith(VERSION_PREFIX):
+        return seal(value)
+
+    cipher = _cipher()
+    if cipher is None:
+        raise TokenEncryptionError(
+            "Stored credential is encrypted but TOKEN_ENCRYPTION_KEY is not configured."
+        )
+
+    try:
+        token = value[len(VERSION_PREFIX):].encode("utf-8")
+        return VERSION_PREFIX + cipher.rotate(token).decode("utf-8")
+    except InvalidToken as exc:
+        raise TokenEncryptionError(
+            "Stored credential could not be rotated with the configured "
+            "TOKEN_ENCRYPTION_KEY keyring."
+        ) from exc
+
+
 def mask(value: Optional[str]) -> str:
     """Render a credential for logs and diagnostics. Never reveals the value."""
     if value is None or value == "":

@@ -1,0 +1,21 @@
+{
+  "run_id": "e34f799d3155425a96ec15f772af4167",
+  "render_url": "https://sherryjo-cal-app.onrender.com",
+  "cloudflare_url": "https://sherryjo-calendar-edge.realty-cal.workers.dev",
+  "passed": false,
+  "checks": [
+    "render_create",
+    "cloudflare_read",
+    "cloudflare_update",
+    "render_read_after_update",
+    "render_invalid_upload_rejection",
+    "cloudflare_invalid_upload_rejection"
+  ],
+  "cleanup": {
+    "attempted": true,
+    "passed": true
+  },
+  "failures": [
+    "SmokeFailure: WebSocket ticket returned HTTP 404; expected 200"
+  ]
+}

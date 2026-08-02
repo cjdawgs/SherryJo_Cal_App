@@ -7,6 +7,7 @@ telemetry does not become permanent rows, and tv_diag_log is pruned.
 """
 
 import logging
+from io import StringIO
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -14,7 +15,9 @@ import pytest
 from app.logging_config import (
     NoisyIcalFilter,
     QuietAccessFilter,
+    SensitiveDataFormatter,
     configure_logging,
+    redact_sensitive_text,
     resolve_log_level,
 )
 from app.routers import tv as tv_router
@@ -61,6 +64,45 @@ def test_configure_logging_is_idempotent(monkeypatch):
     assert sum(isinstance(f, QuietAccessFilter) for f in access.filters) == 1
     assert sum(isinstance(f, NoisyIcalFilter) for f in logging.getLogger().filters) == 1
     assert logging.getLogger("caldav").level == logging.WARNING
+
+
+@pytest.mark.parametrize("message,secret", [
+    ("Authorization: Bearer bearer-secret-123", "bearer-secret-123"),
+    ("Authorization: Basic basic-secret-123", "basic-secret-123"),
+    ("X-API-Key: header-api-secret", "header-api-secret"),
+    ("Cookie: session=session-secret; theme=light", "session-secret"),
+    ("postgresql://dbuser:db-password@db.example.com/app", "db-password"),
+    ("GET /ws?ticket=one-time-ticket&view=week", "one-time-ticket"),
+    ("GET /callback?code=oauth-code&api_key=query-secret", "query-secret"),
+    ("client_secret='provider-secret'", "provider-secret"),
+    ("refresh_token: oauth-refresh-token", "oauth-refresh-token"),
+    ("DATABASE_URL=postgresql://local-value", "local-value"),
+])
+def test_sensitive_log_values_are_redacted(message, secret):
+    rendered = redact_sensitive_text(message)
+
+    assert secret not in rendered
+    assert "[REDACTED]" in rendered
+
+
+def test_sensitive_formatter_redacts_exception_text():
+    stream = StringIO()
+    handler = logging.StreamHandler(stream)
+    handler.setFormatter(SensitiveDataFormatter("%(levelname)s %(message)s"))
+    logger = logging.getLogger("test.security.redaction")
+    logger.handlers = [handler]
+    logger.propagate = False
+    logger.setLevel(logging.ERROR)
+
+    try:
+        raise RuntimeError("access_token=exception-secret")
+    except RuntimeError:
+        logger.exception("Request failed with Bearer message-secret")
+
+    output = stream.getvalue()
+    assert "exception-secret" not in output
+    assert "message-secret" not in output
+    assert output.count("[REDACTED]") >= 2
 
 
 # ==================================================

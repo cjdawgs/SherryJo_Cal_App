@@ -40,6 +40,15 @@ def test_build_auth_url_contains_required_oauth_params(service, monkeypatch):
     assert "&amp;" not in url
 
 
+def test_build_auth_url_uses_request_specific_redirect_uri(service):
+    url = service.build_auth_url(
+        "state-abc",
+        redirect_uri="https://canary.example.com/auth/google/callback",
+    )
+
+    assert "redirect_uri=https://canary.example.com/auth/google/callback" in url
+
+
 # ==================================================
 # TOKEN EXCHANGE / REFRESH
 # ==================================================

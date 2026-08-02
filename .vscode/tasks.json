@@ -90,7 +90,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -370,7 +370,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -440,7 +440,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -480,7 +480,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -560,7 +560,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -1380,7 +1380,7 @@
 			"command": "cmd",
 			"args": [
 				"/c",
-				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& set SHERRYJO_E2E_DB_URL=postgresql+psycopg2://postgres.dtgbcftlciolnrenzicb:oibc94dEdNKQC9tf@aws-1-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require&& python -m pytest app/tests/test_supabase_e2e_optional.py -q"
+				"set PYTHONPATH=.&& set RUN_SUPABASE_E2E=1&& if not defined SHERRYJO_E2E_DB_URL (echo SHERRYJO_E2E_DB_URL must be set externally.&& exit /b 1) else python -m pytest app/tests/test_supabase_e2e_optional.py -q"
 			],
 			"isBackground": false
 		},
@@ -2201,6 +2201,18 @@
 				"clear": true
 			},
 			"problemMatcher": []
+		},
+		{
+			"label": "validate-security-hardening",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/c",
+				".venv\\Scripts\\python.exe -m pytest app\\tests\\test_jwt_rotation.py app\\tests\\test_security_authz.py app\\tests\\test_websocket_tickets.py app\\tests\\test_tv.py app\\tests\\test_logging_usage.py -q --tb=short"
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "test"
 		}
 	]
 }

@@ -169,7 +169,7 @@ class GoogleCalendarService:
     # ==================================================
     # ✅ BUILD AUTH URL (CRITICAL FIXES INCLUDED)
     # ==================================================
-    def build_auth_url(self, state: str) -> str:
+    def build_auth_url(self, state: str, redirect_uri: str | None = None) -> str:
         """
         ✅ PURPOSE:
         Generates Google OAuth login URL
@@ -188,7 +188,7 @@ class GoogleCalendarService:
         url = (
                 f"{self.AUTH_URL}"
                 f"?client_id={settings.GOOGLE_CLIENT_ID}"
-            f"&redirect_uri={get_google_redirect_uri()}"
+            f"&redirect_uri={redirect_uri or get_google_redirect_uri()}"
                 f"&response_type=code"
                 f"&scope={scope_str}"
                 f"&access_type=offline"

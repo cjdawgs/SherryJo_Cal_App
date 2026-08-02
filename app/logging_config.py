@@ -12,6 +12,7 @@ environment variable controls volume without a code change.
 
 import logging
 import os
+import re
 
 # Requests whose 2xx access-log lines carry no information: health probes,
 # telemetry beacons and static assets. 4xx/5xx are always kept.
@@ -33,6 +34,39 @@ BLOCKED_THIRD_PARTY_SNIPPETS = (
     "Your calendar server breaks the icalendar standard",
     "error count:",
 )
+
+LOG_FORMAT = "%(asctime)s %(levelname)s [%(name)s] %(message)s"
+REDACTED = "[REDACTED]"
+SENSITIVE_LOG_PATTERNS = (
+    re.compile(r"(?i)\b(Authorization|Proxy-Authorization|X-API-Key)\s*:\s*[^\r\n]+"),
+    re.compile(r"(?i)\b(Bearer)\s+[^\s,;]+"),
+    re.compile(r"(?i)\b(Cookie|Set-Cookie)\s*:\s*[^\r\n]+"),
+    re.compile(r"(?i)\b(postgres(?:ql)?(?:\+[^:]+)?://)([^\s/@:]+):([^\s/@]+)@"),
+    re.compile(r"(?i)([?&](?:token|ticket|access_token|refresh_token|id_token|code|api_key|password)=)[^&\s]+"),
+    re.compile(
+        r"(?i)\b(password|passwd|secret|client_secret|api_key|access_token|"
+        r"refresh_token|id_token|jwt_secret_key|token_encryption_key|database_url)\s*([:=])\s*"
+        r"(?:['\"])?[^\s,;}&]+"
+    ),
+)
+
+
+def redact_sensitive_text(value: object) -> str:
+    """Remove credential-shaped values from text before it reaches a log sink."""
+    text = str(value)
+    text = SENSITIVE_LOG_PATTERNS[0].sub(r"\1: " + REDACTED, text)
+    text = SENSITIVE_LOG_PATTERNS[1].sub(r"\1 " + REDACTED, text)
+    text = SENSITIVE_LOG_PATTERNS[2].sub(r"\1: " + REDACTED, text)
+    text = SENSITIVE_LOG_PATTERNS[3].sub(r"\1" + REDACTED + ":" + REDACTED + "@", text)
+    text = SENSITIVE_LOG_PATTERNS[4].sub(r"\1" + REDACTED, text)
+    return SENSITIVE_LOG_PATTERNS[5].sub(r"\1\2" + REDACTED, text)
+
+
+class SensitiveDataFormatter(logging.Formatter):
+    """Redact the complete formatted record, including exception tracebacks."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_sensitive_text(super().format(record))
 
 
 class NoisyIcalFilter(logging.Filter):
@@ -90,7 +124,7 @@ def configure_logging() -> str:
 
     logging.basicConfig(
         level=level,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        format=LOG_FORMAT,
         force=True,
     )
 
@@ -98,6 +132,8 @@ def configure_logging() -> str:
         logging.getLogger(name).setLevel(logging.WARNING)
 
     root = logging.getLogger()
+    for handler in root.handlers:
+        handler.setFormatter(SensitiveDataFormatter(LOG_FORMAT))
     if not any(isinstance(f, NoisyIcalFilter) for f in root.filters):
         root.addFilter(NoisyIcalFilter())
 

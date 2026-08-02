@@ -1,0 +1,55 @@
+name: Render Hot-Spare Monitor
+
+on:
+    schedule:
+        - cron: "37 5 * * *"
+    workflow_dispatch:
+        inputs:
+            render_url:
+                description: Direct Render origin URL
+                required: true
+                default: https://sherryjo-cal-app.onrender.com
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: sherryjo-render-hot-spare-monitor
+    cancel-in-progress: false
+
+jobs:
+    direct-render-synthetic:
+        if: ${{ github.event_name == 'workflow_dispatch' || vars.RENDER_HOT_SPARE_MONITOR_ENABLED == 'true' }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        environment: render-monitor
+        env:
+            RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+            SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
+            SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install monitor dependency
+              run: python -m pip install websockets==16.1
+
+            - name: Run direct Render synthetic
+              run: >-
+                  python deployment/render_synthetic.py
+                  --allow-remote
+                  --render-url "$RENDER_URL"
+                  --json-output render-synthetic-report.json
+
+            - name: Upload direct Render report
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: render-synthetic-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: render-synthetic-report.json
+                  if-no-files-found: error
+                  retention-days: 30

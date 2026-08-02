@@ -6,6 +6,7 @@ guarantee that stored OAuth credentials never leave the API.
 """
 
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,6 +16,7 @@ from app.routers.admin import REDACTED_COLUMNS, REDACTED_PLACEHOLDER, redact_row
 from app.utils.crypto import (
     TokenEncryptionError,
     reset_cipher_cache,
+    rotate,
     seal,
     unseal,
 )
@@ -472,6 +474,46 @@ def test_unseal_fails_loudly_with_the_wrong_key(encryption_key, monkeypatch):
         unseal(sealed)
 
 
+def test_rotation_reseals_with_primary_key_and_survives_old_key_removal(monkeypatch):
+    from cryptography.fernet import Fernet
+    from app.config import settings
+
+    old_key = Fernet.generate_key().decode()
+    new_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "token_encryption_key", old_key, raising=False)
+    reset_cipher_cache()
+    sealed_with_old_key = seal("provider-refresh-token")
+
+    monkeypatch.setattr(settings, "token_encryption_key", f"{new_key},{old_key}", raising=False)
+    reset_cipher_cache()
+    rotated = rotate(sealed_with_old_key)
+
+    assert rotated.startswith("v1:")
+    assert rotated != sealed_with_old_key
+    assert unseal(rotated) == "provider-refresh-token"
+
+    monkeypatch.setattr(settings, "token_encryption_key", new_key, raising=False)
+    reset_cipher_cache()
+    assert unseal(rotated) == "provider-refresh-token"
+    with pytest.raises(TokenEncryptionError):
+        unseal(sealed_with_old_key)
+
+
+def test_rotation_requires_old_key_during_overlap(monkeypatch):
+    from cryptography.fernet import Fernet
+    from app.config import settings
+
+    old_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(settings, "token_encryption_key", old_key, raising=False)
+    reset_cipher_cache()
+    sealed = seal("provider-refresh-token")
+
+    monkeypatch.setattr(settings, "token_encryption_key", Fernet.generate_key().decode(), raising=False)
+    reset_cipher_cache()
+    with pytest.raises(TokenEncryptionError, match="could not be rotated"):
+        rotate(sealed)
+
+
 def test_stored_credentials_are_encrypted_at_rest(db, client, user_a, encryption_key):
     from sqlalchemy import text
 
@@ -518,6 +560,17 @@ def test_sentinel_lookups_still_work_at_the_sql_level(db, client, user_a, encryp
 def test_production_configuration_requires_security_env_vars(monkeypatch):
     from app import config
 
+    monkeypatch.setattr(config.settings, "BASE_URL", "https://calendar.example.com")
+    monkeypatch.setattr(
+        config.settings,
+        "GOOGLE_REDIRECT_URI",
+        "https://calendar.example.com/auth/google/callback",
+    )
+    monkeypatch.setattr(
+        config.settings,
+        "MS_REDIRECT_URI",
+        "https://calendar.example.com/ms/callback",
+    )
     monkeypatch.setattr(config.settings, "token_encryption_key", None, raising=False)
     monkeypatch.delenv("ADMIN_SETUP_CODE", raising=False)
     monkeypatch.delenv("DISABLE_SQLITE_FALLBACK", raising=False)
@@ -536,6 +589,87 @@ def test_production_configuration_requires_security_env_vars(monkeypatch):
     monkeypatch.setenv("REQUIRE_DB_KIND", "postgres")
 
     assert config.missing_production_configuration() == []
+
+
+def test_production_configuration_rejects_oauth_callback_drift(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config.settings, "BASE_URL", "https://canary.example.com")
+    monkeypatch.setattr(
+        config.settings,
+        "GOOGLE_REDIRECT_URI",
+        "https://production.example.com/auth/google/callback",
+    )
+    monkeypatch.setattr(
+        config.settings,
+        "MS_REDIRECT_URI",
+        "https://canary.example.com/wrong-callback",
+    )
+    monkeypatch.setattr(config.settings, "token_encryption_key", "key", raising=False)
+    monkeypatch.setenv("ADMIN_SETUP_CODE", "code")
+    monkeypatch.setenv("DISABLE_SQLITE_FALLBACK", "1")
+    monkeypatch.setenv("REQUIRE_DB_KIND", "postgres")
+
+    missing = config.missing_production_configuration()
+
+    assert missing == [
+        "GOOGLE_REDIRECT_URI (must use an allowed public origin and path /auth/google/callback)",
+        "MS_REDIRECT_URI (must use an allowed public origin and path /ms/callback)",
+    ]
+
+
+def test_runtime_base_url_accepts_authenticated_allowlisted_edge_host(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config.settings, "BASE_URL", "https://render.example.com")
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URLS", "https://canary.example.com")
+    monkeypatch.setattr(config.settings, "EDGE_PROXY_SECRET", "trusted-edge-secret")
+    request = SimpleNamespace(
+        headers={
+            "x-sherryjo-edge": "cloudflare",
+            "x-sherryjo-edge-auth": "trusted-edge-secret",
+            "x-forwarded-host": "canary.example.com",
+            "x-forwarded-proto": "https",
+        }
+    )
+
+    assert config.resolve_runtime_base_url(request) == "https://canary.example.com"
+
+
+@pytest.mark.parametrize(
+    ("edge_secret", "forwarded_host"),
+    [
+        ("wrong-secret", "canary.example.com"),
+        ("trusted-edge-secret", "attacker.example.com"),
+    ],
+)
+def test_runtime_base_url_rejects_untrusted_edge_host(monkeypatch, edge_secret, forwarded_host):
+    from app import config
+
+    monkeypatch.setattr(config.settings, "BASE_URL", "https://render.example.com")
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URLS", "https://canary.example.com")
+    monkeypatch.setattr(config.settings, "EDGE_PROXY_SECRET", "trusted-edge-secret")
+    request = SimpleNamespace(
+        headers={
+            "x-sherryjo-edge": "cloudflare",
+            "x-sherryjo-edge-auth": edge_secret,
+            "x-forwarded-host": forwarded_host,
+            "x-forwarded-proto": "https",
+        }
+    )
+
+    assert config.resolve_runtime_base_url(request) == "https://render.example.com"
+
+
+def test_production_configuration_requires_edge_secret_for_extra_public_origins(monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URLS", "https://canary.example.com")
+    monkeypatch.setattr(config.settings, "EDGE_PROXY_SECRET", None)
+
+    assert "EDGE_PROXY_SECRET (required when PUBLIC_BASE_URLS is configured)" in (
+        config._oauth_callback_configuration_errors()
+    )
 
 
 def test_render_is_detected_as_production(monkeypatch):

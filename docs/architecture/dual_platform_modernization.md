@@ -1,6 +1,6 @@
 # Dual-platform modernization architecture
 
-Status: Phase 0 implemented; production traffic is not cut over.
+Status: Edge proxy and selected Worker-native prerequisites implemented; production traffic is not cut over.
 
 ## Decision summary
 
@@ -21,15 +21,16 @@ D1 is not a drop-in replacement for Supabase PostgreSQL. The application current
 | Operations | Render service exists, but repository previously lacked a Render blueprint | Dashboard-only configuration can drift |
 | CI/CD | Python tests existed; Azure deployment workflow is legacy | No unified Cloudflare/Render readiness gate previously existed |
 
-Security debt includes symmetric JWT key distribution, query-string WebSocket tokens, runtime schema mutation, and an application-owner database connection that bypasses RLS. These are migration work items, not phase-zero changes.
+Security debt includes symmetric JWT key distribution, query-string WebSocket tokens, runtime schema mutation, and an application-owner database connection that bypasses RLS. These are migration work items, not phase-zero changes. On 2026-08-02, the owner accepted the residual risk of continuing without rotating a Supabase credential previously exposed in a tracked task file. The value was removed from the current tree, but revocation and historical removal are not asserted; the credential must not be copied to Cloudflare, and this exception does not waive JWT, ticket, RLS, least-privilege-role, or production approval gates.
 
 ## Target architecture
 
 ```mermaid
 flowchart TD
     U[Users] --> CF[Cloudflare DNS and Worker]
-    CF -->|Phase 0-2 all application traffic| R[Render FastAPI hot spare]
-    CF -.->|Later parity-approved routes| WR[Worker route adapters]
+  CF --> RC[Route ownership controller]
+  RC -->|proxy/default| R[Render FastAPI origin]
+  RC -.->|shadow/canary/native after gates| WR[Worker route adapters]
     R --> CORE[Shared behavior contracts]
     WR --> CORE
     R --> PG[(Supabase PostgreSQL primary)]
@@ -104,6 +105,12 @@ For phases 0-4, change DNS/proxy routing back to the Render hostname, verify `/h
 | Supabase | Authoritative PostgreSQL | Database size, egress, connection count, and project pausing limits |
 
 Free-tier limits and prices change. Verify current vendor dashboards before each decision gate. The first scale optimization should be fewer provider syncs and database round trips, not an additional authoritative database.
+
+### Worker-native read prerequisite status
+
+The first events-only Worker persistence adapter is integrated behind a route ownership controller with `proxy`, `shadow`, `canary`, and `native` modes. Invalid or missing mode configuration resolves to `proxy`, and both deployed environments explicitly set `CALENDAR_READ_MODE=proxy`. Non-proxy execution requires strict RS256 authentication and a cache-disabled Hyperdrive binding named `HYPERDRIVE_RLS_NO_CACHE`. Supabase remains authoritative. No Hyperdrive ID, database password, public JWT key, or canary user allowlist is configured in the repository.
+
+Before a non-proxy mode is deployed, live PostgreSQL RLS tests must pass, the owner must provision the least-privilege role credential and cache-disabled Hyperdrive configuration, and Supabase compatibility must be proven. Shadow mode always returns Render's response and emits only status/match telemetry; response bodies and credentials are not logged. Account status is constrained to a two-column, identity-scoped security-barrier projection rather than direct OAuth-table access.
 
 ## Assumptions and dependencies
 

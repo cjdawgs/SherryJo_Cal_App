@@ -15,6 +15,9 @@ ALTER TABLE public.tasks                    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.date_sticky_notes        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_tag_color_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tv_diag_log              ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sync_efficiency_daily_rollups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_runtime_secrets      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.websocket_tickets        ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM anon, authenticated;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated;

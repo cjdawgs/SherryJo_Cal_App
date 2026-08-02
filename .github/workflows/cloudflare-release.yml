@@ -1,0 +1,265 @@
+name: Cloudflare Release
+
+on:
+    workflow_dispatch:
+        inputs:
+            render_deployment_ready:
+                description: Confirm Render has deployed this exact commit before canary release
+                required: true
+                default: false
+                type: boolean
+            promote_production:
+                description: Promote the smoke-tested build to the root Worker
+                required: true
+                default: false
+                type: boolean
+            render_url:
+                description: Direct Render origin URL
+                required: true
+                default: https://sherryjo-cal-app.onrender.com
+                type: string
+            canary_url:
+                description: Isolated Cloudflare canary URL
+                required: true
+                default: https://sherryjo-calendar-edge-canary.realty-cal.workers.dev
+                type: string
+            production_url:
+                description: Root Cloudflare Worker URL
+                required: true
+                default: https://sherryjo-calendar-edge.realty-cal.workers.dev
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: sherryjo-cloudflare-release
+    cancel-in-progress: false
+
+jobs:
+    verify:
+        if: ${{ inputs.render_deployment_ready }}
+        runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:16
+                env:
+                    POSTGRES_PASSWORD: postgres
+                    POSTGRES_DB: sherryjo_test
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
+        env:
+            DISABLE_DOTENV: "true"
+            MS_CLIENT_ID: test-client-id
+            MS_CLIENT_SECRET: test-client-secret
+            MS_TENANT_ID: test-tenant-id
+            MS_REDIRECT_URI: http://127.0.0.1:8000/ms/callback
+            GOOGLE_CLIENT_ID: test-client-id
+            GOOGLE_CLIENT_SECRET: test-client-secret
+            GOOGLE_REDIRECT_URI: http://127.0.0.1:8000/auth/google/callback
+            JWT_SECRET_KEY: test-jwt-secret-key-not-used-in-production
+            TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_test
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
+            - name: Install Python dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install -r requirements.txt
+                  pip install pytest
+
+            - name: Run Python suite
+              run: pytest app/tests -q
+
+            - name: Test Cloudflare edge
+              run: node --test platform/cloudflare/test/*.test.js
+
+            - name: Validate root and canary bundles
+              run: |
+                  npx --yes wrangler@4 deploy --dry-run
+                  npx --yes wrangler@4 deploy --dry-run --env canary
+
+    deploy-canary:
+        needs: verify
+        runs-on: ubuntu-latest
+        environment: cloudflare-canary
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
+            - name: Deploy isolated canary Worker
+              env:
+                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+                  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+              run: npx --yes wrangler@4 deploy --env canary
+
+    smoke-unauthenticated-canary:
+        needs: deploy-canary
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install smoke dependency
+              run: python -m pip install websockets==16.1
+
+            - name: Run canary parity smoke
+              run: >-
+                  python deployment/shadow_parity.py
+                  --render-url "${{ inputs.render_url }}"
+                  --cloudflare-url "${{ inputs.canary_url }}"
+                  --json-output canary-parity-report.json
+
+            - name: Upload canary parity report
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: canary-parity-${{ github.run_attempt }}
+                  path: canary-parity-report.json
+                  if-no-files-found: error
+                  retention-days: 14
+
+    smoke-authenticated-canary:
+        needs: deploy-canary
+        runs-on: ubuntu-latest
+        environment: cloudflare-smoke
+        concurrency:
+            group: sherryjo-authenticated-smoke
+            cancel-in-progress: false
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install smoke dependency
+              run: python -m pip install websockets==16.1
+
+            - name: Run reversible canary smoke
+              env:
+                  SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
+                  SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+              run: >-
+                  python deployment/authenticated_smoke.py
+                  --allow-remote
+                  --render-url "${{ inputs.render_url }}"
+                  --cloudflare-url "${{ inputs.canary_url }}"
+                  --json-output canary-authenticated-report.json
+
+            - name: Upload canary authenticated report
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: canary-authenticated-${{ github.run_attempt }}
+                  path: canary-authenticated-report.json
+                  if-no-files-found: error
+                  retention-days: 14
+
+    promote-root-worker:
+        if: ${{ inputs.promote_production }}
+        needs:
+            - smoke-unauthenticated-canary
+            - smoke-authenticated-canary
+        runs-on: ubuntu-latest
+        environment: cloudflare-production
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+
+            - name: Promote verified build to root Worker
+              env:
+                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+                  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+              run: npx --yes wrangler@4 deploy
+
+    smoke-unauthenticated-production:
+        if: ${{ inputs.promote_production }}
+        needs: promote-root-worker
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install smoke dependency
+              run: python -m pip install websockets==16.1
+
+            - name: Run production parity smoke
+              run: >-
+                  python deployment/shadow_parity.py
+                  --render-url "${{ inputs.render_url }}"
+                  --cloudflare-url "${{ inputs.production_url }}"
+                  --json-output production-parity-report.json
+
+            - name: Upload production parity report
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: production-parity-${{ github.run_attempt }}
+                  path: production-parity-report.json
+                  if-no-files-found: error
+                  retention-days: 14
+
+    smoke-authenticated-production:
+        if: ${{ inputs.promote_production }}
+        needs: promote-root-worker
+        runs-on: ubuntu-latest
+        environment: cloudflare-smoke
+        concurrency:
+            group: sherryjo-authenticated-smoke
+            cancel-in-progress: false
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Install smoke dependency
+              run: python -m pip install websockets==16.1
+
+            - name: Run reversible production smoke
+              env:
+                  SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
+                  SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+              run: >-
+                  python deployment/authenticated_smoke.py
+                  --allow-remote
+                  --render-url "${{ inputs.render_url }}"
+                  --cloudflare-url "${{ inputs.production_url }}"
+                  --json-output production-authenticated-report.json
+
+            - name: Upload production authenticated report
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: production-authenticated-${{ github.run_attempt }}
+                  path: production-authenticated-report.json
+                  if-no-files-found: error
+                  retention-days: 14

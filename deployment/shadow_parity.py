@@ -64,6 +64,7 @@ def _cases(cloudflare_url: str) -> list[HttpCase]:
         HttpCase("health_get", "GET", "/health"),
         HttpCase("health_head", "HEAD", "/health"),
         HttpCase("health_with_cookie", "GET", "/health", headers={"Cookie": "parity_probe=1"}),
+        HttpCase("schema_health", "GET", "/health/schema", compare_body=False),
         HttpCase("favicon", "GET", "/favicon.ico"),
         HttpCase("admin_redirect", "GET", "/admin"),
         HttpCase("login_page", "GET", "/login"),
@@ -193,6 +194,39 @@ def run_http_parity(render_url: str, cloudflare_url: str) -> tuple[list[dict], l
     return rows, failures
 
 
+def run_worker_edge_health(render_url: str, cloudflare_url: str) -> tuple[dict, list[str]]:
+    opener = urllib.request.build_opener(NoRedirectHandler)
+    case = HttpCase("worker_edge_health", "GET", "/__edge/health")
+    render = _request(opener, render_url, case)
+    cloudflare = _request(opener, cloudflare_url, case)
+    expected_body = {
+        "status": "ok",
+        "platform": "cloudflare",
+        "mode": "render-origin-proxy",
+    }
+    try:
+        cloudflare_body = json.loads(cloudflare.body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        cloudflare_body = None
+
+    checks = {
+        "render_does_not_own_route": render.status == 404,
+        "cloudflare_status": cloudflare.status == 200,
+        "cloudflare_body": cloudflare_body == expected_body,
+    }
+    failed_checks = [name for name, passed in checks.items() if not passed]
+    row = {
+        "case": case.name,
+        "passed": not failed_checks,
+        "failed_checks": failed_checks,
+        "render_status": render.status,
+        "cloudflare_status": cloudflare.status,
+        "cloudflare_sha256": _digest(cloudflare.body),
+    }
+    failures = [] if not failed_checks else [f"{case.name}: {', '.join(failed_checks)}"]
+    return row, failures
+
+
 def run_worker_native_status(render_url: str, cloudflare_url: str) -> tuple[dict, list[str]]:
     opener = urllib.request.build_opener(NoRedirectHandler)
     case = HttpCase("worker_native_platform_status", "GET", "/api/platform/status")
@@ -202,6 +236,7 @@ def run_worker_native_status(render_url: str, cloudflare_url: str) -> tuple[dict
         "status": "ok",
         "platform": "cloudflare-worker",
         "mode": "worker-native",
+        "edgeProxyAuthConfigured": True,
     }
     try:
         cloudflare_body = json.loads(cloudflare.body)
@@ -240,8 +275,8 @@ async def _websocket_status(url: str) -> int | None:
 
 
 async def run_websocket_parity(render_url: str, cloudflare_url: str) -> tuple[dict, list[str]]:
-    render_ws = render_url.replace("https://", "wss://", 1) + "/ws?token=invalid-parity-token"
-    cloudflare_ws = cloudflare_url.replace("https://", "wss://", 1) + "/ws?token=invalid-parity-token"
+    render_ws = render_url.replace("https://", "wss://", 1) + "/ws?ticket=invalid-parity-ticket"
+    cloudflare_ws = cloudflare_url.replace("https://", "wss://", 1) + "/ws?ticket=invalid-parity-ticket"
     render_status, cloudflare_status = await asyncio.gather(
         _websocket_status(render_ws),
         _websocket_status(cloudflare_ws),
@@ -266,6 +301,9 @@ def main() -> int:
     render_url = args.render_url.rstrip("/")
     cloudflare_url = args.cloudflare_url.rstrip("/")
     rows, failures = run_http_parity(render_url, cloudflare_url)
+    edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
+    rows.append(edge_health_row)
+    failures.extend(edge_health_failures)
     native_row, native_failures = run_worker_native_status(render_url, cloudflare_url)
     rows.append(native_row)
     failures.extend(native_failures)

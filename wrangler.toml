@@ -1,11 +1,34 @@
 name = "sherryjo-calendar-edge"
 main = "platform/cloudflare/src/worker.js"
 compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
+JWT_ISSUER = "sherryjo-calendar"
+JWT_AUDIENCE = "sherryjo-calendar-app"
+JWT_CLOCK_SKEW_SECONDS = "30"
+JWT_MAX_LIFETIME_SECONDS = "3600"
+CALENDAR_READ_MODE = "proxy"
+
+[secrets]
+required = ["EDGE_PROXY_SECRET"]
 
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[env.canary]
+workers_dev = true
+
+[env.canary.vars]
+ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
+JWT_ISSUER = "sherryjo-calendar"
+JWT_AUDIENCE = "sherryjo-calendar-app"
+JWT_CLOCK_SKEW_SECONDS = "30"
+JWT_MAX_LIFETIME_SECONDS = "3600"
+CALENDAR_READ_MODE = "proxy"
+
+[env.canary.secrets]
+required = ["EDGE_PROXY_SECRET"]

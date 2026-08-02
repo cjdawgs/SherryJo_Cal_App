@@ -1,0 +1,56 @@
+{
+    "query": {
+        "user_id": 42,
+        "start": "2026-08-01T00:00:00+00:00",
+        "end": "2026-08-08T00:00:00+00:00",
+        "dedup_enabled": true
+    },
+    "events": [
+        {
+            "id": 101,
+            "title": "Listing appointment",
+            "account_key": "google:agent@example.com"
+        },
+        {
+            "id": 102,
+            "title": "Closing",
+            "account_key": "google:agent@example.com"
+        },
+        {
+            "id": 103,
+            "title": "Personal reminder",
+            "account_key": "local:local"
+        }
+    ],
+    "account_status": {
+        "google:agent@example.com": "connected",
+        "apple:agent@example.com": "error"
+    },
+    "expected": {
+        "events": [
+            {
+                "id": 101,
+                "title": "Listing appointment",
+                "account_key": "google:agent@example.com"
+            },
+            {
+                "id": 102,
+                "title": "Closing",
+                "account_key": "google:agent@example.com"
+            },
+            {
+                "id": 103,
+                "title": "Personal reminder",
+                "account_key": "local:local"
+            }
+        ],
+        "account_status": {
+            "google:agent@example.com": "connected",
+            "apple:agent@example.com": "error"
+        },
+        "account_event_totals": {
+            "google:agent@example.com": 2,
+            "local:local": 1
+        }
+    }
+}

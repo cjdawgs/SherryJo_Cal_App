@@ -1,0 +1,70 @@
+{
+  "target": "http://127.0.0.1:8787",
+  "passed": true,
+  "read_only": true,
+  "requests_per_http_case": 10,
+  "warmup_requests_per_http_case": 2,
+  "concurrency": 4,
+  "authenticated_calendar_read": false,
+  "skipped": [
+    "calendar_read: token environment variable is not configured"
+  ],
+  "http": [
+    {
+      "name": "health",
+      "requests": 10,
+      "successes": 10,
+      "failures": 0,
+      "success_rate": 1.0,
+      "latency_ms": {
+        "min": 176.087,
+        "p50": 514.711,
+        "p95": 776.494,
+        "p99": 776.494,
+        "max": 776.494
+      },
+      "response_bytes": 520,
+      "statuses": {
+        "200": 10
+      }
+    },
+    {
+      "name": "static_javascript",
+      "requests": 10,
+      "successes": 10,
+      "failures": 0,
+      "success_rate": 1.0,
+      "latency_ms": {
+        "min": 167.123,
+        "p50": 323.164,
+        "p95": 887.904,
+        "p99": 887.904,
+        "max": 887.904
+      },
+      "response_bytes": 736670,
+      "statuses": {
+        "200": 10
+      }
+    }
+  ],
+  "websocket": {
+    "name": "websocket_rejection",
+    "requests": 3,
+    "successes": 3,
+    "failures": 0,
+    "success_rate": 1.0,
+    "latency_ms": {
+      "p50": 200.366,
+      "p95": 588.871,
+      "p99": 588.871,
+      "max": 588.871
+    },
+    "expected_status": 403,
+    "statuses": [
+      403,
+      403,
+      403
+    ],
+    "errors": []
+  }
+}
