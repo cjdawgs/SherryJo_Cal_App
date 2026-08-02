@@ -84,6 +84,9 @@ jobs:
       - name: Validate Render Python build
         run: python -m compileall -q app deployment
 
+      - name: Install Cloudflare edge dependencies
+        run: npm ci --prefix platform/cloudflare
+
       - name: Test Cloudflare edge contract
         run: node --test platform/cloudflare/test/*.test.js
 
