@@ -47,6 +47,7 @@ Thumbs.db
 .vscode/*
 .vscode/launch.json
 !.vscode/tasks.json
+SherryJo_Cal_App.code-workspace
 
 # Backups & Archives
 *.zip
