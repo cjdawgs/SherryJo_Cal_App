@@ -1,6 +1,15 @@
 # Migration completion Lego plan
 
-Status: Execution plan for the remaining dual-platform charter work after foundation commit `1c762c6`.
+Status: Core Cloudflare production cutover completed on 2026-08-04. This plan retains the remaining literal-charter gates for reliability policy, sustained observation, complete Worker autonomy, and timed failover/failback.
+
+## 2026-08-04 release position
+
+- Production Worker reads are native for calendar, current-user, date-sticky, legacy-event, note, tag-color, task, and TV-version routes.
+- Production event, date-sticky, and tag-color writes are native and replay-safe. Standalone note/task writes remain proxied until their callers adopt the idempotency contract.
+- OAuth, provider sync, scheduler, import, administrative, WebSocket, and TV-state-dependent routes remain intentionally Render-owned.
+- Supabase PostgreSQL remains authoritative at Alembic revision `aa980u11mmm44` with least-privilege Worker RLS and hardened replay receipts.
+- The reversible production smoke and direct-Render synthetic each passed 23 checks with cleanup. Render recovery remains best effort on the free tier.
+- The route migration is complete. The original charter is not literally closed until the final owner/operational gates at the end of this document are completed or formally revised.
 
 ## How to use this plan
 
@@ -303,7 +312,7 @@ Global stop rules:
 
 ## Final project closure
 
-**Status (2026-08-02):** Closure assessment complete with a blocked result. Local Python passed 507 with 29 skips; Worker passed 27; both Wrangler bundles dry-run clean; independent Render monitor tests pass. Live parity is 17/18 because the deployed Worker does not contain the uncommitted status field. The canary does not exist, root Worker secrets are empty, Render lacks the uncommitted ticket route, and no seven-day canary, autonomy gate, or final failover drill exists. Detailed exceptions are in the dated closure workbook.
+**Status (2026-08-04):** Core route cutover is complete and production is healthy. Python passed 532 with 29 optional live-integration skips; Worker passed 69; both Wrangler bundles dry-run clean; authenticated production and direct-Render synthetics each passed 23 checks with cleanup. The canary exists, RS256/RLS/Hyperdrive are provisioned, Supabase is at `aa980u11mmm44`, and production native modes are live. Literal charter closure remains blocked by the unselected free-tier reliability policy, disabled scheduled Render monitor, missing seven-day observation record, incomplete provider/OAuth autonomy, and lack of a current timed public failover/failback drill.
 
 1. **Copilot:** Run the complete Python, Worker, contract, integration, E2E, deployment, security, load, and failover suites.
 2. **Automatic:** Confirm required GitHub checks pass for the exact release SHA.

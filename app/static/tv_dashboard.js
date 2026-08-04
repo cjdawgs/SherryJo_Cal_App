@@ -1882,6 +1882,16 @@ async function authFetch(url, options = {}) {
     delete requestOptions.suppressNetworkHint;
 
     const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
+    const method = String(requestOptions.method || 'GET').toUpperCase();
+    const pathname = new URL(url, window.location.origin).pathname;
+    if (method === 'PUT' && pathname.startsWith('/tv/date-sticky/') && !headers['Idempotency-Key']) {
+      const source = `${method}:${pathname}:${requestOptions.body || ''}`;
+      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source));
+      headers['Idempotency-Key'] = Array.from(
+        new Uint8Array(digest),
+        byte => byte.toString(16).padStart(2, '0')
+      ).join('');
+    }
     const fetchPromise = fetch(url, Object.assign({}, requestOptions, { headers }));
     const timeoutPromise = new Promise((_, reject) => {
       timeoutHandle = setTimeout(() => {

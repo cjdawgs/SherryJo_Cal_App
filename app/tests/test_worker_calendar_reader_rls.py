@@ -26,7 +26,22 @@ MIGRATION_SPEC.loader.exec_module(MIGRATION)
 def test_worker_reader_migration_is_in_single_alembic_head_chain():
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
 
-    assert script.get_heads() == ["l965f66ccc99"]
+    assert script.get_heads() == ["aa980u11mmm44"]
+    assert script.get_revision("aa980u11mmm44").down_revision == "z979t00lll33"
+    assert script.get_revision("z979t00lll33").down_revision == "y978s99kkk22"
+    assert script.get_revision("y978s99kkk22").down_revision == "x977r88jjj11"
+    assert script.get_revision("x977r88jjj11").down_revision == "w976q77iii00"
+    assert script.get_revision("w976q77iii00").down_revision == "v975p66hhh99"
+    assert script.get_revision("v975p66hhh99").down_revision == "u974o55ggg88"
+    assert script.get_revision("u974o55ggg88").down_revision == "t973n44fff77"
+    assert script.get_revision("t973n44fff77").down_revision == "s972m33eee66"
+    assert script.get_revision("s972m33eee66").down_revision == "r971l22ddd55"
+    assert script.get_revision("r971l22ddd55").down_revision == "q970k11ccc44"
+    assert script.get_revision("q970k11ccc44").down_revision == "p969j00bbb33"
+    assert script.get_revision("p969j00bbb33").down_revision == "o968i99aaa22"
+    assert script.get_revision("o968i99aaa22").down_revision == "n967h88fff11"
+    assert script.get_revision("n967h88fff11").down_revision == "m966g77eee00"
+    assert script.get_revision("m966g77eee00").down_revision == "l965f66ccc99"
     assert script.get_revision("l965f66ccc99").down_revision == "k964e55bbb88"
 
 
@@ -46,6 +61,9 @@ def test_worker_reader_migration_grants_only_approved_projection_columns_without
     assert "ACCESS_TOKEN" not in grants
     assert "REFRESH_TOKEN" not in grants
     assert "SECURITY_BARRIER = TRUE" in statements
+    assert "ALTER ROLE WORKER_CALENDAR_READER" not in statements
+    assert "ROLSUPER" in statements
+    assert "ROLBYPASSRLS" in statements
 
 
 @pytest.fixture(scope="module")

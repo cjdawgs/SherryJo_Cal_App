@@ -1,11 +1,58 @@
 import { executeCalendarRead } from "./calendar-read-postgres.js";
+import {
+    EventCreateIdempotencyConflictError,
+    executeEventCreate,
+} from "./event-create-postgres.js";
+import {
+    EventMutationIdempotencyConflictError,
+    EventNotFoundError,
+    EventUpdateConflictError,
+    executeEventDelete,
+    executeEventUpdate,
+} from "./event-mutate-postgres.js";
 import { createHyperdriveCalendarReadAdapter } from "./calendar-read-hyperdrive.js";
+import {
+    executeDateStickyItemRead,
+    executeDateStickyListRead,
+} from "./date-sticky-read-postgres.js";
+import {
+    IdempotencyConflictError,
+    executeDateStickyWrite,
+} from "./date-sticky-write-postgres.js";
+import {
+    CurrentUserNotFoundError,
+    executeCurrentUserRead,
+} from "./current-user-read-postgres.js";
 import { authenticateWorkerRequest, JwtVerificationError } from "./jwt.js";
+import { executeLegacyEventRead } from "./legacy-event-read-postgres.js";
+import { executeNoteRead } from "./note-read-postgres.js";
+import {
+    executeNoteWrite,
+    NoteEventNotFoundError,
+    NoteWriteConflictError,
+} from "./note-write-postgres.js";
+import { executeTagColorRead } from "./tag-color-read-postgres.js";
+import {
+    executeTagColorWrite,
+    TagColorIdempotencyConflictError,
+} from "./tag-color-write-postgres.js";
+import { executeTaskRead } from "./task-read-postgres.js";
+import { executeTaskWrite, TaskWriteConflictError } from "./task-write-postgres.js";
 
 const EDGE_HEALTH_PATH = "/__edge/health";
 const PLATFORM_STATUS_PATH = "/api/platform/status";
 const CALENDAR_READ_PATH = "/calendar/unified";
+const EVENT_WRITE_PATH = "/calendar/event";
+const DATE_STICKY_READ_PATH = "/calendar/date-sticky";
+const TV_DATE_STICKY_WRITE_PATH = "/tv/date-sticky";
+const TAG_COLOR_READ_PATH = "/calendar/tag-colors";
+const CURRENT_USER_READ_PATH = "/users/me";
+const LEGACY_EVENT_READ_PATH = "/events/";
+const NOTE_READ_PATH = "/notes/";
+const TASK_READ_PATH = "/tasks/";
+const TV_VERSION_READ_PATH = "/tv/version";
 const CALENDAR_READ_MODES = new Set(["proxy", "shadow", "canary", "native"]);
+const WRITE_MODES = new Set(["proxy", "canary", "native"]);
 
 function jsonResponse(payload, status = 200) {
     return new Response(JSON.stringify(payload), {
@@ -82,6 +129,66 @@ function calendarReadMode(env) {
     return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
 }
 
+function taskReadMode(env) {
+    const mode = String(env.TASK_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function taskWriteMode(env) {
+    const mode = String(env.TASK_WRITE_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function noteReadMode(env) {
+    const mode = String(env.NOTE_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function noteWriteMode(env) {
+    const mode = String(env.NOTE_WRITE_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function dateStickyReadMode(env) {
+    const mode = String(env.DATE_STICKY_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function dateStickyWriteMode(env) {
+    const mode = String(env.DATE_STICKY_WRITE_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function eventWriteMode(env) {
+    const mode = String(env.EVENT_WRITE_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function tagColorReadMode(env) {
+    const mode = String(env.TAG_COLOR_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function tagColorWriteMode(env) {
+    const mode = String(env.TAG_COLOR_WRITE_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function currentUserReadMode(env) {
+    const mode = String(env.CURRENT_USER_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function tvVersionReadMode(env) {
+    const mode = String(env.TV_VERSION_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function legacyEventReadMode(env) {
+    const mode = String(env.LEGACY_EVENT_READ_MODE || "proxy").trim().toLowerCase();
+    return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
 function parseIsoUtc(value) {
     const candidate = String(value || "").trim();
     if (!candidate) return null;
@@ -125,6 +232,183 @@ async function nativeCalendarRead(request, incomingUrl, env, verifiedClaims = nu
     return jsonResponse(await executeCalendarRead(adapter, query));
 }
 
+async function nativeTaskRead(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeTaskRead(adapter, claims.user_id));
+}
+
+async function nativeNoteRead(request, incomingUrl, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeNoteRead(adapter, {
+        userId: claims.user_id,
+        date: incomingUrl.searchParams.get("date"),
+    }));
+}
+
+function dateStickyKey(incomingUrl) {
+    const prefix = `${DATE_STICKY_READ_PATH}/`;
+    return incomingUrl.pathname.startsWith(prefix)
+        ? decodeURIComponent(incomingUrl.pathname.slice(prefix.length))
+        : null;
+}
+
+function tvDateStickyKey(incomingUrl) {
+    const prefix = `${TV_DATE_STICKY_WRITE_PATH}/`;
+    return incomingUrl.pathname.startsWith(prefix)
+        ? decodeURIComponent(incomingUrl.pathname.slice(prefix.length))
+        : null;
+}
+
+function dateStickyWriteKey(incomingUrl) {
+    return dateStickyKey(incomingUrl) ?? tvDateStickyKey(incomingUrl);
+}
+
+function isDateStickyReadPath(incomingUrl) {
+    return incomingUrl.pathname === DATE_STICKY_READ_PATH || dateStickyKey(incomingUrl) !== null;
+}
+
+async function nativeDateStickyRead(request, incomingUrl, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    const date = dateStickyKey(incomingUrl);
+    return jsonResponse(date === null
+        ? await executeDateStickyListRead(adapter, claims.user_id)
+        : await executeDateStickyItemRead(adapter, { userId: claims.user_id, date }));
+}
+
+function canonicalJson(value) {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+    if (value && typeof value === "object") {
+        return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+}
+
+async function sha256Hex(value) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function nativeDateStickyWrite(request, incomingUrl, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const date = dateStickyWriteKey(incomingUrl);
+    if (!date) throw new TypeError("date is required");
+
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) {
+        throw new TypeError("A valid Idempotency-Key is required");
+    }
+
+    const data = await request.json();
+    const stickyNotes = data?.sticky_notes ?? data?.stickyNotes ?? [];
+    const requestHash = await sha256Hex(canonicalJson({ date, sticky_notes: stickyNotes }));
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeDateStickyWrite(adapter, {
+        userId: claims.user_id,
+        date,
+        stickyNotes,
+        idempotencyKey,
+        requestHash,
+    }));
+}
+
+async function nativeEventCreate(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) throw new TypeError("A valid Idempotency-Key is required");
+    const data = await request.json();
+    const requestHash = await sha256Hex(canonicalJson(data));
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeEventCreate(adapter, { userId: claims.user_id, data, idempotencyKey, requestHash }));
+}
+
+function eventId(incomingUrl) {
+    const prefix = `${EVENT_WRITE_PATH}/`;
+    if (!incomingUrl.pathname.startsWith(prefix)) return null;
+    const value = Number(incomingUrl.pathname.slice(prefix.length));
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+async function nativeEventMutation(request, incomingUrl, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const id = eventId(incomingUrl);
+    if (!id) throw new TypeError("A valid event ID is required");
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) throw new TypeError("A valid Idempotency-Key is required");
+    const data = request.method === "PUT" ? await request.json() : {};
+    const requestHash = await sha256Hex(canonicalJson({ eventId: id, method: request.method, data }));
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    const input = { userId: claims.user_id, eventId: id, data, idempotencyKey, requestHash };
+    return jsonResponse(request.method === "PUT"
+        ? await executeEventUpdate(adapter, input)
+        : await executeEventDelete(adapter, input));
+}
+
+async function nativeLocalCreate(request, env, execute, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) throw new TypeError("A valid Idempotency-Key is required");
+    const data = await request.json();
+    const requestHash = await sha256Hex(canonicalJson(data));
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await execute(adapter, { userId: claims.user_id, data, idempotencyKey, requestHash }));
+}
+
+async function nativeTagColorRead(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeTagColorRead(adapter, claims.user_id));
+}
+
+async function nativeTagColorWrite(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const idempotencyKey = String(request.headers.get("idempotency-key") || "").trim();
+    if (!idempotencyKey || idempotencyKey.length > 200) {
+        throw new TypeError("A valid Idempotency-Key is required");
+    }
+
+    const data = await request.json();
+    if (!data?.settings || typeof data.settings !== "object" || Array.isArray(data.settings)) {
+        throw new TypeError("settings object is required");
+    }
+    const requestHash = await sha256Hex(canonicalJson({ settings: data.settings }));
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeTagColorWrite(adapter, {
+        userId: claims.user_id,
+        settings: data.settings,
+        idempotencyKey,
+        requestHash,
+    }));
+}
+
+async function nativeCurrentUserRead(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeCurrentUserRead(adapter, claims.user_id));
+}
+
+async function nativeLegacyEventRead(request, env, verifiedClaims = null) {
+    const claims = verifiedClaims || await authenticateWorkerRequest(request, env);
+    const adapter = createHyperdriveCalendarReadAdapter(env);
+    return jsonResponse(await executeLegacyEventRead(adapter, claims.user_id));
+}
+
+async function nativeTvVersionRead(request, env, verifiedClaims = null) {
+    verifiedClaims || await authenticateWorkerRequest(request, env);
+    const appVersion = String(env.TV_APP_VERSION || "").trim();
+    if (!appVersion) throw new TypeError("TV_APP_VERSION is required for native TV version reads");
+    return new Response(JSON.stringify({ appVersion }), {
+        status: 200,
+        headers: {
+            "cache-control": "no-store, max-age=0, must-revalidate",
+            "content-type": "application/json; charset=utf-8",
+            pragma: "no-cache",
+        },
+    });
+}
+
 async function proxyRequest(request, incomingUrl, env) {
     const origin = resolveOrigin(env);
     const originRequest = buildOriginRequest(request, origin, env);
@@ -166,6 +450,138 @@ async function shadowCalendarRead(request, incomingUrl, env, proxyResponse) {
     }
 }
 
+async function shadowTaskRead(request, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeTaskRead(request, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "task_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "task_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
+async function shadowNoteRead(request, incomingUrl, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeNoteRead(request, incomingUrl, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "note_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "note_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
+async function shadowDateStickyRead(request, incomingUrl, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeDateStickyRead(request, incomingUrl, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "date_sticky_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "date_sticky_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
+async function shadowTagColorRead(request, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeTagColorRead(request, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "tag_color_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "tag_color_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
+async function shadowCurrentUserRead(request, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeCurrentUserRead(request, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "current_user_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "current_user_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
+async function shadowLegacyEventRead(request, env, proxyResponse) {
+    try {
+        const [nativeResponse, proxyBody] = await Promise.all([
+            nativeLegacyEventRead(request, env),
+            proxyResponse.clone().json(),
+        ]);
+        const nativeBody = await nativeResponse.json();
+        console.log(JSON.stringify({
+            event: "legacy_event_read_shadow_comparison",
+            matched: proxyResponse.status === nativeResponse.status
+                && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+            proxyStatus: proxyResponse.status,
+            nativeStatus: nativeResponse.status,
+        }));
+    } catch (error) {
+        console.error(JSON.stringify({
+            event: "legacy_event_read_shadow_failed",
+            errorType: error instanceof Error ? error.name : "UnknownError",
+        }));
+    }
+}
+
 export default {
     async fetch(request, env) {
         const incomingUrl = new URL(request.url);
@@ -183,12 +599,86 @@ export default {
                 platform: "cloudflare-worker",
                 mode: "worker-native",
                 calendarReadMode: calendarReadMode(env),
+                currentUserReadMode: currentUserReadMode(env),
+                dateStickyReadMode: dateStickyReadMode(env),
+                dateStickyWriteMode: dateStickyWriteMode(env),
+                eventWriteMode: eventWriteMode(env),
+                legacyEventReadMode: legacyEventReadMode(env),
+                noteReadMode: noteReadMode(env),
+                noteWriteMode: noteWriteMode(env),
+                tagColorReadMode: tagColorReadMode(env),
+                tagColorWriteMode: tagColorWriteMode(env),
+                taskReadMode: taskReadMode(env),
+                taskWriteMode: taskWriteMode(env),
+                tvVersionReadMode: tvVersionReadMode(env),
                 edgeProxyAuthConfigured: Boolean(String(env.EDGE_PROXY_SECRET || "")),
             });
         }
 
         try {
             const mode = calendarReadMode(env);
+            const currentUserMode = currentUserReadMode(env);
+            const dateStickyMode = dateStickyReadMode(env);
+            const dateStickyWritesMode = dateStickyWriteMode(env);
+            const eventsWriteMode = eventWriteMode(env);
+            const legacyEventsMode = legacyEventReadMode(env);
+            const notesMode = noteReadMode(env);
+            const notesWriteMode = noteWriteMode(env);
+            const tagColorsMode = tagColorReadMode(env);
+            const tagColorWritesMode = tagColorWriteMode(env);
+            const tasksMode = taskReadMode(env);
+            const tasksWriteMode = taskWriteMode(env);
+            const tvVersionMode = tvVersionReadMode(env);
+            if (request.method === "POST" && incomingUrl.pathname === NOTE_READ_PATH && notesWriteMode !== "proxy") {
+                if (notesWriteMode === "native") return await nativeLocalCreate(request, env, executeNoteWrite);
+                if (notesWriteMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) return await nativeLocalCreate(request, env, executeNoteWrite, claims);
+                }
+            }
+            if (request.method === "POST" && incomingUrl.pathname === TASK_READ_PATH && tasksWriteMode !== "proxy") {
+                if (tasksWriteMode === "native") return await nativeLocalCreate(request, env, executeTaskWrite);
+                if (tasksWriteMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) return await nativeLocalCreate(request, env, executeTaskWrite, claims);
+                }
+            }
+            if (request.method === "POST" && incomingUrl.pathname === EVENT_WRITE_PATH && eventsWriteMode !== "proxy") {
+                if (eventsWriteMode === "native") return await nativeEventCreate(request, env);
+                if (eventsWriteMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) return await nativeEventCreate(request, env, claims);
+                }
+            }
+            if (["PUT", "DELETE"].includes(request.method) && eventId(incomingUrl) !== null && eventsWriteMode !== "proxy") {
+                if (eventsWriteMode === "native") return await nativeEventMutation(request, incomingUrl, env);
+                if (eventsWriteMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) return await nativeEventMutation(request, incomingUrl, env, claims);
+                }
+            }
+            if (request.method === "PUT" && dateStickyWriteKey(incomingUrl) !== null && dateStickyWritesMode !== "proxy") {
+                if (dateStickyWritesMode === "native") {
+                    return await nativeDateStickyWrite(request, incomingUrl, env);
+                }
+                if (dateStickyWritesMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeDateStickyWrite(request, incomingUrl, env, claims);
+                    }
+                }
+            }
+            if (request.method === "PUT" && incomingUrl.pathname === TAG_COLOR_READ_PATH && tagColorWritesMode !== "proxy") {
+                if (tagColorWritesMode === "native") {
+                    return await nativeTagColorWrite(request, env);
+                }
+                if (tagColorWritesMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeTagColorWrite(request, env, claims);
+                    }
+                }
+            }
             if (request.method === "GET" && incomingUrl.pathname === CALENDAR_READ_PATH && mode !== "proxy") {
                 if (mode === "native") {
                     return await nativeCalendarRead(request, incomingUrl, env);
@@ -201,17 +691,146 @@ export default {
                 }
             }
 
+            if (request.method === "GET" && incomingUrl.pathname === TASK_READ_PATH && tasksMode !== "proxy") {
+                if (tasksMode === "native") {
+                    return await nativeTaskRead(request, env);
+                }
+                if (tasksMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeTaskRead(request, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && incomingUrl.pathname === LEGACY_EVENT_READ_PATH && legacyEventsMode !== "proxy") {
+                if (legacyEventsMode === "native") {
+                    return await nativeLegacyEventRead(request, env);
+                }
+                if (legacyEventsMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeLegacyEventRead(request, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && incomingUrl.pathname === NOTE_READ_PATH && notesMode !== "proxy") {
+                if (notesMode === "native") {
+                    return await nativeNoteRead(request, incomingUrl, env);
+                }
+                if (notesMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeNoteRead(request, incomingUrl, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && isDateStickyReadPath(incomingUrl) && dateStickyMode !== "proxy") {
+                if (dateStickyMode === "native") {
+                    return await nativeDateStickyRead(request, incomingUrl, env);
+                }
+                if (dateStickyMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeDateStickyRead(request, incomingUrl, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && incomingUrl.pathname === TAG_COLOR_READ_PATH && tagColorsMode !== "proxy") {
+                if (tagColorsMode === "native") {
+                    return await nativeTagColorRead(request, env);
+                }
+                if (tagColorsMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeTagColorRead(request, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && incomingUrl.pathname === CURRENT_USER_READ_PATH && currentUserMode !== "proxy") {
+                if (currentUserMode === "native") {
+                    return await nativeCurrentUserRead(request, env);
+                }
+                if (currentUserMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeCurrentUserRead(request, env, claims);
+                    }
+                }
+            }
+
+            if (request.method === "GET" && incomingUrl.pathname === TV_VERSION_READ_PATH && tvVersionMode !== "proxy") {
+                if (tvVersionMode === "native") {
+                    return await nativeTvVersionRead(request, env);
+                }
+                if (tvVersionMode === "canary") {
+                    const claims = await authenticateWorkerRequest(request, env);
+                    if (canaryUserAllowed(env, claims.user_id)) {
+                        return await nativeTvVersionRead(request, env, claims);
+                    }
+                }
+            }
+
             const response = await proxyRequest(request, incomingUrl, env);
             if (request.method === "GET" && incomingUrl.pathname === CALENDAR_READ_PATH && mode === "shadow") {
                 await shadowCalendarRead(request, incomingUrl, env, response);
             }
+            if (request.method === "GET" && incomingUrl.pathname === TASK_READ_PATH && tasksMode === "shadow") {
+                await shadowTaskRead(request, env, response);
+            }
+            if (request.method === "GET" && incomingUrl.pathname === LEGACY_EVENT_READ_PATH && legacyEventsMode === "shadow") {
+                await shadowLegacyEventRead(request, env, response);
+            }
+            if (request.method === "GET" && incomingUrl.pathname === NOTE_READ_PATH && notesMode === "shadow") {
+                await shadowNoteRead(request, incomingUrl, env, response);
+            }
+            if (request.method === "GET" && isDateStickyReadPath(incomingUrl) && dateStickyMode === "shadow") {
+                await shadowDateStickyRead(request, incomingUrl, env, response);
+            }
+            if (request.method === "GET" && incomingUrl.pathname === TAG_COLOR_READ_PATH && tagColorsMode === "shadow") {
+                await shadowTagColorRead(request, env, response);
+            }
+            if (request.method === "GET" && incomingUrl.pathname === CURRENT_USER_READ_PATH && currentUserMode === "shadow") {
+                await shadowCurrentUserRead(request, env, response);
+            }
+            if (request.method === "GET" && incomingUrl.pathname === TV_VERSION_READ_PATH && tvVersionMode === "shadow") {
+                try {
+                    const nativeResponse = await nativeTvVersionRead(request, env);
+                    const [nativeBody, proxyBody] = await Promise.all([nativeResponse.json(), response.clone().json()]);
+                    console.log(JSON.stringify({
+                        event: "tv_version_read_shadow_comparison",
+                        matched: response.status === nativeResponse.status
+                            && JSON.stringify(proxyBody) === JSON.stringify(nativeBody),
+                        proxyStatus: response.status,
+                        nativeStatus: nativeResponse.status,
+                    }));
+                } catch (error) {
+                    console.error(JSON.stringify({
+                        event: "tv_version_read_shadow_failed",
+                        errorType: error instanceof Error ? error.name : "UnknownError",
+                    }));
+                }
+            }
             return response;
         } catch (error) {
-            if (error instanceof JwtVerificationError) {
+            if (error instanceof JwtVerificationError || error instanceof CurrentUserNotFoundError) {
                 return jsonResponse({ error: "Authentication required" }, 401);
             }
+            if (error instanceof EventUpdateConflictError) {
+                return jsonResponse({ detail: { conflict: true, message: error.message, server_updated_at: error.serverUpdatedAt } }, 409);
+            }
+            if (error instanceof EventNotFoundError || error instanceof NoteEventNotFoundError) {
+                return jsonResponse({ detail: error.message }, 404);
+            }
+            if (error instanceof IdempotencyConflictError || error instanceof TagColorIdempotencyConflictError || error instanceof EventCreateIdempotencyConflictError || error instanceof EventMutationIdempotencyConflictError || error instanceof NoteWriteConflictError || error instanceof TaskWriteConflictError) {
+                return jsonResponse({ error: error.message }, 409);
+            }
             if (error instanceof TypeError) {
-                return jsonResponse({ error: "Invalid calendar read request" }, 400);
+                return jsonResponse({ error: "Invalid Worker request" }, 400);
             }
             console.error(JSON.stringify({
                 event: "origin_request_failed",

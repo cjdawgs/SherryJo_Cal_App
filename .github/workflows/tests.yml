@@ -1,9 +1,3 @@
-# Copy this file to .github/workflows/tests.yml to run the test suite in CI.
-# It lives here because the automation that opened this PR cannot create
-# workflow files (GitHub withholds the `workflow` OAuth scope).
-#
-# The existing workflow only builds and deploys; nothing runs pytest today.
-
 name: Tests
 
 on:

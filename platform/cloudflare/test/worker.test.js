@@ -38,8 +38,280 @@ test("platform status is Worker-native and does not contact Render", async () =>
             platform: "cloudflare-worker",
             mode: "worker-native",
             calendarReadMode: "proxy",
+            currentUserReadMode: "proxy",
+            dateStickyReadMode: "proxy",
+            dateStickyWriteMode: "proxy",
+            eventWriteMode: "proxy",
+            legacyEventReadMode: "proxy",
+            noteReadMode: "proxy",
+            noteWriteMode: "proxy",
+            tagColorReadMode: "proxy",
+            tagColorWriteMode: "proxy",
+            taskReadMode: "proxy",
+            taskWriteMode: "proxy",
+            tvVersionReadMode: "proxy",
             edgeProxyAuthConfigured: true,
         });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native date-sticky write mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        for (const path of ["/calendar/date-sticky/2026-08-04", "/tv/date-sticky/2026-08-04"]) {
+            const response = await worker.fetch(
+                new Request(`https://calendar.example.com${path}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json", "Idempotency-Key": "test-key" },
+                    body: JSON.stringify({ sticky_notes: [] }),
+                }),
+                { DATE_STICKY_WRITE_MODE: "native" },
+            );
+
+            assert.equal(response.status, 401);
+            assert.deepEqual(await response.json(), { error: "Authentication required" });
+        }
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native event create mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => { originContacted = true; throw new Error("Native mode must not contact Render"); };
+    try {
+        const response = await worker.fetch(new Request("https://calendar.example.com/calendar/event", {
+            method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": "test-key" },
+            body: JSON.stringify({ title: "Test", start_time: "2026-08-04T12:00:00Z" }),
+        }), { EVENT_WRITE_MODE: "native" });
+        assert.equal(response.status, 401);
+        assert.equal(originContacted, false);
+    } finally { globalThis.fetch = originalFetch; }
+});
+
+test("native event update and delete modes fail closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => { originContacted = true; throw new Error("Native mode must not contact Render"); };
+    try {
+        for (const method of ["PUT", "DELETE"]) {
+            const response = await worker.fetch(new Request("https://calendar.example.com/calendar/event/7", {
+                method, headers: { "Content-Type": "application/json", "Idempotency-Key": "test-key" },
+                body: method === "PUT" ? JSON.stringify({ title: "Test" }) : undefined,
+            }), { EVENT_WRITE_MODE: "native" });
+            assert.equal(response.status, 401);
+        }
+        assert.equal(originContacted, false);
+    } finally { globalThis.fetch = originalFetch; }
+});
+
+test("native tag-color write mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/calendar/tag-colors", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json", "Idempotency-Key": "test-key" },
+                body: JSON.stringify({ settings: {} }),
+            }),
+            { TAG_COLOR_WRITE_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native note and task write modes fail closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => { originContacted = true; throw new Error("Native mode must not contact Render"); };
+    try {
+        for (const [path, binding, body] of [
+            ["/notes/", "NOTE_WRITE_MODE", { event_id: 7, date: "2026-08-04", content: "Note" }],
+            ["/tasks/", "TASK_WRITE_MODE", { title: "Task" }],
+        ]) {
+            const response = await worker.fetch(new Request(`https://calendar.example.com${path}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "Idempotency-Key": "test-key" },
+                body: JSON.stringify(body),
+            }), { [binding]: "native" });
+            assert.equal(response.status, 401);
+        }
+        assert.equal(originContacted, false);
+    } finally { globalThis.fetch = originalFetch; }
+});
+
+test("native TV version mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/tv/version"),
+            { TV_VERSION_READ_MODE: "native", TV_APP_VERSION: "test-version" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native legacy event mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/events/"),
+            { LEGACY_EVENT_READ_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native date-sticky mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        for (const path of ["/calendar/date-sticky", "/calendar/date-sticky/2026-08-04"]) {
+            const response = await worker.fetch(
+                new Request(`https://calendar.example.com${path}`),
+                { DATE_STICKY_READ_MODE: "native" },
+            );
+
+            assert.equal(response.status, 401);
+            assert.deepEqual(await response.json(), { error: "Authentication required" });
+        }
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native tag-color mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/calendar/tag-colors"),
+            { TAG_COLOR_READ_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native current-user mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/users/me"),
+            { CURRENT_USER_READ_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native note mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/notes/?date=2026-08-04"),
+            { NOTE_READ_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native task mode fails closed without Worker authentication", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Native mode must not contact Render");
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/tasks/"),
+            { TASK_READ_MODE: "native" },
+        );
+
+        assert.equal(response.status, 401);
+        assert.deepEqual(await response.json(), { error: "Authentication required" });
         assert.equal(originContacted, false);
     } finally {
         globalThis.fetch = originalFetch;
@@ -101,6 +373,34 @@ test("proxy rewrites same-origin Render redirects to the public hostname", async
             response.headers.get("location"),
             "https://calendar.example.com/login?next=%2Fcalendar",
         );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("proxy returns WebSocket upgrades without reconstructing the response", async () => {
+    const originalFetch = globalThis.fetch;
+    const upgradeResponse = { status: 101, webSocket: {}, headers: new Headers() };
+    let capturedRequest;
+    globalThis.fetch = async (request) => {
+        capturedRequest = request;
+        return upgradeResponse;
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/ws?ticket=one-use", {
+                headers: { connection: "Upgrade", upgrade: "websocket" },
+            }),
+            {
+                ORIGIN_BASE_URL: "https://sherryjo-cal-app.onrender.com",
+                EDGE_PROXY_SECRET: "trusted-edge-secret",
+            },
+        );
+
+        assert.equal(response, upgradeResponse);
+        assert.equal(capturedRequest.headers.get("upgrade"), "websocket");
+        assert.equal(capturedRequest.headers.get("x-sherryjo-edge-auth"), "trusted-edge-secret");
     } finally {
         globalThis.fetch = originalFetch;
     }

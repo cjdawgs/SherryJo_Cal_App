@@ -76,6 +76,8 @@ def _request(
     if payload is not None:
         request_body = json.dumps(payload).encode("utf-8")
         content_type = "application/json"
+        if method in {"POST", "PUT", "DELETE"}:
+            headers["Idempotency-Key"] = str(uuid.uuid4())
     if content_type:
         headers["Content-Type"] = content_type
     request = urllib.request.Request(

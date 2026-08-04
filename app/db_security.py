@@ -28,6 +28,7 @@ RLS_TABLES = (
     "tv_diag_log",
     "app_runtime_secrets",
     "websocket_tickets",
+    "worker_write_receipts",
 )
 
 PUBLIC_API_ROLES = ("anon", "authenticated")
@@ -41,6 +42,7 @@ BEGIN
         REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM {role};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM {role};
         ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM {role};
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM {role};
     END IF;
 END $$;
 """

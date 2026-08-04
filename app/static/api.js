@@ -26,6 +26,32 @@ function requireAuth() {
   return token;
 }
 
+async function addReplaySafetyHeader(url, method, payload, headers) {
+  const pathname = new URL(url, window.location.origin).pathname;
+  if (method.toUpperCase() === "POST" && pathname === "/calendar/event") {
+    if (!headers["Idempotency-Key"] && !headers["idempotency-key"]) {
+      headers["Idempotency-Key"] = crypto.randomUUID();
+    }
+    return;
+  }
+  if (["PUT", "DELETE"].includes(method.toUpperCase()) && /^\/calendar\/event\/\d+$/.test(pathname)) {
+    if (!headers["Idempotency-Key"] && !headers["idempotency-key"]) {
+      headers["Idempotency-Key"] = crypto.randomUUID();
+    }
+    return;
+  }
+  const replaySafePut = pathname.startsWith("/calendar/date-sticky/") || pathname === "/calendar/tag-colors";
+  if (method.toUpperCase() !== "PUT" || !replaySafePut) return;
+  if (headers["Idempotency-Key"] || headers["idempotency-key"]) return;
+
+  const source = `${method.toUpperCase()}:${pathname}:${payload || ""}`;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+  headers["Idempotency-Key"] = Array.from(
+    new Uint8Array(digest),
+    (byte) => byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
 async function request(url, options = {}) {
   const {
     method = "GET",
@@ -50,6 +76,8 @@ async function request(url, options = {}) {
   if (!isFormLike && payload != null && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json";
   }
+
+  await addReplaySafetyHeader(url, method, payload, headers);
 
   if (auth) {
     const token = getAuthToken();
@@ -78,26 +106,26 @@ async function request(url, options = {}) {
     window.location.href = "/login";
     return null;
   }
-  
+
   // ✅ Unified safe return (compatibility layer)
-let json = {};
-try {
-  json = await response.json();
-} catch {
-  json = {};
-}
+  let json = {};
+  try {
+    json = await response.json();
+  } catch {
+    json = {};
+  }
 
-return {
-  ...json,
+  return {
+    ...json,
 
-  // ✅ old-style compatibility
-  json: async () => json,
-  text: async () => JSON.stringify(json),
+    // ✅ old-style compatibility
+    json: async () => json,
+    text: async () => JSON.stringify(json),
 
-  // ✅ preserve metadata if anything relies on it
-  ok: response.ok,
-  status: response.status,
-};
+    // ✅ preserve metadata if anything relies on it
+    ok: response.ok,
+    status: response.status,
+  };
 
   //return response;
 }

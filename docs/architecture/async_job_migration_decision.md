@@ -1,6 +1,6 @@
 # Async job migration inventory and decision
 
-Status: Repository inventory complete; owner decision pending.
+Status: Decision implemented. Render remains the exclusive scheduler owner.
 
 ## Current ownership
 
@@ -22,7 +22,7 @@ No migration may run Render APScheduler and Cloudflare ownership for the same op
 
 ## Current recommendation
 
-Choose **defer** for Queues and Cron until the operation ledger and replay tests exist. If an earlier Cron proof is desired, use only TV diagnostics pruning after adding exclusive ownership. Keep event sync and efficiency rollup on Render. This recommendation adds no Cloudflare binding and changes no runtime ownership.
+The implemented decision is **defer** for Queues and Cron until the operation ledger and replay tests exist. Event sync, TV diagnostics pruning, and efficiency rollup remain exclusively on Render. No Cloudflare scheduler binding is configured, preventing duplicate provider execution during native route cutover.
 
 ## Required evidence before approval
 

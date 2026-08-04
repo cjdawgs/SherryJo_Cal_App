@@ -95,8 +95,9 @@ def test_root_and_canary_workers_require_edge_proxy_authentication():
 
     assert config["name"] == "sherryjo-cal-app"
     assert config["env"]["canary"]["name"] == "sherryjo-cal-app-canary"
-    assert config["secrets"]["required"] == ["EDGE_PROXY_SECRET"]
-    assert config["env"]["canary"]["secrets"]["required"] == ["EDGE_PROXY_SECRET"]
+    required_secrets = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON"]
+    assert config["secrets"]["required"] == required_secrets
+    assert config["env"]["canary"]["secrets"]["required"] == required_secrets
     expected_jwt_policy = {
         "JWT_ISSUER": "sherryjo-calendar",
         "JWT_AUDIENCE": "sherryjo-calendar-app",

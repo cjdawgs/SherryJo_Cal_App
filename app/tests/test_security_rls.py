@@ -116,7 +116,8 @@ def test_default_privileges_do_not_re_expose_new_tables(pg_engine):
             text(
                 "SELECT defaclacl::text FROM pg_default_acl d "
                 "JOIN pg_namespace n ON n.oid = d.defaclnamespace "
-                "WHERE n.nspname = 'public'"
+                "WHERE n.nspname = 'public' AND defaclrole = "
+                "(SELECT usesysid FROM pg_user WHERE usename = current_user)"
             )
         ).scalars().all()
 

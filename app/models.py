@@ -342,6 +342,17 @@ class DateStickyNote(Base):
     )
 
 
+class WorkerWriteReceipt(Base):
+    __tablename__ = "worker_write_receipts"
+
+    owner_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
+    idempotency_key = Column(String(200), primary_key=True)
+    operation = Column(String(100), nullable=False)
+    request_hash = Column(String(64), nullable=False)
+    response_body = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
 # --------------------------------------------------
 # ✅ TV DIAGNOSTIC LOG TABLE
 # --------------------------------------------------

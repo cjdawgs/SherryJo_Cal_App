@@ -45,7 +45,19 @@ On another development desktop, use `git pull origin main` rather than copying i
 | `REQUIRE_DB_KIND` | `postgres` | N/A | Fail closed on database mismatch |
 | `TOKEN_ENCRYPTION_KEY` | Secret, required | Not copied | Loss requires OAuth reconnection; rotation uses new,old keys |
 | `ORIGIN_BASE_URL` | N/A | Render HTTPS origin | Must not equal the Worker hostname |
-| `CALENDAR_READ_MODE` | N/A | `proxy` | Only `proxy`, `shadow`, `canary`, or `native`; invalid values fail closed to `proxy` |
+| `CALENDAR_READ_MODE` | N/A | `native` | Only `proxy`, `shadow`, `canary`, or `native`; invalid values fail closed to `proxy` |
+| `CURRENT_USER_READ_MODE` | N/A | `native` | Controls credential-free `GET /users/me` projection only |
+| `DATE_STICKY_READ_MODE` | N/A | `native` | Controls both date-sticky GET routes |
+| `DATE_STICKY_WRITE_MODE` | N/A | `native` | Controls replay-safe calendar and TV date-sticky PUT routes |
+| `EVENT_WRITE_MODE` | N/A | `native` | Controls replay-safe local event create/update/delete routes |
+| `LEGACY_EVENT_READ_MODE` | N/A | `native` | Controls smoke-compatible `GET /events/` |
+| `NOTE_READ_MODE` | N/A | `native` | Controls date-filtered `GET /notes/` |
+| `NOTE_WRITE_MODE` | N/A | `proxy` | Remains proxied until all callers supply the idempotency contract |
+| `TAG_COLOR_READ_MODE` | N/A | `native` | Controls `GET /calendar/tag-colors` |
+| `TAG_COLOR_WRITE_MODE` | N/A | `native` | Controls replay-safe tag-color PUT |
+| `TASK_READ_MODE` | N/A | `native` | Controls `GET /tasks/` |
+| `TASK_WRITE_MODE` | N/A | `proxy` | Remains proxied until all callers supply the idempotency contract |
+| `TV_VERSION_READ_MODE` | N/A | `native` | Controls `GET /tv/version` and requires matching `TV_APP_VERSION` |
 | `CALENDAR_READ_CANARY_USER_IDS` | N/A | Unset | Comma-separated server-verified user IDs; required only for canary native reads |
 | `JWT_PUBLIC_KEYS_JSON` | Render publishes public keys | Unset secret | Public verification keys only; never copy a private signing key to Cloudflare |
 | `HYPERDRIVE_RLS_NO_CACHE` | N/A | Unbound | Future cache-disabled least-privilege PostgreSQL binding; required before non-proxy reads |
@@ -100,15 +112,24 @@ After the canary exists, run `Cloudflare Canary Monitor` manually once with revi
 
 ## Worker-native route inventory
 
-The following routes terminate inside the Worker and do not contact Render:
+The following routes have Worker-native implementations. Production uses the modes recorded below; canary reads remain `shadow` and canary writes remain `proxy`:
 
 | Route | Purpose |
 | --- | --- |
 | `/__edge/health` | Edge proxy process health and operating mode |
 | `/api/platform/status` | First Worker-native application route; confirms native routing only |
-| `/calendar/unified` | Ownership-controlled read route; currently forced to `proxy` in root and canary configuration |
+| `/calendar/unified` | Production-native ownership-controlled calendar read |
+| `/calendar/date-sticky[/{date}]` | Production-native user-owned date-sticky reads and replay-safe writes |
+| `/calendar/tag-colors` | Production-native user-owned tag-color reads and replay-safe writes |
+| `/events/` | Legacy user-owned event and embedded-note read used by smoke validation |
+| `/notes/` | Production-native date-filtered read; standalone writes remain proxied |
+| `/tasks/` | Production-native task-list read; standalone writes remain proxied |
+| `/tv/version` | Authenticated deployment-version read; requires explicit matching version configuration before non-proxy use |
+| `/users/me` | Credential-free current-user identity projection |
 
-`/api/platform/status` does not prove that Render, Supabase, OAuth, or scheduled sync is healthy. `CALENDAR_READ_MODE=shadow` returns Render's response and records a masked comparison; `canary` requires a verified user in `CALENDAR_READ_CANARY_USER_IDS`; `native` is forbidden until the JWT, RLS, Hyperdrive, contract, and canary gates pass. To roll back calendar ownership, set `CALENDAR_READ_MODE=proxy` and redeploy the exact reviewed release.
+`/api/platform/status` does not prove that Render, Supabase, OAuth, or scheduled sync is healthy. Each read-mode variable supports `proxy`, `shadow`, `canary`, and `native`; shadow mode returns Render's response and records only masked status/match metadata. Canary mode requires a verified user in `CALENDAR_READ_CANARY_USER_IDS`. Native mode is forbidden until the JWT, RLS, Hyperdrive, contract, and canary gates pass. To roll back route ownership, set its read mode to `proxy` and redeploy the exact reviewed release.
+
+`/accounts` and `/accounts/sync-status` remain on Render because their responses include credential-decryption health, provider remediation, and scheduler state. `/tv/state` remains with its PATCH route because both use process-local shared state. `/tv/events` remains with that state owner because it also performs recurrence expansion, account legend projection, conditional ETag handling, and stale-snapshot fallback. These routes move with their owning OAuth, scheduler, and TV-state subsystems rather than as isolated database reads.
 
 After changing native routing, run the Worker unit tests, Wrangler dry-run, live endpoint check, and the complete shadow parity harness. To roll back, run `wrangler deployments list`, identify the last known-good version, and run `wrangler rollback <VERSION_ID>`. A rollback changes Worker code immediately but does not roll back bindings.
 
@@ -144,7 +165,7 @@ Recovery objective on free tiers is best effort because a sleeping Render instan
 
 ## Failover: Render origin degradation
 
-Phase 0 has no independent application origin, so Cloudflare cannot mask a Render or Supabase outage. Return a controlled 502, preserve edge logs, and fail back only when Render health and schema checks pass. Do not enable SQLite fallback or redirect writes to D1 as an emergency measure.
+Cloudflare now executes production database-local reads plus event, date-sticky, and tag-color writes independently. Provider, OAuth, scheduler, import, administrative, WebSocket, and TV-state-dependent routes still require Render. During Render degradation, native routes continue operating while proxied routes return a controlled 502. Preserve edge logs and restore proxy availability only after Render health and schema checks pass. Do not enable SQLite fallback or redirect writes to D1 as an emergency measure.
 
 ## Database recovery
 

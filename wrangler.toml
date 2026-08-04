@@ -10,14 +10,31 @@ JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"
 JWT_MAX_LIFETIME_SECONDS = "3600"
-CALENDAR_READ_MODE = "proxy"
+TV_APP_VERSION = "3c0f10f84c6d30cc6c16dae0313004219a4dc676"
+CALENDAR_READ_MODE = "native"
+CURRENT_USER_READ_MODE = "native"
+DATE_STICKY_READ_MODE = "native"
+DATE_STICKY_WRITE_MODE = "native"
+EVENT_WRITE_MODE = "native"
+LEGACY_EVENT_READ_MODE = "native"
+NOTE_READ_MODE = "native"
+NOTE_WRITE_MODE = "proxy"
+TAG_COLOR_READ_MODE = "native"
+TAG_COLOR_WRITE_MODE = "native"
+TASK_READ_MODE = "native"
+TASK_WRITE_MODE = "proxy"
+TV_VERSION_READ_MODE = "native"
 
 [secrets]
-required = ["EDGE_PROXY_SECRET"]
+required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON"]
 
 [observability]
 enabled = true
 head_sampling_rate = 1
+
+[[hyperdrive]]
+binding = "HYPERDRIVE_RLS_NO_CACHE"
+id = "2bb6bc680a594a15aa12991869cbb590"
 
 [env.canary]
 name = "sherryjo-cal-app-canary"
@@ -29,7 +46,24 @@ JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"
 JWT_MAX_LIFETIME_SECONDS = "3600"
-CALENDAR_READ_MODE = "proxy"
+TV_APP_VERSION = "3c0f10f84c6d30cc6c16dae0313004219a4dc676"
+CALENDAR_READ_MODE = "shadow"
+CURRENT_USER_READ_MODE = "shadow"
+DATE_STICKY_READ_MODE = "shadow"
+DATE_STICKY_WRITE_MODE = "proxy"
+EVENT_WRITE_MODE = "proxy"
+LEGACY_EVENT_READ_MODE = "shadow"
+NOTE_READ_MODE = "shadow"
+NOTE_WRITE_MODE = "proxy"
+TAG_COLOR_READ_MODE = "shadow"
+TAG_COLOR_WRITE_MODE = "proxy"
+TASK_READ_MODE = "shadow"
+TASK_WRITE_MODE = "proxy"
+TV_VERSION_READ_MODE = "shadow"
 
 [env.canary.secrets]
-required = ["EDGE_PROXY_SECRET"]
+required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON"]
+
+[[env.canary.hyperdrive]]
+binding = "HYPERDRIVE_RLS_NO_CACHE"
+id = "2bb6bc680a594a15aa12991869cbb590"

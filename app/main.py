@@ -201,7 +201,8 @@ if engine.url.drivername.startswith("postgresql"):
             "tags",
             "sticky_note",
             "sticky_notes",
-            "updated_at"
+            "updated_at",
+            "recurrence",
         }
         missing_event_columns = required_event_columns - event_columns
 
@@ -214,6 +215,7 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_note JSONB"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS sticky_notes JSONB"))
                 conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS recurrence JSONB"))
                 conn.execute(text("UPDATE events SET color_enabled = FALSE WHERE color_enabled IS NULL"))
                 conn.commit()
             logger.info("✅ PostgreSQL events schema upgrade complete.")
@@ -292,7 +294,8 @@ if engine.url.drivername.startswith("sqlite"):
             "tags",
             "sticky_note",
             "sticky_notes",
-            "updated_at"
+            "updated_at",
+            "recurrence",
         }
         missing_event_columns = required_event_columns - event_columns
 
@@ -312,6 +315,8 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE events ADD COLUMN sticky_notes JSON"))
                     elif col == "updated_at":
                         conn.execute(text("ALTER TABLE events ADD COLUMN updated_at DATETIME"))
+                    elif col == "recurrence":
+                        conn.execute(text("ALTER TABLE events ADD COLUMN recurrence JSON"))
                 conn.execute(text("UPDATE events SET color_enabled = 0 WHERE color_enabled IS NULL"))
                 conn.commit()
             logger.info("✅ SQLite events schema upgrade complete.")

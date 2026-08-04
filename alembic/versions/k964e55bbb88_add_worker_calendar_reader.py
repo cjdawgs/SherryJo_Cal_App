@@ -57,7 +57,26 @@ def upgrade_statements() -> tuple[str, ...]:
             END IF;
         END $$
         """,
-        f"ALTER ROLE {WORKER_ROLE} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS",
+        f"""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM pg_roles
+                WHERE rolname = '{WORKER_ROLE}'
+                  AND (
+                      NOT rolcanlogin
+                      OR rolsuper
+                      OR rolcreatedb
+                      OR rolcreaterole
+                      OR rolinherit
+                      OR rolbypassrls
+                  )
+            ) THEN
+                RAISE EXCEPTION '{WORKER_ROLE} exists with unsafe role attributes';
+            END IF;
+        END $$
+        """,
         f"""
         DO $$
         BEGIN

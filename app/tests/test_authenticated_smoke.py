@@ -1,6 +1,8 @@
 import asyncio
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -333,3 +335,16 @@ def test_render_monitor_is_independent_default_disabled_and_secret_safe():
     assert job["env"]["SHERRYJO_SMOKE_PASSWORD"] == "${{ secrets.SHERRYJO_SMOKE_PASSWORD }}"
     assert "--render-url" in run_step["run"]
     assert "cloudflare" not in run_step["run"].lower()
+
+
+def test_render_synthetic_supports_workflow_script_invocation():
+    result = subprocess.run(
+        [sys.executable, "deployment/render_synthetic.py", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--render-url" in result.stdout
