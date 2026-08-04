@@ -17,7 +17,7 @@ import websockets
 
 
 DEFAULT_RENDER_URL = "https://sherryjo-cal-app.onrender.com"
-DEFAULT_CLOUDFLARE_URL = "https://sherryjo-calendar-edge.realty-cal.workers.dev"
+DEFAULT_CLOUDFLARE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 USER_AGENT = "curl/8.10.1 SherryJo-shadow-parity/1.0"
 
 

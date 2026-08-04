@@ -13,7 +13,7 @@ on:
             canary_url:
                 description: Isolated Cloudflare canary URL
                 required: true
-                default: https://sherryjo-calendar-edge-canary.realty-cal.workers.dev
+                default: https://sherryjo-cal-app-canary.realty-cal.workers.dev
                 type: string
 
 permissions:
@@ -30,7 +30,7 @@ jobs:
         timeout-minutes: 10
         env:
             RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
-            CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-calendar-edge-canary.realty-cal.workers.dev' }}
+            CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
         steps:
             - uses: actions/checkout@v4
 

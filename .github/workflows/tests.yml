@@ -31,7 +31,7 @@ on:
       cloudflare_url:
         description: Cloudflare Worker URL
         required: true
-        default: https://sherryjo-calendar-edge.realty-cal.workers.dev
+        default: https://sherryjo-cal-app.realty-cal.workers.dev
         type: string
 
 jobs:

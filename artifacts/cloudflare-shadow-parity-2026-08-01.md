@@ -17,7 +17,7 @@ No commit or push was performed as part of this validation.
 The repeatable harness in `deployment/shadow_parity.py` passed 16 of 16 checks against:
 
 - Render: `https://sherryjo-cal-app.onrender.com`
-- Cloudflare: `https://sherryjo-calendar-edge.realty-cal.workers.dev`
+- Cloudflare: `https://retired-cloudflare-worker.invalid` (retired historical target)
 
 Coverage includes health GET/HEAD, cookies, redirects, static and large responses, invalid login, protected API rejection, multipart authentication rejection, CORS preflight parity, Google and Microsoft invalid-state callback rejection, invalid-token WebSocket rejection, and Worker-native route ownership.
 
@@ -95,9 +95,9 @@ This does not break the tested phase-zero proxy path because the browser calls t
 
 Complete the cutover in this order:
 
-1. Register `https://sherryjo-calendar-edge.realty-cal.workers.dev/auth/google/callback` with Google.
-2. Register `https://sherryjo-calendar-edge.realty-cal.workers.dev/ms/callback` with Microsoft.
-3. Set Render `BASE_URL` to `https://sherryjo-calendar-edge.realty-cal.workers.dev`.
+1. Register `https://sherryjo-cal-app.realty-cal.workers.dev/auth/google/callback` with Google.
+2. Register `https://sherryjo-cal-app.realty-cal.workers.dev/ms/callback` with Microsoft.
+3. Set Render `BASE_URL` to `https://sherryjo-cal-app.realty-cal.workers.dev`.
 4. Redeploy Render.
 5. Recheck OAuth initiation, direct browser CORS, and one successful provider reconnect for each provider.
 

@@ -20,7 +20,7 @@ from deployment.platform_contract import RENDER_REQUIRED
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_RENDER_URL = "https://sherryjo-cal-app.onrender.com"
-DEFAULT_EDGE_URL = "https://sherryjo-calendar-edge.realty-cal.workers.dev"
+DEFAULT_EDGE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 USER_AGENT = "SherryJo-Baseline-Evidence/1.0"
 
 SENSITIVE_ENVIRONMENT_NAMES = tuple(

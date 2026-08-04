@@ -18,6 +18,8 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     assert inputs["render_deployment_ready"]["default"] == "false"
     assert inputs["promote_production"]["default"] == "false"
+    assert inputs["production_url"]["default"] == "https://sherryjo-cal-app.realty-cal.workers.dev"
+    assert inputs["canary_url"]["default"] == "https://sherryjo-cal-app-canary.realty-cal.workers.dev"
 
     jobs = workflow["jobs"]
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
@@ -91,6 +93,8 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
 def test_root_and_canary_workers_require_edge_proxy_authentication():
     config = tomllib.loads((ROOT / "wrangler.toml").read_text(encoding="utf-8"))
 
+    assert config["name"] == "sherryjo-cal-app"
+    assert config["env"]["canary"]["name"] == "sherryjo-cal-app-canary"
     assert config["secrets"]["required"] == ["EDGE_PROXY_SECRET"]
     assert config["env"]["canary"]["secrets"]["required"] == ["EDGE_PROXY_SECRET"]
     expected_jwt_policy = {
@@ -112,6 +116,8 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
 
     assert set(workflow["on"]) == {"schedule", "workflow_dispatch"}
     assert workflow["on"]["schedule"] == [{"cron": "17 * * * *"}]
+    inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    assert inputs["canary_url"]["default"] == "https://sherryjo-cal-app-canary.realty-cal.workers.dev"
     job = workflow["jobs"]["parity"]
     assert "CLOUDFLARE_CANARY_MONITOR_ENABLED" in job["if"]
     assert "workflow_dispatch" in job["if"]

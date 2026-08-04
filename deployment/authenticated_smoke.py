@@ -18,7 +18,7 @@ import websockets
 
 
 DEFAULT_RENDER_URL = "https://sherryjo-cal-app.onrender.com"
-DEFAULT_CLOUDFLARE_URL = "https://sherryjo-calendar-edge.realty-cal.workers.dev"
+DEFAULT_CLOUDFLARE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 TOKEN_ENV = "SHERRYJO_SMOKE_TOKEN"
 EMAIL_ENV = "SHERRYJO_SMOKE_EMAIL"
 PASSWORD_ENV = "SHERRYJO_SMOKE_PASSWORD"

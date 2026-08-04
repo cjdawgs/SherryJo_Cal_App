@@ -21,12 +21,12 @@ on:
             canary_url:
                 description: Isolated Cloudflare canary URL
                 required: true
-                default: https://sherryjo-calendar-edge-canary.realty-cal.workers.dev
+                default: https://sherryjo-cal-app-canary.realty-cal.workers.dev
                 type: string
             production_url:
                 description: Root Cloudflare Worker URL
                 required: true
-                default: https://sherryjo-calendar-edge.realty-cal.workers.dev
+                default: https://sherryjo-cal-app.realty-cal.workers.dev
                 type: string
 
 permissions:

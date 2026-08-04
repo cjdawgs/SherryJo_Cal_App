@@ -1,6 +1,6 @@
 {
   "render_url": "https://sherryjo-cal-app.onrender.com",
-  "cloudflare_url": "https://sherryjo-calendar-edge.realty-cal.workers.dev",
+  "cloudflare_url": "https://retired-cloudflare-worker.invalid",
   "passed": true,
   "passed_checks": 16,
   "total_checks": 16,

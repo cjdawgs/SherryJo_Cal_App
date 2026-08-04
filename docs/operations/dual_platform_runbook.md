@@ -2,6 +2,28 @@
 
 For the dependency-ordered completion checklist, owner responsibilities, pass/fail gates, and rollback steps, use [Migration completion Lego plan](migration_completion_lego_plan.md).
 
+## Canonical Cloudflare Worker identity
+
+| Role | Worker name | Public URL |
+| --- | --- | --- |
+| Production | `sherryjo-cal-app` | `https://sherryjo-cal-app.realty-cal.workers.dev` |
+| Canary | `sherryjo-cal-app-canary` | `https://sherryjo-cal-app-canary.realty-cal.workers.dev` |
+
+`wrangler.toml` is the source of truth for both Worker names. The repository-root production command is `npm ci --prefix platform/cloudflare && npm --prefix platform/cloudflare run deploy`; the canary command is `npm ci --prefix platform/cloudflare && npm --prefix platform/cloudflare run deploy:canary`. Do not override either command with a Worker name or an additional `--env` argument.
+
+Before retiring an old Cloudflare application:
+
+1. Deploy and smoke-test both canonical URLs, including `/__edge/health`, `/health`, authentication callbacks, static assets, and `/ws`.
+2. In the `sherryjo-cal-app` Cloudflare build settings, select repository `cjdawgs/SherryJo_Cal_App`, production branch `main`, root directory `/`, and the repository-root production command above. Configure no static asset directory.
+3. Confirm Workers.dev is enabled and the displayed production URL is exactly `https://sherryjo-cal-app.realty-cal.workers.dev`.
+4. Confirm `ORIGIN_BASE_URL`, JWT policy variables, and `CALENDAR_READ_MODE` match `wrangler.toml`. Set `EDGE_PROXY_SECRET` to the same secret value used by Render; never store the value in Git or copy it between dashboards through logs.
+5. Move any custom domains, routes, deploy hooks, or service bindings from an old Worker to `sherryjo-cal-app`, then test them before deleting the old Worker.
+6. Update GitHub repository variable `SHERRYJO_CLOUDFLARE_CANARY_URL` to the canonical canary URL. Keep `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in both protected Cloudflare environments.
+7. Update Render `BASE_URL`, `PUBLIC_BASE_URLS`, OAuth callback variables, and `CLOUDFLARE_DEPLOY_HOOK_URL` for the canonical URLs. Register the exact production and canary callbacks with Google and Microsoft.
+8. Disable builds on, then delete, the obsolete edge-named and generic calendar applications shown in the Cloudflare dashboard only after canonical production verification succeeds.
+
+On another development desktop, use `git pull origin main` rather than copying individual files. Then run `npm ci --prefix platform/cloudflare` and both dry-run scripts. Local Wrangler authentication and secrets are intentionally not synchronized by Git.
+
 ## Environment compatibility
 
 | Variable | Render/FastAPI | Cloudflare phase 0 | Compatibility rule |
@@ -47,9 +69,9 @@ python deployment/platform_contract.py --target render
 ## Phase-zero deployment
 
 1. Run `npm ci --prefix platform/cloudflare`, Python tests, and `node --test platform/cloudflare/test/*.test.js`.
-2. From the repository root, run `npm --prefix platform/cloudflare run deploy:dry-run -- --env canary`.
-3. Authenticate Wrangler locally, then deploy only the isolated canary with `npm --prefix platform/cloudflare run deploy -- --env canary`.
-4. Test `https://sherryjo-calendar-edge-canary.<account-subdomain>.workers.dev/__edge/health` and proxied `/health`.
+2. From the repository root, run `npm --prefix platform/cloudflare run deploy:dry-run:canary`.
+3. Authenticate Wrangler locally, then deploy only the isolated canary with `npm --prefix platform/cloudflare run deploy:canary`.
+4. Test `https://sherryjo-cal-app-canary.realty-cal.workers.dev/__edge/health` and proxied `/health`.
 5. Test login, logout, Google and Microsoft callbacks, calendar CRUD, scheduler status, static assets, and `/ws` on the canary hostname.
 6. Keep production DNS pointed at Render until the migration gate is signed off.
 

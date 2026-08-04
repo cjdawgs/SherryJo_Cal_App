@@ -1,7 +1,7 @@
 {
   "run_id": "e34f799d3155425a96ec15f772af4167",
   "render_url": "https://sherryjo-cal-app.onrender.com",
-  "cloudflare_url": "https://sherryjo-calendar-edge.realty-cal.workers.dev",
+  "cloudflare_url": "https://retired-cloudflare-worker.invalid",
   "passed": false,
   "checks": [
     "render_create",

@@ -1,4 +1,4 @@
-name = "sherryjo-calendar-edge"
+name = "sherryjo-cal-app"
 main = "platform/cloudflare/src/worker.js"
 compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
@@ -20,6 +20,7 @@ enabled = true
 head_sampling_rate = 1
 
 [env.canary]
+name = "sherryjo-cal-app-canary"
 workers_dev = true
 
 [env.canary.vars]

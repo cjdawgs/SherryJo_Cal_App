@@ -10,10 +10,10 @@ Alembic heads: `i962c33fff66`
 | --- | --- | --- | ---: | --- | --- | --- |
 | render | https://sherryjo-cal-app.onrender.com | `/health` | 200 | ok | ok | `972019cacfd7793eb0b21cac8f5818e77c92e9b75a7bcf97207772f9e22ad118` |
 | render | https://sherryjo-cal-app.onrender.com | `/openapi.json` | 200 |  |  | `036ca02f990c32c2bb3176c5283e1e71d033462c9f44ee53091b1b8686ab290b` |
-| cloudflare | https://sherryjo-calendar-edge.realty-cal.workers.dev | `/__edge/health` | 200 | ok | None | `0189e38b80debf64725a34f2b25fe4a889046da89fc310eb7b72da371a442176` |
-| cloudflare | https://sherryjo-calendar-edge.realty-cal.workers.dev | `/health` | 200 | ok | ok | `972019cacfd7793eb0b21cac8f5818e77c92e9b75a7bcf97207772f9e22ad118` |
-| cloudflare | https://sherryjo-calendar-edge.realty-cal.workers.dev | `/api/platform/status` | 200 | ok | None | `f60bbd6e9b2ad46311f7b568cc558f9a21ef764cbb070f7edc33c1b62df9b986` |
-| cloudflare | https://sherryjo-calendar-edge.realty-cal.workers.dev | `/openapi.json` | 200 |  |  | `036ca02f990c32c2bb3176c5283e1e71d033462c9f44ee53091b1b8686ab290b` |
+| cloudflare | https://retired-cloudflare-worker.invalid | `/__edge/health` | 200 | ok | None | `0189e38b80debf64725a34f2b25fe4a889046da89fc310eb7b72da371a442176` |
+| cloudflare | https://retired-cloudflare-worker.invalid | `/health` | 200 | ok | ok | `972019cacfd7793eb0b21cac8f5818e77c92e9b75a7bcf97207772f9e22ad118` |
+| cloudflare | https://retired-cloudflare-worker.invalid | `/api/platform/status` | 200 | ok | None | `f60bbd6e9b2ad46311f7b568cc558f9a21ef764cbb070f7edc33c1b62df9b986` |
+| cloudflare | https://retired-cloudflare-worker.invalid | `/openapi.json` | 200 |  |  | `036ca02f990c32c2bb3176c5283e1e71d033462c9f44ee53091b1b8686ab290b` |
 
 ## Environment presence
 

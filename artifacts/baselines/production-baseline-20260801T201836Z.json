@@ -35,7 +35,7 @@
   },
   "targets": {
     "cloudflare": {
-      "base_url": "https://sherryjo-calendar-edge.realty-cal.workers.dev",
+      "base_url": "https://retired-cloudflare-worker.invalid",
       "probes": {
         "/__edge/health": {
           "content_bytes": 68,
