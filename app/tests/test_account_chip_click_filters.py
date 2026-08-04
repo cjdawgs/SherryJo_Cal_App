@@ -92,7 +92,7 @@ def test_dedup_on_collapses_display_duplicates():
     assert "function getDisplayDedupKey(ev)" in text
     assert "function dedupeEventsForDisplay(events)" in text
     assert "if (!isDedupEnabled()) return events;" in text
-    assert "return `${title}|${startMinute.toISOString().slice(0, 16)}`;" in text
+    assert "return `${title}|${startMinute.toISOString().slice(0, 16)}|${endMinute}`;" in text
 
 
 def test_apply_client_side_filters_uses_live_calendar_instance():

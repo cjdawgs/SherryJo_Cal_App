@@ -8,6 +8,13 @@
     },
     "scripts": {
         "check": "node --check src/worker.js",
-        "test": "node --test test/*.test.js"
+        "test": "node --test test/*.test.js",
+        "deploy": "wrangler deploy --config ../../wrangler.toml --env=\"\"",
+        "deploy:canary": "wrangler deploy --config ../../wrangler.toml --env canary",
+        "deploy:dry-run": "wrangler deploy --dry-run --config ../../wrangler.toml --env=\"\"",
+        "deploy:dry-run:canary": "wrangler deploy --dry-run --config ../../wrangler.toml --env canary"
+    },
+    "devDependencies": {
+        "wrangler": "4.118.0"
     }
 }

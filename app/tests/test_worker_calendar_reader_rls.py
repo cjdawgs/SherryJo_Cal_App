@@ -23,10 +23,11 @@ MIGRATION = importlib.util.module_from_spec(MIGRATION_SPEC)
 MIGRATION_SPEC.loader.exec_module(MIGRATION)
 
 
-def test_worker_reader_migration_is_the_single_alembic_head():
+def test_worker_reader_migration_is_in_single_alembic_head_chain():
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
 
-    assert script.get_heads() == ["k964e55bbb88"]
+    assert script.get_heads() == ["l965f66ccc99"]
+    assert script.get_revision("l965f66ccc99").down_revision == "k964e55bbb88"
 
 
 def test_worker_reader_migration_grants_only_approved_projection_columns_without_password():

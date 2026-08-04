@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 import tomllib
 
@@ -50,13 +51,24 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
         (ROOT / ".github" / "workflows" / "cloudflare-release.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
+    package = json.loads(
+        (ROOT / "platform" / "cloudflare" / "package.json").read_text(encoding="utf-8")
+    )
     jobs = workflow["jobs"]
+    scripts = package["scripts"]
 
     deploy_step = next(
         step for step in jobs["deploy-canary"]["steps"]
         if step.get("name") == "Deploy isolated canary Worker"
     )
-    assert deploy_step["run"].endswith("--env canary")
+    promotion_step = next(
+        step for step in jobs["promote-root-worker"]["steps"]
+        if step.get("name") == "Promote verified build to root Worker"
+    )
+    assert deploy_step["run"].endswith("run deploy:canary")
+    assert promotion_step["run"].endswith("run deploy")
+    assert scripts["deploy:canary"].endswith("--env canary")
+    assert scripts["deploy"].endswith('--env=""')
     assert deploy_step["env"] == {
         "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",

@@ -46,12 +46,14 @@ python deployment/platform_contract.py --target render
 
 ## Phase-zero deployment
 
-1. Run Python tests and `node --test platform/cloudflare/test/*.test.js`.
-2. Run `npx wrangler@4 deploy --dry-run --env canary`.
-3. Authenticate Wrangler locally, then deploy only the isolated canary with `npx wrangler@4 deploy --env canary`.
+1. Run `npm ci --prefix platform/cloudflare`, Python tests, and `node --test platform/cloudflare/test/*.test.js`.
+2. From the repository root, run `npm --prefix platform/cloudflare run deploy:dry-run -- --env canary`.
+3. Authenticate Wrangler locally, then deploy only the isolated canary with `npm --prefix platform/cloudflare run deploy -- --env canary`.
 4. Test `https://sherryjo-calendar-edge-canary.<account-subdomain>.workers.dev/__edge/health` and proxied `/health`.
 5. Test login, logout, Google and Microsoft callbacks, calendar CRUD, scheduler status, static assets, and `/ws` on the canary hostname.
 6. Keep production DNS pointed at Render until the migration gate is signed off.
+
+For Cloudflare Git Builds with root directory `/`, use `npm ci --prefix platform/cloudflare && npm --prefix platform/cloudflare run deploy` as the deploy command. If the dashboard root directory is `platform/cloudflare`, use `npm ci && npm run deploy`. Do not use an assets deploy preset; this project is a Worker proxy and intentionally has no `public/` or `dist/` directory.
 
 Wrangler variables are non-inheriting, so `ORIGIN_BASE_URL` is declared independently for the root and canary Workers. Its value is non-secret and may remain in `wrangler.toml`. Future canary secrets must be created interactively with `npx wrangler@4 secret put NAME --env canary`. Render secrets remain dashboard-managed (`sync: false` in the blueprint). Do not duplicate OAuth or JWT secrets into Cloudflare until Worker-native authentication is implemented and parity-tested.
 
