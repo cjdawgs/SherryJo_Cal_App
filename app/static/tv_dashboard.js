@@ -823,6 +823,10 @@ function ensureStyles() {
   .tv-right-item:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.3); }
   .tv-right-item-title { font-size: 12px; font-weight: 700; color: rgba(236, 244, 255, 0.98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-right-item-time { font-size: 11px; color: rgba(212, 226, 244, 0.96); opacity: 1; }
+  .tv-right-week-list { gap: 8px; }
+  .tv-right-day-group { display: flex; flex-direction: column; gap: 5px; }
+  .tv-right-day-header { padding: 3px 2px; border-bottom: 1px solid rgba(220,234,255,0.24); color: rgba(236,244,255,0.96); font-size: 11px; font-weight: 800; letter-spacing: 0.3px; }
+  .tv-right-day-empty { padding: 2px 4px 4px; color: rgba(184,199,219,0.72); font-size: 10px; font-style: italic; }
   .tv-right-rail.editor-cover { display: flex; flex-direction: column; }
   .tv-right-rail.editor-cover .tv-right-editor-anchor { margin-top: 6px; flex: 1; overflow-y: auto; }
   .tv-day-card, .tv-month-cell { border: 1px solid rgba(201,219,244,0.16); border-radius: 12px; background: rgba(13,24,38,0.44); padding: 10px; min-height: 0; display: flex; flex-direction: column; transition: transform 120ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease; }
@@ -2870,7 +2874,11 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
   }
 
   const selectedItems = itemsForDate(selectedDateKey).slice(0, 12);
-  const weekEvents = weekDateKeys.flatMap(dateKey => filteredEventsForDay(dayData(dateKey)).map(ev => ({ dateKey, ev })));
+  const weekGroups = weekDateKeys.map(dateKey => ({
+    dateKey,
+    events: filteredEventsForDay(dayData(dateKey)),
+  }));
+  const weekEvents = weekGroups.flatMap(group => group.events.map(ev => ({ dateKey: group.dateKey, ev })));
   const selectedDay = dayData(selectedDateKey);
   const selectedDateStickyCount = Array.isArray(selectedDay.stickyNotes) ? selectedDay.stickyNotes.length : 0;
   const selectedEventStickyCount = filteredEventsForDay(selectedDay).filter((ev) => eventHasStickyPayload(ev)).length;
@@ -2887,22 +2895,28 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
     <aside class="tv-right-rail ${extraClass}">
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}${selectedDayStickyBadge}</div>
       <div class="tv-right-list">
-        ${selectedItems.length ? selectedItems.map(item => {
+        ${selectedItems.length ? selectedItems.map((item, itemIndex) => {
     if (item.type === 'event') {
       const eventColor = resolveEventColor(item.event);
       const sticky = eventHasStickyPayload(item.event) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-      return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
+      return `<div class="tv-right-item" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(selectedDateKey)}" data-item-index="${itemIndex}" data-event-id="${item.event.id}" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(item.event.start))}</div><div class="tv-right-item-title">${escapeHtml(item.event.title || 'Untitled')}</div></div>`;
     }
     return `<div class="tv-right-item"><span class="tv-sticky-indicator" aria-label="Date sticky note"></span><div class="tv-right-item-time">Sticky</div><div class="tv-right-item-title">${escapeHtml(item.sticky.content || '')}</div></div>`;
   }).join('') : '<div class="tv-empty">No events or sticky notes</div>'}
       </div>
       <div class="tv-right-subtitle">This Week${weekStickyBadge}</div>
-      <div class="tv-right-list">
-        ${weekEvents.length ? weekEvents.slice(0, 12).map(row => {
-    const eventColor = resolveEventColor(row.ev);
-    const sticky = eventHasStickyPayload(row.ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
-    return `<div class="tv-right-item" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(parseLocalDate(row.dateKey).toLocaleDateString([], { weekday: 'short' }))} ${escapeHtml(formatTime(row.ev.start))}</div><div class="tv-right-item-title">${escapeHtml(row.ev.title || 'Untitled')}</div></div>`;
-  }).join('') : '<div class="tv-empty">No events this week</div>'}
+      <div class="tv-right-list tv-right-week-list">
+        ${weekGroups.map(group => {
+    const dateLabel = parseLocalDate(group.dateKey).toLocaleDateString([], {
+      weekday: 'short', month: 'short', day: '2-digit', year: 'numeric',
+    });
+    const rows = group.events.length ? group.events.map((ev, itemIndex) => {
+      const eventColor = resolveEventColor(ev);
+      const sticky = eventHasStickyPayload(ev) ? '<span class="tv-sticky-indicator" aria-label="Event sticky note"></span>' : '';
+      return `<div class="tv-right-item" data-tv-click="item" data-item-type="event" data-date="${escapeHtml(group.dateKey)}" data-item-index="${itemIndex}" data-event-id="${ev.id}" style="background:${softColor(eventColor, 0.2)}; border-color:${softColor(eventColor, 0.52)}">${sticky}<div class="tv-right-item-time">${escapeHtml(formatTime(ev.start))}</div><div class="tv-right-item-title">${escapeHtml(ev.title || 'Untitled')}</div></div>`;
+    }).join('') : '<div class="tv-right-day-empty">No events</div>';
+    return `<section class="tv-right-day-group"><div class="tv-right-day-header">${escapeHtml(dateLabel)}</div>${rows}</section>`;
+  }).join('')}
       </div>
       <div class="tv-right-editor-anchor"></div>
     </aside>`;
@@ -3328,27 +3342,7 @@ function persistTvDedupSetting() {
   }
 }
 
-function tvExternalIdsDedupFingerprint(ev) {
-  const externalIds =
-    (ev && typeof ev.external_ids === 'object' && ev.external_ids) ||
-    (ev?.extendedProps && typeof ev.extendedProps.external_ids === 'object' && ev.extendedProps.external_ids) ||
-    null;
-
-  if (!externalIds) return '';
-
-  const entries = Object.entries(externalIds)
-    .filter(([k, v]) => String(k || '').trim() && String(v || '').trim())
-    .map(([k, v]) => `${String(k).trim().toLowerCase()}=${String(v).trim()}`)
-    .sort();
-
-  if (!entries.length) return '';
-  return `ext|${entries.join('|')}`;
-}
-
 function tvDedupKeyForEvent(ev) {
-  const extFingerprint = tvExternalIdsDedupFingerprint(ev);
-  if (extFingerprint) return extFingerprint;
-
   const title = String(ev?.title || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const start = ev?.start ? new Date(ev.start) : null;
   if (!title || !start || Number.isNaN(start.getTime())) {
@@ -3356,7 +3350,11 @@ function tvDedupKeyForEvent(ev) {
   }
   const startMinute = new Date(start);
   startMinute.setSeconds(0, 0);
-  return `${title}|${startMinute.toISOString().slice(0, 16)}`;
+  const end = ev?.end ? new Date(ev.end) : null;
+  const endMinute = end && !Number.isNaN(end.getTime())
+    ? new Date(end.setSeconds(0, 0)).toISOString().slice(0, 16)
+    : '';
+  return `${title}|${startMinute.toISOString().slice(0, 16)}|${endMinute}`;
 }
 
 function dedupeTvEventsForDisplay(events) {
@@ -4254,7 +4252,7 @@ function enterEventEditor(item, mode) {
   state.editor = {
     type: 'event',
     mode,
-    eventId: ev ? ev.id : null,
+    eventId: ev ? (ev?.extendedProps?.backendId || ev?.recurrence_parent_id || ev.id) : null,
     date: item ? item.date : state.selectedDate,
     fieldIndex: 0,
     fields: [
@@ -4700,6 +4698,7 @@ function providerFallbackColor(source) {
 
 function buildEventsRequestUrl(stateOverride = null) {
   const params = new URLSearchParams();
+  params.set('dedup', 'false');
   const selectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '').trim();
   if (selectedDate) {
     params.set('selectedDate', selectedDate);

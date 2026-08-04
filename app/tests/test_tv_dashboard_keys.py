@@ -115,9 +115,23 @@ def test_tv_dashboard_color_rendering_paths_cover_month_and_shared_views():
         "function renderRightRail(selectedDateKey, weekDateKeys, extraClass",
         "resolveEventColor(ev)",
         "resolveEventColor(item.event)",
-        "resolveEventColor(row.ev)",
         "softColor(eventColor, 0.2)",
         "softColor(eventColor, 0.52)",
+    ]
+    for token in required_tokens:
+        assert token in text
+
+
+def test_tv_dashboard_week_rail_groups_all_dates_and_makes_events_editable():
+    text = _tv_js_text()
+    required_tokens = [
+        "const weekGroups = weekDateKeys.map",
+        "tv-right-day-group",
+        "tv-right-day-header",
+        "tv-right-day-empty",
+        'data-tv-click="item"',
+        'data-date="${escapeHtml(group.dateKey)}"',
+        "ev?.extendedProps?.backendId || ev?.recurrence_parent_id || ev.id",
     ]
     for token in required_tokens:
         assert token in text

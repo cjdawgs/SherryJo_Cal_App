@@ -257,6 +257,7 @@ def serialize_event(event: Event):
         "end": to_iso_event_time(event.start_time, event.end_time, event.end_time),
         "start_time": to_iso_event_time(event.start_time, event.end_time, event.start_time),
         "end_time": to_iso_event_time(event.start_time, event.end_time, event.end_time),
+        "recurrence": getattr(event, "recurrence", None),
         "color": event.color,
         "color_enabled": bool(getattr(event, "color_enabled", False)),
         "tags": event.tags or [],
@@ -280,7 +281,8 @@ def serialize_event(event: Event):
             "stickyNote": sticky_notes[0] if sticky_notes else None,
             "stickyNotes": sticky_notes,
             "createdAt": to_iso(event.created_at),
-            "updatedAt": to_iso(getattr(event, "updated_at", None))
+            "updatedAt": to_iso(getattr(event, "updated_at", None)),
+            "recurrence": getattr(event, "recurrence", None)
         }
     }
 
@@ -352,7 +354,8 @@ async def create_event(
         color_enabled=bool(data.get("color_enabled")),
         tags=normalize_tags(data.get("tags")),
         sticky_note=sticky_note,
-        sticky_notes=sticky_notes
+        sticky_notes=sticky_notes,
+        recurrence=data.get("recurrence")
     )
 
     db.add(event)
@@ -415,6 +418,9 @@ async def update_event(
     if "end_time" in data:
         event.end_time = to_dt(data.get("end_time"))
         provider_updates["end_time"] = event.end_time
+
+    if "recurrence" in data:
+        event.recurrence = data.get("recurrence")
 
     if "color" in data:
         event.color = data.get("color")

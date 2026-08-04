@@ -1158,6 +1158,7 @@ button.primary {
 }
 
 .modalSection input,
+.modalSection select,
 .modalSection textarea,
 .richEditor {
   width: 100%;
@@ -1417,6 +1418,94 @@ button.primary {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.eventScheduleGrid,
+.recurrenceGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.recurrenceSection summary {
+  color: #233b5f;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.recurrenceBody {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.recurrenceEnabled {
+  justify-self: start;
+}
+
+.recurrenceGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recurrenceGrid select,
+.recurrenceInterval {
+  width: 100%;
+}
+
+.recurrenceInterval,
+.recurrenceEveryRow,
+.recurrenceEnds {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recurrenceInterval input,
+.recurrenceEveryRow input[type="number"] {
+  width: 84px;
+}
+
+.recurrenceEveryRow input[type="time"],
+.recurrenceEnds input[type="date"] {
+  width: auto;
+}
+
+.recurrenceWeekdays,
+.recurrenceDailyFrequency,
+.recurrenceEnds {
+  border: 1px solid #d8e2f1;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.recurrenceWeekdays {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.recurrenceWeekdays legend,
+.recurrenceDailyFrequency legend,
+.recurrenceEnds legend {
+  color: #415673;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.recurrenceWeekdays label,
+.recurrenceDailyFrequency label,
+.recurrenceEnds label {
+  color: #334965;
+  font-size: 0.8rem;
+}
+
+.recurrenceBody input[type="checkbox"],
+.recurrenceBody input[type="radio"] {
+  width: auto;
+  min-height: 0;
 }
 
 .metadataSection {
@@ -1845,6 +1934,9 @@ button.primary {
 
   .eventGrid2,
   .eventGrid2Times,
+  .eventScheduleGrid,
+  .recurrenceGrid,
+  .recurrenceWeekdays,
   .metadataSection {
     grid-template-columns: 1fr;
   }

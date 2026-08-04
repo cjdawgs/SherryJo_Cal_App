@@ -430,6 +430,10 @@ function renderTagColorRows() {
 }
 
 function resolveEventRenderColor(eventLike = null, accountColor = "#4285f4") {
+  if (typeof window.isDedupEnabled === "function" && !window.isDedupEnabled()) {
+    return normalizeColorValue(accountColor, "#4285f4");
+  }
+
   const settings = loadTagColorSettings();
   const rawTags = eventLike?.extendedProps?.tags || eventLike?.tags || [];
   const tags = Array.isArray(rawTags) ? rawTags : parseTagsValue(rawTags);
@@ -703,12 +707,14 @@ function getEventContentSnapshot() {
     eventId: modalState.eventId,
     title: (document.getElementById("eventTitle")?.value || "").trim(),
     date: document.getElementById("eventDate")?.value || "",
+    endDate: document.getElementById("eventEndDate")?.value || "",
     start: document.getElementById("eventStart")?.value || "",
     end: document.getElementById("eventEnd")?.value || "",
     description: getEditorHtml("eventDescriptionEditor"),
     tags: (document.getElementById("eventTags")?.value || "").trim(),
     color: document.getElementById("eventColor")?.value || "",
-    colorEnabled: document.getElementById("eventColorEnabled")?.checked === true
+    colorEnabled: document.getElementById("eventColorEnabled")?.checked === true,
+    recurrence: getRecurrenceFormValue()
   });
 }
 
@@ -1460,12 +1466,85 @@ function refreshSaveButtonState() {
     : "No event changes yet. Edit any field to enable Save.";
 }
 
+function getRecurrenceFormValue() {
+  if (document.getElementById("eventRecurrenceEnabled")?.checked !== true) return null;
+  const frequency = document.getElementById("eventRecurrenceFrequency")?.value || "weekly";
+  const dailyMode = document.querySelector('input[name="eventDailyMode"]:checked')?.value || "once";
+  const endMode = document.querySelector('input[name="eventRecurrenceEndMode"]:checked')?.value || "none";
+  return {
+    enabled: true,
+    frequency,
+    interval: Math.max(1, Number(document.getElementById("eventRecurrenceInterval")?.value || 1)),
+    weekdays: [...document.querySelectorAll('#eventRecurrenceWeekdays input[type="checkbox"]:checked')]
+      .map((input) => Number(input.value)),
+    repeat_minutes: dailyMode === "interval"
+      ? Math.max(1, Number(document.getElementById("eventRepeatMinutes")?.value || 10))
+      : 0,
+    daily_start: dailyMode === "interval" ? (document.getElementById("eventDailyStart")?.value || "") : "",
+    daily_end: dailyMode === "interval" ? (document.getElementById("eventDailyEnd")?.value || "") : "",
+    until: endMode === "date" ? (document.getElementById("eventRecurrenceUntil")?.value || "") : ""
+  };
+}
+
+function syncRecurrenceControls() {
+  const enabled = document.getElementById("eventRecurrenceEnabled")?.checked === true;
+  const frequency = document.getElementById("eventRecurrenceFrequency")?.value || "weekly";
+  const dailyMode = document.querySelector('input[name="eventDailyMode"]:checked')?.value || "once";
+  const endMode = document.querySelector('input[name="eventRecurrenceEndMode"]:checked')?.value || "none";
+  const details = document.getElementById("eventRecurrenceDetails");
+  if (enabled && details) details.open = true;
+
+  document.querySelectorAll("#eventRecurrenceDetails select, #eventRecurrenceDetails input").forEach((input) => {
+    if (input.id !== "eventRecurrenceEnabled") input.disabled = !enabled;
+  });
+  document.getElementById("eventRecurrenceWeekdays")?.toggleAttribute("hidden", frequency !== "weekly");
+  const unit = document.getElementById("eventRecurrenceIntervalUnit");
+  if (unit) unit.textContent = `${frequency === "daily" ? "day" : frequency === "monthly" ? "month" : "week"}(s)`;
+  ["eventRepeatMinutes", "eventDailyStart", "eventDailyEnd"].forEach((id) => {
+    const input = document.getElementById(id);
+    if (input) input.disabled = !enabled || dailyMode !== "interval";
+  });
+  const until = document.getElementById("eventRecurrenceUntil");
+  if (until) until.disabled = !enabled || endMode !== "date";
+}
+
+function hydrateRecurrenceFields(eventRef, startDate) {
+  const recurrence = eventRef?.extendedProps?.recurrence || eventRef?.recurrence || null;
+  const enabledInput = document.getElementById("eventRecurrenceEnabled");
+  if (enabledInput) enabledInput.checked = recurrence?.enabled === true;
+  const frequency = document.getElementById("eventRecurrenceFrequency");
+  if (frequency) frequency.value = recurrence?.frequency || "weekly";
+  const interval = document.getElementById("eventRecurrenceInterval");
+  if (interval) interval.value = String(recurrence?.interval || 1);
+
+  const selectedDays = new Set(recurrence?.weekdays || [startDate.getDay() === 0 ? 6 : startDate.getDay() - 1]);
+  document.querySelectorAll('#eventRecurrenceWeekdays input[type="checkbox"]').forEach((input) => {
+    input.checked = selectedDays.has(Number(input.value));
+  });
+  const repeatMinutes = Number(recurrence?.repeat_minutes || 0);
+  const dailyMode = document.querySelector(`input[name="eventDailyMode"][value="${repeatMinutes > 0 ? "interval" : "once"}"]`);
+  if (dailyMode) dailyMode.checked = true;
+  const repeatInput = document.getElementById("eventRepeatMinutes");
+  if (repeatInput) repeatInput.value = String(repeatMinutes || 10);
+  const dailyStart = document.getElementById("eventDailyStart");
+  const dailyEnd = document.getElementById("eventDailyEnd");
+  if (dailyStart) dailyStart.value = recurrence?.daily_start || document.getElementById("eventStart")?.value || "";
+  if (dailyEnd) dailyEnd.value = recurrence?.daily_end || document.getElementById("eventEnd")?.value || "";
+
+  const endMode = document.querySelector(`input[name="eventRecurrenceEndMode"][value="${recurrence?.until ? "date" : "none"}"]`);
+  if (endMode) endMode.checked = true;
+  const until = document.getElementById("eventRecurrenceUntil");
+  if (until) until.value = recurrence?.until || "";
+  syncRecurrenceControls();
+}
+
 function fillModalFields(date = null, eventRef = null) {
   const now = new Date();
   const baseDate = date || eventRef?.start || now;
 
   const title = document.getElementById("eventTitle");
   const dateInput = document.getElementById("eventDate");
+  const endDateInput = document.getElementById("eventEndDate");
   const startInput = document.getElementById("eventStart");
   const endInput = document.getElementById("eventEnd");
   const desc = document.getElementById("eventDescriptionEditor");
@@ -1486,6 +1565,7 @@ function fillModalFields(date = null, eventRef = null) {
 
   if (title) title.value = eventRef?.title || "";
   if (dateInput) dateInput.value = toDayString(baseDate);
+  if (endDateInput) endDateInput.value = toDayString(eventRef?.end || baseDate);
   if (startInput) startInput.value = eventRef?.start ? new Date(eventRef.start).toTimeString().slice(0, 5) : nextHour.toTimeString().slice(0, 5);
   if (endInput) endInput.value = eventRef?.end ? new Date(eventRef.end).toTimeString().slice(0, 5) : defaultEnd.toTimeString().slice(0, 5);
   if (desc) desc.innerHTML = eventRef?.extendedProps?.description || eventRef?.description || "";
@@ -1513,6 +1593,8 @@ function fillModalFields(date = null, eventRef = null) {
   if (updated) updated.textContent = formatMetaDate(eventRef?.extendedProps?.updatedAt || eventRef?.updated_at || null);
   if (source) source.textContent = eventRef?.extendedProps?.source || eventRef?.source || "local";
 
+  hydrateRecurrenceFields(eventRef, new Date(baseDate));
+
   seedPublishTargetsFromEvent(eventRef);
   renderEventPublishControls();
 }
@@ -1537,12 +1619,14 @@ function getModalEditSnapshot() {
     eventId: modalState.eventId,
     title: (document.getElementById("eventTitle")?.value || "").trim(),
     date: document.getElementById("eventDate")?.value || "",
+    endDate: document.getElementById("eventEndDate")?.value || "",
     start: document.getElementById("eventStart")?.value || "",
     end: document.getElementById("eventEnd")?.value || "",
     description: getEditorHtml("eventDescriptionEditor"),
     tags: (document.getElementById("eventTags")?.value || "").trim(),
     color: document.getElementById("eventColor")?.value || "",
     colorEnabled: document.getElementById("eventColorEnabled")?.checked === true,
+    recurrence: getRecurrenceFormValue(),
     publishTargets: getSelectedPublishTargetKeys()
   });
 }
@@ -1719,6 +1803,7 @@ function normalizeEventForCache(eventData, fallback = null) {
     title: eventData?.title || fallback?.title || "Untitled",
     start: startVal ? new Date(startVal) : null,
     end: endVal ? new Date(endVal) : null,
+    recurrence: eventData?.recurrence || ext.recurrence || fallback?.recurrence || fallback?.extendedProps?.recurrence || null,
     color: eventData?.color || fallback?.color || null,
     color_enabled: eventData?.color_enabled === true || ext.eventColorEnabled === true || fallback?.color_enabled === true || fallback?.extendedProps?.eventColorEnabled === true,
     extendedProps: {
@@ -1734,7 +1819,8 @@ function normalizeEventForCache(eventData, fallback = null) {
       stickyNote,
       stickyNotes,
       createdAt: ext.createdAt || eventData?.created_at || fallback?.extendedProps?.createdAt || null,
-      updatedAt: ext.updatedAt || eventData?.updated_at || fallback?.extendedProps?.updatedAt || null
+      updatedAt: ext.updatedAt || eventData?.updated_at || fallback?.extendedProps?.updatedAt || null,
+      recurrence: eventData?.recurrence || ext.recurrence || fallback?.recurrence || fallback?.extendedProps?.recurrence || null
     }
   };
 }
@@ -1763,11 +1849,19 @@ function upsertCacheEvent(nextEvent) {
 function buildEventPayload() {
   const title = (document.getElementById("eventTitle")?.value || "").trim();
   const date = document.getElementById("eventDate")?.value || "";
+  const endDate = document.getElementById("eventEndDate")?.value || date;
   const start = document.getElementById("eventStart")?.value || "";
   const end = document.getElementById("eventEnd")?.value || "";
 
-  if (!title || !date) {
-    alert("Title and date are required");
+  if (!title || !date || !endDate) {
+    alert("Title, start date, and end date are required");
+    return null;
+  }
+
+  const startDateTime = new Date(`${date}T${start || "00:00"}`);
+  const endDateTime = new Date(`${endDate}T${end || "23:59"}`);
+  if (endDateTime < startDateTime) {
+    alert("End date and time must be after the start date and time");
     return null;
   }
 
@@ -1787,8 +1881,9 @@ function buildEventPayload() {
   return {
     title,
     description,
-    start_time: start ? new Date(`${date}T${start}`).toISOString() : new Date(`${date}T00:00`).toISOString(),
-    end_time: end ? new Date(`${date}T${end}`).toISOString() : null,
+    start_time: startDateTime.toISOString(),
+    end_time: endDateTime.toISOString(),
+    recurrence: getRecurrenceFormValue(),
     color: eventColor,
     color_enabled: eventColorEnabled,
     tags,
@@ -2396,6 +2491,7 @@ function bindUIEvents() {
   });
   eventModal?.addEventListener("change", (event) => {
     if (event.target?.matches?.('input[data-publish-account-key]')) return;
+    if (event.target?.closest?.("#eventRecurrenceDetails")) syncRecurrenceControls();
     refreshSaveButtonState();
   });
 
@@ -2459,14 +2555,28 @@ function bindUIEvents() {
   document.getElementById("eventStart")?.addEventListener("change", () => {
     const startVal = document.getElementById("eventStart")?.value;
     const endInput = document.getElementById("eventEnd");
+    const startDateInput = document.getElementById("eventDate");
+    const endDateInput = document.getElementById("eventEndDate");
     if (!startVal || !endInput) return;
 
-    if (!endInput.value || endInput.value <= startVal) {
+    if (!endInput.value || (endDateInput?.value === startDateInput?.value && endInput.value <= startVal)) {
       const [hour, minute] = startVal.split(":").map((n) => parseInt(n, 10));
       const endDate = new Date();
       endDate.setHours((hour || 0) + 1);
       endDate.setMinutes(minute || 0);
       endInput.value = endDate.toTimeString().slice(0, 5);
+      if (startDateInput?.value && endDateInput) {
+        const nextEndDate = new Date(`${startDateInput.value}T${startVal}`);
+        nextEndDate.setHours(nextEndDate.getHours() + 1);
+        endDateInput.value = toDayString(nextEndDate);
+      }
+    }
+  });
+
+  document.getElementById("eventDate")?.addEventListener("change", (event) => {
+    const endDateInput = document.getElementById("eventEndDate");
+    if (endDateInput && (!endDateInput.value || endDateInput.value < event.target.value)) {
+      endDateInput.value = event.target.value;
     }
   });
 

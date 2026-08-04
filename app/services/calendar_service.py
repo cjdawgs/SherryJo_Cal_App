@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dateutil.relativedelta import relativedelta
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 import requests
@@ -38,6 +39,7 @@ from app.services.multi_account_oauth_service import (
 )
 
 from app.utils import ensure_utc, parse_iso_datetime
+from app.utils.recurrence import expand_event_occurrences
 
 
 import pytz
@@ -1206,9 +1208,9 @@ class CalendarService:
 
             Event.owner_id == user.id,
 
-            Event.start_time >= start_date,
+            Event.start_time <= end_date,
 
-            Event.start_time <= end_date
+            or_(Event.start_time >= start_date, Event.recurrence.isnot(None))
 
         ).all()
 
@@ -1233,6 +1235,8 @@ class CalendarService:
                 "start": self.serialize_event_datetime(ev.start_time, ev.start_time, ev.end_time),
 
                 "end": self.serialize_event_datetime(ev.end_time, ev.start_time, ev.end_time),
+
+                "recurrence": getattr(ev, "recurrence", None),
 
                 "description": ev.description or "",
 
@@ -1288,11 +1292,21 @@ class CalendarService:
 
                         continue
 
-                    serialized_events.append(
+                    serialized_events.extend(expand_event_occurrences(
 
-                        _serialize_event(ev, provider_override=provider, account_email_override=account_email)
+                        ev,
 
-                    )
+                        start_date,
+
+                        end_date,
+
+                        lambda item, provider=provider, account_email=account_email: _serialize_event(
+
+                            item, provider_override=provider, account_email_override=account_email
+
+                        ),
+
+                    ))
 
                     emitted_keys.add(normalized_key)
 
@@ -1302,7 +1316,7 @@ class CalendarService:
 
 
 
-            serialized_events.append(_serialize_event(ev))
+            serialized_events.extend(expand_event_occurrences(ev, start_date, end_date, _serialize_event))
 
 
 

@@ -268,22 +268,77 @@
       <input id="eventTitle" placeholder="e.g. Team Meeting or Dentist Appointment" />
     </section>
 
-    <section class="modalSection eventOnly eventGrid2">
+    <section class="modalSection eventOnly eventScheduleGrid">
       <div>
-        <label class="fieldLabel" for="eventDate">Date</label>
+        <label class="fieldLabel" for="eventDate">Start Date</label>
         <input id="eventDate" type="date" />
       </div>
-      <div class="eventGrid2Times">
-        <div>
-          <label class="fieldLabel" for="eventStart">Start</label>
-          <input id="eventStart" type="time" title="Start time (optional)" />
-        </div>
-        <div>
-          <label class="fieldLabel" for="eventEnd">End</label>
-          <input id="eventEnd" type="time" title="End time (optional)" />
-        </div>
+      <div>
+        <label class="fieldLabel" for="eventStart">Start Time</label>
+        <input id="eventStart" type="time" title="Start time" />
+      </div>
+      <div>
+        <label class="fieldLabel" for="eventEndDate">End Date</label>
+        <input id="eventEndDate" type="date" />
+      </div>
+      <div>
+        <label class="fieldLabel" for="eventEnd">End Time</label>
+        <input id="eventEnd" type="time" title="End time" />
       </div>
     </section>
+
+    <details id="eventRecurrenceDetails" class="modalSection eventOnly recurrenceSection">
+      <summary>Recurring</summary>
+      <div class="recurrenceBody">
+        <label class="inlineToggle recurrenceEnabled"><input id="eventRecurrenceEnabled" type="checkbox" /> Enabled</label>
+        <div class="recurrenceGrid">
+          <div>
+            <label class="fieldLabel" for="eventRecurrenceFrequency">Occurs</label>
+            <select id="eventRecurrenceFrequency">
+              <option value="daily">Daily</option>
+              <option value="weekly" selected>Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </div>
+          <div>
+            <label class="fieldLabel" for="eventRecurrenceInterval">Recurs Every</label>
+            <div class="recurrenceInterval">
+              <input id="eventRecurrenceInterval" type="number" min="1" max="999" value="1" />
+              <span id="eventRecurrenceIntervalUnit">week(s)</span>
+            </div>
+          </div>
+        </div>
+        <fieldset id="eventRecurrenceWeekdays" class="recurrenceWeekdays">
+          <legend>On</legend>
+          <label><input type="checkbox" value="0" /> Monday</label>
+          <label><input type="checkbox" value="1" /> Tuesday</label>
+          <label><input type="checkbox" value="2" /> Wednesday</label>
+          <label><input type="checkbox" value="3" /> Thursday</label>
+          <label><input type="checkbox" value="4" /> Friday</label>
+          <label><input type="checkbox" value="5" /> Saturday</label>
+          <label><input type="checkbox" value="6" /> Sunday</label>
+        </fieldset>
+        <fieldset class="recurrenceDailyFrequency">
+          <legend>Daily Frequency</legend>
+          <label><input name="eventDailyMode" type="radio" value="once" checked /> Occurs once at the start time</label>
+          <div class="recurrenceEveryRow">
+            <label><input name="eventDailyMode" type="radio" value="interval" /> Occurs every</label>
+            <input id="eventRepeatMinutes" type="number" min="1" max="1440" value="10" />
+            <span>minute(s)</span>
+            <label for="eventDailyStart">Starting at</label>
+            <input id="eventDailyStart" type="time" />
+            <label for="eventDailyEnd">Ending at</label>
+            <input id="eventDailyEnd" type="time" />
+          </div>
+        </fieldset>
+        <fieldset class="recurrenceEnds">
+          <legend>Duration</legend>
+          <label><input name="eventRecurrenceEndMode" type="radio" value="none" checked /> No end date</label>
+          <label><input name="eventRecurrenceEndMode" type="radio" value="date" /> End date</label>
+          <input id="eventRecurrenceUntil" type="date" />
+        </fieldset>
+      </div>
+    </details>
 
     <section class="modalSection eventOnly">
       <label class="fieldLabel" for="eventDescriptionEditor">Description / Notes</label>

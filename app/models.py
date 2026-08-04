@@ -245,6 +245,7 @@ class Event(Base):
 
     start_time = Column(DateTime(timezone=True), nullable=False)
     end_time = Column(DateTime(timezone=True))
+    recurrence = Column(JSON, nullable=True)
 
     # ✅ OWNER
     owner_id = Column(Integer, ForeignKey("users.id"), index=True)

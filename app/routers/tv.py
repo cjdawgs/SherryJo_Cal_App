@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from sqlalchemy import String, cast, func
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -400,6 +400,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
         "title": event.title or "",
         "start": _to_iso(event.start_time),
         "end": _to_iso(event.end_time),
+        "recurrence": getattr(event, "recurrence", None),
         "description": event.description or "",
         "source": source,
         "accountEmail": getattr(event, "account_email", None),
@@ -421,6 +422,7 @@ def _serialize_event_for_tv(event: Event) -> dict:
             "tags": getattr(event, "tags", None) or [],
             "eventColor": color,
             "eventColorEnabled": color_enabled,
+            "recurrence": getattr(event, "recurrence", None),
         },
     }
 
@@ -747,6 +749,7 @@ def _build_tv_events_fast_etag(
     window_end: datetime,
     start_key: str,
     end_key: str,
+    dedup_enabled: bool,
 ) -> str:
     """
     Build a cheap change fingerprint for /tv/events.
@@ -762,8 +765,8 @@ def _build_tv_events_fast_etag(
         )
         .filter(
             _event_owner_filter(user_id),
-            Event.start_time >= window_start,
             Event.start_time <= window_end,
+            or_(Event.start_time >= window_start, Event.recurrence.isnot(None)),
         )
         .one()
     )
@@ -797,6 +800,7 @@ def _build_tv_events_fast_etag(
         "v": 1,
         "selectedDate": selected_date_str,
         "currentView": current_view,
+        "dedup": dedup_enabled,
         "rangeStart": start_key,
         "rangeEnd": end_key,
         "events": {
@@ -1237,6 +1241,7 @@ def get_tv_events(
     request: Request,
     selectedDate: Optional[str] = None,
     currentView: Optional[str] = None,
+    dedup: bool = True,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1300,6 +1305,7 @@ def get_tv_events(
                 window_end=window_end,
                 start_key=start_key,
                 end_key=end_key,
+                dedup_enabled=dedup,
             )
             if request.headers.get("if-none-match") == fast_etag:
                 return Response(
@@ -1323,7 +1329,7 @@ def get_tv_events(
                 current_user,
                 window_start,
                 window_end,
-                dedup_enabled=True,
+                dedup_enabled=dedup,
             )
             events = [_adapt_calendar_event_for_tv(event) for event in events]
         except Exception:
@@ -1336,8 +1342,8 @@ def get_tv_events(
                     db.query(Event)
                     .filter(
                         _event_owner_filter(current_user.id),
-                        Event.start_time >= window_start,
                         Event.start_time <= window_end,
+                        or_(Event.start_time >= window_start, Event.recurrence.isnot(None)),
                     )
                     .order_by(Event.start_time)
                     .all()
