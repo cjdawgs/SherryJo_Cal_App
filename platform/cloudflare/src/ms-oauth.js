@@ -131,7 +131,8 @@ export async function handleMsCallback(request, env, adapter) {
             displayName: accountEmail, providerId,
             tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,
         });
-    } catch {
+    } catch (err) {
+        console.error("[handleMsCallback] Account upsert failed:", err.message || String(err));
         return errorRedirect(base, "microsoft_account_save_failed", null);
     }
 

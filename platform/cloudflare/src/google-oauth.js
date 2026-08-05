@@ -124,7 +124,8 @@ export async function handleGoogleCallback(request, env, adapter) {
             displayName: accountEmail, providerId,
             tokenEncryptionKey: env.TOKEN_ENCRYPTION_KEY,
         });
-    } catch {
+    } catch (err) {
+        console.error("[handleGoogleCallback] Account upsert failed:", err.message || String(err));
         return errorRedirect(base, "google_account_save_failed", null);
     }
 
