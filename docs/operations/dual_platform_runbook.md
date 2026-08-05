@@ -52,11 +52,11 @@ On another development desktop, use `git pull origin main` rather than copying i
 | `EVENT_WRITE_MODE` | N/A | `native` | Controls replay-safe local event create/update/delete routes |
 | `LEGACY_EVENT_READ_MODE` | N/A | `native` | Controls smoke-compatible `GET /events/` |
 | `NOTE_READ_MODE` | N/A | `native` | Controls date-filtered `GET /notes/` |
-| `NOTE_WRITE_MODE` | N/A | `proxy` | Remains proxied until all callers supply the idempotency contract |
+| `NOTE_WRITE_MODE` | N/A | `native` | Controls replay-safe standalone note POST writes |
 | `TAG_COLOR_READ_MODE` | N/A | `native` | Controls `GET /calendar/tag-colors` |
 | `TAG_COLOR_WRITE_MODE` | N/A | `native` | Controls replay-safe tag-color PUT |
 | `TASK_READ_MODE` | N/A | `native` | Controls `GET /tasks/` |
-| `TASK_WRITE_MODE` | N/A | `proxy` | Remains proxied until all callers supply the idempotency contract |
+| `TASK_WRITE_MODE` | N/A | `native` | Controls replay-safe standalone task POST writes |
 | `TV_VERSION_READ_MODE` | N/A | `native` | Controls `GET /tv/version` and requires matching `TV_APP_VERSION` |
 | `CALENDAR_READ_CANARY_USER_IDS` | N/A | Unset | Comma-separated server-verified user IDs; required only for canary native reads |
 | `JWT_PUBLIC_KEYS_JSON` | Render publishes public keys | Unset secret | Public verification keys only; never copy a private signing key to Cloudflare |

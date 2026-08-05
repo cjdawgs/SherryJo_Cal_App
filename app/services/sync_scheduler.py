@@ -25,6 +25,13 @@ import io
 import os
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
+from app.services.sync_operation_ledger import (
+    SYNC_ROLLUP_OPERATION_TYPE,
+    SYNC_TV_DIAG_PRUNE_OPERATION_TYPE,
+    begin_sync_operation,
+    complete_sync_operation,
+    is_operation_dead_letter,
+)
 from app.models import User, OAuthAccount, TVDiagLog, SyncEfficiencyDailyRollup   # ✅ VERY IMPORTANT (we loop users)
 from datetime import datetime, timezone, timedelta
 
@@ -97,6 +104,24 @@ def _apple_min_sync_minutes() -> int:
         return max(15, int(os.getenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", str(DEFAULT_APPLE_MIN_SYNC_MINUTES))))
     except ValueError:
         return DEFAULT_APPLE_MIN_SYNC_MINUTES
+
+
+def _sync_operation_max_attempts() -> int:
+    """How many failed attempts are allowed before dead-lettering a sync stream."""
+    try:
+        return max(1, int(os.getenv("SYNC_OPERATION_MAX_ATTEMPTS", "3")))
+    except ValueError:
+        return 3
+
+
+def _scheduler_owner() -> str:
+    """Configured scheduler owner role for exclusive execution."""
+    return str(os.getenv("SYNC_SCHEDULER_OWNER", "render")).strip().lower() or "render"
+
+
+def _scheduler_execution_enabled() -> bool:
+    """Whether this process should execute scheduler jobs."""
+    return _scheduler_owner() == "render"
 
 
 def _normalized_provider(account) -> str:
@@ -192,6 +217,21 @@ def persist_sync_efficiency_rollup() -> None:
     snapshot = _collect_efficiency_snapshot()
 
     db = SessionLocal()
+    operation_key = _rollup_operation_key(snapshot_date)
+    if is_operation_dead_letter(db, operation_key=operation_key):
+        logger.warning("[SYNC] rollup skipped: dead-letter operation key %s", operation_key)
+        db.close()
+        return
+    operation_id = begin_sync_operation(
+        db,
+        operation_key=operation_key,
+        owner_user_id=None,
+        operation_type=SYNC_ROLLUP_OPERATION_TYPE,
+        request_payload={
+            "snapshot_date": snapshot_date.isoformat(),
+            "week_start_date": week_start_date.isoformat(),
+        },
+    )
     try:
         row = (
             db.query(SyncEfficiencyDailyRollup)
@@ -220,10 +260,26 @@ def persist_sync_efficiency_rollup() -> None:
         row.updated_at = now
 
         db.commit()
+        complete_sync_operation(
+            db,
+            operation_id=operation_id,
+            status="succeeded",
+            result_payload={
+                "snapshot_date": snapshot_date.isoformat(),
+                "total_cycles": snapshot["total_cycles"],
+            },
+        )
         last_rollup_persisted_at = now
         logger.info("[SYNC] daily rollup persisted for %s", snapshot_date.isoformat())
     except Exception as exc:
         db.rollback()
+        complete_sync_operation(
+            db,
+            operation_id=operation_id,
+            status="failed",
+            error=exc,
+            max_attempts=_sync_operation_max_attempts(),
+        )
         logger.warning("[SYNC] daily rollup persist failed: %s", exc)
     finally:
         db.close()
@@ -303,6 +359,23 @@ def _is_user_sync_due(user_id: int, accounts, now):
     return now >= (latest_marker + timedelta(minutes=cadence)), cadence
 
 
+def _sync_operation_key(user_id: int, accounts) -> str:
+    """Deterministic per-user operation key that remains stable across retries."""
+    latest_marker = max((_latest_account_sync_marker(account) for account in accounts), default=None)
+    anchor = "bootstrap"
+    if latest_marker is not None:
+        anchor = str(int(latest_marker.astimezone(timezone.utc).timestamp()))
+    return f"scheduler-sync:user:{user_id}:anchor:{anchor}"
+
+
+def _rollup_operation_key(snapshot_date) -> str:
+    return f"scheduler-rollup:date:{snapshot_date.isoformat()}"
+
+
+def _diag_prune_operation_key(cutoff: datetime) -> str:
+    return f"scheduler-tv-diag-prune:cutoff:{cutoff.date().isoformat()}"
+
+
 # ==================================================
 # MAIN SYNC FUNCTION
 # ==================================================
@@ -349,6 +422,7 @@ def run_event_sync():
             return
 
         for user in users:
+            operation_id = None
             try:
                 user_accounts = db.query(OAuthAccount).filter(
                     OAuthAccount.user_id == user.id,
@@ -366,6 +440,21 @@ def run_event_sync():
                     skipped += 1
                     logger.debug("[SYNC] user=%s skipped, cadence %s min not due", user.id, cadence)
                     continue
+
+                operation_key = _sync_operation_key(user.id, user_accounts)
+                if is_operation_dead_letter(db, operation_key=operation_key):
+                    skipped += 1
+                    logger.warning("[SYNC] user=%s skipped: dead-letter operation key", user.id)
+                    continue
+
+                operation_id = begin_sync_operation(
+                    db,
+                    operation_key=operation_key,
+                    owner_user_id=user.id,
+                    request_payload={
+                        "cadence_minutes": cadence,
+                    },
+                )
 
                 # Keep scheduler behavior aligned with manual sync: use per-account
                 # sync_range_days rather than CalendarService default range.
@@ -397,9 +486,26 @@ def run_event_sync():
                     had_changes=_sync_result_has_changes(result),
                     now=datetime.now(timezone.utc),
                 )
+
+                complete_sync_operation(
+                    db,
+                    operation_id=operation_id,
+                    status="succeeded",
+                    result_payload={
+                        "window_days": window_days,
+                        "had_changes": _sync_result_has_changes(result),
+                    },
+                )
                 synced += 1
 
             except Exception as user_error:
+                complete_sync_operation(
+                    db,
+                    operation_id=operation_id,
+                    status="failed",
+                    error=user_error,
+                    max_attempts=_sync_operation_max_attempts(),
+                )
                 failed += 1
                 logger.error("[SYNC] user=%s FAILED: %s", user.id, user_error)
 
@@ -437,6 +543,21 @@ def prune_tv_diag_log():
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=_diag_retention_days())
     db = SessionLocal()
+    operation_key = _diag_prune_operation_key(cutoff)
+    if is_operation_dead_letter(db, operation_key=operation_key):
+        logger.warning("[DIAG] prune skipped: dead-letter operation key %s", operation_key)
+        db.close()
+        return
+    operation_id = begin_sync_operation(
+        db,
+        operation_key=operation_key,
+        owner_user_id=None,
+        operation_type=SYNC_TV_DIAG_PRUNE_OPERATION_TYPE,
+        request_payload={
+            "cutoff": cutoff.isoformat(),
+            "retention_days": _diag_retention_days(),
+        },
+    )
     try:
         deleted = (
             db.query(TVDiagLog)
@@ -444,10 +565,26 @@ def prune_tv_diag_log():
             .delete(synchronize_session=False)
         )
         db.commit()
+        complete_sync_operation(
+            db,
+            operation_id=operation_id,
+            status="succeeded",
+            result_payload={
+                "deleted_rows": int(deleted or 0),
+                "cutoff_date": cutoff.date().isoformat(),
+            },
+        )
         if deleted:
             logger.info("[DIAG] pruned %s tv_diag_log rows older than %s", deleted, cutoff.date())
     except Exception as exc:
         db.rollback()
+        complete_sync_operation(
+            db,
+            operation_id=operation_id,
+            status="failed",
+            error=exc,
+            max_attempts=_sync_operation_max_attempts(),
+        )
         logger.warning("[DIAG] tv_diag_log prune failed: %s", exc)
     finally:
         db.close()
@@ -463,6 +600,13 @@ def start_scheduler():
     
     Wakes on a short heartbeat and only syncs users/accounts that are due.
     """
+
+    if not _scheduler_execution_enabled():
+        logger.info(
+            "[SCHEDULER] startup skipped (owner=%s, expected=render)",
+            _scheduler_owner(),
+        )
+        return
 
     heartbeat_minutes = _scheduler_heartbeat_minutes()
 
@@ -542,6 +686,8 @@ def get_scheduler_health(user_id: int | None = None):
 
     return {
         "running": scheduler.running,
+        "owner": _scheduler_owner(),
+        "execution_enabled": _scheduler_execution_enabled(),
         "last_started_at": last_global_sync_started_at.isoformat() if last_global_sync_started_at else None,
         "last_finished_at": last_global_sync_finished_at.isoformat() if last_global_sync_finished_at else None,
         "last_error": last_global_sync_error,

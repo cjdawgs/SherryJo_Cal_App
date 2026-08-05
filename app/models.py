@@ -415,6 +415,35 @@ class SyncEfficiencyDailyRollup(Base):
     )
 
 
+class SyncOperationLedger(Base):
+    """Durable scheduler operation ledger for replay-safe async migration."""
+
+    __tablename__ = "sync_operation_ledger"
+    __table_args__ = (
+        UniqueConstraint("operation_key", name="uq_sync_operation_ledger_operation_key"),
+    )
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    operation_key = Column(String(200), nullable=False, index=True)
+    operation_type = Column(String(100), nullable=False, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)
+    attempt_count = Column(Integer, nullable=False, default=1)
+    request_payload = Column(JSON, nullable=True)
+    result_payload = Column(JSON, nullable=True)
+    error_type = Column(String, nullable=True)
+    error_message = Column(String, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class AppRuntimeSecret(Base):
     """Encrypted app-level runtime secrets persisted for restart-safe bootstrap."""
 

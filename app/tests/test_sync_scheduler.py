@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.models import SyncEfficiencyDailyRollup, TVDiagLog
+from app.models import SyncEfficiencyDailyRollup, SyncOperationLedger, TVDiagLog
 from app.services import sync_scheduler
 from app.services.google_calendar_service import GoogleCalendarService
 
@@ -188,6 +188,34 @@ def test_sync_due_once_cadence_elapsed():
     assert due is True
 
 
+def test_sync_operation_key_uses_latest_marker_anchor():
+    accounts = [
+        make_account(last_sync=NOW - timedelta(minutes=20)),
+        make_account(last_sync_success=NOW - timedelta(minutes=5)),
+    ]
+
+    key = sync_scheduler._sync_operation_key(37, accounts)
+
+    assert key == f"scheduler-sync:user:37:anchor:{int((NOW - timedelta(minutes=5)).timestamp())}"
+
+
+def test_sync_operation_key_uses_bootstrap_anchor_without_markers():
+    key = sync_scheduler._sync_operation_key(7, [make_account()])
+
+    assert key == "scheduler-sync:user:7:anchor:bootstrap"
+
+
+def test_sync_operation_max_attempts_defaults_and_parses_env(monkeypatch):
+    monkeypatch.delenv("SYNC_OPERATION_MAX_ATTEMPTS", raising=False)
+    assert sync_scheduler._sync_operation_max_attempts() == 3
+
+    monkeypatch.setenv("SYNC_OPERATION_MAX_ATTEMPTS", "5")
+    assert sync_scheduler._sync_operation_max_attempts() == 5
+
+    monkeypatch.setenv("SYNC_OPERATION_MAX_ATTEMPTS", "bad")
+    assert sync_scheduler._sync_operation_max_attempts() == 3
+
+
 def test_sync_uses_provider_floor_for_apple_cadence(monkeypatch):
     monkeypatch.setenv("SYNC_APPLE_MIN_FREQUENCY_MINUTES", "240")
     accounts = [
@@ -232,6 +260,44 @@ def test_run_event_sync_skips_users_not_due(monkeypatch, reset_sync_state):
 
     sync_scheduler.run_event_sync()
 
+    sync_all.assert_not_called()
+
+
+def test_run_event_sync_skips_dead_letter_operation_key(monkeypatch, reset_sync_state):
+    user = SimpleNamespace(id=1)
+    session = RoutingSession(users=[user], accounts_by_user_id={1: [make_account()]})
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
+    monkeypatch.setattr(sync_scheduler, "is_operation_dead_letter", lambda _db, operation_key: True)
+    sync_all = MagicMock()
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
+
+    sync_scheduler.run_event_sync()
+
+    sync_all.assert_not_called()
+
+
+def test_run_event_sync_skips_same_dead_letter_key_across_cycles(monkeypatch, reset_sync_state):
+    user = SimpleNamespace(id=1)
+    seen_keys = []
+
+    def _dead_letter(_db, operation_key):
+        seen_keys.append(operation_key)
+        return True
+
+    monkeypatch.setattr(
+        sync_scheduler,
+        "SessionLocal",
+        lambda: RoutingSession(users=[user], accounts_by_user_id={1: [make_account()]}),
+    )
+    monkeypatch.setattr(sync_scheduler, "is_operation_dead_letter", _dead_letter)
+    sync_all = MagicMock()
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
+
+    sync_scheduler.run_event_sync()
+    sync_scheduler.run_event_sync()
+
+    assert len(seen_keys) == 2
+    assert seen_keys[0] == seen_keys[1]
     sync_all.assert_not_called()
 
 
@@ -344,6 +410,27 @@ def test_start_scheduler_registers_job(monkeypatch):
     scheduler.start.assert_called_once()
 
 
+def test_start_scheduler_skips_when_owner_is_not_render(monkeypatch):
+    scheduler = MagicMock()
+    monkeypatch.setattr(sync_scheduler, "scheduler", scheduler)
+    monkeypatch.setenv("SYNC_SCHEDULER_OWNER", "cloudflare")
+
+    sync_scheduler.start_scheduler()
+
+    scheduler.add_job.assert_not_called()
+    scheduler.start.assert_not_called()
+
+
+def test_scheduler_owner_and_execution_enabled(monkeypatch):
+    monkeypatch.delenv("SYNC_SCHEDULER_OWNER", raising=False)
+    assert sync_scheduler._scheduler_owner() == "render"
+    assert sync_scheduler._scheduler_execution_enabled() is True
+
+    monkeypatch.setenv("SYNC_SCHEDULER_OWNER", "cloudflare")
+    assert sync_scheduler._scheduler_owner() == "cloudflare"
+    assert sync_scheduler._scheduler_execution_enabled() is False
+
+
 def test_prune_tv_diag_log_deletes_only_expired_rows(monkeypatch, db):
     expired = TVDiagLog(
         ts_server=datetime.now(timezone.utc) - timedelta(days=30),
@@ -361,6 +448,32 @@ def test_prune_tv_diag_log_deletes_only_expired_rows(monkeypatch, db):
     sync_scheduler.prune_tv_diag_log()
 
     assert [row.event for row in db.query(TVDiagLog).all()] == ["current"]
+    ledger_rows = db.query(SyncOperationLedger).filter(SyncOperationLedger.operation_type == "scheduler_tv_diag_prune").all()
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].status == "succeeded"
+    assert ledger_rows[0].result_payload["deleted_rows"] == 1
+
+
+def test_prune_tv_diag_log_skips_dead_letter_operation_key(monkeypatch, db):
+    expired = TVDiagLog(
+        ts_server=datetime.now(timezone.utc) - timedelta(days=30),
+        event="expired",
+    )
+    current = TVDiagLog(
+        ts_server=datetime.now(timezone.utc) - timedelta(days=1),
+        event="current",
+    )
+    db.add_all([expired, current])
+    db.commit()
+
+    monkeypatch.setenv("TV_DIAG_RETENTION_DAYS", "14")
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: db)
+    monkeypatch.setattr(sync_scheduler, "is_operation_dead_letter", lambda _db, operation_key: True)
+
+    sync_scheduler.prune_tv_diag_log()
+
+    assert sorted(row.event for row in db.query(TVDiagLog).all()) == ["current", "expired"]
+    assert db.query(SyncOperationLedger).filter(SyncOperationLedger.operation_type == "scheduler_tv_diag_prune").count() == 0
 
 
 def test_sync_efficiency_rollup_updates_one_row_per_day(monkeypatch, db, reset_sync_state):
@@ -390,6 +503,23 @@ def test_sync_efficiency_rollup_updates_one_row_per_day(monkeypatch, db, reset_s
     assert rows[0].google_cache_hit_ratio == 0.75
     assert sync_scheduler.last_rollup_persisted_at is not None
 
+    ledger_rows = db.query(SyncOperationLedger).filter(SyncOperationLedger.operation_type == "scheduler_rollup").all()
+    assert len(ledger_rows) == 1
+    assert ledger_rows[0].attempt_count == 2
+    assert ledger_rows[0].status == "succeeded"
+    assert ledger_rows[0].result_payload["total_cycles"] == 10
+
+
+def test_sync_efficiency_rollup_skips_dead_letter_operation_key(monkeypatch, db, reset_sync_state):
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: db)
+    monkeypatch.setattr(sync_scheduler, "is_operation_dead_letter", lambda _db, operation_key: True)
+    sync_scheduler._sync_efficiency_counters.update(changes=2, no_changes=6)
+
+    sync_scheduler.persist_sync_efficiency_rollup()
+
+    assert db.query(SyncEfficiencyDailyRollup).count() == 0
+    assert db.query(SyncOperationLedger).filter(SyncOperationLedger.operation_type == "scheduler_rollup").count() == 0
+
 
 def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):
     job = SimpleNamespace(next_run_time=NOW + timedelta(minutes=5))
@@ -402,6 +532,8 @@ def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):
     health = sync_scheduler.get_scheduler_health()
 
     assert health["running"] is True
+    assert health["owner"] == "render"
+    assert health["execution_enabled"] is True
     assert health["last_started_at"] == NOW.isoformat()
     assert health["last_finished_at"] == (NOW + timedelta(seconds=30)).isoformat()
     assert health["next_run_at"] == (NOW + timedelta(minutes=5)).isoformat()
@@ -425,6 +557,8 @@ def test_get_scheduler_health_handles_lookup_failure(monkeypatch, reset_sync_sta
 
     assert health["next_run_at"] is None
     assert health["running"] is False
+    assert health["owner"] == "render"
+    assert health["execution_enabled"] is True
     assert health["last_started_at"] is None
 
 
