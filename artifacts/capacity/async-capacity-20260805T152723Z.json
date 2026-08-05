@@ -1,0 +1,11 @@
+{
+  "available": false,
+  "created_in_window": null,
+  "estimated_daily_operations": null,
+  "evidence_status": "pending",
+  "notes": [
+    "No authenticated scheduler ledger evidence was captured in the baseline."
+  ],
+  "recommendation": "defer",
+  "total_operations": null
+}

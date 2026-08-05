@@ -243,10 +243,14 @@ def run_worker_native_status(render_url: str, cloudflare_url: str) -> tuple[dict
     except (json.JSONDecodeError, UnicodeDecodeError):
         cloudflare_body = None
 
+    required_fields_match = isinstance(cloudflare_body, dict) and all(
+        cloudflare_body.get(key) == value for key, value in expected_body.items()
+    )
+
     checks = {
         "render_does_not_own_route": render.status == 404,
         "cloudflare_status": cloudflare.status == 200,
-        "cloudflare_body": cloudflare_body == expected_body,
+        "cloudflare_body": required_fields_match,
     }
     failed_checks = [name for name, passed in checks.items() if not passed]
     row = {

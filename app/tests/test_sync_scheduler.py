@@ -540,6 +540,10 @@ def test_get_scheduler_health_reports_next_run(monkeypatch, reset_sync_state):
     assert health["frequency_minutes"] == 5
     assert health["apple_min_frequency_minutes"] == 240
     assert health["last_error"] is None
+    assert "operation_ledger" in health
+    assert health["operation_ledger"]["window_hours"] == 24
+    assert "total_operations" in health["operation_ledger"]
+    assert "created_in_window" in health["operation_ledger"]
     assert "adaptive_backoff" in health
     assert "efficiency" in health
     assert "google_calendar_list_cache" in health
@@ -559,6 +563,8 @@ def test_get_scheduler_health_handles_lookup_failure(monkeypatch, reset_sync_sta
     assert health["running"] is False
     assert health["owner"] == "render"
     assert health["execution_enabled"] is True
+    assert "operation_ledger" in health
+    assert health["operation_ledger"]["window_hours"] == 24
     assert health["last_started_at"] is None
 
 

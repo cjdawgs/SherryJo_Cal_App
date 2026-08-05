@@ -24,6 +24,8 @@ No migration may run Render APScheduler and Cloudflare ownership for the same op
 
 Current recommendation remains **defer** for Queue/Cron execution ownership until observed production volume, cost evidence, and end-to-end replay semantics are complete. Event sync, TV diagnostics pruning, and efficiency rollup remain Render-owned. No Cloudflare scheduler binding is configured, preventing duplicate provider execution during native route cutover.
 
+Decision support artifact: [artifacts/capacity/async-capacity-20260805T152723Z.md](../../artifacts/capacity/async-capacity-20260805T152723Z.md) summarizes the latest ledger-based capacity evidence and records the current recommendation for the migration gate.
+
 ## Required evidence before approval
 
 1. Dated production volume for scheduler wakeups, due users/accounts, provider reads/writes, failures, diagnostic rows pruned, and rollup writes.

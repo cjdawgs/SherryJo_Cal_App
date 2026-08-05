@@ -1,0 +1,36 @@
+{
+  "run_id": "1ffc97f3292e4e9c967f5b65d6f48b3a",
+  "render_url": "https://sherryjo-cal-app.onrender.com",
+  "cloudflare_url": "https://sherryjo-cal-app-canary.realty-cal.workers.dev",
+  "passed": true,
+  "checks": [
+    "render_create",
+    "cloudflare_read",
+    "cloudflare_update",
+    "render_read_after_update",
+    "render_note_create",
+    "cloudflare_note_read",
+    "render_tasks_read",
+    "render_accounts_read",
+    "render_scheduler_running",
+    "render_tv_version",
+    "render_tv_state",
+    "render_calendar_asset",
+    "cloudflare_tasks_read",
+    "cloudflare_accounts_read",
+    "cloudflare_scheduler_running",
+    "cloudflare_tv_version",
+    "cloudflare_tv_state",
+    "cloudflare_calendar_asset",
+    "render_invalid_upload_rejection",
+    "cloudflare_invalid_upload_rejection",
+    "render_websocket_echo",
+    "cloudflare_websocket_echo",
+    "note_cleanup_verified"
+  ],
+  "cleanup": {
+    "attempted": true,
+    "passed": true
+  },
+  "failures": []
+}

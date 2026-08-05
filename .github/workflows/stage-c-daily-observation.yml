@@ -1,0 +1,169 @@
+name: Stage C Daily Observation
+
+on:
+    schedule:
+        - cron: "25 6 * * *"
+    workflow_dispatch:
+        inputs:
+            render_url:
+                description: Direct Render origin URL
+                required: true
+                default: https://sherryjo-cal-app.onrender.com
+                type: string
+            canary_url:
+                description: Isolated Cloudflare canary URL
+                required: true
+                default: https://sherryjo-cal-app-canary.realty-cal.workers.dev
+                type: string
+
+permissions:
+    contents: read
+
+concurrency:
+    group: sherryjo-stage-c-daily-observation
+    cancel-in-progress: false
+
+jobs:
+    observe:
+        if: ${{ github.event_name == 'workflow_dispatch' || vars.STAGE_C_DAILY_OBSERVATION_ENABLED == 'true' }}
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        environment: cloudflare-smoke
+        env:
+            RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+            CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
+            SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
+            SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: "3.x"
+
+            - name: Install smoke dependencies
+              run: python -m pip install websockets==16.1
+
+            - name: Run unauthenticated canary parity
+              id: unauth
+              continue-on-error: true
+              run: >-
+                  python deployment/shadow_parity.py
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$CANARY_URL"
+                  --json-output stage-c-unauthenticated.json
+
+            - name: Run authenticated canary smoke
+              id: auth
+              continue-on-error: true
+              run: >-
+                  python deployment/authenticated_smoke.py
+                  --allow-remote
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$CANARY_URL"
+                  --json-output stage-c-authenticated.json
+
+            - name: Build daily observation summary
+              run: |
+                  python - <<'PY'
+                  import json
+                  from datetime import datetime, timezone
+                  from pathlib import Path
+
+                  now = datetime.now(timezone.utc)
+                  date_label = now.strftime('%Y-%m-%d')
+                  ts_label = now.strftime('%Y%m%dT%H%M%SZ')
+
+                  def load_report(path):
+                      file_path = Path(path)
+                      if not file_path.exists():
+                          return {"present": False, "passed": False, "failures": [f"missing report: {path}"]}
+                      try:
+                          payload = json.loads(file_path.read_text(encoding='utf-8'))
+                      except Exception as exc:
+                          return {"present": True, "passed": False, "failures": [f"invalid report {path}: {type(exc).__name__}"]}
+                      failures = payload.get('failures') or []
+                      if not isinstance(failures, list):
+                          failures = [str(failures)]
+                      return {
+                          "present": True,
+                          "passed": bool(payload.get('passed')),
+                          "failures": failures,
+                      }
+
+                  unauth = load_report('stage-c-unauthenticated.json')
+                  auth = load_report('stage-c-authenticated.json')
+
+                  overall_pass = unauth['passed'] and auth['passed']
+                  summary = {
+                      "date_utc": date_label,
+                      "timestamp_utc": ts_label,
+                      "render_url": "${{ env.RENDER_URL }}",
+                      "canary_url": "${{ env.CANARY_URL }}",
+                      "overall_passed": overall_pass,
+                      "unauthenticated": unauth,
+                      "authenticated": auth,
+                  }
+
+                  Path('stage-c-daily-summary.json').write_text(
+                      json.dumps(summary, indent=2) + '\n',
+                      encoding='utf-8',
+                  )
+
+                  lines = [
+                      '# Stage C Daily Observation Summary',
+                      '',
+                      f'- Date (UTC): `{date_label}`',
+                      f'- Render URL: `${{ env.RENDER_URL }}`',
+                      f'- Canary URL: `${{ env.CANARY_URL }}`',
+                      f'- Overall: `{ "Pass" if overall_pass else "Fail" }`',
+                      '',
+                      '## Unauthenticated parity',
+                      '',
+                      f'- Passed: `{unauth["passed"]}`',
+                  ]
+                  if unauth['failures']:
+                      lines.append('- Failures:')
+                      lines.extend([f'  - {item}' for item in unauth['failures']])
+                  else:
+                      lines.append('- Failures: none')
+
+                  lines.extend([
+                      '',
+                      '## Authenticated smoke',
+                      '',
+                      f'- Passed: `{auth["passed"]}`',
+                  ])
+                  if auth['failures']:
+                      lines.append('- Failures:')
+                      lines.extend([f'  - {item}' for item in auth['failures']])
+                  else:
+                      lines.append('- Failures: none')
+
+                  Path('stage-c-daily-summary.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                  PY
+
+            - name: Upload Stage C daily artifacts
+              if: ${{ always() }}
+              uses: actions/upload-artifact@v4
+              with:
+                  name: stage-c-daily-${{ github.run_id }}-${{ github.run_attempt }}
+                  path: |
+                      stage-c-unauthenticated.json
+                      stage-c-authenticated.json
+                      stage-c-daily-summary.json
+                      stage-c-daily-summary.md
+                  if-no-files-found: error
+                  retention-days: 30
+
+            - name: Enforce Stage C pass gate
+              run: |
+                  python - <<'PY'
+                  import json
+                  from pathlib import Path
+
+                  summary = json.loads(Path('stage-c-daily-summary.json').read_text(encoding='utf-8'))
+                  if not summary.get('overall_passed'):
+                      raise SystemExit('Stage C daily observation failed; check uploaded artifacts.')
+                  print('Stage C daily observation passed.')
+                  PY

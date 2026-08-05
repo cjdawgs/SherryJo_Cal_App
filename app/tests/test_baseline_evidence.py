@@ -117,3 +117,54 @@ def test_authenticated_summaries_drop_unrecognized_fields():
     assert rollups["row_count"] == 1
     assert rollups["current_week"]["days_present"] == 1
     assert "secret" not in serialized
+
+
+def test_markdown_notes_when_authenticated_probes_not_configured():
+    snapshot = {
+        "generated_at": "2026-08-05T00:00:00+00:00",
+        "repository": {"git_commit": "abc123", "alembic_heads": ["head"]},
+        "targets": {},
+        "environment_presence": {},
+        "authenticated": {"configured": False},
+    }
+
+    markdown = baseline_evidence._markdown(snapshot)
+
+    assert "## Authenticated probes" in markdown
+    assert "no admin bearer token provided" in markdown
+
+
+def test_markdown_includes_scheduler_operation_ledger_summary():
+    snapshot = {
+        "generated_at": "2026-08-05T00:00:00+00:00",
+        "repository": {"git_commit": "abc123", "alembic_heads": ["head"]},
+        "targets": {},
+        "environment_presence": {},
+        "authenticated": {
+            "configured": True,
+            "probes": {
+                "sync_status": {
+                    "http_status": 200,
+                    "summary": {
+                        "scheduler": {
+                            "owner": "render",
+                            "execution_enabled": True,
+                            "operation_ledger": {
+                                "available": True,
+                                "window_hours": 24,
+                                "total_operations": 12,
+                                "created_in_window": 5,
+                            },
+                        }
+                    },
+                }
+            },
+        },
+    }
+
+    markdown = baseline_evidence._markdown(snapshot)
+
+    assert "Scheduler owner: `render`" in markdown
+    assert "Scheduler execution enabled: `True`" in markdown
+    assert "Ledger total operations: `12`" in markdown
+    assert "Ledger created in window: `5`" in markdown

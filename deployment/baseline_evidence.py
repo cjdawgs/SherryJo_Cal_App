@@ -407,6 +407,36 @@ def _markdown(snapshot: dict[str, Any]) -> str:
     )
     for name, present in snapshot.get("environment_presence", {}).items():
         lines.append(f"- `{name}`: {'configured' if present else 'not configured'}")
+
+    authenticated = snapshot.get("authenticated") if isinstance(snapshot.get("authenticated"), dict) else {}
+    lines.extend([
+        "",
+        "## Authenticated probes",
+        "",
+    ])
+
+    if not authenticated.get("configured"):
+        lines.append("- Not configured for this run (no admin bearer token provided).")
+        return "\n".join(lines) + "\n"
+
+    probes = authenticated.get("probes") if isinstance(authenticated.get("probes"), dict) else {}
+    sync_status = probes.get("sync_status") if isinstance(probes.get("sync_status"), dict) else {}
+    scheduler = (
+        sync_status.get("summary", {}).get("scheduler")
+        if isinstance(sync_status.get("summary"), dict)
+        else {}
+    )
+    scheduler = scheduler if isinstance(scheduler, dict) else {}
+    operation_ledger = scheduler.get("operation_ledger") if isinstance(scheduler.get("operation_ledger"), dict) else {}
+
+    lines.append(f"- Sync status HTTP: `{sync_status.get('http_status', 'unknown')}`")
+    lines.append(f"- Scheduler owner: `{scheduler.get('owner', 'unknown')}`")
+    lines.append(f"- Scheduler execution enabled: `{scheduler.get('execution_enabled', 'unknown')}`")
+    lines.append(f"- Ledger summary available: `{operation_ledger.get('available', False)}`")
+    lines.append(f"- Ledger window hours: `{operation_ledger.get('window_hours', 'unknown')}`")
+    lines.append(f"- Ledger total operations: `{operation_ledger.get('total_operations', 'unknown')}`")
+    lines.append(f"- Ledger created in window: `{operation_ledger.get('created_in_window', 'unknown')}`")
+
     return "\n".join(lines) + "\n"
 
 
