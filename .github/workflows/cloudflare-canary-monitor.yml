@@ -32,7 +32,7 @@ jobs:
             RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
             CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -50,7 +50,7 @@ jobs:
 
             - name: Upload monitor report
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: canary-monitor-${{ github.run_id }}-${{ github.run_attempt }}
                   path: canary-monitor-report.json

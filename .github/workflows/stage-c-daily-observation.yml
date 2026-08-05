@@ -35,7 +35,7 @@ jobs:
             SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
             SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -145,7 +145,7 @@ jobs:
 
             - name: Upload Stage C daily artifacts
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: stage-c-daily-${{ github.run_id }}-${{ github.run_attempt }}
                   path: |

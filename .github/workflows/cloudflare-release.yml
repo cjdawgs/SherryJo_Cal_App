@@ -66,7 +66,7 @@ jobs:
             TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_test
 
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -98,7 +98,7 @@ jobs:
         runs-on: ubuntu-latest
         environment: cloudflare-canary
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-node@v4
               with:
@@ -114,7 +114,7 @@ jobs:
         needs: deploy-canary
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -132,7 +132,7 @@ jobs:
 
             - name: Upload canary parity report
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: canary-parity-${{ github.run_attempt }}
                   path: canary-parity-report.json
@@ -147,7 +147,7 @@ jobs:
             group: sherryjo-authenticated-smoke
             cancel-in-progress: false
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -169,7 +169,7 @@ jobs:
 
             - name: Upload canary authenticated report
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: canary-authenticated-${{ github.run_attempt }}
                   path: canary-authenticated-report.json
@@ -184,7 +184,7 @@ jobs:
         runs-on: ubuntu-latest
         environment: cloudflare-production
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-node@v4
               with:
@@ -201,7 +201,7 @@ jobs:
         needs: promote-root-worker
         runs-on: ubuntu-latest
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -219,7 +219,7 @@ jobs:
 
             - name: Upload production parity report
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: production-parity-${{ github.run_attempt }}
                   path: production-parity-report.json
@@ -235,7 +235,7 @@ jobs:
             group: sherryjo-authenticated-smoke
             cancel-in-progress: false
         steps:
-            - uses: actions/checkout@v4
+            - uses: actions/checkout@v7
 
             - uses: actions/setup-python@v5
               with:
@@ -257,7 +257,7 @@ jobs:
 
             - name: Upload production authenticated report
               if: ${{ always() }}
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v7
               with:
                   name: production-authenticated-${{ github.run_attempt }}
                   path: production-authenticated-report.json
