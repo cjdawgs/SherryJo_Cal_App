@@ -38,6 +38,8 @@ import {
 } from "./tag-color-write-postgres.js";
 import { executeTaskRead } from "./task-read-postgres.js";
 import { executeTaskWrite, TaskWriteConflictError } from "./task-write-postgres.js";
+import { handleGoogleLogin, handleGoogleCallback } from "./google-oauth.js";
+import { handleMsLogin, handleMsCallback } from "./ms-oauth.js";
 
 const EDGE_HEALTH_PATH = "/__edge/health";
 const PLATFORM_STATUS_PATH = "/api/platform/status";
@@ -51,6 +53,10 @@ const LEGACY_EVENT_READ_PATH = "/events/";
 const NOTE_READ_PATH = "/notes/";
 const TASK_READ_PATH = "/tasks/";
 const TV_VERSION_READ_PATH = "/tv/version";
+const GOOGLE_LOGIN_PATH = "/auth/google/login";
+const GOOGLE_CALLBACK_PATH = "/auth/google/callback";
+const MS_LOGIN_PATH = "/ms/login";
+const MS_CALLBACK_PATH = "/ms/callback";
 const CALENDAR_READ_MODES = new Set(["proxy", "shadow", "canary", "native"]);
 const WRITE_MODES = new Set(["proxy", "canary", "native"]);
 
@@ -182,6 +188,16 @@ function currentUserReadMode(env) {
 function tvVersionReadMode(env) {
     const mode = String(env.TV_VERSION_READ_MODE || "proxy").trim().toLowerCase();
     return CALENDAR_READ_MODES.has(mode) ? mode : "proxy";
+}
+
+function googleAuthMode(env) {
+    const mode = String(env.GOOGLE_AUTH_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
+}
+
+function msAuthMode(env) {
+    const mode = String(env.MS_AUTH_MODE || "proxy").trim().toLowerCase();
+    return WRITE_MODES.has(mode) ? mode : "proxy";
 }
 
 function legacyEventReadMode(env) {
@@ -611,6 +627,8 @@ export default {
                 taskReadMode: taskReadMode(env),
                 taskWriteMode: taskWriteMode(env),
                 tvVersionReadMode: tvVersionReadMode(env),
+                googleAuthMode: googleAuthMode(env),
+                msAuthMode: msAuthMode(env),
                 edgeProxyAuthConfigured: Boolean(String(env.EDGE_PROXY_SECRET || "")),
             });
         }
@@ -629,6 +647,23 @@ export default {
             const tasksMode = taskReadMode(env);
             const tasksWriteMode = taskWriteMode(env);
             const tvVersionMode = tvVersionReadMode(env);
+            const googleMode = googleAuthMode(env);
+            const msMode = msAuthMode(env);
+
+            // OAuth routes: mode "native" lets the Worker handle the full flow.
+            if (incomingUrl.pathname === GOOGLE_LOGIN_PATH && googleMode === "native") {
+                return await handleGoogleLogin(request, env, createHyperdriveCalendarReadAdapter(env));
+            }
+            if (incomingUrl.pathname === GOOGLE_CALLBACK_PATH && googleMode === "native") {
+                return await handleGoogleCallback(request, env, createHyperdriveCalendarReadAdapter(env));
+            }
+            if (incomingUrl.pathname === MS_LOGIN_PATH && msMode === "native") {
+                return await handleMsLogin(request, env, createHyperdriveCalendarReadAdapter(env));
+            }
+            if (incomingUrl.pathname === MS_CALLBACK_PATH && msMode === "native") {
+                return await handleMsCallback(request, env, createHyperdriveCalendarReadAdapter(env));
+            }
+
             if (request.method === "POST" && incomingUrl.pathname === NOTE_READ_PATH && notesWriteMode !== "proxy") {
                 if (notesWriteMode === "native") return await nativeLocalCreate(request, env, executeNoteWrite);
                 if (notesWriteMode === "canary") {

@@ -11,6 +11,81 @@ Status: Core Cloudflare production cutover completed on 2026-08-04. This plan re
 - The reversible production smoke and direct-Render synthetic each passed 23 checks with cleanup. Render recovery remains best effort on the free tier.
 - The route migration is complete. The original charter is not literally closed until the final owner/operational gates at the end of this document are completed or formally revised.
 
+## Architecture progression
+
+### 1. Starting point: Render-centered application
+
+All browser traffic and application behavior entered through the Render FastAPI process. Render owned the frontend, calendar API, OAuth, provider sync, scheduled work, WebSockets, and process-local TV state. Supabase PostgreSQL was the authoritative database.
+
+```mermaid
+flowchart LR
+	Users[Users] --> Render[Render FastAPI application]
+	Render -->|Calendar CRUD and application data| Supabase[(Supabase PostgreSQL)]
+	Render -->|OAuth and calendar sync| Providers[Google and Microsoft]
+	Scheduler[Render APScheduler] --> Render
+	TV[WebSocket and TV state] --> Render
+
+	classDef primary fill:#eaf4f8,stroke:#3f7f96,color:#17262d,stroke-width:2px;
+	classDef data fill:#f7f2e8,stroke:#8a7045,color:#2b2418,stroke-width:2px;
+	classDef external fill:#f4f4f4,stroke:#777,color:#222;
+	class Users,Render primary;
+	class Supabase data;
+	class Providers,Scheduler,TV external;
+```
+
+### 2. Current production: secure hybrid cutover
+
+Cloudflare is the public edge and directly owns the database-local calendar paths that are safe to run there. Render remains an active application origin for workflows that depend on provider credentials, scheduling, process state, or the existing FastAPI runtime. Both runtimes use the same authoritative Supabase data.
+
+```mermaid
+flowchart LR
+	Users[Users] --> Worker[Cloudflare Worker]
+	Worker -->|Native reads and replay-safe calendar writes| Supabase[(Supabase PostgreSQL)]
+	Worker -->|OAuth, sync, admin, WebSocket, TV state, and remaining writes| Render[Render FastAPI origin]
+	Render --> Supabase
+	Render -->|OAuth and calendar sync| Providers[Google and Microsoft]
+
+	Current[Current status: production cutover complete] -.-> Worker
+	Boundary[Render is still required for normal operation] -.-> Render
+
+	classDef primary fill:#eaf4f8,stroke:#3f7f96,color:#17262d,stroke-width:2px;
+	classDef data fill:#f7f2e8,stroke:#8a7045,color:#2b2418,stroke-width:2px;
+	classDef active fill:#eef5ea,stroke:#5f8a4b,color:#1d2b18,stroke-width:2px;
+	classDef note fill:#fff,stroke:#888,color:#222,stroke-dasharray: 4 3;
+	class Users,Worker primary;
+	class Supabase data;
+	class Render,Providers active;
+	class Current,Boundary note;
+```
+
+### 3. Full completion: Cloudflare-autonomous application
+
+The literal charter is complete only when Cloudflare can run every normal user and operator workflow without Render. Render then becomes an independently monitored, always-ready failover target rather than a required origin. A timed failover and failback drill, sustained observation, and an approved reliability policy must prove that architecture.
+
+```mermaid
+flowchart LR
+	Users[Users] -->|Normal traffic| Cloudflare[Cloudflare complete application]
+	Cloudflare -->|All reads, writes, auth, sync, async work, WebSockets, and TV state| Supabase[(Authoritative data)]
+	Cloudflare -->|OAuth and calendar sync| Providers[Google and Microsoft]
+
+	Users -.->|Failover traffic only| Render[Always-ready Render spare]
+	Render -.->|Recovery access| Supabase
+	Render -.->|Recovery provider workflows| Providers
+
+	Complete[Completion proof: observation plus timed failover and failback] -.-> Cloudflare
+
+	classDef primary fill:#eaf4f8,stroke:#3f7f96,color:#17262d,stroke-width:2px;
+	classDef data fill:#f7f2e8,stroke:#8a7045,color:#2b2418,stroke-width:2px;
+	classDef standby fill:#f4f4f4,stroke:#777,color:#222,stroke-dasharray: 5 3;
+	classDef note fill:#fff,stroke:#888,color:#222,stroke-dasharray: 4 3;
+	class Users,Cloudflare primary;
+	class Supabase data;
+	class Render,Providers standby;
+	class Complete note;
+```
+
+The second architecture is the deployed release. The third remains the literal completion target; it should not be marked complete while Render handles normal production workflows or while the failover and reliability gates remain open.
+
 ## How to use this plan
 
 Complete the blocks in the execution order below. Treat every numbered action as one Lego brick: perform it, save its evidence, and check it off before moving on. Never combine a production cutover with a database, authentication, or business-logic change.

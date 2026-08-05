@@ -28,7 +28,8 @@ function requireAuth() {
 
 async function addReplaySafetyHeader(url, method, payload, headers) {
   const pathname = new URL(url, window.location.origin).pathname;
-  if (method.toUpperCase() === "POST" && pathname === "/calendar/event") {
+  const replaySafePost = new Set(["/calendar/event", "/notes/", "/tasks/"]);
+  if (method.toUpperCase() === "POST" && replaySafePost.has(pathname)) {
     if (!headers["Idempotency-Key"] && !headers["idempotency-key"]) {
       headers["Idempotency-Key"] = crypto.randomUUID();
     }

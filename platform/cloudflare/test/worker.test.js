@@ -50,6 +50,8 @@ test("platform status is Worker-native and does not contact Render", async () =>
             taskReadMode: "proxy",
             taskWriteMode: "proxy",
             tvVersionReadMode: "proxy",
+            googleAuthMode: "proxy",
+            msAuthMode: "proxy",
             edgeProxyAuthConfigured: true,
         });
         assert.equal(originContacted, false);

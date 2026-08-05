@@ -95,7 +95,7 @@ def test_root_and_canary_workers_require_edge_proxy_authentication():
 
     assert config["name"] == "sherryjo-cal-app"
     assert config["env"]["canary"]["name"] == "sherryjo-cal-app-canary"
-    required_secrets = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON"]
+    required_secrets = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY"]
     assert config["secrets"]["required"] == required_secrets
     assert config["env"]["canary"]["secrets"]["required"] == required_secrets
     expected_jwt_policy = {
@@ -109,6 +109,18 @@ def test_root_and_canary_workers_require_edge_proxy_authentication():
         name: config["env"]["canary"]["vars"][name]
         for name in expected_jwt_policy
     } == expected_jwt_policy
+
+
+def test_note_and_task_writes_are_replay_safe_and_production_native():
+    config = tomllib.loads((ROOT / "wrangler.toml").read_text(encoding="utf-8"))
+    api_client = (ROOT / "app" / "static" / "api.js").read_text(encoding="utf-8")
+
+    assert 'new Set(["/calendar/event", "/notes/", "/tasks/"])' in api_client
+    assert 'headers["Idempotency-Key"] = crypto.randomUUID()' in api_client
+    assert config["vars"]["NOTE_WRITE_MODE"] == "native"
+    assert config["vars"]["TASK_WRITE_MODE"] == "native"
+    assert config["env"]["canary"]["vars"]["NOTE_WRITE_MODE"] == "proxy"
+    assert config["env"]["canary"]["vars"]["TASK_WRITE_MODE"] == "proxy"
 
 
 def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
