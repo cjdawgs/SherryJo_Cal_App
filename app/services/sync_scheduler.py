@@ -23,6 +23,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from contextlib import redirect_stdout
 import io
 import os
+from sqlalchemy import func
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
 from app.services.sync_operation_ledger import (
@@ -32,7 +33,13 @@ from app.services.sync_operation_ledger import (
     complete_sync_operation,
     is_operation_dead_letter,
 )
-from app.models import User, OAuthAccount, TVDiagLog, SyncEfficiencyDailyRollup   # ✅ VERY IMPORTANT (we loop users)
+from app.models import (
+    User,
+    OAuthAccount,
+    TVDiagLog,
+    SyncEfficiencyDailyRollup,
+    SyncOperationLedger,
+)   # ✅ VERY IMPORTANT (we loop users)
 from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
@@ -376,6 +383,63 @@ def _diag_prune_operation_key(cutoff: datetime) -> str:
     return f"scheduler-tv-diag-prune:cutoff:{cutoff.date().isoformat()}"
 
 
+def _operation_ledger_volume_summary(window_hours: int = 24) -> dict:
+    """Return compact operation-ledger volume metrics for migration evidence."""
+    db = SessionLocal()
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=max(1, int(window_hours)))
+    try:
+        total_operations = int(db.query(func.count(SyncOperationLedger.id)).scalar() or 0)
+        created_last_window = int(
+            db.query(func.count(SyncOperationLedger.id))
+            .filter(SyncOperationLedger.created_at >= window_start)
+            .scalar()
+            or 0
+        )
+
+        by_status = {
+            str(status): int(count)
+            for status, count in (
+                db.query(SyncOperationLedger.status, func.count(SyncOperationLedger.id))
+                .filter(SyncOperationLedger.created_at >= window_start)
+                .group_by(SyncOperationLedger.status)
+                .all()
+            )
+        }
+
+        by_operation_type = {
+            str(operation_type): int(count)
+            for operation_type, count in (
+                db.query(SyncOperationLedger.operation_type, func.count(SyncOperationLedger.id))
+                .filter(SyncOperationLedger.created_at >= window_start)
+                .group_by(SyncOperationLedger.operation_type)
+                .all()
+            )
+        }
+
+        return {
+            "available": True,
+            "window_hours": int(window_hours),
+            "window_started_at": window_start.isoformat(),
+            "captured_at": now.isoformat(),
+            "total_operations": total_operations,
+            "created_in_window": created_last_window,
+            "by_status": by_status,
+            "by_operation_type": by_operation_type,
+        }
+    except Exception as exc:
+        logger.warning("[SCHEDULER] operation-ledger summary unavailable: %s", exc)
+        return {
+            "available": False,
+            "window_hours": int(window_hours),
+            "window_started_at": window_start.isoformat(),
+            "captured_at": now.isoformat(),
+            "error_type": type(exc).__name__,
+        }
+    finally:
+        db.close()
+
+
 # ==================================================
 # MAIN SYNC FUNCTION
 # ==================================================
@@ -684,6 +748,8 @@ def get_scheduler_health(user_id: int | None = None):
             "next_due_override_at": next_due.isoformat() if next_due else None,
         }
 
+    operation_ledger = _operation_ledger_volume_summary(window_hours=24)
+
     return {
         "running": scheduler.running,
         "owner": _scheduler_owner(),
@@ -696,6 +762,7 @@ def get_scheduler_health(user_id: int | None = None):
         "apple_min_frequency_minutes": _apple_min_sync_minutes(),
         "adaptive_backoff": adaptive_summary,
         "adaptive_backoff_user": adaptive_user,
+        "operation_ledger": operation_ledger,
         "efficiency": {
             "changes": changes,
             "no_changes": no_changes,

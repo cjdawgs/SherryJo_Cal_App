@@ -1,0 +1,121 @@
+{
+  "authenticated": {
+    "configured": false
+  },
+  "environment_presence": {
+    "ADMIN_SETUP_CODE": false,
+    "AUTHORIZATION": false,
+    "BASELINE_BEARER_TOKEN": false,
+    "BASE_URL": false,
+    "CLOUDFLARE_API_TOKEN": false,
+    "DATABASE_URL": false,
+    "DB_TYPE": false,
+    "DISABLE_SQLITE_FALLBACK": false,
+    "GH_TOKEN": false,
+    "GITHUB_TOKEN": true,
+    "GOOGLE_CLIENT_ID": false,
+    "GOOGLE_CLIENT_SECRET": false,
+    "GOOGLE_REDIRECT_URI": false,
+    "JWT_ALGORITHM": false,
+    "JWT_SECRET_KEY": false,
+    "MS_CLIENT_ID": false,
+    "MS_CLIENT_SECRET": false,
+    "MS_REDIRECT_URI": false,
+    "MS_TENANT_ID": false,
+    "RENDER_API_KEY": false,
+    "REQUIRE_DB_KIND": false,
+    "TOKEN_ENCRYPTION_KEY": false
+  },
+  "generated_at": "2026-08-05T15:18:45.341583+00:00",
+  "repository": {
+    "alembic_heads": [
+      "ab982v22ooo66",
+      "bb981v22nnn55"
+    ],
+    "git_commit": "e51bb421321129495b0339e3b9b54d292e73d7fd"
+  },
+  "targets": {
+    "cloudflare": {
+      "base_url": "https://sherryjo-cal-app.realty-cal.workers.dev",
+      "probes": {
+        "/__edge/health": {
+          "content_bytes": 68,
+          "content_sha256": "0189e38b80debf64725a34f2b25fe4a889046da89fc310eb7b72da371a442176",
+          "http_status": 200,
+          "summary": {
+            "app": null,
+            "mode": "render-origin-proxy",
+            "platform": "cloudflare",
+            "schema_status": null,
+            "status": "ok"
+          }
+        },
+        "/api/platform/status": {
+          "content_bytes": 509,
+          "content_sha256": "3bbfe40f701104b5ee0cd5ac75f78c7bb903a128f8edf959caaace95279eac1e",
+          "http_status": 200,
+          "summary": {
+            "app": null,
+            "mode": "worker-native",
+            "platform": "cloudflare-worker",
+            "schema_status": null,
+            "status": "ok"
+          }
+        },
+        "/health": {
+          "content_bytes": 52,
+          "content_sha256": "972019cacfd7793eb0b21cac8f5818e77c92e9b75a7bcf97207772f9e22ad118",
+          "http_status": 200,
+          "summary": {
+            "app": "running",
+            "mode": null,
+            "platform": null,
+            "schema_status": "ok",
+            "status": "ok"
+          }
+        },
+        "/openapi.json": {
+          "content_bytes": 65030,
+          "content_sha256": "192bb98423671941244bc9580aa81f5722e95004f4b02723fc2714e2cfabda56",
+          "http_status": 200,
+          "summary": {
+            "contract_sha256": "678a0cae218de930a34bd7f19c5b506d252e0925f68ce71a8df46c1cf69b8050",
+            "path_count": 88,
+            "schema_count": 29,
+            "title": "SherryJo App",
+            "version": "1.0"
+          }
+        }
+      }
+    },
+    "render": {
+      "base_url": "https://sherryjo-cal-app.onrender.com",
+      "probes": {
+        "/health": {
+          "content_bytes": 52,
+          "content_sha256": "972019cacfd7793eb0b21cac8f5818e77c92e9b75a7bcf97207772f9e22ad118",
+          "http_status": 200,
+          "summary": {
+            "app": "running",
+            "mode": null,
+            "platform": null,
+            "schema_status": "ok",
+            "status": "ok"
+          }
+        },
+        "/openapi.json": {
+          "content_bytes": 65030,
+          "content_sha256": "192bb98423671941244bc9580aa81f5722e95004f4b02723fc2714e2cfabda56",
+          "http_status": 200,
+          "summary": {
+            "contract_sha256": "678a0cae218de930a34bd7f19c5b506d252e0925f68ce71a8df46c1cf69b8050",
+            "path_count": 88,
+            "schema_count": 29,
+            "title": "SherryJo App",
+            "version": "1.0"
+          }
+        }
+      }
+    }
+  }
+}

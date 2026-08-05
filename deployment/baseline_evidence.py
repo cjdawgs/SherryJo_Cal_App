@@ -165,10 +165,13 @@ def _safe_deployment(payload: Any) -> dict[str, Any]:
 def _safe_scheduler(payload: Any) -> dict[str, Any]:
     payload = payload if isinstance(payload, dict) else {}
     adaptive = payload.get("adaptive_backoff") if isinstance(payload.get("adaptive_backoff"), dict) else {}
+    operation_ledger = payload.get("operation_ledger") if isinstance(payload.get("operation_ledger"), dict) else {}
     efficiency = payload.get("efficiency") if isinstance(payload.get("efficiency"), dict) else {}
     cache = payload.get("google_calendar_list_cache") if isinstance(payload.get("google_calendar_list_cache"), dict) else {}
     return {
         "running": payload.get("running"),
+        "owner": payload.get("owner"),
+        "execution_enabled": payload.get("execution_enabled"),
         "last_started_at": payload.get("last_started_at"),
         "last_finished_at": payload.get("last_finished_at"),
         "has_last_error": bool(payload.get("last_error")),
@@ -181,6 +184,16 @@ def _safe_scheduler(payload: Any) -> dict[str, Any]:
             "tracked_users": adaptive.get("tracked_users"),
             "users_in_backoff": adaptive.get("users_in_backoff"),
             "last_rollup_persisted_at": adaptive.get("last_rollup_persisted_at"),
+        },
+        "operation_ledger": {
+            "available": operation_ledger.get("available"),
+            "window_hours": operation_ledger.get("window_hours"),
+            "window_started_at": operation_ledger.get("window_started_at"),
+            "captured_at": operation_ledger.get("captured_at"),
+            "total_operations": operation_ledger.get("total_operations"),
+            "created_in_window": operation_ledger.get("created_in_window"),
+            "by_status": operation_ledger.get("by_status") if isinstance(operation_ledger.get("by_status"), dict) else {},
+            "by_operation_type": operation_ledger.get("by_operation_type") if isinstance(operation_ledger.get("by_operation_type"), dict) else {},
         },
         "efficiency": {
             key: efficiency.get(key)

@@ -81,6 +81,18 @@ def test_authenticated_summaries_drop_unrecognized_fields():
     scheduler = baseline_evidence._safe_scheduler(
         {
             "running": True,
+            "owner": "render",
+            "execution_enabled": True,
+            "operation_ledger": {
+                "available": True,
+                "window_hours": 24,
+                "window_started_at": "2026-08-05T00:00:00+00:00",
+                "captured_at": "2026-08-05T01:00:00+00:00",
+                "total_operations": 10,
+                "created_in_window": 4,
+                "by_status": {"succeeded": 3, "retry_pending": 1},
+                "unexpected_secret": "ledger-secret",
+            },
             "unexpected_secret": "scheduler-secret",
             "efficiency": {"changes": 2, "unexpected_secret": "efficiency-secret"},
             "google_calendar_list_cache": {"hits": 3, "unexpected_secret": "cache-secret"},
@@ -97,6 +109,10 @@ def test_authenticated_summaries_drop_unrecognized_fields():
     serialized = json.dumps({"scheduler": scheduler, "rollups": rollups})
 
     assert scheduler["running"] is True
+    assert scheduler["owner"] == "render"
+    assert scheduler["execution_enabled"] is True
+    assert scheduler["operation_ledger"]["available"] is True
+    assert scheduler["operation_ledger"]["total_operations"] == 10
     assert scheduler["efficiency"]["changes"] == 2
     assert rollups["row_count"] == 1
     assert rollups["current_week"]["days_present"] == 1
