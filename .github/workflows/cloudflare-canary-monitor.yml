@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
     parity:
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 10
         env:
             RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
