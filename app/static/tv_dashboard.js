@@ -2283,13 +2283,27 @@ function logRemoteKey(phase, e, normalizedKey) {
 
 function renderDebugOverlay() {
   if (!dom.debugList) return;
+  const root = document.documentElement;
+  const fixMarker = root ? root.getAttribute('data-tv-viewport-fix') : '';
+  const viewportMeta = document.querySelector('meta[name="viewport"]');
+  const viewportContent = viewportMeta ? String(viewportMeta.getAttribute('content') || '') : 'missing';
+  const viewportScale = window.visualViewport && Number.isFinite(window.visualViewport.scale)
+    ? window.visualViewport.scale
+    : null;
+  const viewportScaleLabel = viewportScale === null ? 'n/a' : Number(viewportScale).toFixed(2);
+  const fixLine = `ViewportFix ${fixMarker === 'cloudflare-firetv' ? 'ON' : 'OFF'} | marker=${fixMarker || 'none'} | inner=${window.innerWidth}x${window.innerHeight} dpr=${Number(window.devicePixelRatio || 1).toFixed(2)} vScale=${viewportScaleLabel} | meta=${viewportContent}`;
+
   if (!state.debug.lines.length) {
-    dom.debugList.innerHTML = '<li class="tv-debug-row">Press arrows / select / mute here. The overlay will show raw key data.</li>';
+    dom.debugList.innerHTML = [
+      `<li class="tv-debug-row">${escapeHtml(fixLine)}</li>`,
+      '<li class="tv-debug-row">Press arrows / select / mute here. The overlay will show raw key data.</li>',
+    ].join('');
     return;
   }
-  dom.debugList.innerHTML = state.debug.lines
-    .map(line => `<li class="tv-debug-row">${escapeHtml(line)}</li>`)
-    .join('');
+  dom.debugList.innerHTML = [
+    `<li class="tv-debug-row">${escapeHtml(fixLine)}</li>`,
+    ...state.debug.lines.map(line => `<li class="tv-debug-row">${escapeHtml(line)}</li>`),
+  ].join('');
 }
 
 function setCursorVisible(visible) {

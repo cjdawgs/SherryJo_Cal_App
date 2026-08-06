@@ -180,6 +180,19 @@ def _resolve_lan_autopair_principal(request: Request) -> Optional[int]:
     return int(user_id)
 
 
+def _is_cloudflare_request(request: Request) -> bool:
+    """Best-effort detection that this request traversed Cloudflare edge."""
+    headers = request.headers
+    if headers.get("cf-ray") or headers.get("cf-connecting-ip"):
+        return True
+
+    host = (headers.get("host") or "").strip().lower()
+    if host.endswith(".workers.dev") or host.endswith(".pages.dev"):
+        return True
+
+    return False
+
+
 # ─────────────────────────────────────────────────
 # TV DASHBOARD PAGE (no auth — JS handles token)
 # ─────────────────────────────────────────────────
@@ -194,6 +207,7 @@ def tv_dashboard(request: Request):
     response = _templates.TemplateResponse(request, "tv.html", {
         "request": request,
         "app_version": _get_tv_app_version(),
+        "is_cloudflare_request": _is_cloudflare_request(request),
     })
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     response.headers["Pragma"] = "no-cache"
@@ -231,6 +245,7 @@ def tv_kiosk(request: Request, token: str, db: Session = Depends(get_db)):
         "request":     request,
         "kiosk_token": token,
         "app_version": _get_tv_app_version(),
+        "is_cloudflare_request": _is_cloudflare_request(request),
     })
     response.headers["Cache-Control"] = "no-store, max-age=0, must-revalidate"
     response.headers["Pragma"] = "no-cache"

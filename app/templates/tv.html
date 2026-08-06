@@ -5,6 +5,26 @@
   <script src="/static/console_quiet.js"></script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=1920, initial-scale=1.0" />
+  <script>
+    (function applyCloudflareFireTvViewportFix() {
+      const isCloudflareRequest = {{ is_cloudflare_request | tojson }};
+      if (!isCloudflareRequest) return;
+
+      const ua = String(navigator.userAgent || '');
+      const isSilk = /\bSilk\//i.test(ua);
+      const isFireTv = /\bAFT\w+\b|Fire TV/i.test(ua);
+      if (!isSilk && !isFireTv) return;
+
+      const viewport = document.querySelector('meta[name="viewport"]');
+      if (!viewport) return;
+
+      viewport.setAttribute(
+        'content',
+        'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, viewport-fit=cover'
+      );
+      document.documentElement.setAttribute('data-tv-viewport-fix', 'cloudflare-firetv');
+    })();
+  </script>
   <title>SherryJo — Calendar TV</title>
   <style>
     /* ── Reset & base ─────────────────────────────────────────── */
