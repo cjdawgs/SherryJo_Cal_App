@@ -26,7 +26,8 @@ MIGRATION_SPEC.loader.exec_module(MIGRATION)
 def test_worker_reader_migration_is_in_single_alembic_head_chain():
     script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
 
-    assert script.get_heads() == ["bb981v22nnn55"]
+    assert script.get_heads() == ["ac983w33ppp77"]
+    assert set(script.get_revision("ac983w33ppp77").down_revision) == {"ab982v22ooo66", "bb981v22nnn55"}
     assert script.get_revision("bb981v22nnn55").down_revision == "aa980u11mmm44"
     assert script.get_revision("z979t00lll33").down_revision == "y978s99kkk22"
     assert script.get_revision("y978s99kkk22").down_revision == "x977r88jjj11"
