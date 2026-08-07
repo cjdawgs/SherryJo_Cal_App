@@ -709,6 +709,33 @@
               </table>
             </div>
 
+            <details class="overview-subsection tv-health-panel">
+              <summary>FireTV Health Snapshot</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Quick per-device status for last heartbeat, sustained hidden-state warning, and latest timeout/token fault.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvHealthCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+                  <label for="tvHealthSort" style="font-size:11px;opacity:0.75;">Sort</label>
+                  <select id="tvHealthSort" style="font-size:11px;min-width:170px;">
+                    <option value="severity" selected>Severity (red/yellow/green)</option>
+                    <option value="recent-heartbeat">Most recent heartbeat</option>
+                    <option value="hidden-duration">Highest hidden duration</option>
+                    <option value="recent-failure">Most recent failure</option>
+                  </select>
+                  <button id="tvHealthLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvHealthClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div style="overflow-x:auto;">
+                  <table class="tv-diag-table" id="tvHealthTable">
+                    <thead><tr><th>Device</th><th>Status</th><th>Last heartbeat</th><th>Hidden-state warning</th><th>Last network/token failure</th></tr></thead>
+                    <tbody id="tvHealthBody"><tr><td colspan="5" style="opacity:0.4;">No health snapshot loaded yet.</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+
             <details class="overview-subsection tv-stale-panel">
               <summary>TV Refresh Safety (Stale Snapshot Fallback)</summary>
               <div class="overview-subsection-body">

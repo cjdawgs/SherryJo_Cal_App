@@ -109,6 +109,8 @@ def test_root_and_canary_workers_require_edge_proxy_authentication():
         name: config["env"]["canary"]["vars"][name]
         for name in expected_jwt_policy
     } == expected_jwt_policy
+    assert "AUTH_PROXY_FALLBACK" not in config["vars"]
+    assert "AUTH_PROXY_FALLBACK" not in config["env"]["canary"]["vars"]
 
 
 def test_note_and_task_writes_are_replay_safe_and_production_native():

@@ -14,6 +14,7 @@ Design rules:
 import secrets
 import logging
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -235,8 +236,40 @@ class _TVStateStore:
     def __init__(self):
         self._states: dict[int, dict] = {}
 
+    @staticmethod
+    def _allow_sleep_timeout() -> bool:
+        raw = str(os.getenv("TV_SLEEP_GUARD_ALLOW_TIMEOUT", "0")).strip().lower()
+        return raw in {"1", "true", "yes", "on"}
+
+    @classmethod
+    def _normalize_sleep_timeout_minutes(cls, enabled: bool, timeout_minutes) -> int:
+        if not enabled:
+            return 0
+        if not cls._allow_sleep_timeout():
+            # Production-safe default: guard is either on forever or off.
+            return 0
+        try:
+            parsed = int(timeout_minutes or 0)
+        except (TypeError, ValueError):
+            parsed = 0
+        return max(0, min(parsed, 24 * 60))
+
+    def _sanitize_state(self, state: Optional[dict]) -> Optional[dict]:
+        if state is None:
+            return None
+        enabled = bool(state.get("sleepGuardEnabled", True))
+        normalized_timeout = self._normalize_sleep_timeout_minutes(
+            enabled,
+            state.get("sleepGuardTimeoutMinutes", 0),
+        )
+        if normalized_timeout != state.get("sleepGuardTimeoutMinutes", 0):
+            state["sleepGuardTimeoutMinutes"] = normalized_timeout
+        state["sleepGuardEnabled"] = enabled
+        return state
+
     def get(self, user_id: int) -> Optional[dict]:
-        return self._states.get(user_id)
+        state = self._states.get(user_id)
+        return self._sanitize_state(state)
 
     def set(self, user_id: int, patch: dict) -> dict:
         """
@@ -250,6 +283,12 @@ class _TVStateStore:
         for key in allowed_keys:
             if key in patch:
                 current[key] = patch[key]
+
+        current["sleepGuardEnabled"] = bool(current.get("sleepGuardEnabled", True))
+        current["sleepGuardTimeoutMinutes"] = self._normalize_sleep_timeout_minutes(
+            current["sleepGuardEnabled"],
+            current.get("sleepGuardTimeoutMinutes", 0),
+        )
 
         self._states[user_id] = current
         logger.info(
@@ -269,7 +308,7 @@ class _TVStateStore:
             "currentView": current_view,
             "focusedEventId": None,
             "sleepGuardEnabled": True,
-            "sleepGuardTimeoutMinutes": 0,
+            "sleepGuardTimeoutMinutes": self._normalize_sleep_timeout_minutes(True, 0),
         }
         self._states[user_id] = state
         return state

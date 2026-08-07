@@ -137,9 +137,14 @@ export async function handleMsCallback(request, env, adapter) {
     }
 
     let newToken;
-    try { newToken = await issueUserToken(userId, env); } catch { newToken = null; }
+    try {
+        newToken = await issueUserToken(userId, env);
+    } catch (err) {
+        console.error("[handleMsCallback] Native token issue failed:", err?.message || String(err));
+        return errorRedirect(base, "microsoft_token_issue_failed", null);
+    }
 
     const params = new URLSearchParams({ connected: "microsoft", account: accountEmail });
-    if (newToken) params.set("token", newToken);
+    params.set("token", newToken);
     return Response.redirect(`${base}/accounts/ui?${params}`, 302);
 }

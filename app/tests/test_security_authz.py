@@ -618,6 +618,40 @@ def test_production_configuration_rejects_oauth_callback_drift(monkeypatch):
     ]
 
 
+def test_edge_login_rejects_legacy_hs256_token_issue(client, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config.settings, "jwt_private_key", None, raising=False)
+    monkeypatch.setattr(config.settings, "jwt_active_kid", None, raising=False)
+    monkeypatch.setattr(config.settings, "jwt_algorithm", "HS256", raising=False)
+    monkeypatch.setattr(config.settings, "BASE_URL", "https://calendar.example.com", raising=False)
+    monkeypatch.setattr(config.settings, "PUBLIC_BASE_URLS", "https://calendar.example.com", raising=False)
+    monkeypatch.setattr(config.settings, "EDGE_PROXY_SECRET", "edge-secret", raising=False)
+
+    client.post(
+        "/auth/register",
+        json={
+            "username": "edge_login_user",
+            "email": "edge-login-user@example.com",
+            "password": "pass123",
+        },
+    )
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "edge-login-user@example.com", "password": "pass123"},
+        headers={
+            "x-sherryjo-edge": "cloudflare",
+            "x-sherryjo-edge-auth": "edge-secret",
+            "x-forwarded-host": "calendar.example.com",
+            "x-forwarded-proto": "https",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "requires RS256" in response.json().get("detail", "")
+
+
 def test_runtime_base_url_accepts_authenticated_allowlisted_edge_host(monkeypatch):
     from app import config
 

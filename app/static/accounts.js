@@ -900,9 +900,11 @@ function applyQueryState() {
     const known = {
       microsoft_scope_missing_write: "Microsoft connection is missing calendar write permission. Click Microsoft Reconnect and accept full consent.",
       microsoft_token_missing: "Microsoft token was not returned. Please reconnect Microsoft.",
+      microsoft_token_issue_failed: "Microsoft connected, but Cloudflare could not issue a native session token. Ask an admin to verify JWT_PRIVATE_KEY, JWT_ACTIVE_KID, JWT_ISSUER, and JWT_AUDIENCE on the Worker.",
       microsoft_profile_failed: "Microsoft profile lookup failed. Please reconnect Microsoft.",
       microsoft_reconnect_mismatch: "Reconnect completed with a different Microsoft account than expected.",
       microsoft_email_missing: "Microsoft did not return an account email. Please reconnect Microsoft.",
+      google_token_issue_failed: "Google connected, but Cloudflare could not issue a native session token. Ask an admin to verify JWT_PRIVATE_KEY, JWT_ACTIVE_KID, JWT_ISSUER, and JWT_AUDIENCE on the Worker.",
     };
     setGlobalMessage(known[oauthError] || oauthError.replace(/_/g, " "));
   }

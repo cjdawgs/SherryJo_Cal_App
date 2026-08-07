@@ -143,6 +143,25 @@ class TestTVStateStore:
         assert "unknownKey" not in updated
         assert updated["currentView"] == "day"
 
+    def test_sleep_timeout_defaults_to_never(self):
+        from app.services.tv_pairing_service import _TVStateStore
+
+        store = _TVStateStore()
+        store.initialize(user_id=7, selected_date="2026-06-01")
+        updated = store.set(user_id=7, patch={"sleepGuardEnabled": True, "sleepGuardTimeoutMinutes": 120})
+        assert updated["sleepGuardEnabled"] is True
+        assert updated["sleepGuardTimeoutMinutes"] == 0
+
+    def test_sleep_timeout_can_be_enabled_with_explicit_env_flag(self, monkeypatch):
+        from app.services.tv_pairing_service import _TVStateStore
+
+        monkeypatch.setenv("TV_SLEEP_GUARD_ALLOW_TIMEOUT", "1")
+        store = _TVStateStore()
+        store.initialize(user_id=8, selected_date="2026-06-01")
+        updated = store.set(user_id=8, patch={"sleepGuardEnabled": True, "sleepGuardTimeoutMinutes": 45})
+        assert updated["sleepGuardEnabled"] is True
+        assert updated["sleepGuardTimeoutMinutes"] == 45
+
 
 # ─────────────────────────────────────────────────
 # API ENDPOINT TESTS

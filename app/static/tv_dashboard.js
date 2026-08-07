@@ -6,6 +6,8 @@ const TOKEN_KEY = 'tv_token';
 const POLL_MS = 600000;
 const TV_FETCH_TIMEOUT_MS = 12000;
 const AUTO_REFRESH_FAILURE_BACKOFF_MS = 60000;
+const AUTO_PAIR_RETRY_MS = 45000;
+const HIDDEN_WATCHDOG_WARN_AFTER_MS = 10 * 60 * 1000;
 const MIN_SYNC_VISUAL_MS = 500;
 const LONG_PRESS_MS = 600;
 const DEFAULT_ZOOM_LEVEL = 100;
@@ -19,6 +21,7 @@ const VIEW_PAYLOAD_CACHE_LIMIT = 24;
 const DAY_WINDOW_CACHE_LIMIT = 140;
 const VIEW_PAYLOAD_MAX_AGE_MS = 120000;
 const TV_VIEW_NAMES = new Set(['day', '3-day', 'week', 'month']);
+const ENFORCE_SLEEP_TIMEOUTS = false;
 
 const IS_KIOSK = Boolean(window.KIOSK_TOKEN);
 const CLIENT_APP_VERSION = String(window.TV_APP_VERSION || 'dev-local');
@@ -315,9 +318,13 @@ const state = {
   pollHandle: null,
   clockHandle: null,
   heartbeatHandle: null,       // 60-second diagnostic heartbeat
+  autoPairRetryHandle: null,
   sessionStartAt: null,        // set by startPolling()
   sleepGuardEnabled: true,     // read from /tv/state
   sleepGuardTimeoutMinutes: 0, // 0 = never timeout
+  sleepTimeoutReleased: false,
+  hiddenSinceMs: null,
+  hiddenWatchdogLogged: false,
   longPressTimer: null,
   longPressTriggered: false,
   clickCount: 0,
@@ -1073,13 +1080,52 @@ function ensureHeaderActions() {
 function transitionTo(screen) {
   if (!dom.screenPair || !dom.screenDash) return;
   if (screen === 'dashboard') {
+    stopAutoPairRetryLoop();
     dom.screenPair.classList.add('hidden');
     dom.screenDash.classList.remove('hidden');
   } else {
+    startAutoPairRetryLoop();
     dom.screenDash.classList.add('hidden');
     dom.screenPair.classList.remove('hidden');
     if (dom.pairInput) setTimeout(() => dom.pairInput.focus(), 60);
   }
+}
+
+function readTokenFromUrl() {
+  try {
+    const url = new URL(window.location.href);
+    const urlToken = String(url.searchParams.get('token') || url.searchParams.get('tv_token') || '').trim();
+    if (!urlToken) return null;
+
+    try { localStorage.setItem(TOKEN_KEY, urlToken); } catch { }
+
+    url.searchParams.delete('token');
+    url.searchParams.delete('tv_token');
+    const cleaned = `${url.pathname}${url.search}${url.hash}`;
+    window.history.replaceState({}, document.title, cleaned || '/tv/dashboard');
+    return urlToken;
+  } catch {
+    return null;
+  }
+}
+
+function stopAutoPairRetryLoop() {
+  if (!state.autoPairRetryHandle) return;
+  clearInterval(state.autoPairRetryHandle);
+  state.autoPairRetryHandle = null;
+}
+
+function startAutoPairRetryLoop() {
+  if (IS_KIOSK || state.token || state.autoPairRetryHandle) return;
+  state.autoPairRetryHandle = setInterval(async () => {
+    if (state.token || document.hidden) return;
+    const paired = await attemptLanAutoPair();
+    if (!paired) return;
+    if (tvDiag) tvDiag.log('lan_auto_pair_recovered', 'Recovered via scheduled auto-pair retry');
+    setPairStatus('Auto-connect recovered.');
+    transitionTo('dashboard');
+    await bootstrapFromBackend();
+  }, AUTO_PAIR_RETRY_MS);
 }
 
 async function init() {
@@ -1152,10 +1198,17 @@ async function init() {
     const vis = document.visibilityState;
     if (tvDiag) tvDiag.log('visibilitychange', vis);
     if (document.hidden) {
+      state.hiddenSinceMs = Date.now();
       clearRemoteHoldState();
       return;
     }
     if (!document.hidden) {
+      if (state.hiddenSinceMs && tvDiag) {
+        const hiddenMinutes = Math.floor((Date.now() - state.hiddenSinceMs) / 60000);
+        tvDiag.log('visibility_restored_after_hidden', `hidden=${hiddenMinutes}m`);
+      }
+      state.hiddenSinceMs = null;
+      state.hiddenWatchdogLogged = false;
       refreshEvents();
       // Re-acquire wake lock — the OS always releases it when the tab hides.
       if (state.token) wakeLock.reacquire();
@@ -1209,6 +1262,7 @@ async function init() {
   });
 
   window.addEventListener('online', () => {
+    if (tvDiag) tvDiag.log('network_online', 'navigator online event');
     if (state.token) refreshEvents();
   });
 
@@ -1216,7 +1270,12 @@ async function init() {
   window.addEventListener('beforeunload', () => { if (tvDiag) tvDiag.log('beforeunload', 'page unloading'); });
   // ────────────────────────────────────────────────────────────────────────────
 
-  state.token = window.KIOSK_TOKEN || localStorage.getItem(TOKEN_KEY);
+  const urlToken = readTokenFromUrl();
+  if (urlToken && tvDiag) {
+    tvDiag.log('token_bootstrap_query_param', 'Dashboard token accepted from URL');
+  }
+
+  state.token = window.KIOSK_TOKEN || urlToken || localStorage.getItem(TOKEN_KEY);
   if (!state.token && !IS_KIOSK) {
     await attemptLanAutoPair();
   }
@@ -1275,6 +1334,9 @@ async function attemptLanAutoPair() {
 function startPolling() {
   stopAll();
   state.sessionStartAt = Date.now();
+  state.sleepTimeoutReleased = false;
+  state.hiddenSinceMs = document.hidden ? Date.now() : null;
+  state.hiddenWatchdogLogged = false;
   state.lastObservedDayKey = toISO(new Date());
   if (!state.selectedDate) state.selectedDate = toISO(new Date());
   render();
@@ -1292,6 +1354,20 @@ function startPolling() {
   // Heartbeat confirms the guard is alive between visible events. Every 15 min
   // proves that just as well as every minute at a fraction of the traffic.
   state.heartbeatHandle = setInterval(() => {
+    if (document.hidden) {
+      if (!state.hiddenSinceMs) state.hiddenSinceMs = Date.now();
+      const hiddenDurationMs = Date.now() - state.hiddenSinceMs;
+      if (!state.hiddenWatchdogLogged && hiddenDurationMs >= HIDDEN_WATCHDOG_WARN_AFTER_MS && tvDiag) {
+        const hiddenMinutes = Math.floor(hiddenDurationMs / 60000);
+        tvDiag.log('hidden_session_watchdog',
+          `hidden=${hiddenMinutes}m rafActive=${window.__ANTI_SLEEP_ACTIVE__} wakeLock=${window.__WAKE_LOCK_ACTIVE__} videoActive=${antiSleep.isVideoActive()}`);
+        state.hiddenWatchdogLogged = true;
+      }
+    } else {
+      state.hiddenSinceMs = null;
+      state.hiddenWatchdogLogged = false;
+    }
+
     if (tvDiag) tvDiag.log('heartbeat',
       `elapsed=${Math.floor((Date.now() - state.sessionStartAt) / 60000)}m` +
       ` guard=${state.sleepGuardEnabled}` +
@@ -1311,9 +1387,12 @@ function stopAll() {
   if (state.pollHandle) clearInterval(state.pollHandle);
   if (state.clockHandle) clearInterval(state.clockHandle);
   if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
+  stopAutoPairRetryLoop();
   state.pollHandle = null;
   state.clockHandle = null;
   state.heartbeatHandle = null;
+  state.hiddenSinceMs = null;
+  state.hiddenWatchdogLogged = false;
   clearRemoteHoldState();
   // Release wake lock on clean teardown (unpair / logout).
   wakeLock.release();
@@ -1399,12 +1478,16 @@ function renderSleepStatus() {
 
 // Stops anti-sleep when the configured session timeout is reached.
 function enforceSleepTimeout() {
+  if (!ENFORCE_SLEEP_TIMEOUTS) return;
   if (!state.sleepGuardEnabled || !state.sleepGuardTimeoutMinutes || !state.sessionStartAt) return;
+  if (state.sleepTimeoutReleased) return;
   const elapsedMins = (Date.now() - state.sessionStartAt) / 60000;
   if (elapsedMins >= state.sleepGuardTimeoutMinutes) {
     // Timeout reached — release prevention but keep polling & clock running
     antiSleep.stop();
     wakeLock.release();
+    state.sleepTimeoutReleased = true;
+    if (tvDiag) tvDiag.log('sleep_timeout_reached', `released at ${Math.floor(elapsedMins)}m`);
   }
 }
 
@@ -1626,7 +1709,13 @@ async function fetchTvState() {
   state.userRole = data.currentUserRole || state.userRole || null;
   // Sleep guard settings (default to guard enabled, no timeout)
   state.sleepGuardEnabled = data.sleepGuardEnabled !== undefined ? data.sleepGuardEnabled : true;
-  state.sleepGuardTimeoutMinutes = data.sleepGuardTimeoutMinutes || 0;
+  state.sleepGuardTimeoutMinutes = Math.max(0, Number(data.sleepGuardTimeoutMinutes || 0));
+  if (state.sleepGuardEnabled !== false && state.sleepGuardTimeoutMinutes > 0 && !ENFORCE_SLEEP_TIMEOUTS) {
+    const receivedTimeout = state.sleepGuardTimeoutMinutes;
+    state.sleepGuardTimeoutMinutes = 0;
+    if (tvDiag) tvDiag.log('sleep_timeout_policy_override', `received=${receivedTimeout}m forcing=0m`);
+    patchTvState({ sleepGuardTimeoutMinutes: 0 }, { recordHistory: false }).catch(() => { });
+  }
   if (!state.selectedDate) {
     const fallbackDate = toISO(new Date());
     const patched = await patchTvState({ selectedDate: fallbackDate }, { recordHistory: false });
@@ -1919,9 +2008,15 @@ async function authFetch(url, options = {}) {
     return res;
   } catch (err) {
     const message = err && err.message ? err.message : 'Network request failed';
+    const isTimeout = /timed out/i.test(String(message));
+    if (tvDiag) {
+      const method = String(options.method || 'GET').toUpperCase();
+      const pathname = new URL(url, window.location.origin).pathname;
+      tvDiag.log(isTimeout ? 'tv_fetch_timeout' : 'tv_fetch_network_error', `${method} ${pathname} ${message}`);
+    }
     state.lastAuthFetchError = {
       message,
-      isTimeout: /timed out/i.test(String(message)),
+      isTimeout,
       url,
       at: Date.now(),
     };

@@ -194,6 +194,10 @@
             loginRecovery.textContent = "Enter either your username or your complete email address, then enter your password and try again.";
             loginRecovery.hidden = false;
             document.getElementById("email").focus();
+          } else if (response.status === 503) {
+            loginStatus.textContent = data.detail || "Login is temporarily unavailable.";
+            loginRecovery.textContent = "Ask an administrator to verify Cloudflare JWT signing settings, then try again.";
+            loginRecovery.hidden = false;
           } else {
             loginStatus.textContent = "Login could not be completed.";
             loginRecovery.textContent = "Your entries are still here. Press Login to retry; if it continues, ask an administrator to verify the account is active.";

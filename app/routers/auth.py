@@ -5,14 +5,15 @@
 import os
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from pydantic import BaseModel, EmailStr
 from jose import jwt
+from jose.exceptions import JWTError
 
-from app.config import settings
+from app.config import is_trusted_edge_request, settings
 from app.database import get_db
 from app.models import User, Roles
 from app.security import hash_password, verify_password, create_token
@@ -110,7 +111,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
 # --------------------------------------------------
 
 @router.post("/login")
-def login(credentials: LoginRequest, db: Session = Depends(get_db)):
+def login(credentials: LoginRequest, request: Request, db: Session = Depends(get_db)):
     identifier = (credentials.email or "").strip().lower()
     if not identifier:
         raise HTTPException(status_code=401, detail="Invalid email, username, or password")
@@ -121,7 +122,21 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email, username, or password")
 
-    token = create_token(user.id)
+    try:
+        token = create_token(user.id)
+    except JWTError as exc:
+        raise HTTPException(status_code=503, detail="Session signing is unavailable") from exc
+
+    if is_trusted_edge_request(request):
+        token_alg = str(jwt.get_unverified_header(token).get("alg") or "").upper()
+        if token_alg != "RS256":
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Cloudflare native authentication requires RS256 tokens. "
+                    "Configure JWT_PRIVATE_KEY, JWT_ACTIVE_KID, JWT_PUBLIC_KEYS_JSON, JWT_ISSUER, and JWT_AUDIENCE."
+                ),
+            )
 
     return {
         "access_token": token,
