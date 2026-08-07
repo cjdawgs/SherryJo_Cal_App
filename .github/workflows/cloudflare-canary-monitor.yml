@@ -2,7 +2,7 @@ name: Cloudflare Canary Monitor
 
 on:
     schedule:
-        - cron: "17 */6 * * *"
+        - cron: "17 6 * * *"
     workflow_dispatch:
         inputs:
             render_url:
@@ -43,27 +43,10 @@ jobs:
             - name: Run direct Render and canary parity
               run: |
                   set -euo pipefail
-                  max_attempts=3
-                  attempt=1
-                  until [ "$attempt" -gt "$max_attempts" ]; do
-                      echo "Running parity attempt ${attempt}/${max_attempts}"
-                      if python deployment/shadow_parity.py \
-                          --render-url "$RENDER_URL" \
-                          --cloudflare-url "$CANARY_URL" \
-                          --json-output canary-monitor-report.json; then
-                          echo "Parity check passed on attempt ${attempt}"
-                          break
-                      fi
-
-                      if [ "$attempt" -eq "$max_attempts" ]; then
-                          echo "Parity check failed after ${max_attempts} attempts"
-                          exit 1
-                      fi
-
-                      attempt=$((attempt + 1))
-                      echo "Parity check failed; retrying in 30 seconds"
-                      sleep 30
-                  done
+                  python deployment/shadow_parity.py \
+                      --render-url "$RENDER_URL" \
+                      --cloudflare-url "$CANARY_URL" \
+                      --json-output canary-monitor-report.json
 
             - name: Upload monitor report
               if: ${{ always() }}
