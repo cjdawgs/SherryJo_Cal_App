@@ -25,6 +25,7 @@ RLS_TABLES = (
     "date_sticky_notes",
     "event_tag_color_settings",
     "sync_efficiency_daily_rollups",
+    "sync_operation_ledger",
     "tv_diag_log",
     "app_runtime_secrets",
     "websocket_tickets",
