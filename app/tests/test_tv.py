@@ -436,7 +436,7 @@ class TestTVEventsEndpoint:
         assert [day["date"] for day in data["days"]] == ["2026-11-05"]
         assert data["days"][0]["events"]
 
-    def test_events_accounts_include_account_key_and_color(self, client, auth_headers, db):
+    def test_events_accounts_include_enabled_and_disabled_connections(self, client, auth_headers, db):
         from app.models import OAuthAccount
         from app.security import decode_token
 
@@ -453,6 +453,16 @@ class TestTVEventsEndpoint:
             refresh_token="refresh",
             sync_enabled=True,
             color="#112233",
+        ))
+        db.add(OAuthAccount(
+            user_id=user_id,
+            provider="microsoft",
+            provider_id="microsoft-account-1",
+            account_email="paused@realmail.test",
+            access_token="token",
+            refresh_token="refresh",
+            sync_enabled=False,
+            color="#445566",
         ))
         db.commit()
 
@@ -471,6 +481,15 @@ class TestTVEventsEndpoint:
         assert target.get("provider") == "google"
         assert target.get("account_key") == "google:colorized@realmail.test"
         assert target.get("color") == "#112233"
+        assert target.get("syncEnabled") is True
+
+        paused = next((item for item in accounts if item.get("accountEmail") == "paused@realmail.test"), None)
+        assert paused is not None
+        assert paused.get("provider") == "microsoft"
+        assert paused.get("account_key") == "microsoft:paused@realmail.test"
+        assert paused.get("color") == "#445566"
+        assert paused.get("syncEnabled") is False
+        assert data["summary"]["accountCount"] == 2
 
     def test_events_payload_preserves_color_metadata_for_tv(self, client, auth_headers, db):
         from app.models import Event

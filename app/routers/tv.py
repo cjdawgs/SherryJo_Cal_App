@@ -804,10 +804,7 @@ def _build_tv_events_fast_etag(
             func.count(OAuthAccount.id),
             func.max(OAuthAccount.updated_at),
         )
-        .filter(
-            _oauth_user_filter(user_id),
-            OAuthAccount.sync_enabled.is_(True),
-        )
+        .filter(_oauth_user_filter(user_id))
         .one()
     )
 
@@ -1435,7 +1432,7 @@ def get_tv_events(
         try:
             account_rows = (
                 db.query(OAuthAccount)
-                .filter(_oauth_user_filter(current_user.id), OAuthAccount.sync_enabled.is_(True))
+                .filter(_oauth_user_filter(current_user.id))
                 .all()
             )
             seen = set()
@@ -1456,6 +1453,7 @@ def get_tv_events(
                     "accountEmail": account_email,
                     "account_key": account_key,
                     "color": color,
+                    "syncEnabled": bool(acc.sync_enabled),
                 })
         except SQLAlchemyError:
             logger.exception("TV_EVENTS_FETCH_ACCOUNTS_QUERY_FAILED user_id=%s; omitting account legend metadata", current_user.id)
