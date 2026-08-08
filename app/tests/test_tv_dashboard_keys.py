@@ -126,6 +126,8 @@ def test_tv_dashboard_week_rail_groups_all_dates_and_makes_events_editable():
     text = _tv_js_text()
     required_tokens = [
         "const weekGroups = weekDateKeys.map",
+        "tv-right-rail calendar-rail",
+        "tv-right-selected-list",
         "tv-right-day-group",
         "tv-right-day-header",
         "tv-right-day-empty",
@@ -135,6 +137,9 @@ def test_tv_dashboard_week_rail_groups_all_dates_and_makes_events_editable():
     ]
     for token in required_tokens:
         assert token in text
+
+    assert ".tv-right-week-list { flex: 1 1 0; min-height: 0; max-height: none;" in text
+    assert "overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;" in text
 
 
 def test_tv_dashboard_exposes_visible_zoom_settings_panel():

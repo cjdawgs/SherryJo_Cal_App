@@ -821,7 +821,8 @@ function ensureStyles() {
   .tv-side-item { border: 1px solid rgba(201,219,244,0.16); border-radius: 10px; padding: 8px 9px; font-size: 12px; color: var(--tv-text-soft); background: rgba(17,28,44,0.34); transition: transform 120ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease; }
   .tv-side-item.focused { border-color: var(--tv-accent); box-shadow: 0 0 0 2px rgba(26,115,232,0.26); transform: translateY(-1px) scale(1.015); background: rgba(26,115,232,0.15); color: var(--tv-text); }
   .tv-side-item:hover { border-color: rgba(255,255,255,0.24); }
-  .tv-right-rail { border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(45,63,92,0.44), rgba(29,43,66,0.32)); overflow: hidden; }
+  .tv-right-rail { min-height: 0; height: 100%; border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(45,63,92,0.44), rgba(29,43,66,0.32)); overflow: hidden; }
+  .tv-right-rail.calendar-rail { display: flex; flex-direction: column; }
   .tv-right-rail.month-popout { align-self: start; min-height: 74vh; max-height: 74vh; }
   .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
   .tv-right-subtitle { font-size: 11px; opacity: 0.78; margin: 12px 0 6px 0; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; }
@@ -830,7 +831,8 @@ function ensureStyles() {
   .tv-right-item:hover { transform: translateY(-1px); border-color: rgba(201,219,244,0.3); }
   .tv-right-item-title { font-size: 12px; font-weight: 700; color: rgba(236, 244, 255, 0.98); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tv-right-item-time { font-size: 11px; color: rgba(212, 226, 244, 0.96); opacity: 1; }
-  .tv-right-week-list { gap: 8px; }
+  .tv-right-selected-list { flex: 0 1 auto; max-height: 30%; }
+  .tv-right-week-list { flex: 1 1 0; min-height: 0; max-height: none; gap: 8px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
   .tv-right-day-group { display: flex; flex-direction: column; gap: 5px; }
   .tv-right-day-header { padding: 3px 2px; border-bottom: 1px solid rgba(220,234,255,0.24); color: rgba(236,244,255,0.96); font-size: 11px; font-weight: 800; letter-spacing: 0.3px; }
   .tv-right-day-empty { padding: 2px 4px 4px; color: rgba(184,199,219,0.72); font-size: 10px; font-style: italic; }
@@ -3011,9 +3013,9 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
     ? `<span class="tv-sticky-indicator tv-inline-sticky-badge" aria-label="${escapeHtml(`${weekStickyTotal} sticky note${weekStickyTotal === 1 ? '' : 's'} this week`)}">${escapeHtml(weekStickyTotal > 1 ? String(Math.min(weekStickyTotal, 9)) : 'S')}</span>`
     : '';
   return `
-    <aside class="tv-right-rail ${extraClass}">
+    <aside class="tv-right-rail calendar-rail ${extraClass}">
       <div class="tv-right-title">${escapeHtml(parseLocalDate(selectedDateKey).toLocaleDateString([], { weekday: 'long', month: 'short', day: '2-digit', year: 'numeric' }))}${selectedDayStickyBadge}</div>
-      <div class="tv-right-list">
+      <div class="tv-right-list tv-right-selected-list">
         ${selectedItems.length ? selectedItems.map((item, itemIndex) => {
     if (item.type === 'event') {
       const eventColor = resolveEventColor(item.event);

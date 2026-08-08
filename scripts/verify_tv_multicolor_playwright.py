@@ -164,6 +164,36 @@ def _assert_colorized_card(
         raise AssertionError(f"{title} border opacity too low: {data}")
 
 
+def _assert_day_week_rail_layout(page) -> dict[str, float | int | str]:
+    layout = page.locator(".tv-right-rail.calendar-rail").evaluate(
+        """
+        (rail) => {
+          const weekList = rail.querySelector('.tv-right-week-list');
+          if (!weekList) throw new Error('Missing week list');
+          const railRect = rail.getBoundingClientRect();
+          const weekRect = weekList.getBoundingClientRect();
+          const style = getComputedStyle(weekList);
+          return {
+            groupCount: weekList.querySelectorAll('.tv-right-day-group').length,
+            railHeight: railRect.height,
+            weekHeight: weekRect.height,
+            bottomGap: railRect.bottom - weekRect.bottom,
+            overflowY: style.overflowY,
+          };
+        }
+        """
+    )
+    if layout["groupCount"] != 7:
+        raise AssertionError(f"Day sidebar should render seven week groups: {layout}")
+    if layout["weekHeight"] < layout["railHeight"] * 0.45:
+        raise AssertionError(f"Week list does not fill the available rail space: {layout}")
+    if not 0 <= layout["bottomGap"] <= 12:
+        raise AssertionError(f"Week list does not reach the rail bottom: {layout}")
+    if layout["overflowY"] not in {"auto", "scroll"}:
+        raise AssertionError(f"Week list is not vertically scrollable: {layout}")
+    return layout
+
+
 def main() -> int:
     token, event_index = _seed_multi_color_data()
     month_expectations = [
@@ -175,7 +205,7 @@ def main() -> int:
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1600, "height": 900})
+        page = browser.new_page(viewport={"width": 1600, "height": 768})
         page.route("**/users/me", _mock_api)
         page.add_init_script("localStorage.setItem('tv_token', '%s');" % token)
         page.goto(f"{BASE}/tv/dashboard", wait_until="domcontentloaded")
@@ -200,6 +230,7 @@ def main() -> int:
         for title, color in focused_day_expectation:
             _assert_colorized_card(page, ".tv-day-event-card", title, color)
             day_result[title] = True
+        day_result["weekRail"] = _assert_day_week_rail_layout(page)
         results["day"] = day_result
 
         page.locator("[data-control='view-week']").click()
