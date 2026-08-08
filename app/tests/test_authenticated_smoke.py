@@ -333,7 +333,9 @@ def test_render_monitor_is_independent_default_disabled_and_secret_safe():
     }
     assert job["env"]["SHERRYJO_SMOKE_EMAIL"] == "${{ secrets.SHERRYJO_SMOKE_EMAIL }}"
     assert job["env"]["SHERRYJO_SMOKE_PASSWORD"] == "${{ secrets.SHERRYJO_SMOKE_PASSWORD }}"
+    assert job["env"]["SHERRYJO_SMOKE_TOKEN"] == "${{ secrets.SHERRYJO_SMOKE_TOKEN }}"
     assert "--render-url" in run_step["run"]
+    assert "missing_smoke_credentials" in run_step["run"]
     assert "cloudflare" not in run_step["run"].lower()
 
 
