@@ -56,6 +56,9 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
     package = json.loads(
         (ROOT / "platform" / "cloudflare" / "package.json").read_text(encoding="utf-8")
     )
+    deploy_wrapper = (
+        ROOT / "platform" / "cloudflare" / "scripts" / "deploy-worker.mjs"
+    ).read_text(encoding="utf-8")
     jobs = workflow["jobs"]
     scripts = package["scripts"]
 
@@ -69,8 +72,10 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
     )
     assert deploy_step["run"].endswith("run deploy:canary")
     assert promotion_step["run"].endswith("run deploy")
-    assert scripts["deploy:canary"].endswith("--env canary")
-    assert scripts["deploy"].endswith('--env=""')
+    assert scripts["deploy:canary"] == "node scripts/deploy-worker.mjs canary"
+    assert scripts["deploy"] == "node scripts/deploy-worker.mjs production"
+    assert 'args.push("--env", target === "canary" ? "canary" : "")' in deploy_wrapper
+    assert 'args.push("--var", `WORKER_GIT_COMMIT:${gitCommit}`)' in deploy_wrapper
     assert deploy_step["env"] == {
         "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
