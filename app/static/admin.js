@@ -64,6 +64,7 @@ const el = {
   deploymentSyncDetails: document.getElementById("deploymentSyncDetails"),
   deploymentSyncStatusPill: document.getElementById("deploymentSyncStatusPill"),
   deploymentSyncCurrentCommit: document.getElementById("deploymentSyncCurrentCommit"),
+  deploymentSyncOriginCommit: document.getElementById("deploymentSyncOriginCommit"),
   deploymentSyncGithubCommit: document.getElementById("deploymentSyncGithubCommit"),
   deploymentSyncRepoBranch: document.getElementById("deploymentSyncRepoBranch"),
   deploymentSyncSource: document.getElementById("deploymentSyncSource"),
@@ -132,6 +133,59 @@ function shortCommit(value) {
     return "unavailable";
   }
   return text.length > 12 ? text.slice(0, 12) : text;
+}
+
+function normalizeCommit(value) {
+  const commit = String(value || "").trim().toLowerCase();
+  return /^[0-9a-f]{7,40}$/.test(commit) ? commit : null;
+}
+
+function applyWorkerDeploymentStatus(data, workerStatus) {
+  if (workerStatus?.platform !== "cloudflare-worker" || !data?.deployment) {
+    return data;
+  }
+
+  const deployment = data.deployment;
+  if (deployment.worker_status_applied) {
+    return data;
+  }
+  const workerCommit = normalizeCommit(workerStatus.deploymentCommit);
+  const githubCommit = normalizeCommit(deployment.github_latest_commit);
+  deployment.origin_commit = deployment.current_commit;
+  deployment.origin_commit_source = deployment.current_commit_source;
+  deployment.current_commit = workerCommit;
+  deployment.current_commit_source = "Cloudflare Worker build";
+  deployment.active_platform = "cloudflare";
+  deployment.active_platform_label = "Cloudflare Worker";
+
+  if (workerCommit && githubCommit) {
+    deployment.status = workerCommit === githubCommit ? "synced" : "out_of_sync";
+    deployment.message = workerCommit === githubCommit
+      ? "The active Cloudflare Worker matches the latest GitHub commit."
+      : "The active Cloudflare Worker is not on the latest GitHub commit yet.";
+  } else {
+    deployment.status = "unknown";
+    deployment.message = "Cloudflare is active, but its deployed Git commit is unavailable.";
+  }
+
+  const platforms = Array.isArray(deployment.platforms) ? deployment.platforms : [];
+  for (const platform of platforms) {
+    if (platform.id === "cloudflare") platform.role = "Primary application runtime";
+    if (platform.id === "render") platform.role = "Proxied admin and legacy origin";
+  }
+  const cloudflareTarget = platforms.find((platform) => platform.id === "cloudflare") || {};
+  deployment.manual_deploy_available = Boolean(cloudflareTarget.manual_deploy_available);
+  deployment.manual_deploy_endpoint = cloudflareTarget.manual_deploy_endpoint || null;
+  deployment.manual_deploy_hint = deployment.manual_deploy_available
+    ? "Trigger the Cloudflare deploy hook from this admin app."
+    : "Open the Cloudflare dashboard and deploy the latest GitHub commit.";
+  deployment.current_commit_url = workerCommit
+    ? `${deployment.repository_url}/commit/${workerCommit}`
+    : null;
+  deployment.compare_url = workerCommit && githubCommit && workerCommit !== githubCommit
+    ? `${deployment.compare_base_url}/${workerCommit}...${githubCommit}`
+    : null;
+  return data;
 }
 
 async function refreshDeploymentSync() {
@@ -443,12 +497,18 @@ function renderSystemOverview(data) {
     el.deploymentSyncCurrentCommit.textContent = shortCommit(deployment.current_commit);
   }
 
+  if (el.deploymentSyncOriginCommit) {
+    el.deploymentSyncOriginCommit.textContent = deployment.origin_commit
+      ? `${shortCommit(deployment.origin_commit)} (${deployment.origin_commit_source || "origin"})`
+      : "not used for Cloudflare sync";
+  }
+
   if (el.deploymentSyncPlatform) {
     el.deploymentSyncPlatform.textContent = deployment.active_platform_label || "Unknown platform";
   }
 
   if (el.deploymentSyncCurrentLabel) {
-    el.deploymentSyncCurrentLabel.textContent = deployment.active_platform === "cloudflare" ? "Origin build at edge" : "Current Render build";
+    el.deploymentSyncCurrentLabel.textContent = deployment.active_platform === "cloudflare" ? "Cloudflare Worker build" : "Current Render build";
   }
 
   if (el.deploymentSyncPlatformSummary) {
@@ -777,7 +837,10 @@ async function applyTokenEncryptionKey() {
 }
 
 async function loadSystemOverview() {
-  const res = await apiRequest("/admin/system/overview", { method: "GET" });
+  const [res, workerStatusRes] = await Promise.all([
+    apiRequest("/admin/system/overview", { method: "GET" }),
+    fetch("/api/platform/status", { cache: "no-store" }).catch(() => null),
+  ]);
   if (!res) {
     setStatus("Unable to load system overview", true);
     return;
@@ -793,7 +856,11 @@ async function loadSystemOverview() {
     return;
   }
 
-  renderSystemOverview(data);
+  let workerStatus = null;
+  if (workerStatusRes?.ok) {
+    workerStatus = await workerStatusRes.json().catch(() => null);
+  }
+  renderSystemOverview(applyWorkerDeploymentStatus(data, workerStatus));
 }
 
 function activeConfig() {

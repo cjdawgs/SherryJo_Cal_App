@@ -28,7 +28,10 @@ test("platform status is Worker-native and does not contact Render", async () =>
     try {
         const response = await worker.fetch(
             new Request("https://calendar.example.com/api/platform/status"),
-            { EDGE_PROXY_SECRET: "configured-secret" },
+            {
+                EDGE_PROXY_SECRET: "configured-secret",
+                WORKER_GIT_COMMIT: "9CFB04D26497C55FC6933E634C91E5965D8171D8",
+            },
         );
 
         assert.equal(response.status, 200);
@@ -37,6 +40,7 @@ test("platform status is Worker-native and does not contact Render", async () =>
             status: "ok",
             platform: "cloudflare-worker",
             mode: "worker-native",
+            deploymentCommit: "9cfb04d26497c55fc6933e634c91e5965d8171d8",
             calendarReadMode: "proxy",
             currentUserReadMode: "proxy",
             dateStickyReadMode: "proxy",
@@ -353,6 +357,46 @@ test("proxy preserves path, query, authorization, and public host", async () => 
         assert.equal(capturedRequest.headers.get("x-forwarded-proto"), "https");
         assert.equal(capturedRequest.headers.get("x-sherryjo-edge-auth"), "trusted-edge-secret");
         assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("admin overview uses the Cloudflare deployment commit as the sync signal", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({
+        deployment: {
+            current_commit: "9424fafa8ff89dc0e0cea8013d942706e74f6079",
+            current_commit_source: "RENDER_GIT_COMMIT",
+            github_latest_commit: "9cfb04d26497c55fc6933e634c91e5965d8171d8",
+            repository_url: "https://github.com/cjdawgs/SherryJo_Cal_App",
+            compare_base_url: "https://github.com/cjdawgs/SherryJo_Cal_App/compare",
+            platforms: [
+                { id: "render", role: "Application origin" },
+                { id: "cloudflare", role: "Public edge proxy", manual_deploy_available: false },
+            ],
+        },
+    }), { headers: { "content-type": "application/json" } });
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/admin/system/overview"),
+            {
+                ORIGIN_BASE_URL: "https://sherryjo-cal-app.onrender.com",
+                WORKER_GIT_COMMIT: "9cfb04d26497c55fc6933e634c91e5965d8171d8",
+            },
+        );
+        const deployment = (await response.json()).deployment;
+
+        assert.equal(deployment.status, "synced");
+        assert.equal(deployment.active_platform, "cloudflare");
+        assert.equal(deployment.current_commit, "9cfb04d26497c55fc6933e634c91e5965d8171d8");
+        assert.equal(deployment.current_commit_source, "Cloudflare Worker build");
+        assert.equal(deployment.origin_commit, "9424fafa8ff89dc0e0cea8013d942706e74f6079");
+        assert.equal(deployment.origin_commit_source, "RENDER_GIT_COMMIT");
+        assert.equal(deployment.worker_status_applied, true);
+        assert.equal(deployment.platforms[0].role, "Proxied admin and legacy origin");
+        assert.equal(deployment.platforms[1].role, "Primary application runtime");
     } finally {
         globalThis.fetch = originalFetch;
     }

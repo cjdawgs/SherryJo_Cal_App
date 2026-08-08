@@ -43,6 +43,7 @@ import { handleMsLogin, handleMsCallback } from "./ms-oauth.js";
 
 const EDGE_HEALTH_PATH = "/__edge/health";
 const PLATFORM_STATUS_PATH = "/api/platform/status";
+const ADMIN_SYSTEM_OVERVIEW_PATH = "/admin/system/overview";
 const CALENDAR_READ_PATH = "/calendar/unified";
 const EVENT_WRITE_PATH = "/calendar/event";
 const DATE_STICKY_READ_PATH = "/calendar/date-sticky";
@@ -444,6 +445,65 @@ async function proxyRequest(request, incomingUrl, env) {
     });
 }
 
+async function applyCloudflareDeploymentStatus(response, env) {
+    if (!response.ok) return response;
+
+    const payload = await response.json();
+    const deployment = payload?.deployment;
+    if (!deployment) return response;
+
+    const workerCommitValue = String(env.WORKER_GIT_COMMIT || "").trim().toLowerCase();
+    const workerCommit = /^[0-9a-f]{7,40}$/.test(workerCommitValue) ? workerCommitValue : null;
+    const githubCommitValue = String(deployment.github_latest_commit || "").trim().toLowerCase();
+    const githubCommit = /^[0-9a-f]{7,40}$/.test(githubCommitValue) ? githubCommitValue : null;
+
+    deployment.origin_commit = deployment.current_commit;
+    deployment.origin_commit_source = deployment.current_commit_source;
+    deployment.current_commit = workerCommit;
+    deployment.current_commit_source = "Cloudflare Worker build";
+    deployment.active_platform = "cloudflare";
+    deployment.active_platform_label = "Cloudflare Worker";
+    deployment.worker_status_applied = true;
+
+    if (workerCommit && githubCommit) {
+        deployment.status = workerCommit === githubCommit ? "synced" : "out_of_sync";
+        deployment.message = workerCommit === githubCommit
+            ? "The active Cloudflare Worker matches the latest GitHub commit."
+            : "The active Cloudflare Worker is not on the latest GitHub commit yet.";
+    } else {
+        deployment.status = "unknown";
+        deployment.message = "Cloudflare is active, but its deployed Git commit is unavailable.";
+    }
+
+    const platforms = Array.isArray(deployment.platforms) ? deployment.platforms : [];
+    for (const platform of platforms) {
+        if (platform.id === "cloudflare") platform.role = "Primary application runtime";
+        if (platform.id === "render") platform.role = "Proxied admin and legacy origin";
+    }
+    const cloudflareTarget = platforms.find((platform) => platform.id === "cloudflare") || {};
+    deployment.manual_deploy_available = Boolean(cloudflareTarget.manual_deploy_available);
+    deployment.manual_deploy_endpoint = cloudflareTarget.manual_deploy_endpoint || null;
+    deployment.manual_deploy_hint = deployment.manual_deploy_available
+        ? "Trigger the Cloudflare deploy hook from this admin app."
+        : "Open the Cloudflare dashboard and deploy the latest GitHub commit.";
+    deployment.current_commit_url = workerCommit
+        ? `${deployment.repository_url}/commit/${workerCommit}`
+        : null;
+    deployment.compare_url = workerCommit && githubCommit && workerCommit !== githubCommit
+        ? `${deployment.compare_base_url}/${workerCommit}...${githubCommit}`
+        : null;
+
+    const headers = new Headers(response.headers);
+    headers.delete("content-length");
+    headers.set("content-type", "application/json; charset=utf-8");
+    headers.set("cache-control", "no-store");
+    return new Response(JSON.stringify(payload), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    });
+}
+
 async function shadowCalendarRead(request, incomingUrl, env, proxyResponse) {
     try {
         const [nativeResponse, proxyBody] = await Promise.all([
@@ -614,6 +674,9 @@ export default {
                 status: "ok",
                 platform: "cloudflare-worker",
                 mode: "worker-native",
+                deploymentCommit: /^[0-9a-f]{7,40}$/i.test(String(env.WORKER_GIT_COMMIT || "").trim())
+                    ? String(env.WORKER_GIT_COMMIT).trim().toLowerCase()
+                    : null,
                 calendarReadMode: calendarReadMode(env),
                 currentUserReadMode: currentUserReadMode(env),
                 dateStickyReadMode: dateStickyReadMode(env),
@@ -811,6 +874,9 @@ export default {
             }
 
             const response = await proxyRequest(request, incomingUrl, env);
+            if (request.method === "GET" && incomingUrl.pathname === ADMIN_SYSTEM_OVERVIEW_PATH) {
+                return await applyCloudflareDeploymentStatus(response, env);
+            }
             if (request.method === "GET" && incomingUrl.pathname === CALENDAR_READ_PATH && mode === "shadow") {
                 await shadowCalendarRead(request, incomingUrl, env, response);
             }

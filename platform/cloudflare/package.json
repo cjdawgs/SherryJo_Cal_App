@@ -9,10 +9,10 @@
     "scripts": {
         "check": "node --check src/worker.js",
         "test": "node --test test/*.test.js",
-        "deploy": "wrangler deploy --config ../../wrangler.toml --env=\"\"",
-        "deploy:canary": "wrangler deploy --config ../../wrangler.toml --env canary",
-        "deploy:dry-run": "wrangler deploy --dry-run --config ../../wrangler.toml --env=\"\"",
-        "deploy:dry-run:canary": "wrangler deploy --dry-run --config ../../wrangler.toml --env canary"
+        "deploy": "node scripts/deploy-worker.mjs production",
+        "deploy:canary": "node scripts/deploy-worker.mjs canary",
+        "deploy:dry-run": "node scripts/deploy-worker.mjs production --dry-run",
+        "deploy:dry-run:canary": "node scripts/deploy-worker.mjs canary --dry-run"
     },
     "devDependencies": {
         "wrangler": "4.118.0"
