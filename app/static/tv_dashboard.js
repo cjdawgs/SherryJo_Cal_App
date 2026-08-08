@@ -765,7 +765,9 @@ function ensureStyles() {
   }
   .tv-shell { display: grid; width: 100%; height: 100%; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); gap: 10px; }
   .tv-shell.month { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr); }
-  .tv-shell.month.has-popout { grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(320px, 0.86fr); align-items: start; }
+  .tv-shell.month.has-popout { min-height: 0; grid-template-columns: minmax(120px, 150px) minmax(0, 1fr) minmax(260px, 320px); grid-template-rows: minmax(0, 1fr); overflow: hidden; }
+  .tv-shell.month.has-popout > * { min-height: 0; }
+  .tv-shell.month.has-popout > :nth-child(2) { overflow: hidden; }
   .tv-header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; width: 260px; }
   .tv-main { padding: 14px 52px 14px; gap: 14px; }
   .tv-user-email { font-size: 11px; line-height: 1.1; color: var(--tv-text-soft); font-weight: 600; letter-spacing: 0.2px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: auto; }
@@ -823,7 +825,7 @@ function ensureStyles() {
   .tv-side-item:hover { border-color: rgba(255,255,255,0.24); }
   .tv-right-rail { min-height: 0; height: 100%; border: 1px solid rgba(201,219,244,0.18); border-radius: 14px; padding: 10px; background: linear-gradient(180deg, rgba(45,63,92,0.44), rgba(29,43,66,0.32)); overflow: hidden; }
   .tv-right-rail.calendar-rail { display: flex; flex-direction: column; }
-  .tv-right-rail.month-popout { align-self: start; min-height: 74vh; max-height: 74vh; }
+  .tv-right-rail.month-popout { min-height: 0; max-height: none; }
   .tv-right-title { font-size: 14px; font-weight: 700; margin: 0 0 8px 0; }
   .tv-right-subtitle { font-size: 11px; opacity: 0.78; margin: 12px 0 6px 0; font-weight: 700; letter-spacing: 0.9px; text-transform: uppercase; }
   .tv-right-list { display: flex; flex-direction: column; gap: 6px; max-height: 37vh; overflow-y: auto; }
@@ -2703,9 +2705,7 @@ function expectedDatesForView(viewName, selectedDate) {
   const anchor = parseLocalDate(selectedDate || state.selectedDate || toISO(new Date()));
   const view = String(viewName || state.currentView || 'day');
   if (view === 'month') return buildMonthDates(anchor);
-  if (view === 'week') return buildWeekDates(anchor);
-  if (view === '3-day') return buildThreeDayDates(anchor);
-  return [toISO(anchor)];
+  return buildWeekDates(anchor);
 }
 
 function cacheDayWindow(days, accounts, cachedAt = Date.now()) {
@@ -4166,7 +4166,7 @@ function renderMonthView() {
   const selected = parseLocalDate(state.selectedDate || toISO(new Date()));
   const weekDates = buildWeekDates(selected);
   return `
-  <div class="tv-shell month ${state.monthDetailOpen ? 'has-popout' : ''}">
+  <div class="tv-shell month has-popout">
     ${renderLeftSidebar()}
     <div>
       ${renderTopControls()}
@@ -4175,7 +4175,7 @@ function renderMonthView() {
       ${state.monthDates.map((dateKey, idx) => renderMonthCell(dayData(dateKey), idx)).join('')}
       </div>
     </div>
-    ${state.monthDetailOpen ? renderRightRail(state.selectedDate, weekDates, 'month-popout') : ''}
+    ${renderRightRail(state.selectedDate, weekDates, 'month-popout')}
   </div>`;
 }
 

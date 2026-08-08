@@ -60,7 +60,7 @@ def test_tv_dashboard_normalizes_pairing_codes_with_dash_separator():
     assert "XXXX-XXXX" in text
 
 
-def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
+def test_tv_dashboard_exposes_persistent_month_rail_and_sidebar_actions():
     text = _tv_js_text()
     required_tokens = [
         "monthDetailOpen",
@@ -72,9 +72,14 @@ def test_tv_dashboard_exposes_month_popout_and_sidebar_actions():
         "month-popout",
         "View 3-Day",
         "data-control=\"view-three-day\"",
+        '<div class="tv-shell month has-popout">',
+        "renderRightRail(state.selectedDate, weekDates, 'month-popout')",
+        "grid-template-rows: minmax(0, 1fr); overflow: hidden;",
     ]
     for token in required_tokens:
         assert token in text
+
+    assert "state.monthDetailOpen ? renderRightRail" not in text
 
 
 def test_tv_dashboard_exposes_account_chip_filtering_and_sticky_icons():
@@ -126,6 +131,8 @@ def test_tv_dashboard_week_rail_groups_all_dates_and_makes_events_editable():
     text = _tv_js_text()
     required_tokens = [
         "const weekGroups = weekDateKeys.map",
+        "function expectedDatesForView(viewName, selectedDate)",
+        "return buildWeekDates(anchor);",
         "tv-right-rail calendar-rail",
         "tv-right-selected-list",
         "tv-right-day-group",

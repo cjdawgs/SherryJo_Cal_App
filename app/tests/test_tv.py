@@ -342,7 +342,7 @@ class TestTVEventsEndpoint:
         assert data["selectedDate"] is None
         assert data["days"] == []
 
-    def test_events_day_view_returns_single_day_window(self, client, auth_headers, db):
+    def test_events_day_view_returns_full_sunday_start_week_for_sidebar(self, client, auth_headers, db):
         from app.models import Event
         from app.security import decode_token
 
@@ -357,9 +357,9 @@ class TestTVEventsEndpoint:
             owner_id=user_id,
         ))
         db.add(Event(
-            title="Adjacent Day Event",
-            start_time=datetime(2026, 10, 21, 9, 0, tzinfo=timezone.utc),
-            end_time=datetime(2026, 10, 21, 10, 0, tzinfo=timezone.utc),
+            title="Saturday Sidebar Event",
+            start_time=datetime(2026, 10, 24, 9, 0, tzinfo=timezone.utc),
+            end_time=datetime(2026, 10, 24, 10, 0, tzinfo=timezone.utc),
             owner_id=user_id,
         ))
         db.commit()
@@ -374,9 +374,16 @@ class TestTVEventsEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["currentView"] == "day"
-        assert [day["date"] for day in data["days"]] == ["2026-10-20"]
+        assert data["rangeStart"] == "2026-10-18"
+        assert data["rangeEnd"] == "2026-10-24"
+        assert [day["date"] for day in data["days"]] == [
+            "2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21",
+            "2026-10-22", "2026-10-23", "2026-10-24",
+        ]
+        saturday = next(day for day in data["days"] if day["date"] == "2026-10-24")
+        assert [event["title"] for event in saturday["events"]] == ["Saturday Sidebar Event"]
 
-    def test_events_three_day_view_keeps_centered_strip(self, client, auth_headers, db):
+    def test_events_three_day_view_returns_full_sunday_start_week_for_sidebar(self, client, auth_headers, db):
         from app.models import Event
         from app.security import decode_token
 
@@ -384,10 +391,9 @@ class TestTVEventsEndpoint:
         payload = decode_token(token)
         user_id = payload["user_id"]
 
-        for offset in (-1, 0, 1):
-            day = 20 + offset
+        for day in (18, 20, 24):
             db.add(Event(
-                title=f"Strip Event {offset}",
+            title=f"Week Event {day}",
                 start_time=datetime(2026, 10, day, 9, 0, tzinfo=timezone.utc),
                 end_time=datetime(2026, 10, day, 10, 0, tzinfo=timezone.utc),
                 owner_id=user_id,
@@ -404,7 +410,13 @@ class TestTVEventsEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["currentView"] == "3-day"
-        assert [day["date"] for day in data["days"]] == ["2026-10-19", "2026-10-20", "2026-10-21"]
+        assert data["rangeStart"] == "2026-10-18"
+        assert data["rangeEnd"] == "2026-10-24"
+        assert [day["date"] for day in data["days"]] == [
+            "2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21",
+            "2026-10-22", "2026-10-23", "2026-10-24",
+        ]
+        assert sum(len(day["events"]) for day in data["days"]) == 3
 
     def test_events_supports_selected_date_and_view_query_override(self, client, auth_headers, db):
         from app.models import Event
@@ -433,8 +445,12 @@ class TestTVEventsEndpoint:
         data = resp.json()
         assert data["selectedDate"] == "2026-11-05"
         assert data["currentView"] == "day"
-        assert [day["date"] for day in data["days"]] == ["2026-11-05"]
-        assert data["days"][0]["events"]
+        assert [day["date"] for day in data["days"]] == [
+            "2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04",
+            "2026-11-05", "2026-11-06", "2026-11-07",
+        ]
+        selected_day = next(day for day in data["days"] if day["date"] == "2026-11-05")
+        assert selected_day["events"]
 
     def test_events_accounts_include_enabled_and_disabled_connections(self, client, auth_headers, db):
         from app.models import OAuthAccount

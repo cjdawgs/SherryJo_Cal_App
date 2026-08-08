@@ -623,8 +623,8 @@ def _normalize_date_key(value) -> Optional[str]:
 
 
 def _week_start_for_date(d):
-    # Monday-start week grid
-    return d - timedelta(days=d.weekday())
+    # Match the TV grid and sidebar: Sunday through Saturday.
+    return d - timedelta(days=(d.weekday() + 1) % 7)
 
 
 def _month_grid_start_for_date(d):
@@ -633,13 +633,9 @@ def _month_grid_start_for_date(d):
 
 
 def _window_for_view(anchor_date, current_view: str):
-    if current_view == "day":
-        # TV day mode renders a true single-day window.
-        return anchor_date, anchor_date
-    if current_view == "3-day":
-        # Legacy TV day mode now maps to the centered 3-day strip.
-        return anchor_date - timedelta(days=1), anchor_date + timedelta(days=1)
-    if current_view == "week":
+    if current_view in {"day", "3-day", "week"}:
+        # Day and 3-day center panels render their own subset, while the
+        # shared right rail always needs the full selected week.
         start = _week_start_for_date(anchor_date)
         return start, start + timedelta(days=6)
     # month view: 6-week TV grid for stable layout

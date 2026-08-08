@@ -164,7 +164,7 @@ def _assert_colorized_card(
         raise AssertionError(f"{title} border opacity too low: {data}")
 
 
-def _assert_day_week_rail_layout(page) -> dict[str, float | int | str]:
+def _assert_week_rail_layout(page) -> dict[str, float | int | str]:
     layout = page.locator(".tv-right-rail.calendar-rail").evaluate(
         """
         (rail) => {
@@ -184,7 +184,7 @@ def _assert_day_week_rail_layout(page) -> dict[str, float | int | str]:
         """
     )
     if layout["groupCount"] != 7:
-        raise AssertionError(f"Day sidebar should render seven week groups: {layout}")
+        raise AssertionError(f"Sidebar should render seven week groups: {layout}")
     if layout["weekHeight"] < layout["railHeight"] * 0.45:
         raise AssertionError(f"Week list does not fill the available rail space: {layout}")
     if not 0 <= layout["bottomGap"] <= 12:
@@ -215,7 +215,7 @@ def main() -> int:
 
         page.locator("[data-control='view-month']").click()
         page.wait_for_timeout(1000)
-        month_result = {}
+        month_result = {"weekRail": _assert_week_rail_layout(page)}
         for title, color in month_expectations:
             _assert_colorized_card(page, ".tv-month-preview", title, color)
             month_result[title] = True
@@ -230,7 +230,7 @@ def main() -> int:
         for title, color in focused_day_expectation:
             _assert_colorized_card(page, ".tv-day-event-card", title, color)
             day_result[title] = True
-        day_result["weekRail"] = _assert_day_week_rail_layout(page)
+        day_result["weekRail"] = _assert_week_rail_layout(page)
         results["day"] = day_result
 
         page.locator("[data-control='view-week']").click()
@@ -239,6 +239,7 @@ def main() -> int:
         for title, color in focused_day_expectation:
             _assert_colorized_card(page, ".tv-item", title, color)
             week_result[title] = True
+        week_result["weekRail"] = _assert_week_rail_layout(page)
         results["week"] = week_result
 
         page.locator("[data-control='view-three-day']").click()
@@ -247,6 +248,7 @@ def main() -> int:
         for title, color in focused_day_expectation:
             _assert_colorized_card(page, ".tv-item", title, color)
             three_day_result[title] = True
+        three_day_result["weekRail"] = _assert_week_rail_layout(page)
         results["3-day"] = three_day_result
 
         page.locator("[data-control='view-month']").click()
