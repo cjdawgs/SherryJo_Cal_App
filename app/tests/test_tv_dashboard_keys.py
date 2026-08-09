@@ -194,10 +194,51 @@ def test_tv_dashboard_auth_fetch_handles_network_exceptions():
 
 def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     text = _tv_js_text()
-    assert "const POLL_MS = 60000" in text
+    assert "const POLL_MS = 600000;" in text
+    assert "const STARTUP_REFRESH_RETRY_MS = 5000;" in text
+    assert "const CONNECTION_KEEPALIVE_MS = 300000;" in text
     assert "deltaMs >= POLL_MS" in text
     assert "window.addEventListener('online'" in text
     assert "state.lastEventsFetchAt = Date.now()" in text
+    assert "if (!state.token || state.days.length || document.hidden) return;" in text
+    assert "tvDiag.log('startup_refresh_retry'" in text
+    assert "clearTimeout(state.startupRefreshRetryHandle)" in text
+    assert "setInterval(pulseTvConnection, CONNECTION_KEEPALIVE_MS)" in text
+    assert "fetch('/__edge/health'" in text
+    assert "if (!state.token || document.hidden || state.connectionKeepaliveInFlight) return;" in text
+    assert "state.connectionKeepaliveInFlight = false;" in text
+    assert "clearInterval(state.connectionKeepaliveHandle)" in text
+
+
+def test_tv_dashboard_retains_persistent_pairing_across_transient_401():
+    text = _tv_js_text()
+    assert "handleUnpair('token_invalid_401')" not in text
+    assert "retaining persistent pairing" in text
+    assert "TV authorization interrupted - retaining pairing and retrying." in text
+    assert "tv_authorization_restored" in text
+    assert "state.authStatus = IS_KIOSK ? 'kiosk' : 'paired';" in text
+    assert text.count("localStorage.removeItem(TOKEN_KEY)") == 1
+
+
+def test_tv_dashboard_proactively_repairs_local_sleep_guard_layers():
+    text = _tv_js_text()
+    required_tokens = [
+        "const LOCAL_GUARD_WATCHDOG_MS = 30000;",
+        "const LOCAL_GUARD_DIAG_COOLDOWN_MS = 60 * 60 * 1000;",
+        "setInterval(maintainLocalTvGuard, LOCAL_GUARD_WATCHDOG_MS)",
+        "clearInterval(state.localGuardWatchdogHandle)",
+        "if (wakeLock.isSupported() && !wakeLock.isActive())",
+        "antiSleep.ensureActive()",
+        "performance.now() - _lastRafTs > LOCAL_GUARD_WATCHDOG_MS * 2",
+        "typeof PointerEvent === 'function'",
+        "tvDiag.log('local_guard_repaired'",
+        "now - state.lastLocalGuardDiagAt >= LOCAL_GUARD_DIAG_COOLDOWN_MS",
+        "if (!_explicitRelease && document.visibilityState === 'visible')",
+        "if (_explicitRelease) {",
+        "await _sentinel.release().catch(() => { });",
+    ]
+    for token in required_tokens:
+        assert token in text
 
 
 def test_tv_dashboard_remote_up_down_zoom_and_center_reset():

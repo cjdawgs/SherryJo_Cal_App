@@ -5,6 +5,10 @@ const TOKEN_KEY = 'tv_token';
 // lifecycle recovery handles FireOS/Silk timer suspension.
 const POLL_MS = 600000;
 const TV_FETCH_TIMEOUT_MS = 12000;
+const STARTUP_REFRESH_RETRY_MS = 5000;
+const CONNECTION_KEEPALIVE_MS = 300000;
+const LOCAL_GUARD_WATCHDOG_MS = 30000;
+const LOCAL_GUARD_DIAG_COOLDOWN_MS = 60 * 60 * 1000;
 const AUTO_REFRESH_FAILURE_BACKOFF_MS = 60000;
 const AUTO_PAIR_RETRY_MS = 45000;
 const HIDDEN_WATCHDOG_WARN_AFTER_MS = 10 * 60 * 1000;
@@ -56,6 +60,8 @@ let zoomEngine = null;
 // Diagnostics: inspect window.__WAKE_LOCK_ACTIVE__ from remote devtools.
 const wakeLock = (() => {
   let _sentinel = null;
+  let _requestInFlight = null;
+  let _explicitRelease = false;
 
   async function request() {
     if (!('wakeLock' in navigator)) {
@@ -63,33 +69,46 @@ const wakeLock = (() => {
       return;
     }
     // If we already hold a live sentinel, nothing to do.
-    try {
-      console.log('[WakeLock] Status: Requested');
-      _sentinel = await navigator.wakeLock.request('screen');
-      window.__WAKE_LOCK_ACTIVE__ = true;
-      console.log('[WakeLock] Status: Active');
+    if (_requestInFlight) return _requestInFlight;
+    _explicitRelease = false;
+    _requestInFlight = (async () => {
+      try {
+        console.log('[WakeLock] Status: Requested');
+        _sentinel = await navigator.wakeLock.request('screen');
+        if (_explicitRelease) {
+          await _sentinel.release().catch(() => { });
+          _sentinel = null;
+          window.__WAKE_LOCK_ACTIVE__ = false;
+          return;
+        }
+        window.__WAKE_LOCK_ACTIVE__ = true;
+        console.log('[WakeLock] Status: Active');
 
-      // The OS/browser releases the lock automatically when the tab is hidden,
-      // the screen turns off, or a network glitch causes a reload.
-      // Bind once per sentinel acquisition so we never stack listeners.
-      _sentinel.addEventListener('release', () => {
-        console.log('[WakeLock] Status: Released by OS/Browser — scheduling re-acquisition');
+        // The OS/browser releases the lock automatically when the tab is hidden,
+        // the screen turns off, or a network glitch causes a reload.
+        // Bind once per sentinel acquisition so we never stack listeners.
+        _sentinel.addEventListener('release', () => {
+          console.log('[WakeLock] Status: Released by OS/Browser — scheduling re-acquisition');
+          _sentinel = null;
+          window.__WAKE_LOCK_ACTIVE__ = false;
+          if (tvDiag) tvDiag.log('wake_lock_released', `vis=${document.visibilityState}`);
+          // Re-acquire only when the document is still visible; if it's hidden the
+          // visibilitychange listener will re-acquire when it comes back.
+          if (!_explicitRelease && document.visibilityState === 'visible') {
+            setTimeout(request, 1000);
+          }
+        }, { once: true });
+
+      } catch (err) {
+        // NotAllowedError is normal (page not visible, low-power mode, etc.)
         _sentinel = null;
         window.__WAKE_LOCK_ACTIVE__ = false;
-        if (tvDiag) tvDiag.log('wake_lock_released', `vis=${document.visibilityState}`);
-        // Re-acquire only when the document is still visible; if it's hidden the
-        // visibilitychange listener will re-acquire when it comes back.
-        if (document.visibilityState === 'visible') {
-          setTimeout(request, 1000);
-        }
-      }, { once: true });
-
-    } catch (err) {
-      // NotAllowedError is normal (page not visible, low-power mode, etc.)
-      _sentinel = null;
-      window.__WAKE_LOCK_ACTIVE__ = false;
-      console.log(`[WakeLock] Error: ${err.name} - ${err.message}`);
-    }
+        console.log(`[WakeLock] Error: ${err.name} - ${err.message}`);
+      } finally {
+        _requestInFlight = null;
+      }
+    })();
+    return _requestInFlight;
   }
 
   // Called whenever the page regains visibility.
@@ -102,6 +121,7 @@ const wakeLock = (() => {
 
   // Called on clean application teardown (unpair / logout).
   function release() {
+    _explicitRelease = true;
     if (_sentinel && !_sentinel.released) {
       _sentinel.release().catch(() => { });
     }
@@ -110,7 +130,15 @@ const wakeLock = (() => {
     console.log('[WakeLock] Status: Explicitly released');
   }
 
-  return { request, reacquire, release };
+  function isActive() {
+    return !!(_sentinel && !_sentinel.released && window.__WAKE_LOCK_ACTIVE__);
+  }
+
+  function isSupported() {
+    return 'wakeLock' in navigator;
+  }
+
+  return { request, reacquire, release, isActive, isSupported };
 })();
 
 // ─── Three-Layer Anti-Sleep Engine ───────────────────────────────────────────
@@ -152,8 +180,8 @@ const antiSleep = (() => {
   // for media sessions, not browser wake locks.
   let _videoEl = null;
 
-  function _startVideoStream() {
-    if (_videoEl && !_videoEl.paused) return;
+  async function _startVideoStream() {
+    if (_videoEl && !_videoEl.paused) return true;
     try {
       if (!_videoEl) {
         const stream = _canvas.captureStream(1); // 1 fps — negligible CPU
@@ -172,11 +200,12 @@ const antiSleep = (() => {
         });
       }
       if (!document.body.contains(_videoEl)) document.body.appendChild(_videoEl);
-      _videoEl.play()
-        .then(() => console.log('[AntiSleep] Layer 4 video stream: playing (media-exempt)'))
-        .catch(err => console.log('[AntiSleep] Layer 4 video stream: play() failed —', err.message));
+      await _videoEl.play();
+      console.log('[AntiSleep] Layer 4 video stream: playing (media-exempt)');
+      return isVideoActive();
     } catch (err) {
-      console.log('[AntiSleep] Layer 4 video stream: not available —', err.message);
+      console.log('[AntiSleep] Layer 4 video stream: play unavailable —', err.message);
+      return false;
     }
   }
 
@@ -233,7 +262,7 @@ const antiSleep = (() => {
     if (!document.body.contains(_canvas)) document.body.appendChild(_canvas);
     if (!_rafHandle) {
       _lastRafTs = null;
-      requestAnimationFrame(_rafLoop);
+      _rafHandle = requestAnimationFrame(_rafLoop);
       console.log('[AntiSleep] Layer 2 rAF canvas: started');
     }
     if (!_evtHandle) {
@@ -242,9 +271,11 @@ const antiSleep = (() => {
           document.dispatchEvent(new MouseEvent('mousemove', {
             bubbles: true, cancelable: true, clientX: 1, clientY: 1,
           }));
-          document.dispatchEvent(new PointerEvent('pointermove', {
-            bubbles: true, cancelable: true, clientX: 1, clientY: 1, isPrimary: true,
-          }));
+          if (typeof PointerEvent === 'function') {
+            document.dispatchEvent(new PointerEvent('pointermove', {
+              bubbles: true, cancelable: true, clientX: 1, clientY: 1, isPrimary: true,
+            }));
+          }
         }
       }, 8000);  // 8 s — resets FireOS activity watchdog more aggressively than 20 s
       console.log('[AntiSleep] Layer 3 synthetic events: started (8s)');
@@ -269,23 +300,54 @@ const antiSleep = (() => {
   // element back into play().  Browsers always pause <video> when a tab goes
   // hidden, killing our Layer-4 media-exempt status on FireOS.  Explicit
   // restart is required; antiSleep.start() alone does not always re-trigger it.
-  function restartVideo() {
+  async function restartVideo() {
     if (_videoEl) {
-      _videoEl.play()
-        .then(() => console.log('[AntiSleep] Layer 4 video: restarted after visibility restore'))
-        .catch(err => console.log('[AntiSleep] Layer 4 video restart failed:', err.message));
-    } else {
-      _startVideoStream();  // element was removed — create fresh
+      try {
+        await _videoEl.play();
+        console.log('[AntiSleep] Layer 4 video: restarted after visibility restore');
+        return isVideoActive();
+      } catch (err) {
+        console.log('[AntiSleep] Layer 4 video restart failed:', err.message);
+        return false;
+      }
     }
+    return _startVideoStream();
   }
 
   function isVideoActive() {
     return !!(_videoEl && !_videoEl.paused && !_videoEl.ended);
   }
 
+  async function ensureActive() {
+    const repaired = [];
+    const rafStalled = _lastRafTs === null
+      || (typeof performance !== 'undefined' && performance.now() - _lastRafTs > LOCAL_GUARD_WATCHDOG_MS * 2);
+    if (rafStalled && _rafHandle) {
+      cancelAnimationFrame(_rafHandle);
+      _rafHandle = null;
+    }
+    if (!document.body.contains(_canvas) || !_rafHandle || !_evtHandle) {
+      start();
+      if (!rafStalled) repaired.push('render-input');
+    }
+    if (!isVideoActive()) {
+      if (await restartVideo()) repaired.push('video');
+    }
+    if (_audioCtx && _audioCtx.state === 'suspended') {
+      try {
+        await _audioCtx.resume();
+        if (_audioCtx.state === 'running') repaired.push('audio');
+      } catch { }
+    } else if (!_audioCtx || _audioCtx.state === 'closed') {
+      _startAudio();
+      if (_audioCtx && _audioCtx.state === 'running') repaired.push('audio');
+    }
+    return repaired;
+  }
+
   function setRafGapCb(fn) { _gapCb = fn; }
 
-  return { start, stop, setRafGapCb, restartVideo, isVideoActive };
+  return { start, stop, setRafGapCb, restartVideo, isVideoActive, ensureActive };
 })();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -316,8 +378,14 @@ const state = {
   syncStatusTimer: null,
   syncStatusMessage: '',
   pollHandle: null,
+  startupRefreshRetryHandle: null,
+  connectionKeepaliveHandle: null,
+  connectionKeepaliveInFlight: false,
+  localGuardWatchdogHandle: null,
+  localGuardRepairInFlight: false,
+  lastLocalGuardDiagAt: 0,
   clockHandle: null,
-  heartbeatHandle: null,       // 60-second diagnostic heartbeat
+  heartbeatHandle: null,
   autoPairRetryHandle: null,
   sessionStartAt: null,        // set by startPolling()
   sleepGuardEnabled: true,     // read from /tv/state
@@ -1353,7 +1421,15 @@ function startPolling() {
   }, 120);
   if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
   refreshEvents(true);
+  state.startupRefreshRetryHandle = setTimeout(() => {
+    state.startupRefreshRetryHandle = null;
+    if (!state.token || state.days.length || document.hidden) return;
+    if (tvDiag) tvDiag.log('startup_refresh_retry', `view=${state.currentView} date=${state.selectedDate || 'n/a'}`);
+    refreshEvents(true);
+  }, STARTUP_REFRESH_RETRY_MS);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
+  state.connectionKeepaliveHandle = setInterval(pulseTvConnection, CONNECTION_KEEPALIVE_MS);
+  state.localGuardWatchdogHandle = setInterval(maintainLocalTvGuard, LOCAL_GUARD_WATCHDOG_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   // Heartbeat confirms the guard is alive between visible events. Every 15 min
   // proves that just as well as every minute at a fraction of the traffic.
@@ -1389,10 +1465,17 @@ function startPolling() {
 
 function stopAll() {
   if (state.pollHandle) clearInterval(state.pollHandle);
+  if (state.startupRefreshRetryHandle) clearTimeout(state.startupRefreshRetryHandle);
+  if (state.connectionKeepaliveHandle) clearInterval(state.connectionKeepaliveHandle);
+  if (state.localGuardWatchdogHandle) clearInterval(state.localGuardWatchdogHandle);
   if (state.clockHandle) clearInterval(state.clockHandle);
   if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
   stopAutoPairRetryLoop();
   state.pollHandle = null;
+  state.startupRefreshRetryHandle = null;
+  state.connectionKeepaliveHandle = null;
+  state.localGuardWatchdogHandle = null;
+  state.localGuardRepairInFlight = false;
   state.clockHandle = null;
   state.heartbeatHandle = null;
   state.hiddenSinceMs = null;
@@ -1401,6 +1484,42 @@ function stopAll() {
   // Release wake lock on clean teardown (unpair / logout).
   wakeLock.release();
   antiSleep.stop();
+}
+
+async function maintainLocalTvGuard() {
+  if (!state.token || document.hidden || state.sleepGuardEnabled === false || state.localGuardRepairInFlight) return;
+  state.localGuardRepairInFlight = true;
+  const repaired = [];
+  try {
+    if (wakeLock.isSupported() && !wakeLock.isActive()) {
+      await wakeLock.reacquire();
+      if (wakeLock.isActive()) repaired.push('wake-lock');
+    }
+    repaired.push(...await antiSleep.ensureActive());
+    const now = Date.now();
+    if (repaired.length && tvDiag && now - state.lastLocalGuardDiagAt >= LOCAL_GUARD_DIAG_COOLDOWN_MS) {
+      state.lastLocalGuardDiagAt = now;
+      tvDiag.log('local_guard_repaired', `layers=${[...new Set(repaired)].join(',')}`);
+    }
+  } finally {
+    state.localGuardRepairInFlight = false;
+  }
+}
+
+async function pulseTvConnection() {
+  if (!state.token || document.hidden || state.connectionKeepaliveInFlight) return;
+  state.connectionKeepaliveInFlight = true;
+  try {
+    await fetch('/__edge/health', {
+      method: 'GET',
+      cache: 'no-store',
+      keepalive: true,
+    });
+  } catch {
+    // Calendar polling and lifecycle recovery own user-visible network status.
+  } finally {
+    state.connectionKeepaliveInFlight = false;
+  }
 }
 
 function tickClock() {
@@ -1967,11 +2086,12 @@ async function refreshEvents(force = false, options = {}) {
 async function authFetch(url, options = {}) {
   if (!state.token) return null;
   let timeoutHandle = null;
+  let suppressNetworkHint = false;
   try {
     const timeoutMs = Number(options.timeoutMs || TV_FETCH_TIMEOUT_MS);
     const requestOptions = Object.assign({}, options);
     delete requestOptions.timeoutMs;
-    const suppressNetworkHint = Boolean(requestOptions.suppressNetworkHint);
+    suppressNetworkHint = Boolean(requestOptions.suppressNetworkHint);
     delete requestOptions.suppressNetworkHint;
 
     const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
@@ -1994,20 +2114,31 @@ async function authFetch(url, options = {}) {
     const res = await Promise.race([fetchPromise, timeoutPromise]);
     state.lastAuthFetchError = null;
     if (res.status === 401) {
+      const previousAuthIssue = state.lastAuthIssue;
       if (IS_KIOSK) {
         state.authStatus = 'invalid';
         state.lastAuthIssue = 'kiosk-401';
-        if (tvDiag && state.token) {
+        if (previousAuthIssue !== state.lastAuthIssue && tvDiag && state.token) {
           tvDiag.log('kiosk_token_invalid_401', `url=${url}`);
           tvDiag.flush();
         }
-        renderFooterHint('Kiosk token invalid/expired. Regenerate kiosk URL from Admin.');
+        renderFooterHint('Kiosk authorization interrupted - retrying automatically.');
       } else {
         state.authStatus = 'invalid';
         state.lastAuthIssue = '401';
-        handleUnpair('token_invalid_401');
+        if (previousAuthIssue !== state.lastAuthIssue && tvDiag && state.token) {
+          tvDiag.log('token_invalid_401', `url=${url}; retaining persistent pairing`);
+          tvDiag.flush();
+        }
+        renderFooterHint('TV authorization interrupted - retaining pairing and retrying.');
       }
       return null;
+    }
+    if (state.lastAuthIssue === '401' || state.lastAuthIssue === 'kiosk-401') {
+      const recoveredIssue = state.lastAuthIssue;
+      state.authStatus = IS_KIOSK ? 'kiosk' : 'paired';
+      state.lastAuthIssue = '';
+      if (tvDiag) tvDiag.log('tv_authorization_restored', `recovered=${recoveredIssue}`);
     }
     return res;
   } catch (err) {

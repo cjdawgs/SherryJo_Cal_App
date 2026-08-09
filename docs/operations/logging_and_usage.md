@@ -29,6 +29,21 @@ in response to a user.
   instead of one per event, high-signal events still flush immediately), and the
   heartbeat moved from 60 s to 15 min. Server-side, routine events are recorded
   in memory but reach the table at most once per device per hour.
+- **TV liveness.** Calendar payloads remain on a 10-minute poll. An empty startup
+  gets one retry after 5 seconds, and a visible paired TV sends one small
+  `/__edge/health` pulse every 5 minutes. The pulse is answered entirely by the
+  Cloudflare Worker: it does not wake Render, query the database, write a
+  diagnostic row, or create an application access log. That is 288 inexpensive
+  edge requests per continuously visible TV per day.
+- **Local sleep guard.** A 30-second browser-only watchdog checks the screen wake
+  lock, animation loop, synthetic-input timer, media stream and Web Audio layer.
+  It repairs inactive layers before the Fire OS inactivity window is reached.
+  The watchdog makes no network request; repair telemetry is capped at one
+  diagnostic event per hour per running TV session.
+- **Persistent TV pairing.** A transient `401` records one repair-risk event but
+  no longer deletes the long-lived TV token. Pairing storage is cleared only by
+  an explicit logout/unpair action, and a later successful authenticated request
+  restores the paired status automatically.
 - **Retention.** A daily scheduler job prunes `tv_diag_log`; it was the only
   table that grew without user action and nothing deleted from it.
 - **Sync scheduler.** One aggregated line per cycle instead of one per user, and
