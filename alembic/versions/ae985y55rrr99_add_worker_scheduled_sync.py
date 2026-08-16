@@ -58,7 +58,7 @@ def upgrade_statements() -> tuple[str, ...]:
                       FROM public.sync_operation_ledger AS ledger
                       WHERE ledger.operation_key = 'worker-sync:account:' || account.id::text || ':anchor:'
                           || COALESCE(
-                              pg_catalog.floor(pg_catalog.extract(epoch FROM GREATEST(
+                              pg_catalog.floor(EXTRACT(epoch FROM GREATEST(
                                   account.last_sync, account.last_sync_success, account.last_manual_refresh_at
                               )))::bigint::text,
                               'bootstrap'
@@ -142,7 +142,7 @@ def upgrade_statements() -> tuple[str, ...]:
                 created_at, updated_at
             ) VALUES (
                 v_today,
-                (v_today - ((pg_catalog.extract(isodow FROM v_today)::integer - 1)))::date,
+                (v_today - ((EXTRACT(isodow FROM v_today)::integer - 1)))::date,
                 v_changes, v_no_changes, v_total,
                 CASE WHEN v_total > 0 THEN v_changes::double precision / v_total ELSE NULL END,
                 CASE WHEN v_total > 0 THEN v_no_changes::double precision / v_total ELSE NULL END,

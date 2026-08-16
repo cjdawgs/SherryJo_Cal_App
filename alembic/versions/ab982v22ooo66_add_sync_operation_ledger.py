@@ -17,30 +17,33 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "sync_operation_ledger",
-        sa.Column("id", sa.String(), nullable=False),
-        sa.Column("operation_key", sa.String(length=200), nullable=False),
-        sa.Column("operation_type", sa.String(length=100), nullable=False),
-        sa.Column("owner_user_id", sa.Integer(), nullable=True),
-        sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="1"),
-        sa.Column("request_payload", sa.JSON(), nullable=True),
-        sa.Column("result_payload", sa.JSON(), nullable=True),
-        sa.Column("error_type", sa.String(), nullable=True),
-        sa.Column("error_message", sa.String(), nullable=True),
-        sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"]),
-        sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("operation_key", name="uq_sync_operation_ledger_operation_key"),
-    )
-    op.create_index("ix_sync_operation_ledger_operation_key", "sync_operation_ledger", ["operation_key"], unique=False)
-    op.create_index("ix_sync_operation_ledger_operation_type", "sync_operation_ledger", ["operation_type"], unique=False)
-    op.create_index("ix_sync_operation_ledger_owner_user_id", "sync_operation_ledger", ["owner_user_id"], unique=False)
-    op.create_index("ix_sync_operation_ledger_status", "sync_operation_ledger", ["status"], unique=False)
+    if not sa.inspect(op.get_bind()).has_table("sync_operation_ledger"):
+        op.create_table(
+            "sync_operation_ledger",
+            sa.Column("id", sa.String(), nullable=False),
+            sa.Column("operation_key", sa.String(length=200), nullable=False),
+            sa.Column("operation_type", sa.String(length=100), nullable=False),
+            sa.Column("owner_user_id", sa.Integer(), nullable=True),
+            sa.Column("status", sa.String(length=32), nullable=False),
+            sa.Column("attempt_count", sa.Integer(), nullable=False, server_default="1"),
+            sa.Column("request_payload", sa.JSON(), nullable=True),
+            sa.Column("result_payload", sa.JSON(), nullable=True),
+            sa.Column("error_type", sa.String(), nullable=True),
+            sa.Column("error_message", sa.String(), nullable=True),
+            sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.ForeignKeyConstraint(["owner_user_id"], ["users.id"]),
+            sa.PrimaryKeyConstraint("id"),
+            sa.UniqueConstraint("operation_key", name="uq_sync_operation_ledger_operation_key"),
+        )
+
+    op.execute("ALTER TABLE sync_operation_ledger ALTER COLUMN attempt_count SET DEFAULT 1")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_operation_ledger_operation_key ON sync_operation_ledger (operation_key)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_operation_ledger_operation_type ON sync_operation_ledger (operation_type)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_operation_ledger_owner_user_id ON sync_operation_ledger (owner_user_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_sync_operation_ledger_status ON sync_operation_ledger (status)")
 
 
 def downgrade() -> None:

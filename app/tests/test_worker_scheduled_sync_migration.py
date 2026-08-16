@@ -13,6 +13,8 @@ SPEC.loader.exec_module(MIGRATION)
 def test_due_account_claim_is_bounded_atomic_and_excludes_terminal_work():
     statements = "\n".join(MIGRATION.upgrade_statements()).lower()
 
+    assert "pg_catalog.extract(" not in statements
+    assert "extract(epoch from" in statements
     assert "security definer" in statements
     assert "for update skip locked" in statements
     assert "least(greatest(p_limit, 1), 50)" in statements
@@ -28,6 +30,7 @@ def test_due_account_claim_is_bounded_atomic_and_excludes_terminal_work():
 def test_worker_ledger_access_remains_scoped_to_transaction_user_identity():
     statements = "\n".join(MIGRATION.upgrade_statements()).lower()
 
+    assert "extract(isodow from" in statements
     for operation in ("select", "insert", "update"):
         assert f"for {operation} to {MIGRATION.WORKER_ROLE}" in statements
     assert "owner_user_id = public.worker_app_user_id()" in statements

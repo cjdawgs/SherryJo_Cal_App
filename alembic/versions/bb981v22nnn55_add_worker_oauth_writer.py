@@ -30,18 +30,45 @@ def upgrade_statements() -> tuple[str, ...]:
         """CREATE UNIQUE INDEX IF NOT EXISTS uq_oauth_account_user_provider_email
            ON public.oauth_accounts(user_id, provider, account_email)""",
         # RLS: worker reads only its own rows.
-        f"""CREATE POLICY worker_oauth_reader ON public.oauth_accounts
-            FOR SELECT TO {WORKER_ROLE}
-            USING (user_id = public.worker_app_user_id())""",
+        f"""DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies
+                WHERE schemaname = 'public'
+                  AND tablename = 'oauth_accounts'
+                  AND policyname = 'worker_oauth_reader'
+            ) THEN
+                CREATE POLICY worker_oauth_reader ON public.oauth_accounts
+                    FOR SELECT TO {WORKER_ROLE}
+                    USING (user_id = public.worker_app_user_id());
+            END IF;
+        END $$""",
         # RLS: worker inserts only its own rows.
-        f"""CREATE POLICY worker_oauth_writer_insert ON public.oauth_accounts
-            FOR INSERT TO {WORKER_ROLE}
-            WITH CHECK (user_id = public.worker_app_user_id())""",
+        f"""DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies
+                WHERE schemaname = 'public'
+                  AND tablename = 'oauth_accounts'
+                  AND policyname = 'worker_oauth_writer_insert'
+            ) THEN
+                CREATE POLICY worker_oauth_writer_insert ON public.oauth_accounts
+                    FOR INSERT TO {WORKER_ROLE}
+                    WITH CHECK (user_id = public.worker_app_user_id());
+            END IF;
+        END $$""",
         # RLS: worker updates only its own rows.
-        f"""CREATE POLICY worker_oauth_writer_update ON public.oauth_accounts
-            FOR UPDATE TO {WORKER_ROLE}
-            USING (user_id = public.worker_app_user_id())
-            WITH CHECK (user_id = public.worker_app_user_id())""",
+        f"""DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_policies
+                WHERE schemaname = 'public'
+                  AND tablename = 'oauth_accounts'
+                  AND policyname = 'worker_oauth_writer_update'
+            ) THEN
+                CREATE POLICY worker_oauth_writer_update ON public.oauth_accounts
+                    FOR UPDATE TO {WORKER_ROLE}
+                    USING (user_id = public.worker_app_user_id())
+                    WITH CHECK (user_id = public.worker_app_user_id());
+            END IF;
+        END $$""",
         # Grants scoped to only the columns the Worker needs.
         f"GRANT SELECT ON TABLE public.oauth_accounts TO {WORKER_ROLE}",
         f"""GRANT INSERT (user_id, provider, account_email, access_token,
