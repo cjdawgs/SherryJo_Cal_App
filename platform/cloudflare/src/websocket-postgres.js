@@ -14,9 +14,9 @@ async function ticketHash(ticket) {
 export async function issueWebSocketTicket(adapter, userId) {
     const ticket = base64Url(crypto.getRandomValues(new Uint8Array(32)));
     const expiresAt = new Date(Date.now() + TICKET_TTL_SECONDS * 1000);
-    await adapter.runWithIdentity(userId, (client) => client.query(
+    await adapter.runWithIdentity(userId, async (client) => client.query(
         "SELECT public.worker_issue_websocket_ticket($1, $2)",
-        [ticketHash(ticket), expiresAt],
+        [await ticketHash(ticket), expiresAt],
     ));
     return { ticket, expires_at: expiresAt.toISOString(), expires_in_seconds: TICKET_TTL_SECONDS };
 }

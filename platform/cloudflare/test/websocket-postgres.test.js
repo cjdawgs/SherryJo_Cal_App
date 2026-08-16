@@ -5,7 +5,7 @@ import { consumeWebSocketTicket, issueWebSocketTicket } from "../src/websocket-p
 
 test("issues a 60-second opaque WebSocket ticket through owner identity", async () => {
     let captured;
-    const adapter = { runWithIdentity: async (userId, operation) => { captured = { userId }; await operation({ query: async (sql, params) => { captured.sql = sql; captured.params = await Promise.all(params); } }); } };
+    const adapter = { runWithIdentity: async (userId, operation) => { captured = { userId }; await operation({ query: async (sql, params) => { captured.sql = sql; captured.params = params; } }); } };
     const result = await issueWebSocketTicket(adapter, 9);
     assert.equal(captured.userId, 9);
     assert.match(captured.params[0], /^[0-9a-f]{64}$/);

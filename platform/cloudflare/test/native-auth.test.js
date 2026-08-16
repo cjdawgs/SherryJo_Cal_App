@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+    hashPassword,
     handleNativeLogin,
     handleNativeRegistration,
     verifyPassword,
@@ -20,6 +21,14 @@ function jsonRequest(path, body) {
 test("verifies existing Passlib Argon2id hashes", async () => {
     assert.equal(await verifyPassword("NativeAuth-Test-123", PASSLIB_HASH), true);
     assert.equal(await verifyPassword("wrong", PASSLIB_HASH), false);
+});
+
+test("creates Passlib-compatible Argon2id hashes", async () => {
+    const hash = await hashPassword("NativeAuth-Roundtrip-456");
+
+    assert.match(hash, /^\$argon2id\$v=19\$m=65536,t=3,p=4\$/);
+    assert.equal(await verifyPassword("NativeAuth-Roundtrip-456", hash), true);
+    assert.equal(await verifyPassword("wrong", hash), false);
 });
 
 test("logs in by normalized identifier and issues the native token contract", async () => {

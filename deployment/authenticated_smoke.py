@@ -150,7 +150,13 @@ def _note_by_id(notes: Any, note_id: str, check: str) -> dict[str, Any]:
     return note
 
 
-def _verify_operational_reads(origin: str, token: str, prefix: str) -> list[str]:
+def _verify_operational_reads(
+    origin: str,
+    token: str,
+    prefix: str,
+    *,
+    expected_scheduler_running: bool,
+) -> list[str]:
     tasks = _expect(_request(origin, token, "GET", "/tasks/"), 200, f"{prefix} task read")
     if not isinstance(tasks, list):
         raise SmokeFailure(f"{prefix} task read did not return a list")
@@ -165,8 +171,9 @@ def _verify_operational_reads(origin: str, token: str, prefix: str) -> list[str]
         f"{prefix} scheduler status",
     )
     scheduler = sync_status.get("scheduler") if isinstance(sync_status, dict) else None
-    if not isinstance(scheduler, dict) or scheduler.get("running") is not True:
-        raise SmokeFailure(f"{prefix} scheduler is not running")
+    if not isinstance(scheduler, dict) or scheduler.get("running") is not expected_scheduler_running:
+        expected_state = "running" if expected_scheduler_running else "stopped"
+        raise SmokeFailure(f"{prefix} scheduler is not {expected_state}")
 
     tv_version = _expect(_request(origin, token, "GET", "/tv/version"), 200, f"{prefix} TV version")
     if not isinstance(tv_version, dict) or not str(tv_version.get("appVersion") or "").strip():
@@ -185,7 +192,7 @@ def _verify_operational_reads(origin: str, token: str, prefix: str) -> list[str]
     return [
         f"{prefix}_tasks_read",
         f"{prefix}_accounts_read",
-        f"{prefix}_scheduler_running",
+        f"{prefix}_scheduler_{'running' if expected_scheduler_running else 'stopped'}",
         f"{prefix}_tv_version",
         f"{prefix}_tv_state",
         f"{prefix}_calendar_asset",
@@ -352,8 +359,18 @@ async def run_authenticated_smoke(
             raise SmokeFailure("Cloudflare note read returned the wrong content")
         checks.append("cloudflare_note_read")
 
-        checks.extend(_verify_operational_reads(render_url, token, "render"))
-        checks.extend(_verify_operational_reads(cloudflare_url, token, "cloudflare"))
+        checks.extend(_verify_operational_reads(
+            render_url,
+            token,
+            "render",
+            expected_scheduler_running=False,
+        ))
+        checks.extend(_verify_operational_reads(
+            cloudflare_url,
+            token,
+            "cloudflare",
+            expected_scheduler_running=True,
+        ))
 
         for origin, name in (
             (render_url, "render_invalid_upload_rejection"),

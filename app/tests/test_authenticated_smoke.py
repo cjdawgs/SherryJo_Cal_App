@@ -90,6 +90,7 @@ def test_operational_reads_require_running_scheduler(monkeypatch):
             "https://render.example.com",
             "temporary-token",
             "render",
+            expected_scheduler_running=True,
         )
 
 
@@ -125,7 +126,10 @@ def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
         if method == "GET" and path in {"/tasks/", "/accounts"}:
             return _response(200, [])
         if method == "GET" and path == "/accounts/sync-status":
-            return _response(200, {"scheduler": {"running": True}, "accounts": []})
+            return _response(200, {
+                "scheduler": {"running": origin.endswith("edge.example.com")},
+                "accounts": [],
+            })
         if method == "GET" and path == "/tv/version":
             return _response(200, {"appVersion": "test-version"})
         if method == "GET" and path == "/tv/state":
@@ -164,7 +168,8 @@ def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
     assert report["cleanup"] == {"attempted": True, "passed": True}
     assert "render_note_create" in report["checks"]
     assert "cloudflare_note_read" in report["checks"]
-    assert "render_scheduler_running" in report["checks"]
+    assert "render_scheduler_stopped" in report["checks"]
+    assert "cloudflare_scheduler_running" in report["checks"]
     assert "cloudflare_calendar_asset" in report["checks"]
     assert "note_cleanup_verified" in report["checks"]
     assert ("https://edge.example.com", "DELETE", f"/calendar/event/{event_id}") in requests
