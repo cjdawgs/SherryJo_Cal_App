@@ -17,6 +17,21 @@ test("edge health does not contact the Render origin", async () => {
     });
 });
 
+test("public health and schema probes are Worker-native", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw new Error("Health probes must not contact origin"); };
+    try {
+        const health = await worker.fetch(new Request("https://calendar.example/health"), {});
+        const schema = await worker.fetch(new Request("https://calendar.example/health/schema"), {});
+        assert.equal(health.status, 200);
+        assert.equal((await health.json()).platform, "cloudflare-worker");
+        assert.equal(schema.status, 200);
+        assert.equal((await schema.json()).runtime, "cloudflare-worker");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("platform status is Worker-native and does not contact Render", async () => {
     const originalFetch = globalThis.fetch;
     let originContacted = false;
@@ -56,12 +71,126 @@ test("platform status is Worker-native and does not contact Render", async () =>
             tvVersionReadMode: "proxy",
             googleAuthMode: "proxy",
             msAuthMode: "proxy",
+            authMode: "proxy",
+            accountReadMode: "proxy",
+            accountWriteMode: "proxy",
+            tvPairingMode: "proxy",
+            tvStateMode: "proxy",
+            tvEventsMode: "proxy",
+            tvDiagnosticsMode: "proxy",
+            calendarImportMode: "proxy",
+            calendarPublishMode: "proxy",
+            webSocketMode: "proxy",
+            adminApiMode: "proxy",
+            calendarSyncMode: "proxy",
+            scheduledSyncEnabled: false,
+            originFallbackMode: "proxy",
+            renderDependencySevered: false,
             edgeProxyAuthConfigured: true,
         });
         assert.equal(originContacted, false);
     } finally {
         globalThis.fetch = originalFetch;
     }
+});
+
+test("severed origin mode never contacts Render for an unmigrated route", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("Render must not be contacted in severed mode");
+    };
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/accounts"),
+            { ORIGIN_FALLBACK_MODE: "severed" },
+        );
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), {
+            error: "Route is not available in Worker-only mode",
+            code: "worker_route_not_migrated",
+            path: "/accounts",
+        });
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("invalid origin mode fails closed without contacting Render", async () => {
+    const originalFetch = globalThis.fetch;
+    let originContacted = false;
+    globalThis.fetch = async () => {
+        originContacted = true;
+        throw new Error("invalid mode must fail closed");
+    };
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example.com/static/calendar.js"),
+            { ORIGIN_FALLBACK_MODE: "typo" },
+        );
+        assert.equal(response.status, 503);
+        assert.equal(originContacted, false);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("serves browser pages and static files from Worker assets without contacting Render", async () => {
+    const requestedPaths = [];
+    const env = {
+        ORIGIN_FALLBACK_MODE: "severed",
+        ASSETS: {
+            async fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return new Response("native asset", { status: 200 });
+            },
+        },
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+        throw new Error("native assets must not contact Render");
+    };
+
+    try {
+        for (const path of ["/", "/calendar-ui", "/login", "/accounts/ui", "/admin", "/admin/ui", "/static/calendar.js"]) {
+            const response = await worker.fetch(new Request(`https://calendar.example.com${path}`), env);
+            assert.equal(response.status, 200);
+            assert.equal(await response.text(), "native asset");
+        }
+        assert.deepEqual(requestedPaths, [
+            "/index.html",
+            "/index.html",
+            "/login.html",
+            "/accounts.html",
+            "/admin.html",
+            "/admin.html",
+            "/static/calendar.js",
+        ]);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("serves the TV dashboard from Worker assets only in native pairing mode", async () => {
+    const paths = [];
+    const response = await worker.fetch(new Request("https://calendar.example.com/tv/dashboard"), {
+        TV_PAIRING_MODE: "native",
+        ASSETS: {
+            async fetch(request) {
+                paths.push(new URL(request.url).pathname);
+                return new Response("<script>window.TV_APP_VERSION='__TV_APP_VERSION__'</script>", {
+                    headers: { "content-type": "text/html" },
+                });
+            },
+        },
+        TV_APP_VERSION: "tv-test-version",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store, max-age=0, must-revalidate");
+    assert.equal(await response.text(), "<script>window.TV_APP_VERSION='tv-test-version'</script>");
+    assert.deepEqual(paths, ["/tv.html"]);
 });
 
 test("native date-sticky write mode fails closed without Worker authentication", async () => {
@@ -462,7 +591,7 @@ test("proxy fails closed when the origin points back to the Worker", async () =>
     let response;
     try {
         response = await worker.fetch(
-            new Request("https://calendar.example.com/health?token=must-not-be-logged"),
+            new Request("https://calendar.example.com/unmigrated?token=must-not-be-logged"),
             { ORIGIN_BASE_URL: "https://calendar.example.com" },
         );
     } finally {
@@ -474,7 +603,7 @@ test("proxy fails closed when the origin points back to the Worker", async () =>
     assert.deepEqual(errorLog, {
         event: "origin_request_failed",
         method: "GET",
-        path: "/health",
+        path: "/unmigrated",
         errorType: "Error",
     });
 });

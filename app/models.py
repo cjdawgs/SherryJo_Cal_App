@@ -160,6 +160,7 @@ class OAuthAccount(Base):
     sync_frequency_minutes = Column(Integer, default=5, nullable=False)
     sync_range_days = Column(Integer, default=30, nullable=False)
     last_manual_refresh_at = Column(DateTime(timezone=True), nullable=True)
+    sync_claimed_until = Column(DateTime(timezone=True), nullable=True)
 
     # ✅ SYNC TRACKING
     last_sync = Column(DateTime(timezone=True), nullable=True)

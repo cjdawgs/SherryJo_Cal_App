@@ -131,6 +131,21 @@ def _scheduler_execution_enabled() -> bool:
     return _scheduler_owner() == "render"
 
 
+def _maintenance_scheduler_owner() -> str:
+    """Owner for non-provider maintenance jobs; defaults to the legacy global owner."""
+    return str(os.getenv("SYNC_MAINTENANCE_SCHEDULER_OWNER", _scheduler_owner())).strip().lower() or _scheduler_owner()
+
+
+def _render_provider_allowlist() -> set[str]:
+    """Providers Render may retain when Cloudflare owns primary provider sync."""
+    raw = str(os.getenv("SYNC_RENDER_PROVIDER_ALLOWLIST", ""))
+    return {normalize.strip().lower() for normalize in raw.split(",") if normalize.strip()}
+
+
+def _render_provider_allowed(provider: str) -> bool:
+    return _scheduler_execution_enabled() or str(provider or "").strip().lower() in _render_provider_allowlist()
+
+
 def _normalized_provider(account) -> str:
     return str(getattr(account, "provider", "") or "").strip().lower()
 
@@ -471,16 +486,20 @@ def run_event_sync():
     try:
         # Only users that actually have a sync-enabled account can be due, so
         # the wakeup costs one join instead of a query per registered user.
-        users = (
+        user_query = (
             db.query(User)
             .join(OAuthAccount, OAuthAccount.user_id == User.id)
             .filter(
                 OAuthAccount.sync_enabled == True,
                 OAuthAccount.access_token != "__REAUTH_REQUIRED__",
             )
-            .distinct()
-            .all()
         )
+        if not _scheduler_execution_enabled():
+            retained_providers = _render_provider_allowlist()
+            if not retained_providers:
+                return
+            user_query = user_query.filter(func.lower(OAuthAccount.provider).in_(retained_providers))
+        users = user_query.distinct().all()
 
         if not users:
             return
@@ -495,7 +514,7 @@ def run_event_sync():
                 ).all()
                 user_accounts = [
                     account for account in user_accounts
-                    if not _is_reauth_required(account)
+                    if not _is_reauth_required(account) and _render_provider_allowed(account.provider)
                 ]
 
                 now_for_user = datetime.now(timezone.utc)
@@ -665,44 +684,53 @@ def start_scheduler():
     Wakes on a short heartbeat and only syncs users/accounts that are due.
     """
 
-    if not _scheduler_execution_enabled():
+    provider_jobs_enabled = _scheduler_execution_enabled() or bool(_render_provider_allowlist())
+    maintenance_jobs_enabled = _maintenance_scheduler_owner() == "render"
+
+    if not provider_jobs_enabled and not maintenance_jobs_enabled:
         logger.info(
-            "[SCHEDULER] startup skipped (owner=%s, expected=render)",
+            "[SCHEDULER] startup skipped (provider_owner=%s, maintenance_owner=%s)",
             _scheduler_owner(),
+            _maintenance_scheduler_owner(),
         )
         return
 
     heartbeat_minutes = _scheduler_heartbeat_minutes()
 
-    scheduler.add_job(
-        run_event_sync,
-        "interval",
-        minutes=heartbeat_minutes,
-        id="event_sync_job",
-        replace_existing=True
-    )
+    if provider_jobs_enabled:
+        scheduler.add_job(
+            run_event_sync,
+            "interval",
+            minutes=heartbeat_minutes,
+            id="event_sync_job",
+            replace_existing=True
+        )
 
-    scheduler.add_job(
-        prune_tv_diag_log,
-        "interval",
-        hours=24,
-        id="tv_diag_prune_job",
-        replace_existing=True
-    )
+    if maintenance_jobs_enabled:
+        scheduler.add_job(
+            prune_tv_diag_log,
+            "interval",
+            hours=24,
+            id="tv_diag_prune_job",
+            replace_existing=True
+        )
 
-    scheduler.add_job(
-        persist_sync_efficiency_rollup,
-        "cron",
-        hour=0,
-        minute=5,
-        id="sync_efficiency_rollup_job",
-        replace_existing=True,
-    )
+        scheduler.add_job(
+            persist_sync_efficiency_rollup,
+            "cron",
+            hour=0,
+            minute=5,
+            id="sync_efficiency_rollup_job",
+            replace_existing=True,
+        )
 
     scheduler.start()
 
     logger.info(
-        "[SCHEDULER] Background sync started (heartbeat=%s min, apple_min=%s min); diag prune daily; sync rollup daily",
+        "[SCHEDULER] started provider_owner=%s retained_providers=%s maintenance_owner=%s heartbeat=%s min apple_min=%s min",
+        _scheduler_owner(),
+        sorted(_render_provider_allowlist()),
+        _maintenance_scheduler_owner(),
         heartbeat_minutes,
         _apple_min_sync_minutes(),
     )
@@ -754,6 +782,8 @@ def get_scheduler_health(user_id: int | None = None):
         "running": scheduler.running,
         "owner": _scheduler_owner(),
         "execution_enabled": _scheduler_execution_enabled(),
+        "render_provider_allowlist": sorted(_render_provider_allowlist()),
+        "maintenance_owner": _maintenance_scheduler_owner(),
         "last_started_at": last_global_sync_started_at.isoformat() if last_global_sync_started_at else None,
         "last_finished_at": last_global_sync_finished_at.isoformat() if last_global_sync_finished_at else None,
         "last_error": last_global_sync_error,

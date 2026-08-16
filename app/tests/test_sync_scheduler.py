@@ -431,6 +431,23 @@ def test_scheduler_owner_and_execution_enabled(monkeypatch):
     assert sync_scheduler._scheduler_execution_enabled() is False
 
 
+def test_cloudflare_provider_owner_can_retain_apple_and_render_maintenance(monkeypatch):
+    scheduler = MagicMock()
+    monkeypatch.setattr(sync_scheduler, "scheduler", scheduler)
+    monkeypatch.setenv("SYNC_SCHEDULER_OWNER", "cloudflare")
+    monkeypatch.setenv("SYNC_RENDER_PROVIDER_ALLOWLIST", "apple")
+    monkeypatch.setenv("SYNC_MAINTENANCE_SCHEDULER_OWNER", "render")
+
+    sync_scheduler.start_scheduler()
+
+    jobs = {call[1]["id"]: call[1] for call in scheduler.add_job.call_args_list}
+    assert set(jobs) == {"event_sync_job", "tv_diag_prune_job", "sync_efficiency_rollup_job"}
+    assert sync_scheduler._render_provider_allowed("apple") is True
+    assert sync_scheduler._render_provider_allowed("google") is False
+    assert sync_scheduler._render_provider_allowed("microsoft") is False
+    scheduler.start.assert_called_once()
+
+
 def test_prune_tv_diag_log_deletes_only_expired_rows(monkeypatch, db):
     expired = TVDiagLog(
         ts_server=datetime.now(timezone.utc) - timedelta(days=30),

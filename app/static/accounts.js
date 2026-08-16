@@ -256,6 +256,9 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
   const chosen = selectedAccounts[0] || accounts[0];
 
   const scheduler = statusPayload?.scheduler || {};
+  const schedulerOwner = String(scheduler.owner || "render").toLowerCase();
+  const schedulerActive = Boolean(scheduler.running) || schedulerOwner === "cloudflare";
+  const schedulerLabel = schedulerOwner === "cloudflare" ? "Cloudflare Cron" : "Render";
   const lines = selectedAccounts.length > 1
     ? [
       {
@@ -268,7 +271,7 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
       },
       {
         title: "Scheduler health",
-        body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+        body: [`Owner: ${schedulerLabel}`, `Last account sync: ${chosen.last_sync_success || chosen.last_sync_failure || chosen.last_sync || "never"}`, `Ledger operations (24h): ${scheduler.operation_ledger?.created_in_window ?? "unknown"}`].join(" | "),
       },
     ]
     : [
@@ -286,7 +289,7 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
       },
       {
         title: "Scheduler health",
-        body: [`Last started: ${scheduler.last_started_at || "unknown"}`, `Last finished: ${scheduler.last_finished_at || "unknown"}`, `Next run: ${scheduler.next_run_at || "unknown"}`].join(" | "),
+        body: [`Owner: ${schedulerLabel}`, `Last account sync: ${chosen.last_sync_success || chosen.last_sync_failure || chosen.last_sync || "never"}`, `Ledger operations (24h): ${scheduler.operation_ledger?.created_in_window ?? "unknown"}`].join(" | "),
       },
     ];
 
@@ -295,7 +298,7 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
     selectedAccounts.length > 1
       ? `Selected accounts: ${selectedAccounts.length}`
       : `Selected account: ${chosen.account_email || "Unknown"}`,
-    `Range ${chosen.sync_range_days || 30} days | Every ${chosen.sync_frequency_minutes || 5} min | ${scheduler.running ? "scheduler running" : "scheduler idle"}`
+    `Range ${chosen.sync_range_days || 30} days | Every ${chosen.sync_frequency_minutes || 5} min | ${schedulerActive ? `${schedulerLabel} scheduler active` : "scheduler idle"}`
   );
   renderSchedulerMetricsCard(scheduler, rollupPayload);
 
@@ -534,12 +537,6 @@ async function hydrateAdminNavigation() {
       return;
     }
 
-    // Fallback guard: if role payload is unavailable, probe an admin-only route.
-    const adminProbe = await api.get("/admin/users");
-    if (adminProbe && adminProbe.ok) {
-      adminBtn.classList.remove("hidden");
-      return;
-    }
   } catch (error) {
     console.warn("Unable to determine admin role for accounts nav", error);
   }

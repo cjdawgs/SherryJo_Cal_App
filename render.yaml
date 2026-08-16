@@ -40,3 +40,9 @@ services:
         sync: false
       - key: TOKEN_ENCRYPTION_KEY
         sync: false
+      - key: SYNC_SCHEDULER_OWNER
+        value: render
+      - key: SYNC_RENDER_PROVIDER_ALLOWLIST
+        value: ""
+      - key: SYNC_MAINTENANCE_SCHEDULER_OWNER
+        value: render

@@ -168,6 +168,7 @@ if engine.url.drivername.startswith("postgresql"):
             "sync_frequency_minutes",
             "sync_range_days",
             "last_manual_refresh_at",
+            "sync_claimed_until",
             "sync_token",
         }
         missing = required_columns - columns
@@ -185,6 +186,7 @@ if engine.url.drivername.startswith("postgresql"):
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_frequency_minutes INTEGER DEFAULT 5"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_range_days INTEGER DEFAULT 30"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS last_manual_refresh_at TIMESTAMPTZ"))
+                conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_claimed_until TIMESTAMPTZ"))
                 conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_token JSONB"))
                 conn.execute(text("UPDATE oauth_accounts SET sync_frequency_minutes = 5 WHERE sync_frequency_minutes IS NULL"))
                 conn.execute(text("UPDATE oauth_accounts SET sync_range_days = 30 WHERE sync_range_days IS NULL"))
@@ -248,6 +250,7 @@ if engine.url.drivername.startswith("sqlite"):
             "sync_frequency_minutes",
             "sync_range_days",
             "last_manual_refresh_at",
+            "sync_claimed_until",
             "sync_token",
         }
         missing = required_columns - columns
@@ -277,6 +280,8 @@ if engine.url.drivername.startswith("sqlite"):
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN sync_range_days INTEGER DEFAULT 30"))
                     elif col == "last_manual_refresh_at":
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN last_manual_refresh_at DATETIME"))
+                    elif col == "sync_claimed_until":
+                        conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN sync_claimed_until DATETIME"))
                     elif col == "sync_token":
                         conn.execute(text("ALTER TABLE oauth_accounts ADD COLUMN sync_token JSON"))
                 conn.execute(text("UPDATE oauth_accounts SET sync_frequency_minutes = 5 WHERE sync_frequency_minutes IS NULL"))

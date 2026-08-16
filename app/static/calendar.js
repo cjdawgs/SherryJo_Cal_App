@@ -1661,7 +1661,7 @@ async function syncSingleAccount(accountKey) {
     /**************************************************************
      * ✅ STEP 2 — CALL BACKEND
      **************************************************************/
-    const res = await apiFetch(`/calendar/sync?account=${accountKey}`, {
+    const res = await apiFetch(`/calendar/sync?account=${encodeURIComponent(accountKey)}`, {
       method: "POST"
     });
 

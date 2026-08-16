@@ -100,7 +100,7 @@ def test_root_and_canary_workers_require_edge_proxy_authentication():
 
     assert config["name"] == "sherryjo-cal-app"
     assert config["env"]["canary"]["name"] == "sherryjo-cal-app-canary"
-    required_secrets = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY"]
+    required_secrets = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY", "ADMIN_SETUP_CODE"]
     assert config["secrets"]["required"] == required_secrets
     assert config["env"]["canary"]["secrets"]["required"] == required_secrets
     expected_jwt_policy = {

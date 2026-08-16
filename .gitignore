@@ -37,6 +37,7 @@ dist/
 # Node / JavaScript
 node_modules/
 .wrangler/
+platform/cloudflare/.worker-assets/
 
 # OS Junk
 .DS_Store

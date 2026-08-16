@@ -4,8 +4,14 @@ compatibility_date = "2026-08-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+[assets]
+directory = "platform/cloudflare/.worker-assets"
+binding = "ASSETS"
+run_worker_first = true
+
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
+ORIGIN_FALLBACK_MODE = "proxy"
 JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"
@@ -15,6 +21,18 @@ GOOGLE_CLIENT_ID = "680630646564-pf1vacnv9f1659e1kdebcenb0pvgrhs3.apps.googleuse
 MS_CLIENT_ID = "db1b5b12-6509-4653-8d94-c7a320528c6f"
 MS_TENANT_ID = "common"
 JWT_ACTIVE_KID = "jwt-20260804-030b2267fd45"
+AUTH_MODE = "proxy"
+ACCOUNT_READ_MODE = "proxy"
+ACCOUNT_WRITE_MODE = "proxy"
+TV_PAIRING_MODE = "proxy"
+TV_STATE_MODE = "proxy"
+TV_EVENTS_MODE = "proxy"
+TV_DIAGNOSTICS_MODE = "proxy"
+CALENDAR_IMPORT_MODE = "proxy"
+CALENDAR_PUBLISH_MODE = "proxy"
+WEBSOCKET_MODE = "proxy"
+ADMIN_API_MODE = "proxy"
+CALENDAR_SYNC_MODE = "proxy"
 GOOGLE_AUTH_MODE = "native"
 MS_AUTH_MODE = "native"
 CALENDAR_READ_MODE = "native"
@@ -30,9 +48,16 @@ TAG_COLOR_WRITE_MODE = "native"
 TASK_READ_MODE = "native"
 TASK_WRITE_MODE = "native"
 TV_VERSION_READ_MODE = "native"
+SCHEDULED_SYNC_ENABLED = "false"
+SCHEDULED_SYNC_BATCH_SIZE = "10"
+SCHEDULED_SYNC_CLAIM_SECONDS = "240"
+TV_DIAG_RETENTION_DAYS = "14"
+
+[triggers]
+crons = ["*/5 * * * *"]
 
 [secrets]
-required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY"]
+required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY", "ADMIN_SETUP_CODE"]
 
 [observability]
 enabled = true
@@ -48,6 +73,7 @@ workers_dev = true
 
 [env.canary.vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
+ORIGIN_FALLBACK_MODE = "proxy"
 JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"
@@ -57,6 +83,18 @@ GOOGLE_CLIENT_ID = "680630646564-pf1vacnv9f1659e1kdebcenb0pvgrhs3.apps.googleuse
 MS_CLIENT_ID = "db1b5b12-6509-4653-8d94-c7a320528c6f"
 MS_TENANT_ID = "common"
 JWT_ACTIVE_KID = "jwt-20260804-030b2267fd45"
+AUTH_MODE = "proxy"
+ACCOUNT_READ_MODE = "proxy"
+ACCOUNT_WRITE_MODE = "proxy"
+TV_PAIRING_MODE = "proxy"
+TV_STATE_MODE = "proxy"
+TV_EVENTS_MODE = "proxy"
+TV_DIAGNOSTICS_MODE = "proxy"
+CALENDAR_IMPORT_MODE = "proxy"
+CALENDAR_PUBLISH_MODE = "proxy"
+WEBSOCKET_MODE = "proxy"
+ADMIN_API_MODE = "proxy"
+CALENDAR_SYNC_MODE = "proxy"
 GOOGLE_AUTH_MODE = "proxy"
 MS_AUTH_MODE = "proxy"
 CALENDAR_READ_MODE = "shadow"
@@ -72,9 +110,13 @@ TAG_COLOR_WRITE_MODE = "proxy"
 TASK_READ_MODE = "shadow"
 TASK_WRITE_MODE = "proxy"
 TV_VERSION_READ_MODE = "shadow"
+SCHEDULED_SYNC_ENABLED = "false"
+SCHEDULED_SYNC_BATCH_SIZE = "2"
+SCHEDULED_SYNC_CLAIM_SECONDS = "240"
+TV_DIAG_RETENTION_DAYS = "14"
 
 [env.canary.secrets]
-required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY"]
+required = ["EDGE_PROXY_SECRET", "JWT_PUBLIC_KEYS_JSON", "GOOGLE_CLIENT_SECRET", "MS_CLIENT_SECRET", "TOKEN_ENCRYPTION_KEY", "JWT_PRIVATE_KEY", "ADMIN_SETUP_CODE"]
 
 [[env.canary.hyperdrive]]
 binding = "HYPERDRIVE_RLS_NO_CACHE"

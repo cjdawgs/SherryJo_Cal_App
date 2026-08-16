@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { generateKeyPairSync, sign } from "node:crypto";
 
-import { authenticateWorkerRequest, JwtVerificationError, verifyWorkerJwt } from "../src/jwt.js";
+import { authenticateTvRequest, authenticateWorkerRequest, JwtVerificationError, verifyWorkerJwt } from "../src/jwt.js";
 
 const NOW = 1_800_000_000;
 const ISSUER = "https://auth.sherryjo.test";
@@ -211,5 +211,28 @@ test("request authentication fails closed on missing credentials or policy", asy
             { ...configured, JWT_MAX_LIFETIME_SECONDS: "not-a-number" },
         ),
         /JWT_MAX_LIFETIME_SECONDS/,
+    );
+});
+
+test("persistent TV tokens are accepted only by the TV authentication policy", async () => {
+    const pair = keypair();
+    const currentNow = Math.floor(Date.now() / 1000);
+    const tvClaims = payload({ iat: currentNow, nbf: currentNow, token_use: "tv" });
+    delete tvClaims.exp;
+    const token = signedToken(pair.privateKey, tvClaims);
+    const request = () => new Request("https://calendar.example.com/tv/state", {
+        headers: { authorization: `Bearer ${token}` },
+    });
+    const env = {
+        JWT_PUBLIC_KEYS_JSON: JSON.stringify({ "key-1": pair.publicKey }),
+        JWT_ISSUER: ISSUER,
+        JWT_AUDIENCE: AUDIENCE,
+    };
+
+    assert.equal((await authenticateTvRequest(request(), env)).user_id, 42);
+    await assert.rejects(authenticateWorkerRequest(request(), env), /exp claim/);
+    await assert.rejects(
+        verifyWorkerJwt(token, options(pair.publicKey, { nowSeconds: currentNow })),
+        /exp claim/,
     );
 });

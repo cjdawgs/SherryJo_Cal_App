@@ -10,6 +10,8 @@ if (!/^[0-9a-f]{40}$/.test(gitCommit)) {
 }
 
 const wranglerPath = fileURLToPath(new URL("../node_modules/wrangler/bin/wrangler.js", import.meta.url));
+const buildAssetsPath = fileURLToPath(new URL("./build-assets.mjs", import.meta.url));
+execFileSync(process.execPath, [buildAssetsPath], { stdio: "inherit" });
 const args = [wranglerPath, "deploy", "--config", "../../wrangler.toml"];
 if (dryRun) args.push("--dry-run");
 args.push("--env", target === "canary" ? "canary" : "");

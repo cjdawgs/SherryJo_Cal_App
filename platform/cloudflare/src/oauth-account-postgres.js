@@ -14,6 +14,7 @@ export const OAUTH_UPSERT_SQL = `
         token_expires_at  = EXCLUDED.token_expires_at,
         display_name      = EXCLUDED.display_name,
         provider_id       = COALESCE(EXCLUDED.provider_id, oauth_accounts.provider_id)
+    RETURNING id
 `;
 
 export async function executeOAuthAccountUpsert(adapter, {
@@ -31,11 +32,12 @@ export async function executeOAuthAccountUpsert(adapter, {
     const encryptedRefresh = refreshToken ? await fernetEncrypt(refreshToken, tokenEncryptionKey) : null;
     const expiresIso = tokenExpiresAt ? new Date(tokenExpiresAt * 1000).toISOString() : null;
 
-    await adapter.runWithIdentity(userId, (client) =>
+    const result = await adapter.runWithIdentity(userId, (client) =>
         client.query(OAUTH_UPSERT_SQL, [
             userId, provider, accountEmail,
             encryptedAccess, encryptedRefresh, expiresIso,
             displayName || accountEmail, providerId || null,
         ]),
     );
+    return result.rows?.[0]?.id || null;
 }

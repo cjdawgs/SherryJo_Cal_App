@@ -105,20 +105,24 @@ function validateClaims(payload, options) {
 
     const issuedAt = requiredNumericClaim(payload, "iat");
     const notBefore = requiredNumericClaim(payload, "nbf");
-    const expiresAt = requiredNumericClaim(payload, "exp");
+    const persistentTvToken = options.allowPersistentTvToken === true && payload.token_use === "tv";
+    const expiresAt = persistentTvToken ? null : requiredNumericClaim(payload, "exp");
     if (issuedAt > nowSeconds + clockSkewSeconds) {
         throw new JwtVerificationError("JWT issued-at time is in the future");
     }
     if (notBefore > nowSeconds + clockSkewSeconds) {
         throw new JwtVerificationError("JWT is not active yet");
     }
-    if (expiresAt <= nowSeconds - clockSkewSeconds) {
+    if (persistentTvToken && payload.exp !== undefined) {
+        throw new JwtVerificationError("Persistent TV JWT must not include exp");
+    }
+    if (!persistentTvToken && expiresAt <= nowSeconds - clockSkewSeconds) {
         throw new JwtVerificationError("JWT has expired");
     }
-    if (notBefore < issuedAt - clockSkewSeconds || expiresAt <= notBefore) {
+    if (notBefore < issuedAt - clockSkewSeconds || (!persistentTvToken && expiresAt <= notBefore)) {
         throw new JwtVerificationError("JWT time claims are inconsistent");
     }
-    if (expiresAt - issuedAt > maxLifetimeSeconds) {
+    if (!persistentTvToken && expiresAt - issuedAt > maxLifetimeSeconds) {
         throw new JwtVerificationError("JWT lifetime exceeds the allowed maximum");
     }
 }
@@ -205,5 +209,22 @@ export async function authenticateWorkerRequest(request, env) {
         audience,
         clockSkewSeconds: integerSetting(env.JWT_CLOCK_SKEW_SECONDS, "JWT_CLOCK_SKEW_SECONDS", 30, 0),
         maxLifetimeSeconds: integerSetting(env.JWT_MAX_LIFETIME_SECONDS, "JWT_MAX_LIFETIME_SECONDS", 3600, 1),
+    });
+}
+
+export async function authenticateTvRequest(request, env) {
+    const authorization = request.headers.get("authorization") || "";
+    const match = authorization.match(/^Bearer ([^\s]+)$/i);
+    if (!match) throw new JwtVerificationError("A single Bearer token is required");
+    const issuer = String(env.JWT_ISSUER || "").trim();
+    const audience = String(env.JWT_AUDIENCE || "").trim();
+    if (!issuer || !audience) throw new JwtVerificationError("Worker JWT issuer and audience must be configured");
+    return verifyWorkerJwt(match[1], {
+        publicKeys: env.JWT_PUBLIC_KEYS_JSON,
+        issuer,
+        audience,
+        clockSkewSeconds: integerSetting(env.JWT_CLOCK_SKEW_SECONDS, "JWT_CLOCK_SKEW_SECONDS", 30, 0),
+        maxLifetimeSeconds: integerSetting(env.JWT_MAX_LIFETIME_SECONDS, "JWT_MAX_LIFETIME_SECONDS", 3600, 1),
+        allowPersistentTvToken: true,
     });
 }
