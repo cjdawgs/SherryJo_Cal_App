@@ -1,0 +1,27 @@
+{
+    "name": "sherryjo-calendar-ios",
+    "version": "1.0.0",
+    "private": true,
+    "description": "App Store package for the SherryJo Calendar iPhone and iPad UI.",
+    "type": "module",
+    "scripts": {
+        "assets": "capacitor-assets generate --ios --iconBackgroundColor '#f6f8fc' --splashBackgroundColor '#f6f8fc' --logoSplashScale 0.28",
+        "sync": "cap sync ios",
+        "open": "cap open ios",
+        "doctor": "cap doctor ios",
+        "prepare:ios": "npm run assets && npm run sync && npm run doctor",
+        "package:source": "sh scripts/create-source-package.sh"
+    },
+    "dependencies": {
+        "@capacitor/app": "8.1.1",
+        "@capacitor/core": "8.5.0",
+        "@capacitor/ios": "8.5.0",
+        "@capacitor/splash-screen": "8.0.2",
+        "@capacitor/status-bar": "8.0.3"
+    },
+    "devDependencies": {
+        "@capacitor/assets": "^3.0.5",
+        "@capacitor/cli": "8.5.0",
+        "typescript": "^5.9.3"
+    }
+}

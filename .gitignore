@@ -53,6 +53,7 @@ SherryJo_Cal_App.code-workspace
 
 # Backups & Archives
 *.zip
+artifacts/mobile/*.sha256
 _backup_before_force/
 
 # Local validation evidence
