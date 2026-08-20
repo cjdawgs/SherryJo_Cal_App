@@ -7,7 +7,6 @@ workers_dev = true
 [assets]
 directory = "platform/cloudflare/.worker-assets"
 binding = "ASSETS"
-run_worker_first = true
 
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
