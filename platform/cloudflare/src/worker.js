@@ -1136,15 +1136,15 @@ export default {
             const accountsReadMode = accountReadMode(env);
             const accountsWriteMode = accountWriteMode(env);
             const pairingMode = tvPairingMode(env);
-                        if (pairingMode === "native" && request.method === "GET" && incomingUrl.pathname === "/tv/dashboard") {
-                            return await nativeTvDashboard(request, incomingUrl, env);
-                        }
-                        if (pairingMode === "native" && request.method === "GET" && incomingUrl.pathname === "/tv/kiosk") {
-                            return await nativeTvKiosk(request, incomingUrl, env);
-                        }
-                        if (pairingMode === "native" && request.method === "POST" && incomingUrl.pathname === "/tv/generate-kiosk-token") {
-                            return await nativeTvKioskToken(request, incomingUrl, env);
-                        }
+            if (pairingMode === "native" && request.method === "GET" && incomingUrl.pathname === "/tv/dashboard") {
+                return await nativeTvDashboard(request, incomingUrl, env);
+            }
+            if (pairingMode === "native" && request.method === "GET" && incomingUrl.pathname === "/tv/kiosk") {
+                return await nativeTvKiosk(request, incomingUrl, env);
+            }
+            if (pairingMode === "native" && request.method === "POST" && incomingUrl.pathname === "/tv/generate-kiosk-token") {
+                return await nativeTvKioskToken(request, incomingUrl, env);
+            }
             const stateMode = tvStateMode(env);
             const eventsMode = tvEventsMode(env);
             const diagnosticsMode = tvDiagnosticsMode(env);
@@ -1160,10 +1160,11 @@ export default {
             }
             if (syncMode === "native" && request.method === "POST" && incomingUrl.pathname === "/calendar/sync") {
                 const claims = await authenticateWorkerRequest(request, env);
-                return jsonResponse(await runManualCalendarSync(
+                const result = await runManualCalendarSync(
                     createHyperdriveCalendarReadAdapter(env), env, claims.user_id,
                     incomingUrl.searchParams.get("account"), incomingUrl.searchParams.get("dedup") !== "false",
-                ));
+                );
+                return jsonResponse(result, result.status === "error" ? 502 : 200);
             }
             if (syncMode === "native" && request.method === "POST" && incomingUrl.pathname === "/calendar/dedup-materialize") {
                 const claims = await authenticateWorkerRequest(request, env);

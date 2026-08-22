@@ -3360,6 +3360,11 @@ async function syncNow() {
     }
 
     if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+      console.error("❌ /calendar/sync failed:", {
+        httpStatus: res.status,
+        message: data?.message || null,
+        results: data?.result?.results || [],
+      });
       const msg = data?.message || `Sync failed (${res.status})`;
       throw new Error(msg);
     }

@@ -8,6 +8,22 @@ function normalizeProvider(value) {
     return provider;
 }
 
+function formatSyncFailureMessage(accounts, results) {
+    const accountsById = new Map(accounts.map((account) => [account.id, account]));
+    const failed = results.filter((result) => ["failed", "reauth_required"].includes(result.status));
+    if (!failed.length) return null;
+    const details = failed.map((result) => {
+        const account = accountsById.get(result.accountId);
+        const provider = normalizeProvider(result.provider || account?.provider || "calendar");
+        const email = String(account?.account_email || "").trim();
+        const label = email ? `${provider} (${email})` : provider;
+        return result.status === "reauth_required"
+            ? `Reconnect ${label}`
+            : `${label} sync failed (${result.errorType || "ProviderError"})`;
+    });
+    return details.join("; ");
+}
+
 export async function materializeDedup(adapter, userId) {
     return adapter.runWithIdentity(userId, async (client) => {
         const result = await client.query(`
@@ -67,7 +83,16 @@ export async function runManualCalendarSync(adapter, env, userId, accountKey, de
         : 30;
     const rangeDays = Math.max(1, Math.min(365, configuredRange));
     const now = Date.now();
-    return { status: results.some((item) => ["failed", "reauth_required"].includes(item.status)) ? "error" : "success", result: { results, dedup_changed: changed }, range_days: rangeDays, range_start: new Date(now - rangeDays * 86400000).toISOString(), range_end: new Date(now + rangeDays * 86400000).toISOString(), account: normalizedKey || null };
+    const message = formatSyncFailureMessage(selected, results);
+    return {
+        status: message ? "error" : "success",
+        ...(message ? { message } : {}),
+        result: { results, dedup_changed: changed },
+        range_days: rangeDays,
+        range_start: new Date(now - rangeDays * 86400000).toISOString(),
+        range_end: new Date(now + rangeDays * 86400000).toISOString(),
+        account: normalizedKey || null,
+    };
 }
 
 export async function upsertLegacyEventNote(adapter, userId, data) {
