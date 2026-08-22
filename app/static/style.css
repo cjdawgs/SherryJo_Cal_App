@@ -19,10 +19,26 @@
 }
 
 .database-provider-live {
+  appearance: auto;
   background: #86efac !important;
+  background-color: #86efac !important;
   border: 2px solid #22c55e !important;
   color: #ffffff !important;
   font-weight: 700 !important;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.14) inset;
+}
+
+select.database-provider-live,
+input.database-provider-live {
+  background: #86efac !important;
+  background-color: #86efac !important;
+  color: #ffffff !important;
+  -webkit-text-fill-color: #ffffff !important;
+}
+
+select.database-provider-live option {
+  background: #ffffff;
+  color: #111827;
 }
 
 .database-provider-inactive {
@@ -88,6 +104,7 @@
   background: #86efac;
   border: 2px solid #22c55e;
   color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.14) inset;
 }
 
 .hyperdrive-live-badge-inactive {

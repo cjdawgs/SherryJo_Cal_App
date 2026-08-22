@@ -441,6 +441,7 @@ function renderSystemOverview(data) {
   const isOutOfSync = deploymentStatus === "out_of_sync";
   const isUnknown = !isSynced && !isOutOfSync;
   const hasDeployedCommit = Boolean(normalizeCommit(deployment?.current_commit));
+  const isDeployedKnown = isUnknown && hasDeployedCommit;
   const previousDeploymentStatus = state.deploymentSyncStatus;
 
   if (el.dbTypeText) {
@@ -517,8 +518,9 @@ function renderSystemOverview(data) {
   if (el.deploymentSyncStatusPill) {
     el.deploymentSyncStatusPill.textContent = isSynced ? "In sync" : (isOutOfSync ? "Out of sync" : (hasDeployedCommit ? "Deployed, comparison unavailable" : "Unable to verify"));
     el.deploymentSyncStatusPill.classList.toggle("is-synced", isSynced);
+    el.deploymentSyncStatusPill.classList.toggle("is-deployed", isDeployedKnown);
     el.deploymentSyncStatusPill.classList.toggle("is-out-of-sync", isOutOfSync);
-    el.deploymentSyncStatusPill.classList.toggle("is-unknown", isUnknown);
+    el.deploymentSyncStatusPill.classList.toggle("is-unknown", isUnknown && !isDeployedKnown);
   }
 
   if (el.deploymentSyncCurrentCommit) {
@@ -2185,6 +2187,11 @@ async function loadDatabaseConfig() {
     const providerIsLive = Boolean(data.live_database_confirmed && el.databaseProfileSelect.value === data.active_provider_title);
     el.databaseProfileSelect.classList.toggle("database-provider-live", providerIsLive);
     el.databaseProfileSelect.classList.toggle("database-provider-inactive", !providerIsLive);
+    if (el.databaseProviderTitleInput) {
+      const titleMatchesLiveProvider = Boolean(data.live_database_confirmed && data.provider_label && el.databaseProviderTitleInput.value.trim().toLowerCase() === String(data.provider_label).trim().toLowerCase());
+      el.databaseProviderTitleInput.classList.toggle("database-provider-live", titleMatchesLiveProvider);
+      el.databaseProviderTitleInput.classList.toggle("database-provider-inactive", !titleMatchesLiveProvider);
+    }
   }
   window.__databasePreferredUrl = preferredUrl;
   window.__databaseRuntime = data.runtime || "origin";
