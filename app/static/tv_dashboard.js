@@ -808,6 +808,13 @@ function processServerVersionSignal(res, data = null) {
   scheduleUpdateReload(signal);
 }
 
+function recordServerVersion(res, data = null) {
+  const headerVersion = normalizeAppVersion(res && res.headers ? res.headers.get('X-TV-App-Version') : '');
+  const bodyVersion = normalizeAppVersion(data && data.appVersion ? data.appVersion : '');
+  const signal = headerVersion || bodyVersion;
+  if (signal) state.serverAppVersion = signal;
+}
+
 function toggleCursorMode() {
   const nextMode = isCursorMode() ? 'nav' : 'cursor';
   setInputMode(nextMode);
@@ -1913,7 +1920,7 @@ async function refreshEvents(force = false, options = {}) {
       return;
     }
 
-    processServerVersionSignal(res);
+    recordServerVersion(res);
 
     if (res.status === 304) {
       state.lastEventsFetchAt = Date.now();
@@ -1940,7 +1947,7 @@ async function refreshEvents(force = false, options = {}) {
     }
 
     const data = await res.json().catch(() => ({}));
-    processServerVersionSignal(res, data);
+    recordServerVersion(res, data);
     state.lastEventsFetchAt = Date.now();
     state.autoRefreshBackoffUntil = 0;
     const staleData = Boolean(data.staleData);
@@ -3177,7 +3184,7 @@ function renderRightRail(selectedDateKey, weekDateKeys, extraClass = '') {
 function sidebarItems() {
   const dedupOn = isTvDedupEnabled();
   const items = [
-    { key: 'sync', label: 'Sync', group: 'top', action: () => patchTvState({ selectedDate: state.selectedDate || toISO(new Date()) }, { recordHistory: false }).then(() => refreshEvents(true, { showSync: true })) },
+    { key: 'sync', label: 'Sync', group: 'top', action: () => syncTvCalendar() },
     { key: 'undo', label: 'Undo', group: 'history', action: () => undoTvState(), disabled: !state.history.past.length },
     { key: 'redo', label: 'Redo', group: 'history', action: () => redoTvState(), disabled: !state.history.future.length },
     { key: 'dedupe-toggle', label: dedupOn ? 'Dedup: ON' : 'Dedup: OFF', group: 'history', action: () => toggleTvDedup(), dedupOn },
@@ -3202,6 +3209,47 @@ function runSidebarAction(index) {
   closeEditor(true);
   const items = sidebarItems();
   if (items[index]) items[index].action();
+}
+
+async function syncTvCalendar() {
+  if (state.syncInProgress) return;
+  state.syncInProgress = true;
+  state.syncVisualStartedAt = Date.now();
+  applySyncVisualState();
+  renderFooterHint();
+
+  try {
+    const res = await authFetch(`/calendar/sync${isTvDedupEnabled() ? '' : '?dedup=false'}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      suppressNetworkHint: true,
+    });
+    if (!res) throw new Error(state.lastAuthFetchError?.message || 'Network request failed');
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || String(data.status || '').toLowerCase() === 'error') {
+      throw new Error(data.message || `Calendar sync failed (${res.status})`);
+    }
+
+    state.lastEventsEtag = '';
+    await refreshEvents(true, { showSync: true });
+  } catch (err) {
+    const message = err && err.message ? err.message : 'Calendar sync failed';
+    if (tvDiag) tvDiag.log('tv_calendar_sync_failed', message);
+    setSyncStatus(false, 'Sync Failed - showing last known data');
+    renderFooterHint(`Sync issue: ${message}`);
+  } finally {
+    if (state.syncInProgress) {
+      const elapsed = Date.now() - (state.syncVisualStartedAt || Date.now());
+      if (elapsed < MIN_SYNC_VISUAL_MS) {
+        await new Promise((resolve) => setTimeout(resolve, MIN_SYNC_VISUAL_MS - elapsed));
+      }
+      state.syncInProgress = false;
+      state.syncVisualStartedAt = 0;
+      applySyncVisualState();
+      renderFooterHint();
+    }
+  }
 }
 
 function resetAccountFilters() {
