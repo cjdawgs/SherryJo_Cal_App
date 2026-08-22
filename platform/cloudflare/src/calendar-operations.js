@@ -40,7 +40,7 @@ export async function materializeDedup(adapter, userId) {
             }
             await client.query(`UPDATE public.events SET external_ids=$2::jsonb, source='local', account_email='local',
                 description=COALESCE(NULLIF(description,''),$3), color=COALESCE(color,$4), updated_at=now() WHERE id=$1`,
-            [canonical.id, JSON.stringify(externalIds), rows.find((row) => row.description)?.description || "", rows.find((row) => row.color)?.color || null]);
+                [canonical.id, JSON.stringify(externalIds), rows.find((row) => row.description)?.description || "", rows.find((row) => row.color)?.color || null]);
         }
         const promoted = await client.query(`UPDATE public.events SET source='local',account_email='local',updated_at=now()
             WHERE owner_id=public.worker_app_user_id() AND external_ids IS NOT NULL
@@ -53,7 +53,9 @@ export async function runManualCalendarSync(adapter, env, userId, accountKey, de
     const normalizedKey = String(accountKey || "").trim().toLowerCase();
     const accounts = await adapter.runWithIdentity(userId, async (client) => (await client.query(`
         SELECT id, provider, account_email, sync_range_days FROM public.oauth_accounts
-        WHERE user_id=public.worker_app_user_id() AND sync_enabled IS TRUE ORDER BY id
+                WHERE user_id=public.worker_app_user_id() AND sync_enabled IS TRUE
+                    AND lower(COALESCE(account_email, '')) NOT LIKE '%@example.com'
+                ORDER BY id
     `)).rows);
     const selected = normalizedKey ? accounts.filter((account) => `${normalizeProvider(account.provider)}:${String(account.account_email).trim().toLowerCase()}` === normalizedKey) : accounts;
     if (normalizedKey && !selected.length) return { status: "error", message: "Sync account not found" };
@@ -74,7 +76,7 @@ export async function upsertLegacyEventNote(adapter, userId, data) {
             const result = await client.query(`UPDATE public.notes AS note SET content=COALESCE($2,note.content),
                 x=COALESCE($3,note.x),y=COALESCE($4,note.y) FROM public.events AS event
                 WHERE note.id=$1 AND event.id=note.event_id AND event.owner_id=public.worker_app_user_id() RETURNING note.id`,
-            [String(data.note_id), data.content ?? null, data.x ?? null, data.y ?? null]);
+                [String(data.note_id), data.content ?? null, data.x ?? null, data.y ?? null]);
             if (!result.rowCount) return null;
         } else {
             const eventId = Number(data.event_id);

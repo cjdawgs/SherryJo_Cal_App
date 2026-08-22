@@ -9,11 +9,15 @@ test("materializes matching provider events into one local canonical", async () 
         { id: 1, title: "Same", start_time: new Date("2026-08-16T12:00:20Z"), end_time: new Date("2026-08-16T13:00:00Z"), source: "google", account_email: "a@test", external_ids: { "google:a@test": "g1" } },
         { id: 2, title: " same ", start_time: new Date("2026-08-16T12:00:40Z"), end_time: new Date("2026-08-16T13:00:30Z"), source: "microsoft", account_email: "b@test", external_ids: { "microsoft:b@test": "m1" } },
     ];
-    const adapter = { runWithIdentity: async (_userId, operation) => operation({ query: async (sql, params) => {
-        calls.push([sql, params]);
-        if (sql.includes("SELECT id, title")) return { rows };
-        return { rows: [], rowCount: sql.includes("UPDATE public.events SET source") ? 0 : 1 };
-    } }) };
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql, params) => {
+                calls.push([sql, params]);
+                if (sql.includes("SELECT id, title")) return { rows };
+                return { rows: [], rowCount: sql.includes("UPDATE public.events SET source") ? 0 : 1 };
+            }
+        })
+    };
     assert.equal(await materializeDedup(adapter, 4), 1);
     const canonicalUpdate = calls.find(([sql]) => sql.includes("external_ids=$2"));
     assert.deepEqual(JSON.parse(canonicalUpdate[1][1]), { "google:a@test": "g1", "microsoft:b@test": "m1" });
@@ -24,4 +28,24 @@ test("manual sync rejects an unknown selected account before provider work", asy
     const result = await runManualCalendarSync(adapter, {}, 4, "google:missing@test", true);
     assert.equal(result.status, "error");
     assert.match(result.message, /not found/i);
+});
+
+test("manual sync excludes example.com placeholder accounts", async () => {
+    let accountQuery = "";
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql) => {
+                if (sql.includes("FROM public.oauth_accounts")) {
+                    accountQuery = sql;
+                    return { rows: [] };
+                }
+                return { rows: [], rowCount: 0 };
+            },
+        }),
+    };
+
+    const result = await runManualCalendarSync(adapter, {}, 4, null, false);
+
+    assert.equal(result.status, "success");
+    assert.match(accountQuery, /lower\(COALESCE\(account_email, ''\)\) NOT LIKE '%@example\.com'/i);
 });
