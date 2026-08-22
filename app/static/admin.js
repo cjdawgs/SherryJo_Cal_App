@@ -94,6 +94,9 @@ const el = {
   databasePasswordInput: document.getElementById("databasePasswordInput"),
   databaseSslModeSelect: document.getElementById("databaseSslModeSelect"),
   databaseUrlInput: document.getElementById("databaseUrlInput"),
+  cloudflareAccountIdInput: document.getElementById("cloudflareAccountIdInput"),
+  hyperdriveConfigIdInput: document.getElementById("hyperdriveConfigIdInput"),
+  cloudflareApiTokenInput: document.getElementById("cloudflareApiTokenInput"),
   databaseFallbackToggle: document.getElementById("databaseFallbackToggle"),
   databaseConnectBtn: document.getElementById("databaseConnectBtn"),
   databaseTestBtn: document.getElementById("databaseTestBtn"),
@@ -2024,6 +2027,7 @@ function bindEvents() {
   el.databaseSaveBtn?.addEventListener("click", saveDatabaseConfig);
   el.databaseProfileSelect?.addEventListener("change", selectDatabaseProfile);
   el.databaseCopyBtn?.addEventListener("click", copyCriticalDatabaseData);
+  [el.cloudflareAccountIdInput, el.cloudflareApiTokenInput].forEach((input) => input?.addEventListener("input", updateHyperdriveButtonState));
   if (el.databaseConfigDetails) {
     el.databaseConfigDetails.open = localStorage.getItem("databaseConfigOpen") !== "false";
     el.databaseConfigDetails.addEventListener("toggle", () => localStorage.setItem("databaseConfigOpen", String(el.databaseConfigDetails.open)));
@@ -2090,9 +2094,26 @@ function databasePayload(mode, url) {
     database_host: el.databaseHostInput?.value.trim() || null,
     database_port: el.databasePortInput?.value.trim() || "5432",
     database_name: el.databaseNameInput?.value.trim() || null,
+    cloudflare_account_id: el.cloudflareAccountIdInput?.value.trim() || null,
+    hyperdrive_config_id: el.hyperdriveConfigIdInput?.value.trim() || null,
+    cloudflare_api_token: el.cloudflareApiTokenInput?.value || null,
     ssl_mode: el.databaseSslModeSelect?.value || "require",
     disable_sqlite_fallback: !(el.databaseFallbackToggle?.checked ?? true),
   };
+}
+
+function hasRequestScopedCloudflareCredentials() {
+  return Boolean(el.cloudflareAccountIdInput?.value.trim() && el.cloudflareApiTokenInput?.value.trim());
+}
+
+function updateHyperdriveButtonState() {
+  if (window.__databaseRuntime !== "cloudflare-worker" || !el.databaseSaveBtn) return;
+  const canEditHyperdrive = window.__hyperdriveEditAvailable === true || hasRequestScopedCloudflareCredentials();
+  el.databaseSaveBtn.disabled = !canEditHyperdrive;
+  el.databaseSaveBtn.textContent = canEditHyperdrive ? "Update Hyperdrive" : "Configure DB in Cloudflare";
+  el.databaseSaveBtn.title = canEditHyperdrive
+    ? "Update the active Hyperdrive configuration from these fields."
+    : "Enter Cloudflare account ID and API token, or configure them as Worker secrets.";
 }
 
 async function connectPreferredDatabase() {
@@ -2167,6 +2188,7 @@ async function loadDatabaseConfig() {
   }
   window.__databasePreferredUrl = preferredUrl;
   window.__databaseRuntime = data.runtime || "origin";
+  window.__hyperdriveEditAvailable = data.hyperdrive_edit_available === true;
   if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
   if (el.databaseUrlInput) el.databaseUrlInput.value = activeUrl || preferredUrl || "";
   if (el.databaseFallbackToggle) el.databaseFallbackToggle.checked = !fallback;
@@ -2183,9 +2205,7 @@ async function loadDatabaseConfig() {
         el.databaseTestBtn.title = "The Worker can test only its configured Hyperdrive database.";
       }
       if (el.databaseSaveBtn) {
-        el.databaseSaveBtn.disabled = true;
-        el.databaseSaveBtn.textContent = "Configure DB in Cloudflare";
-        el.databaseSaveBtn.title = "Update HYPERDRIVE_RLS_NO_CACHE in Cloudflare, then redeploy.";
+        updateHyperdriveButtonState();
       }
     }
   }
@@ -2271,9 +2291,10 @@ async function saveDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
   const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
   const payload = databasePayload(mode, url);
+  const updateHyperdrive = window.__databaseRuntime === "cloudflare-worker";
 
-  const res = await apiRequest("/admin/system/database-config", {
-    method: "POST",
+  const res = await apiRequest(updateHyperdrive ? "/admin/system/database-config/update" : "/admin/system/database-config", {
+    method: updateHyperdrive ? "PUT" : "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
@@ -2297,6 +2318,10 @@ async function saveDatabaseConfig(options = {}) {
   }
 
   setStatus(data.message || "Database settings saved.");
+  if (updateHyperdrive && data.cloudflare_token_accepted && el.cloudflareApiTokenInput) {
+    el.cloudflareApiTokenInput.value = "";
+    el.cloudflareApiTokenInput.placeholder = "Cloudflare API token accepted for this update (not stored)";
+  }
   if (el.databaseConfigStatus) {
     el.databaseConfigStatus.textContent = data.saved?.provider_title
       ? `${data.saved.provider_title} saved as the active provider. Restart the app to fully apply the runtime engine.`

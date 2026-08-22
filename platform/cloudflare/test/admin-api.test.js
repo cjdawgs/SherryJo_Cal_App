@@ -92,3 +92,60 @@ test("reports an inactive Hyperdrive binding with setup instructions", async () 
     assert.match(body.message, /not configured/);
     assert.match(body.next_steps.join(" "), /npm run deploy/);
 });
+
+test("explains the required Cloudflare credentials for Hyperdrive editing", async () => {
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [{ allowed: true }] }),
+        })
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/database-config/update", {
+            method: "PUT",
+            body: JSON.stringify({ database_host: "db.example.test", database_name: "app", database_user: "user", database_password: "secret" }),
+            headers: { "Content-Type": "application/json" },
+        }),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 501);
+    const body = await result.json();
+    assert.match(body.detail, /not configured/);
+    assert.doesNotMatch(JSON.stringify(body), /db\.example\.test|user/);
+});
+
+test("uses request-scoped Cloudflare credentials without echoing secrets", async () => {
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [{ allowed: true }] }),
+        })
+    };
+    const originalFetch = globalThis.fetch;
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+        captured = { url, init, body: JSON.parse(init.body) };
+        return new Response(JSON.stringify({ success: true }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    try {
+        const result = await handleAdminApi(
+            new Request("https://calendar.test/admin/system/database-config/update", {
+                method: "PUT",
+                body: JSON.stringify({ cloudflare_account_id: "acct", cloudflare_api_token: "cf-token", database_url: "postgresql://neon-user:db-pass@ep-example.neon.tech/neondb", provider_title: "Neon - Postgres" }),
+                headers: { "Content-Type": "application/json" },
+            }),
+            {},
+            adapter,
+            1,
+        );
+        assert.equal(result.status, 200);
+        assert.match(captured.url, /accounts\/acct\/hyperdrive\/configs/);
+        assert.equal(captured.init.headers.Authorization, "Bearer cf-token");
+        assert.equal(captured.body.origin.host, "ep-example.neon.tech");
+        const responseBody = await result.json();
+        assert.equal(responseBody.cloudflare_token_accepted, true);
+        assert.doesNotMatch(JSON.stringify(responseBody), /cf-token|db-pass/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});

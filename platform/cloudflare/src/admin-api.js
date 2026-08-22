@@ -104,7 +104,52 @@ async function providersRoute(client, request, parts, body) {
     return { error: "Unsupported admin provider operation", status: 405 };
 }
 
-async function systemRoute(client, request, parts, url, env) {
+async function updateHyperdriveConfig(body, env) {
+    const accountId = String(body.cloudflare_account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+    const configId = String(body.hyperdrive_config_id || env.HYPERDRIVE_CONFIG_ID || "2bb6bc680a594a15aa12991869cbb590").trim();
+    const apiToken = String(body.cloudflare_api_token || env.CLOUDFLARE_API_TOKEN || "").trim();
+    if (!accountId || !apiToken) return {
+        error: "Hyperdrive editing is not configured for this Worker.",
+        status: 501,
+        next_steps: ["Set CLOUDFLARE_ACCOUNT_ID and a scoped CLOUDFLARE_API_TOKEN secret on the Worker.", "Grant the token Hyperdrive configuration edit permission.", "Redeploy the Worker, then try Update Hyperdrive again."],
+    };
+    let host = String(body.database_host || "").trim();
+    let database = String(body.database_name || "").trim();
+    let user = String(body.database_user || "").trim();
+    let password = String(body.database_password || "");
+    let port = Number(body.database_port || 5432);
+    if ((!host || !database || !user || !password) && String(body.database_url || "").startsWith("postgresql")) {
+        try {
+            const parsed = new URL(String(body.database_url));
+            host ||= parsed.hostname;
+            database ||= parsed.pathname.replace(/^\//, "");
+            user ||= decodeURIComponent(parsed.username);
+            password ||= decodeURIComponent(parsed.password);
+            port = Number(body.database_port || parsed.port || 5432);
+        } catch {
+            // Field validation below returns the actionable error.
+        }
+    }
+    if (!host || !database || !user || !password || !Number.isInteger(port) || port < 1 || port > 65535) return {
+        error: "Enter the Neon or Supabase host, port, database name, username, and password before updating Hyperdrive.",
+        status: 422,
+    };
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs/${encodeURIComponent(configId)}`;
+    const response = await fetch(endpoint, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${apiToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ name: body.provider_title || "SherryJo Postgres", origin: { host, port, database, user, password, scheme: "postgres" } }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false) return {
+        error: "Cloudflare rejected the Hyperdrive update. Check the API token permission and database fields.",
+        status: response.status === 403 ? 403 : 502,
+        next_steps: ["Confirm the API token can edit Hyperdrive configurations.", "Confirm the Neon or Supabase credentials are correct.", "Run Test active Worker DB after the update completes."],
+    };
+    return { ok: true, message: "Hyperdrive configuration updated. Test the active Worker database to confirm the new datasource is live.", provider_title: body.provider_title || "SherryJo Postgres", hyperdrive_config_id: configId, cloudflare_token_accepted: Boolean(body.cloudflare_api_token), requires_redeploy: true };
+}
+
+async function systemRoute(client, request, parts, url, env, body = {}) {
     const action = parts[2];
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
@@ -145,6 +190,7 @@ async function systemRoute(client, request, parts, url, env) {
                 copy_supported: false,
                 hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
                 hyperdrive_configured: hyperdriveConfigured,
+                hyperdrive_edit_available: Boolean(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
                 hyperdrive_reachable: hyperdriveReachable,
                 message: live
                     ? "The Worker is live on its configured Hyperdrive Postgres connection."
@@ -152,7 +198,7 @@ async function systemRoute(client, request, parts, url, env) {
                         ? "The Hyperdrive binding exists, but the Worker could not reach its Postgres database."
                         : "Hyperdrive is not configured for this Worker.",
                 next_steps: live
-                    ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare, then redeploy the Worker."]
+                    ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, use Update Hyperdrive if Cloudflare API editing is enabled."]
                     : ["Open Cloudflare Hyperdrive and create or update the HYPERDRIVE_RLS_NO_CACHE binding.", "Point Hyperdrive at the intended Neon or Supabase Postgres connection.", "Set HYPERDRIVE_PROVIDER to neon or supabase so the Provider server can identify it.", "Redeploy with: cd platform/cloudflare && npm ci && npm run deploy.", "Return here and run Test active Worker DB."]
             };
         }
@@ -180,6 +226,7 @@ async function systemRoute(client, request, parts, url, env) {
                 };
             }
         }
+        if (request.method === "PUT" && parts[3] === "update") return updateHyperdriveConfig(body, env);
         if (request.method === "POST") return {
             error: "Database settings cannot be changed from the Worker admin page.",
             status: 409,
@@ -235,7 +282,7 @@ export async function handleAdminApi(request, env, adapter, userId) {
             if (!admin.rows[0]?.allowed) return { error: "Admin only", status: 403 };
             if (parts[1] === "users") return usersRoute(client, request, parts, body);
             if (parts[1] === "providers") return providersRoute(client, request, parts, body);
-            if (parts[1] === "system") return systemRoute(client, request, parts, url, env);
+            if (parts[1] === "system") return systemRoute(client, request, parts, url, env, body);
             if (parts[1] === "maintenance") return maintenanceRoute(client, request, parts);
             return { error: "Admin route not found", status: 404 };
         });
