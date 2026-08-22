@@ -18,6 +18,18 @@
   color: #475569;
 }
 
+.database-provider-live {
+  background: #86efac;
+  border: 2px solid #22c55e;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.database-provider-inactive {
+  background: #e5e7eb;
+  color: #111827;
+}
+
 .database-collapse-hint {
   float: right;
   font-size: 11px;
@@ -73,9 +85,9 @@
 }
 
 .hyperdrive-live-badge-active {
-  background: #dcfce7;
+  background: #86efac;
   border: 2px solid #22c55e;
-  color: #166534;
+  color: #ffffff;
 }
 
 .hyperdrive-live-badge-inactive {

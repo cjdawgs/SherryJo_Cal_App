@@ -2161,6 +2161,9 @@ async function loadDatabaseConfig() {
     if (data.active_provider_title && window.__databaseProfiles.some((profile) => profile.title === data.active_provider_title)) {
       el.databaseProfileSelect.value = data.active_provider_title;
     }
+    const providerIsLive = Boolean(data.live_database_confirmed && el.databaseProfileSelect.value === data.active_provider_title);
+    el.databaseProfileSelect.classList.toggle("database-provider-live", providerIsLive);
+    el.databaseProfileSelect.classList.toggle("database-provider-inactive", !providerIsLive);
   }
   window.__databasePreferredUrl = preferredUrl;
   window.__databaseRuntime = data.runtime || "origin";
