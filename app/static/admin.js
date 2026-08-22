@@ -437,6 +437,7 @@ function renderSystemOverview(data) {
   const isSynced = deploymentStatus === "synced";
   const isOutOfSync = deploymentStatus === "out_of_sync";
   const isUnknown = !isSynced && !isOutOfSync;
+  const hasDeployedCommit = Boolean(normalizeCommit(deployment?.current_commit));
   const previousDeploymentStatus = state.deploymentSyncStatus;
 
   if (el.dbTypeText) {
@@ -511,7 +512,7 @@ function renderSystemOverview(data) {
   state.deploymentSyncStatus = deploymentStatus;
 
   if (el.deploymentSyncStatusPill) {
-    el.deploymentSyncStatusPill.textContent = isSynced ? "In sync" : (isOutOfSync ? "Out of sync" : "Unable to verify");
+    el.deploymentSyncStatusPill.textContent = isSynced ? "In sync" : (isOutOfSync ? "Out of sync" : (hasDeployedCommit ? "Deployed, comparison unavailable" : "Unable to verify"));
     el.deploymentSyncStatusPill.classList.toggle("is-synced", isSynced);
     el.deploymentSyncStatusPill.classList.toggle("is-out-of-sync", isOutOfSync);
     el.deploymentSyncStatusPill.classList.toggle("is-unknown", isUnknown);
@@ -566,7 +567,9 @@ function renderSystemOverview(data) {
   }
 
   if (el.deploymentSyncMessage) {
-    el.deploymentSyncMessage.textContent = deployment.message || "Deployment sync check not available.";
+    el.deploymentSyncMessage.textContent = deployment.message || (hasDeployedCommit
+      ? "The Worker build is deployed, but the latest GitHub commit could not be retrieved for comparison."
+      : "Deployment sync check not available.");
   }
 
   if (el.deploymentSyncHint) {
@@ -2183,14 +2186,6 @@ async function loadDatabaseConfig() {
       }
     }
   }
-  if (el.databaseConfigSummary) {
-    const summary = data.summary || { label: "Unknown", engine: "unknown" };
-    const providerLabel = data.provider_label || (summary.label || "Unknown");
-    const liveLabel = data.active_provider_title || providerLabel;
-    el.databaseConfigSummary.textContent = `${data.live_database_confirmed ? "LIVE DATABASE" : "NOT LIVE"}: ${liveLabel} · ${data.active_database_source || summary.label || "Unknown"}`;
-    el.databaseConfigSummary.classList.toggle("database-connection-active", Boolean(data.live_database_confirmed));
-    el.databaseConfigSummary.classList.toggle("database-connection-inactive", !data.live_database_confirmed);
-  }
   if (el.hyperdriveSetupBanner && data.runtime === "cloudflare-worker") {
     const hyperdriveLive = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
     el.hyperdriveSetupBanner.hidden = hyperdriveLive;
@@ -2198,7 +2193,7 @@ async function loadDatabaseConfig() {
   }
   if (el.hyperdriveLiveBadge && data.runtime === "cloudflare-worker") {
     const live = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
-    const provider = data.provider_label || "Cloudflare Hyperdrive / Postgres";
+    const provider = data.provider_label || "Postgres provider not identified";
     el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
     el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
     if (el.hyperdriveLiveBadgeText) el.hyperdriveLiveBadgeText.textContent = live
@@ -2207,7 +2202,7 @@ async function loadDatabaseConfig() {
   }
   if (el.databaseConfigStatus) {
     const statusText = data.message
-      ? [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].join(" ")
+      ? (data.live_database_confirmed ? "Live database check complete." : [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].join(" "))
       : data.is_connected_to_supabase
         ? "Supabase Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
         : data.is_connected_to_neon

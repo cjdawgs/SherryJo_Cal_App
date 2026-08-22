@@ -108,7 +108,9 @@ async function systemRoute(client, request, parts, url, env) {
     const action = parts[2];
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
-        let hyperdriveProvider = "Cloudflare Hyperdrive / Postgres";
+        let hyperdriveProvider = ["neon", "supabase"].includes(String(env.HYPERDRIVE_PROVIDER || "").toLowerCase())
+            ? `${String(env.HYPERDRIVE_PROVIDER).toLowerCase() === "neon" ? "Neon" : "Supabase"} - Postgres`
+            : "Cloudflare Hyperdrive / Postgres";
         if (hyperdriveConfigured) {
             try {
                 const hostname = new URL(env.HYPERDRIVE_RLS_NO_CACHE.connectionString).hostname.toLowerCase();
@@ -151,7 +153,7 @@ async function systemRoute(client, request, parts, url, env) {
                         : "Hyperdrive is not configured for this Worker.",
                 next_steps: live
                     ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare, then redeploy the Worker."]
-                    : ["Open Cloudflare Hyperdrive and create or update the HYPERDRIVE_RLS_NO_CACHE binding.", "Point Hyperdrive at the intended Neon or Supabase Postgres connection.", "Redeploy with: cd platform/cloudflare && npm ci && npm run deploy.", "Return here and run Test active Worker DB."]
+                    : ["Open Cloudflare Hyperdrive and create or update the HYPERDRIVE_RLS_NO_CACHE binding.", "Point Hyperdrive at the intended Neon or Supabase Postgres connection.", "Set HYPERDRIVE_PROVIDER to neon or supabase so the Provider server can identify it.", "Redeploy with: cd platform/cloudflare && npm ci && npm run deploy.", "Return here and run Test active Worker DB."]
             };
         }
         if (request.method === "POST" && parts[3] === "test") {

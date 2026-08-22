@@ -401,6 +401,13 @@ def _database_provider_label(url: str | None) -> str:
     return "postgres"
 
 
+def _configured_database_provider(url: str | None) -> str:
+    configured = str(os.getenv("DATABASE_PROVIDER") or "").strip().lower()
+    if configured in {"neon", "supabase"}:
+        return configured
+    return _database_provider_label(url)
+
+
 def _credential_encryption_health(db: Session, tables: list[str]) -> dict:
     token_key_configured = bool((getattr(settings, "token_encryption_key", None) or "").strip())
     encrypted_access_token_rows = 0
@@ -1122,8 +1129,8 @@ def admin_database_config(
     preferred_url = _preferred_postgres_url()
     if active_url and active_url.startswith("postgresql") and not preferred_url:
         preferred_url = active_url
-    provider_label = _database_provider_label(active_url)
-    preferred_provider = _database_provider_label(preferred_url)
+    provider_label = _configured_database_provider(active_url)
+    preferred_provider = _configured_database_provider(preferred_url)
     active_profile = next(
         (profile for profile in _database_profiles() if profile.get("database_url") == active_url),
         None,
@@ -1136,7 +1143,7 @@ def admin_database_config(
         "requires_restart": True,
         "summary": _safe_database_summary(active_url),
         "provider": provider_label,
-        "provider_label": "Supabase postgres" if provider_label == "supabase" else "Neon postgres" if provider_label == "neon" else "SQLite" if provider_label == "sqlite" else "Postgres",
+        "provider_label": "Supabase - Postgres" if provider_label == "supabase" else "Neon - Postgres" if provider_label == "neon" else "SQLite" if provider_label == "sqlite" else "Postgres provider not identified",
         "preferred_postgres_url": preferred_url,
         "preferred_provider": preferred_provider,
         "profiles": _database_profiles(),
