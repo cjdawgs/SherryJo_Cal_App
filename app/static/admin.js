@@ -913,7 +913,7 @@ function activeConfig() {
       `Owner User ID: ${item.metadata?.user_id ?? "-"}`,
       `Owner Email: ${item.metadata?.owner_email || "-"}`,
     ],
-    searchText: (item) => `${item.provider_name} ${item.contact_email} ${item.status} ${item.metadata?.provider} ${item.metadata?.user_id ?? ""} ${item.metadata?.owner_email || ""}`,
+    searchText: (item) => `${item.provider_name} ${item.contact_email} ${item.status} ${item.metadata?.provider} ${item.metadata?.user_id ?? ""} ${item.metadata?.owner_email ?? ""}`,
     buildForm: buildProviderForm,
   };
 }
@@ -2074,7 +2074,7 @@ async function loadDatabaseConfig() {
 
 async function testDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
-  const url = (options.url ?? el.databaseUrlInput?.value || "").trim();
+  const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
   const payload = {
     database_mode: mode,
     database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
@@ -2112,7 +2112,7 @@ async function testDatabaseConfig(options = {}) {
 
 async function saveDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
-  const url = (options.url ?? el.databaseUrlInput?.value || "").trim();
+  const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
   const fallbackChecked = el.databaseFallbackToggle?.checked ?? true;
   const payload = {
     database_mode: mode,
