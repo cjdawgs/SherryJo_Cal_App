@@ -583,6 +583,14 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
 
     if not account.refresh_token:
         logger.error(f"❌ No Google refresh_token: {account.account_email}")
+        if hasattr(account, "status"):
+            account.status = "error"
+        if hasattr(account, "last_error"):
+            account.last_error = "Google refresh token is missing (missing refresh_token); reconnect this account to restore access."
+        if hasattr(account, "token_expires_at"):
+            account.token_expires_at = datetime.now(timezone.utc)
+        account.updated_at = datetime.now(timezone.utc)
+        safe_commit(db)
         return None
 
     res = requests.post(
@@ -606,24 +614,22 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
         logger.error("❌ Google refresh failed: %s", res.text)
 
         # ==================================================
-        # ✅ GOLD STANDARD FIX — HANDLE REVOKED TOKEN
+        # ✅ PRESERVE ACCOUNT RECORD — DO NOT ERASE CONNECTION STATE
         # ==================================================
         if error == "invalid_grant":
-            logger.error(f"🚫 TOKEN REVOKED → marking error: {account.account_email}")
+            logger.error(f"🚫 TOKEN REVOKED → preserving OAuth record and requiring reconnect: {account.account_email}")
 
-            # ✅ SAFE ATTRIBUTE SET (no crash if column missing)
             if hasattr(account, "status"):
                 account.status = "error"
+            if hasattr(account, "last_error"):
+                account.last_error = "Google refresh token was revoked or invalid_grant; reconnect this account to restore access."
+            if hasattr(account, "token_expires_at"):
+                account.token_expires_at = datetime.now(timezone.utc)
 
-            # ✅ PREVENT BAD TOKEN RETRY
-            # ✅ NEVER set NULL (DB constraint)
-            # ✅ Use sentinel value instead
-
-            account.access_token = "__REAUTH_REQUIRED__"
             account.updated_at = datetime.now(timezone.utc)
             safe_commit(db)
 
-            return "__REAUTH_REQUIRED__"
+            return None
 
         return None
 

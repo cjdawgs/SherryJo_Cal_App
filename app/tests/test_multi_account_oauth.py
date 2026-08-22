@@ -203,6 +203,33 @@ def test_add_oauth_account_update_existing_clears_error_state(db: Session, multi
     assert updated.last_sync_success is not None
 
 
+def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_connection(db: Session, multi_account_user: User):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="needs-reconnect@gmail.com",
+        access_token="stale_access_token",
+        refresh_token="refresh_token_123",
+        token_expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        status="ok",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    with patch("app.services.multi_account_oauth_service.requests.post") as mock_post:
+        mock_post.return_value.status_code = 400
+        mock_post.return_value.json.return_value = {"error": "invalid_grant"}
+
+        result = ensure_valid_token(db, account)
+
+    db.refresh(account)
+    assert result is None
+    assert account.access_token == "stale_access_token"
+    assert account.status == "error"
+    assert "invalid_grant" in (account.last_error or "").lower()
+
+
 def test_get_user_accounts_all(db: Session, multi_account_user: User, oauth_accounts_setup):
     """Test retrieving all accounts for a user."""
     
