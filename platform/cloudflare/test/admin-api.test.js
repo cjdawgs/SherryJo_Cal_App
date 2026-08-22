@@ -50,3 +50,25 @@ test("reports the Worker database reconnect steps instead of returning 404", asy
     assert.match(body.message, /HYPERDRIVE_RLS_NO_CACHE/);
     assert.equal(body.next_steps.length, 3);
 });
+
+test("rejects database saves in the single-binding Worker runtime", async () => {
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [{ allowed: true }] }),
+        })
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/database-config", {
+            method: "POST",
+            body: JSON.stringify({ provider_title: "Neon - Postgres" }),
+            headers: { "Content-Type": "application/json" },
+        }),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 409);
+    const body = await result.json();
+    assert.match(body.detail, /cannot be changed/);
+    assert.equal(body.next_steps.length, 3);
+});

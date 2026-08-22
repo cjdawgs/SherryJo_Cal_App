@@ -2135,10 +2135,24 @@ async function loadDatabaseConfig() {
   const preferredUrl = (data.preferred_postgres_url || "").trim();
   const activeUrl = (data.database_url || "").trim();
   window.__databaseProfiles = data.profiles || [];
+  if (data.runtime === "cloudflare-worker" && data.provider_label) {
+    window.__databaseProfiles = [{
+      title: `${data.provider_label} (active)`,
+      database_url: "",
+      database_host: "cloudflare-hyperdrive",
+      database_port: "5432",
+      database_name: "configured Hyperdrive database",
+      database_user: "managed by Cloudflare",
+      ssl_mode: "managed by Hyperdrive",
+    }];
+  }
   populateDatabaseCopyProviders(window.__databaseProfiles);
   if (el.databaseProfileSelect) {
     el.databaseProfileSelect.replaceChildren(new Option("New provider connection", ""));
     window.__databaseProfiles.forEach((profile) => el.databaseProfileSelect.add(new Option(profile.title, profile.title)));
+    if (data.active_provider_title && window.__databaseProfiles.some((profile) => profile.title === data.active_provider_title)) {
+      el.databaseProfileSelect.value = data.active_provider_title;
+    }
   }
   window.__databasePreferredUrl = preferredUrl;
   window.__databaseRuntime = data.runtime || "origin";
@@ -2151,13 +2165,26 @@ async function loadDatabaseConfig() {
     el.databaseConnectBtn.textContent = workerRuntime
       ? "Test active Worker DB"
       : preferredUrl ? "Connect Supabase / Neon" : "No Supabase / Neon URL";
+    if (workerRuntime) {
+      if (el.databaseTestBtn) {
+        el.databaseTestBtn.disabled = true;
+        el.databaseTestBtn.textContent = "Neon test requires origin runtime";
+        el.databaseTestBtn.title = "The Worker can test only its configured Hyperdrive database.";
+      }
+      if (el.databaseSaveBtn) {
+        el.databaseSaveBtn.disabled = true;
+        el.databaseSaveBtn.textContent = "Configure DB in Cloudflare";
+        el.databaseSaveBtn.title = "Update HYPERDRIVE_RLS_NO_CACHE in Cloudflare, then redeploy.";
+      }
+    }
   }
   if (el.databaseConfigSummary) {
     const summary = data.summary || { label: "Unknown", engine: "unknown" };
     const providerLabel = data.provider_label || (summary.label || "Unknown");
-    el.databaseConfigSummary.textContent = `Active: ${summary.label || "Unknown"} (${summary.engine || "unknown"}) · ${data.database_mode || "postgres"} · ${providerLabel}`;
-    el.databaseConfigSummary.classList.toggle("database-connection-active", Boolean(data.is_connected_to_postgres));
-    el.databaseConfigSummary.classList.toggle("database-connection-inactive", !data.is_connected_to_postgres);
+    const liveLabel = data.active_provider_title || providerLabel;
+    el.databaseConfigSummary.textContent = `${data.live_database_confirmed ? "LIVE DATABASE" : "NOT LIVE"}: ${liveLabel} · ${data.active_database_source || summary.label || "Unknown"}`;
+    el.databaseConfigSummary.classList.toggle("database-connection-active", Boolean(data.live_database_confirmed));
+    el.databaseConfigSummary.classList.toggle("database-connection-inactive", !data.live_database_confirmed);
   }
   if (el.databaseConfigStatus) {
     const statusText = data.message
@@ -2242,7 +2269,7 @@ async function saveDatabaseConfig(options = {}) {
   const data = await res.json().catch(() => ({}));
   if (handleAdminForbidden(res, data)) return;
 
-  if (!res.ok) {
+  if (!res.ok || data.ok === false) {
     const message = [data.detail, ...(data.next_steps || []).map((step) => `Next: ${step}`)].filter(Boolean).join(" ");
     setStatus(message || "Unable to save database settings.", true);
     if (el.databaseConfigStatus) {
@@ -2254,7 +2281,9 @@ async function saveDatabaseConfig(options = {}) {
 
   setStatus(data.message || "Database settings saved.");
   if (el.databaseConfigStatus) {
-    el.databaseConfigStatus.textContent = "Database settings saved. Restart the app to fully apply the runtime engine.";
+    el.databaseConfigStatus.textContent = data.saved?.provider_title
+      ? `${data.saved.provider_title} saved as the active provider. Restart the app to fully apply the runtime engine.`
+      : data.message || "Database settings saved. Restart the app to fully apply the runtime engine.";
     el.databaseConfigStatus.classList.remove("error");
   }
   await loadDatabaseConfig();

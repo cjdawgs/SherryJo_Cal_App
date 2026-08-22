@@ -115,6 +115,9 @@ async function systemRoute(client, request, parts, url, env) {
             requires_restart: true,
             runtime: "cloudflare-worker",
             provider_label: "Cloudflare Hyperdrive / Postgres",
+            active_provider_title: "Cloudflare Hyperdrive / Postgres (active)",
+            active_database_source: "cloudflare-hyperdrive",
+            live_database_confirmed: hyperdriveConfigured,
             is_connected_to_postgres: hyperdriveConfigured,
             profiles: [],
             copy_supported: false,
@@ -152,8 +155,8 @@ async function systemRoute(client, request, parts, url, env) {
             }
         }
         if (request.method === "POST") return {
-            ok: false,
-            message: "Database settings cannot be changed from the Worker admin page.",
+            error: "Database settings cannot be changed from the Worker admin page.",
+            status: 409,
             next_steps: ["Update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare.", "Redeploy the Worker.", "Run Test Connection to verify the new database."]
         };
         return { error: "Unsupported database configuration operation", status: 405 };
@@ -210,7 +213,7 @@ export async function handleAdminApi(request, env, adapter, userId) {
             if (parts[1] === "maintenance") return maintenanceRoute(client, request, parts);
             return { error: "Admin route not found", status: 404 };
         });
-        if (result?.error) return response({ detail: result.error }, result.status || 400);
+        if (result?.error) return response({ detail: result.error, ...(result.next_steps ? { next_steps: result.next_steps } : {}) }, result.status || 400);
         return response(result);
     } catch (error) {
         const duplicate = error?.code === "23505";

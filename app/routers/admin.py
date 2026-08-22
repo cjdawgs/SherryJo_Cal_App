@@ -1076,6 +1076,10 @@ def admin_database_config(
         preferred_url = active_url
     provider_label = _database_provider_label(active_url)
     preferred_provider = _database_provider_label(preferred_url)
+    active_profile = next(
+        (profile for profile in _database_profiles() if profile.get("database_url") == active_url),
+        None,
+    )
     return {
         "database_mode": active_mode,
         "database_url": active_url,
@@ -1088,6 +1092,9 @@ def admin_database_config(
         "preferred_postgres_url": preferred_url,
         "preferred_provider": preferred_provider,
         "profiles": _database_profiles(),
+        "active_provider_title": active_profile.get("title") if active_profile else provider_label,
+        "active_database_source": mask_database_url(active_url),
+        "live_database_confirmed": bool(active_url and not active_url.startswith("sqlite")),
         "is_connected_to_postgres": bool(active_url and active_url.startswith("postgresql")),
         "is_connected_to_supabase": provider_label == "supabase",
         "is_connected_to_neon": provider_label == "neon",
