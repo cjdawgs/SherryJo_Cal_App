@@ -736,7 +736,7 @@
             <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Enter a full Neon connection string or complete the fields, then select Test Neon connection. Nothing is saved until the test succeeds.</p>
             <div class="database-copy-panel">
               <h3>Copy critical application data</h3>
-              <p class="muted-line">Copies users, events, tasks, notes, date-sticky notes, and tag colors. Existing records in the destination are preserved.</p>
+              <p class="muted-line">Copies users, events, tasks, notes, date-sticky notes, tag colors, and encrypted OAuth provider credentials. Existing records in the destination are preserved. Both runtimes must use the same TOKEN_ENCRYPTION_KEY.</p>
               <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
                 <select id="databaseCopySourceSelect" aria-label="Copy source provider" style="flex:1;min-width:0;"><option value="">Source provider</option></select>
                 <select id="databaseCopyTargetSelect" aria-label="Copy target provider" style="flex:1;min-width:0;"><option value="">Target provider</option></select>

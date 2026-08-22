@@ -2051,8 +2051,9 @@ async function copyCriticalDatabaseData() {
   });
   const data = res ? await res.json().catch(() => ({})) : {};
   const totals = Object.values(data.tables || {}).reduce((sum, item) => sum + Number(item.copied || 0), 0);
+  const providerTotal = Number(data.tables?.oauth_accounts?.copied || 0);
   if (el.databaseCopyStatus) {
-    el.databaseCopyStatus.textContent = res?.ok ? `${data.message || "Copy complete."} ${totals} new rows copied.` : data.detail || "Database copy failed.";
+    el.databaseCopyStatus.textContent = res?.ok ? `${data.message || "Copy complete."} ${totals} new rows copied, including ${providerTotal} authenticated provider accounts.` : data.detail || "Database copy failed.";
     el.databaseCopyStatus.classList.toggle("error", !res?.ok);
   }
   if (el.databaseCopyBtn) el.databaseCopyBtn.disabled = false;

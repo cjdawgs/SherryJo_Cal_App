@@ -375,17 +375,22 @@ async function saveSyncSettings() {
     const res = await api.put(`/accounts/${accountId}/sync-settings`, payload);
     if (!res) {
       setGlobalMessage("Unable to save sync settings.");
+      window.__oauthResult = {
+        provider: connected || "",
+        account: connectedAccount || "",
+        error: oauthError || "",
+      };
       return;
     }
 
     const data = await res.json();
     if (!res.ok) {
-      setGlobalMessage(data.detail || data.message || "Unable to save sync settings.");
+      setGlobalMessage("Google may have connected, but the account list request did not complete. Check your session and retry.");
       return;
     }
   }
 
-  setGlobalMessage("Sync settings saved.", "success");
+  setGlobalMessage(`Google may have connected, but the account list could not be loaded (HTTP ${res.status}). Sign in again if the session expired, then retry.`);
   await refreshAllSyncStatus();
 }
 
@@ -971,6 +976,19 @@ async function init() {
   await hydrateAdminNavigation();
 
   const accounts = await loadAccounts();
+
+  const oauthResult = window.__oauthResult;
+  if (oauthResult?.provider && oauthResult.account) {
+    const connectedAccount = accounts.find((account) =>
+      normalizeProvider(account.provider) === normalizeProvider(oauthResult.provider)
+      && String(account.account_email || "").trim().toLowerCase() === oauthResult.account.trim().toLowerCase()
+    );
+    if (connectedAccount) {
+      setGlobalMessage(`${oauthResult.provider} account ${oauthResult.account} is connected and visible in this database.`, "success");
+    } else {
+      setGlobalMessage(`${oauthResult.provider} OAuth completed, but ${oauthResult.account} is not visible in the current database account list. Check the active datasource and TOKEN_ENCRYPTION_KEY.`, "error");
+    }
+  }
 
   await fetchSyncStatus();
 

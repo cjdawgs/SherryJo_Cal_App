@@ -93,6 +93,25 @@ CRITICAL_DATABASE_TABLES = (
     "date_sticky_notes",
     "event_tag_color_settings",
 )
+OAUTH_ACCOUNT_COPY_COLUMNS = (
+    "provider",
+    "account_email",
+    "access_token",
+    "refresh_token",
+    "token_expires_at",
+    "display_name",
+    "provider_id",
+    "color",
+    "is_primary",
+    "sync_enabled",
+    "status",
+    "last_sync",
+    "last_sync_success",
+    "last_sync_failure",
+    "last_error",
+    "created_at",
+    "updated_at",
+)
 
 
 def _database_profiles() -> list[dict]:
@@ -270,6 +289,35 @@ def _copy_critical_database_data(source_url: str, target_url: str) -> dict:
                     result = target.execute(insert_sql, {f"value_{index}": row[column] for index, column in enumerate(columns)})
                     inserted += result.rowcount or 0
                 copied[table] = {"copied": inserted, "examined": len(rows)}
+            if "oauth_accounts" not in source_inspector.get_table_names() or "oauth_accounts" not in target_inspector.get_table_names():
+                copied["oauth_accounts"] = {"copied": 0, "examined": 0, "skipped": "table missing"}
+                return copied
+            source_users = source.execute(text('SELECT id, email FROM "users"')).mappings().all()
+            target_users = target.execute(text('SELECT id, email FROM "users"')).mappings().all()
+            source_account_columns = {column["name"] for column in source_inspector.get_columns("oauth_accounts")}
+            target_account_columns = {column["name"] for column in target_inspector.get_columns("oauth_accounts")}
+            account_columns = [column for column in OAUTH_ACCOUNT_COPY_COLUMNS if column in source_account_columns and column in target_account_columns]
+            if not account_columns:
+                copied["oauth_accounts"] = {"copied": 0, "examined": 0, "skipped": "no shared columns"}
+                return copied
+            target_user_ids = {str(row["email"]).strip().lower(): row["id"] for row in target_users if row.get("email")}
+            provider_rows = source.execute(text(f'SELECT user_id, {", ".join(account_columns)} FROM "oauth_accounts"')).mappings().all()
+            inserted_accounts = 0
+            skipped_accounts = 0
+            for row in provider_rows:
+                source_user = next((user for user in source_users if user["id"] == row["user_id"]), None)
+                destination_user_id = target_user_ids.get(str(source_user["email"]).strip().lower()) if source_user else None
+                if not destination_user_id:
+                    skipped_accounts += 1
+                    continue
+                values = {column: row[column] for column in account_columns}
+                values["user_id"] = destination_user_id
+                columns = ["user_id", *account_columns]
+                column_sql = ", ".join(f'"{column}"' for column in columns)
+                values_sql = ", ".join(f":account_{index}" for index in range(len(columns)))
+                result = target.execute(text(f'INSERT INTO "oauth_accounts" ({column_sql}) VALUES ({values_sql}) ON CONFLICT DO NOTHING'), {f"account_{index}": values[column] for index, column in enumerate(columns)})
+                inserted_accounts += result.rowcount or 0
+            copied["oauth_accounts"] = {"copied": inserted_accounts, "examined": len(provider_rows), "skipped": skipped_accounts}
     finally:
         source_engine.dispose()
         target_engine.dispose()
@@ -1163,7 +1211,7 @@ def admin_copy_database_config(
         "source_provider": payload.source_provider,
         "target_provider": payload.target_provider,
         "tables": copied,
-        "message": "Critical application data was copied additively. Existing target rows were preserved.",
+        "message": "Critical application data and encrypted provider credentials were copied additively. Existing target rows were preserved. The destination must use the same TOKEN_ENCRYPTION_KEY for copied OAuth tokens to remain usable.",
     }
 
 
