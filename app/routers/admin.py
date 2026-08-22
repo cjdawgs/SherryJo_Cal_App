@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 import app.database as database_module
 from app.database import DATABASE_URL, engine, get_db
-from app.config import is_trusted_edge_request, settings
+from app.config import is_trusted_edge_request, mask_database_url, settings
 from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, User
 from app.security import verify_password
@@ -236,8 +236,8 @@ def _test_database_url(database_url: str) -> dict:
             conn.execute(text("SELECT 1"))
         return {"ok": True, "message": "Database connection verified."}
     except Exception as exc:
-        logger.warning("Database connection test failed for %s: %s", database_url, exc)
-        return {"ok": False, "message": f"Connection failed: {exc}"}
+        logger.warning("Database connection test failed for %s: %s", mask_database_url(database_url), exc)
+        return {"ok": False, "message": "Connection failed. Verify the host, port, database name, username, password, and SSL mode."}
 
 
 def _copy_critical_database_data(source_url: str, target_url: str) -> dict:
@@ -1119,6 +1119,13 @@ def admin_test_database_config(
         "database_mode": payload.database_mode,
         "database_url": candidate_url,
         "message": result["message"],
+        "connection_details": {
+            "host": payload.database_host or "from connection string",
+            "port": payload.database_port or "5432",
+            "database": payload.database_name or "from connection string",
+            "username": payload.database_user or "from connection string",
+            "ssl_mode": payload.ssl_mode or "require",
+        },
         "requires_restart": True,
     }
 

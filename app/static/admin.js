@@ -2177,6 +2177,14 @@ async function loadDatabaseConfig() {
 }
 
 async function testDatabaseConfig(options = {}) {
+  if (el.databaseTestBtn) {
+    el.databaseTestBtn.disabled = true;
+    el.databaseTestBtn.textContent = "Testing connection...";
+  }
+  if (el.databaseConfigStatus) {
+    el.databaseConfigStatus.textContent = "Testing the database credentials and SSL connection...";
+    el.databaseConfigStatus.classList.remove("error");
+  }
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
   const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
   const payload = databasePayload(mode, url);
@@ -2189,6 +2197,7 @@ async function testDatabaseConfig(options = {}) {
 
   if (!res) {
     setStatus("Database test request failed.", true);
+    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
     return;
   }
   const data = await res.json().catch(() => ({}));
@@ -2200,15 +2209,18 @@ async function testDatabaseConfig(options = {}) {
       el.databaseConfigStatus.textContent = data.detail || "Database connection test failed.";
       el.databaseConfigStatus.classList.add("error");
     }
+    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
     return;
   }
 
-  const message = [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].filter(Boolean).join(" ");
+  const details = data.connection_details ? ` Host: ${data.connection_details.host}, port: ${data.connection_details.port}, database: ${data.connection_details.database}, SSL: ${data.connection_details.ssl_mode}.` : "";
+  const message = [data.ok ? "Connection verified." : "Connection was not verified.", data.message, details, ...(data.next_steps || []).map((step) => `Next: ${step}`)].filter(Boolean).join(" ");
   setStatus(message || "Database connection test passed.");
   if (el.databaseConfigStatus) {
     el.databaseConfigStatus.textContent = message || "Database connection test passed.";
     el.databaseConfigStatus.classList.toggle("error", data.ok === false);
   }
+  if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
 }
 
 async function saveDatabaseConfig(options = {}) {

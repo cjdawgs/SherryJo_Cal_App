@@ -669,7 +669,8 @@
         <div class="repository-control-body">
           <div>
             <h3>Active database</h3>
-            <p id="databaseConfigSummary">Loading database status...</p>
+            <p id="databaseConfigSummary" class="database-connection-inactive">Loading database status...</p>
+            <p class="database-field-help">App admin authorization lets you use this panel. Neon or Supabase credentials below authenticate the database connection; they are separate from the SherryJo admin password.</p>
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
                 <span style="font-size:12px;opacity:0.75;min-width:72px;">Mode</span>
@@ -681,7 +682,7 @@
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
-                <span style="font-size:12px;opacity:0.75;min-width:72px;">Saved provider</span>
+                <span style="font-size:12px;opacity:0.75;min-width:72px;">Provider</span>
                 <select id="databaseProfileSelect" style="flex:1;min-width:0;">
                   <option value="">New provider connection</option>
                 </select>
@@ -694,20 +695,20 @@
               </label>
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
-              <input id="databaseHostInput" type="text" placeholder="Host, e.g. ep-example.us-east-2.aws.neon.tech" autocomplete="off" style="flex:2;min-width:0;">
-              <input id="databasePortInput" type="text" placeholder="Port (5432)" value="5432" autocomplete="off" style="flex:1;min-width:110px;">
-              <input id="databaseNameInput" type="text" placeholder="Database name" autocomplete="off" style="flex:1;min-width:0;">
+              <input id="databaseHostInput" type="text" placeholder="Host from Neon" aria-label="Database host" autocomplete="off" style="flex:2;min-width:0;">
+              <input id="databasePortInput" type="text" placeholder="Port, usually 5432" aria-label="Database port" value="5432" autocomplete="off" style="flex:1;min-width:110px;">
+              <input id="databaseNameInput" type="text" placeholder="Database name, usually neondb" aria-label="Database name" autocomplete="off" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
-              <input id="databaseUserInput" type="text" placeholder="Username" autocomplete="username" style="flex:1;min-width:0;">
-              <input id="databasePasswordInput" type="password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:0;">
+              <input id="databaseUserInput" type="text" placeholder="Neon username" aria-label="Database username" autocomplete="username" style="flex:1;min-width:0;">
+              <input id="databasePasswordInput" type="password" placeholder="Neon password" aria-label="Database password" autocomplete="current-password" style="flex:1;min-width:0;">
               <select id="databaseSslModeSelect" style="flex:1;min-width:120px;">
-                <option value="require">SSL required</option>
-                <option value="off">SSL off</option>
+                <option value="require">SSL required (Neon recommended)</option>
+                <option value="off">SSL off (local only)</option>
               </select>
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
-              <input id="databaseUrlInput" type="text" placeholder="Optional full PostgreSQL URL" autocomplete="off" style="flex:1;min-width:0;">
+              <input id="databaseUrlInput" type="text" placeholder="Optional full Neon connection string; use this OR the fields above" aria-label="Full PostgreSQL connection string" autocomplete="off" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;font-size:12px;opacity:0.8;">
@@ -717,10 +718,10 @@
             </div>
             <div class="deployment-sync-actions" style="margin-top:12px;">
               <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect Supabase / Neon</button>
-              <button id="databaseTestBtn" class="ghost-btn" type="button">Test Connection</button>
+              <button id="databaseTestBtn" class="ghost-btn" type="button">Test Neon connection</button>
               <button id="databaseSaveBtn" type="button">Save Database</button>
             </div>
-            <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Add your Neon URL or switch to SQLite before testing.</p>
+            <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Enter a full Neon connection string or complete the fields, then select Test Neon connection. Nothing is saved until the test succeeds.</p>
             <div class="database-copy-panel">
               <h3>Copy critical application data</h3>
               <p class="muted-line">Copies users, events, tasks, notes, date-sticky notes, and tag colors. Existing records in the destination are preserved.</p>
