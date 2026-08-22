@@ -870,6 +870,56 @@ def test_disconnect_account_endpoint(client, multi_account_user: User, oauth_acc
     assert "Disconnected" in data["message"]
 
 
+def test_get_accounts_filters_out_example_com_accounts(client, multi_account_user: User, oauth_accounts_setup, db: Session):
+    """Test that GET /accounts properly filters out @example.com test accounts."""
+    
+    import jwt
+    from app.routers.auth import SECRET_KEY
+    
+    # Add a test account with @example.com email
+    test_account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="test@example.com",
+        display_name="Test Account",
+        access_token="test_token_xyz",
+        refresh_token="test_refresh_xyz",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+        provider_id="test_id_001",
+        is_primary=False,
+        sync_enabled=True
+    )
+    db.add(test_account)
+    db.commit()
+    
+    token = jwt.encode(
+        {"user_id": multi_account_user.id},
+        SECRET_KEY,
+        algorithm="HS256"
+    )
+    
+    response = client.get(
+        "/accounts",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    
+    assert response.status_code == 200
+    data = response.json()
+    
+    # Should have 3 accounts (the fixture accounts) but NOT the test@example.com
+    assert len(data) == 3
+    
+    # Verify none of the returned accounts have @example.com email
+    for account in data:
+        assert not account["account_email"].endswith("@example.com"), \
+            f"Account with @example.com email should be filtered: {account['account_email']}"
+    
+    # Verify all returned accounts are from the fixture
+    emails = {acc["account_email"] for acc in data}
+    expected_emails = {"sherryjo@gmail.com", "sherryjo.work@gmail.com", "sherryjo@outlook.com"}
+    assert emails == expected_emails
+
+
 # ============================================================
 # MANUAL TESTING GUIDE (Run against real app)
 # ============================================================

@@ -18,7 +18,7 @@ CalendarService → ensure_valid_token → API client
 
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
+from sqlalchemy import or_, func, not_
 from app.models import OAuthAccount
 from app.utils.crypto import TokenEncryptionError
 import requests
@@ -61,6 +61,7 @@ def _exclude_service_provider_rows(query):
     """
     Exclude admin-managed provider rows from end-user OAuth account flows.
     Includes a token-based fallback for legacy rows that predate the flag.
+    Also excludes test/placeholder accounts with @example.com email addresses.
     """
     return query.filter(
         or_(
@@ -68,7 +69,7 @@ def _exclude_service_provider_rows(query):
             OAuthAccount.is_service_provider.is_(None),
         ),
         OAuthAccount.access_token != ADMIN_PLACEHOLDER_TOKEN,
-        func.lower(OAuthAccount.account_email).notlike("%@example.com"),
+        not_(func.lower(OAuthAccount.account_email).like("%@example.com")),
     )
 
 
