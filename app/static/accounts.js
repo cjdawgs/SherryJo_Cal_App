@@ -757,11 +757,14 @@ async function loadAccounts() {
   const payload = await res.json();
   const accounts = Array.isArray(payload) ? payload : payload.accounts || [];
 
-  updateAppleSetupVisibility(accounts);
+  const syncPayload = await fetchSyncStatus();
+  const syncAccounts = Array.isArray(syncPayload?.accounts) ? syncPayload.accounts : [];
+  const displayAccounts = accounts.length ? accounts : syncAccounts;
+  updateAppleSetupVisibility(displayAccounts);
   renderAppleEmailSuggestions();
 
   const groups = { google: [], microsoft: [], apple: [] };
-  accounts.forEach((acc) => {
+  displayAccounts.forEach((acc) => {
     const key = normalizeProvider(acc.provider);
     if (groups[key]) groups[key].push(acc);
   });
@@ -771,9 +774,11 @@ async function loadAccounts() {
   renderProviderAccounts("apple", groups.apple);
   focusRemediationTargetIfRequested();
 
-  await fetchSyncStatus();
+  if (!accounts.length && syncAccounts.length) {
+    setGlobalMessage("Provider accounts are connected and loaded from sync status. The account details endpoint returned no rows; the cards below use the verified sync account list.", "info");
+  }
 
-  return accounts;
+  return displayAccounts;
 }
 
 async function testApple(button) {
