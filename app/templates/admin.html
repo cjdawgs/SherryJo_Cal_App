@@ -665,7 +665,7 @@
 
     <section class="panel database-config-panel" id="databaseConfigPanel">
       <details id="databaseConfigDetails" open>
-        <summary>Database Runtime Control</summary>
+        <summary>Database Runtime Control <span class="database-collapse-hint">Select to expand or collapse</span></summary>
         <div class="repository-control-body">
           <div>
             <h3>Active database</h3>
@@ -674,13 +674,40 @@
               <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
                 <span style="font-size:12px;opacity:0.75;min-width:72px;">Mode</span>
                 <select id="databaseModeSelect" style="flex:1;min-width:0;">
-                  <option value="postgres">Postgres / Neon</option>
+                  <option value="postgres">Postgres DB provider</option>
                   <option value="sqlite">SQLite</option>
                 </select>
               </label>
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
-              <input id="databaseUrlInput" type="text" placeholder="postgresql://user:pass@host/dbname or sqlite:///./app.db" autocomplete="off">
+              <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+                <span style="font-size:12px;opacity:0.75;min-width:72px;">Saved provider</span>
+                <select id="databaseProfileSelect" style="flex:1;min-width:0;">
+                  <option value="">New provider connection</option>
+                </select>
+              </label>
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;">
+              <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+                <span style="font-size:12px;opacity:0.75;min-width:72px;">Provider title</span>
+                <input id="databaseProviderTitleInput" type="text" placeholder="Neon - Postgres" autocomplete="off" style="flex:1;min-width:0;">
+              </label>
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
+              <input id="databaseHostInput" type="text" placeholder="Host, e.g. ep-example.us-east-2.aws.neon.tech" autocomplete="off" style="flex:2;min-width:0;">
+              <input id="databasePortInput" type="text" placeholder="Port (5432)" value="5432" autocomplete="off" style="flex:1;min-width:110px;">
+              <input id="databaseNameInput" type="text" placeholder="Database name" autocomplete="off" style="flex:1;min-width:0;">
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
+              <input id="databaseUserInput" type="text" placeholder="Username" autocomplete="username" style="flex:1;min-width:0;">
+              <input id="databasePasswordInput" type="password" placeholder="Password" autocomplete="current-password" style="flex:1;min-width:0;">
+              <select id="databaseSslModeSelect" style="flex:1;min-width:120px;">
+                <option value="require">SSL required</option>
+                <option value="off">SSL off</option>
+              </select>
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;">
+              <input id="databaseUrlInput" type="text" placeholder="Optional full PostgreSQL URL" autocomplete="off" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;font-size:12px;opacity:0.8;">
@@ -694,6 +721,16 @@
               <button id="databaseSaveBtn" type="button">Save Database</button>
             </div>
             <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Add your Neon URL or switch to SQLite before testing.</p>
+            <div class="database-copy-panel">
+              <h3>Copy critical application data</h3>
+              <p class="muted-line">Copies users, events, tasks, notes, date-sticky notes, and tag colors. Existing records in the destination are preserved.</p>
+              <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
+                <select id="databaseCopySourceSelect" aria-label="Copy source provider" style="flex:1;min-width:0;"><option value="">Source provider</option></select>
+                <select id="databaseCopyTargetSelect" aria-label="Copy target provider" style="flex:1;min-width:0;"><option value="">Target provider</option></select>
+                <button id="databaseCopyBtn" class="ghost-btn" type="button">Copy critical data</button>
+              </div>
+              <p id="databaseCopyStatus" class="muted-line" style="margin-top:8px;">Save and test both PostgreSQL providers before copying.</p>
+            </div>
           </div>
           <div>
             <h3>Live test notes</h3>

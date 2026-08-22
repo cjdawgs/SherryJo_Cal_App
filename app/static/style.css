@@ -1,3 +1,36 @@
+.database-connection-active,
+.database-connection-inactive {
+  border-radius: 6px;
+  display: block;
+  padding: 8px 10px;
+  font-weight: 600;
+}
+
+.database-connection-active {
+  background: #dcfce7;
+  border: 1px solid #86efac;
+  color: #166534;
+}
+
+.database-connection-inactive {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+
+.database-collapse-hint {
+  float: right;
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+}
+
+.database-copy-panel {
+  border-top: 1px solid #e2e8f0;
+  margin-top: 18px;
+  padding-top: 14px;
+}
+
 /* =====================================================
 ✅ GLOBAL BASE
 ===================================================== */

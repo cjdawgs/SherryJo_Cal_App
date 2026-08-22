@@ -81,12 +81,24 @@ const el = {
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
   databaseModeSelect: document.getElementById("databaseModeSelect"),
+  databaseProfileSelect: document.getElementById("databaseProfileSelect"),
+  databaseProviderTitleInput: document.getElementById("databaseProviderTitleInput"),
+  databaseHostInput: document.getElementById("databaseHostInput"),
+  databasePortInput: document.getElementById("databasePortInput"),
+  databaseNameInput: document.getElementById("databaseNameInput"),
+  databaseUserInput: document.getElementById("databaseUserInput"),
+  databasePasswordInput: document.getElementById("databasePasswordInput"),
+  databaseSslModeSelect: document.getElementById("databaseSslModeSelect"),
   databaseUrlInput: document.getElementById("databaseUrlInput"),
   databaseFallbackToggle: document.getElementById("databaseFallbackToggle"),
   databaseConnectBtn: document.getElementById("databaseConnectBtn"),
   databaseTestBtn: document.getElementById("databaseTestBtn"),
   databaseSaveBtn: document.getElementById("databaseSaveBtn"),
   databaseConfigStatus: document.getElementById("databaseConfigStatus"),
+  databaseCopySourceSelect: document.getElementById("databaseCopySourceSelect"),
+  databaseCopyTargetSelect: document.getElementById("databaseCopyTargetSelect"),
+  databaseCopyBtn: document.getElementById("databaseCopyBtn"),
+  databaseCopyStatus: document.getElementById("databaseCopyStatus"),
   gitCommitPasswordInput: document.getElementById("gitCommitPasswordInput"),
   gitCommitPushBtn: document.getElementById("gitCommitPushBtn"),
   gitCommitPushHint: document.getElementById("gitCommitPushHint"),
@@ -2003,9 +2015,83 @@ function bindEvents() {
   el.databaseConnectBtn?.addEventListener("click", connectPreferredDatabase);
   el.databaseTestBtn?.addEventListener("click", testDatabaseConfig);
   el.databaseSaveBtn?.addEventListener("click", saveDatabaseConfig);
+  el.databaseProfileSelect?.addEventListener("change", selectDatabaseProfile);
+  el.databaseCopyBtn?.addEventListener("click", copyCriticalDatabaseData);
+  if (el.databaseConfigDetails) {
+    el.databaseConfigDetails.open = localStorage.getItem("databaseConfigOpen") !== "false";
+    el.databaseConfigDetails.addEventListener("toggle", () => localStorage.setItem("databaseConfigOpen", String(el.databaseConfigDetails.open)));
+  }
+}
+
+function populateDatabaseCopyProviders(profiles) {
+  [el.databaseCopySourceSelect, el.databaseCopyTargetSelect].forEach((select) => {
+    if (!select) return;
+    const placeholder = select === el.databaseCopySourceSelect ? "Source provider" : "Target provider";
+    select.replaceChildren(new Option(placeholder, ""));
+    profiles.forEach((profile) => select.add(new Option(profile.title, profile.title)));
+  });
+}
+
+async function copyCriticalDatabaseData() {
+  const source = el.databaseCopySourceSelect?.value;
+  const target = el.databaseCopyTargetSelect?.value;
+  if (!source || !target) {
+    if (el.databaseCopyStatus) el.databaseCopyStatus.textContent = "Select both a source and target provider.";
+    return;
+  }
+  if (source === target || !window.confirm(`Copy critical application data from ${source} to ${target}? Existing target records will be preserved.`)) return;
+  if (el.databaseCopyBtn) el.databaseCopyBtn.disabled = true;
+  if (el.databaseCopyStatus) el.databaseCopyStatus.textContent = "Copying critical data...";
+  const res = await apiRequest("/admin/system/database-config/copy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ source_provider: source, target_provider: target }),
+  });
+  const data = res ? await res.json().catch(() => ({})) : {};
+  const totals = Object.values(data.tables || {}).reduce((sum, item) => sum + Number(item.copied || 0), 0);
+  if (el.databaseCopyStatus) {
+    el.databaseCopyStatus.textContent = res?.ok ? `${data.message || "Copy complete."} ${totals} new rows copied.` : data.detail || "Database copy failed.";
+    el.databaseCopyStatus.classList.toggle("error", !res?.ok);
+  }
+  if (el.databaseCopyBtn) el.databaseCopyBtn.disabled = false;
+}
+
+function selectDatabaseProfile() {
+  const profile = (window.__databaseProfiles || []).find((item) => item.title === el.databaseProfileSelect?.value);
+  if (!profile) return;
+  const fields = {
+    databaseProviderTitleInput: profile.title,
+    databaseHostInput: profile.database_host,
+    databasePortInput: profile.database_port || "5432",
+    databaseNameInput: profile.database_name,
+    databaseUserInput: profile.database_user,
+    databasePasswordInput: profile.database_password,
+    databaseSslModeSelect: profile.ssl_mode || "require",
+    databaseUrlInput: profile.database_url,
+  };
+  Object.entries(fields).forEach(([key, value]) => { if (el[key]) el[key].value = value || ""; });
+}
+
+function databasePayload(mode, url) {
+  return {
+    provider_title: el.databaseProviderTitleInput?.value.trim() || null,
+    database_mode: mode,
+    database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
+    database_user: el.databaseUserInput?.value.trim() || null,
+    database_password: el.databasePasswordInput?.value || null,
+    database_host: el.databaseHostInput?.value.trim() || null,
+    database_port: el.databasePortInput?.value.trim() || "5432",
+    database_name: el.databaseNameInput?.value.trim() || null,
+    ssl_mode: el.databaseSslModeSelect?.value || "require",
+    disable_sqlite_fallback: !(el.databaseFallbackToggle?.checked ?? true),
+  };
 }
 
 async function connectPreferredDatabase() {
+  if (window.__databaseRuntime === "cloudflare-worker") {
+    await testDatabaseConfig({ mode: "postgres", url: "" });
+    return;
+  }
   const preferredUrl = (window.__databasePreferredUrl || "").trim();
   if (!preferredUrl) {
     setStatus("No Supabase or Neon Postgres URL is configured yet.", true);
@@ -2048,18 +2134,30 @@ async function loadDatabaseConfig() {
   const fallback = Boolean(data.disable_sqlite_fallback === true || data.disable_sqlite_fallback === "true");
   const preferredUrl = (data.preferred_postgres_url || "").trim();
   const activeUrl = (data.database_url || "").trim();
+  window.__databaseProfiles = data.profiles || [];
+  populateDatabaseCopyProviders(window.__databaseProfiles);
+  if (el.databaseProfileSelect) {
+    el.databaseProfileSelect.replaceChildren(new Option("New provider connection", ""));
+    window.__databaseProfiles.forEach((profile) => el.databaseProfileSelect.add(new Option(profile.title, profile.title)));
+  }
   window.__databasePreferredUrl = preferredUrl;
+  window.__databaseRuntime = data.runtime || "origin";
   if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
   if (el.databaseUrlInput) el.databaseUrlInput.value = activeUrl || preferredUrl || "";
   if (el.databaseFallbackToggle) el.databaseFallbackToggle.checked = !fallback;
   if (el.databaseConnectBtn) {
-    el.databaseConnectBtn.disabled = !preferredUrl;
-    el.databaseConnectBtn.textContent = preferredUrl ? "Connect Supabase / Neon" : "No Supabase / Neon URL";
+    const workerRuntime = data.runtime === "cloudflare-worker";
+    el.databaseConnectBtn.disabled = workerRuntime ? false : !preferredUrl;
+    el.databaseConnectBtn.textContent = workerRuntime
+      ? "Test active Worker DB"
+      : preferredUrl ? "Connect Supabase / Neon" : "No Supabase / Neon URL";
   }
   if (el.databaseConfigSummary) {
     const summary = data.summary || { label: "Unknown", engine: "unknown" };
     const providerLabel = data.provider_label || (summary.label || "Unknown");
     el.databaseConfigSummary.textContent = `Active: ${summary.label || "Unknown"} (${summary.engine || "unknown"}) · ${data.database_mode || "postgres"} · ${providerLabel}`;
+    el.databaseConfigSummary.classList.toggle("database-connection-active", Boolean(data.is_connected_to_postgres));
+    el.databaseConfigSummary.classList.toggle("database-connection-inactive", !data.is_connected_to_postgres);
   }
   if (el.databaseConfigStatus) {
     const statusText = data.message
@@ -2072,16 +2170,16 @@ async function loadDatabaseConfig() {
     el.databaseConfigStatus.textContent = statusText;
     el.databaseConfigStatus.classList.toggle("error", data.hyperdrive_configured === false);
   }
+  if (el.databaseCopyBtn && data.copy_supported === false) {
+    el.databaseCopyBtn.disabled = true;
+    if (el.databaseCopyStatus) el.databaseCopyStatus.textContent = "Data copy is unavailable in the single-binding Worker runtime. Configure a second database binding or use the origin runtime with two saved providers.";
+  }
 }
 
 async function testDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
   const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
-  const payload = {
-    database_mode: mode,
-    database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
-    disable_sqlite_fallback: !(el.databaseFallbackToggle?.checked ?? true),
-  };
+  const payload = databasePayload(mode, url);
 
   const res = await apiRequest("/admin/system/database-config/test", {
     method: "POST",
@@ -2116,12 +2214,7 @@ async function testDatabaseConfig(options = {}) {
 async function saveDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
   const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
-  const fallbackChecked = el.databaseFallbackToggle?.checked ?? true;
-  const payload = {
-    database_mode: mode,
-    database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
-    disable_sqlite_fallback: !fallbackChecked,
-  };
+  const payload = databasePayload(mode, url);
 
   const res = await apiRequest("/admin/system/database-config", {
     method: "POST",

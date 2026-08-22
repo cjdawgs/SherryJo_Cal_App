@@ -115,6 +115,9 @@ async function systemRoute(client, request, parts, url, env) {
             requires_restart: true,
             runtime: "cloudflare-worker",
             provider_label: "Cloudflare Hyperdrive / Postgres",
+            is_connected_to_postgres: hyperdriveConfigured,
+            profiles: [],
+            copy_supported: false,
             hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
             hyperdrive_configured: hyperdriveConfigured,
             message: hyperdriveConfigured

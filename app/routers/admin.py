@@ -68,14 +68,39 @@ class GitCommitPushRequest(BaseModel):
 
 
 class DatabaseRuntimeConfigUpdate(BaseModel):
+    provider_title: str | None = None
     database_mode: str = "postgres"
     database_url: str | None = None
     database_user: str | None = None
     database_password: str | None = None
     database_host: str | None = None
+    database_port: str | None = None
     database_name: str | None = None
     ssl_mode: str = "require"
     disable_sqlite_fallback: bool = False
+
+
+class DatabaseCopyRequest(BaseModel):
+    source_provider: str
+    target_provider: str
+
+
+CRITICAL_DATABASE_TABLES = (
+    "users",
+    "events",
+    "tasks",
+    "notes",
+    "date_sticky_notes",
+    "event_tag_color_settings",
+)
+
+
+def _database_profiles() -> list[dict]:
+    try:
+        profiles = json.loads(os.getenv("DB_PROFILES", "[]"))
+    except (TypeError, ValueError):
+        profiles = []
+    return profiles if isinstance(profiles, list) else []
 
 
 def _database_runtime_mode(value: str | None) -> str:
@@ -91,7 +116,7 @@ def _database_runtime_mode(value: str | None) -> str:
     return "postgres"
 
 
-def _normalize_database_url(database_mode: str, candidate: str | None, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None) -> str:
+def _normalize_database_url(database_mode: str, candidate: str | None, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None, database_port: str | None = None) -> str:
     mode = (database_mode or "postgres").strip().lower()
     value = (candidate or "").strip()
 
@@ -105,6 +130,7 @@ def _normalize_database_url(database_mode: str, candidate: str | None, database_
     password = (database_password or "").strip()
     host = (database_host or "").strip()
     name = (database_name or "").strip()
+    port = (database_port or "5432").strip()
     ssl_value = (ssl_mode or "require").strip().lower()
 
     if not (host and name):
@@ -115,10 +141,10 @@ def _normalize_database_url(database_mode: str, candidate: str | None, database_
 
     auth = f":{password}" if password else ""
     suffix = "" if ssl_value == "off" else "?sslmode=require"
-    return f"postgresql://{user}{auth}@{host}/{name}{suffix}"
+    return f"postgresql://{user}{auth}@{host}:{port}/{name}{suffix}"
 
 
-def _persist_runtime_database_config(database_url: str, database_mode: str, disable_sqlite_fallback: bool, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None) -> dict:
+def _persist_runtime_database_config(database_url: str, database_mode: str, disable_sqlite_fallback: bool, provider_title: str | None = None, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None, database_port: str | None = None) -> dict:
     env_path = Path(BASE_DIR) / ".env"
     existing_lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
 
@@ -131,8 +157,22 @@ def _persist_runtime_database_config(database_url: str, database_mode: str, disa
         "DB_PASSWORD": database_password or "",
         "DB_HOST": database_host or "",
         "DB_NAME": database_name or "",
+        "DB_PORT": database_port or "5432",
         "DB_SSL_MODE": (ssl_mode or "require").strip() or "require",
     }
+    profiles = [profile for profile in _database_profiles() if profile.get("title") != (provider_title or "").strip()]
+    if provider_title and database_mode == "postgres":
+        profiles.append({
+            "title": provider_title.strip(),
+            "database_url": database_url,
+            "database_user": database_user or "",
+            "database_password": database_password or "",
+            "database_host": database_host or "",
+            "database_port": database_port or "5432",
+            "database_name": database_name or "",
+            "ssl_mode": (ssl_mode or "require").strip() or "require",
+        })
+        replacements["DB_PROFILES"] = json.dumps(profiles, separators=(",", ":"))
     updated_lines = []
     seen_keys = set()
 
@@ -173,12 +213,14 @@ def _persist_runtime_database_config(database_url: str, database_mode: str, disa
 
     return {
         "database_url": database_url,
+        "provider_title": provider_title,
         "database_mode": database_mode,
         "disable_sqlite_fallback": disable_sqlite_fallback,
         "database_user": database_user,
         "database_host": database_host,
         "database_name": database_name,
         "ssl_mode": (ssl_mode or "require").strip() or "require",
+        "profiles": [{key: value for key, value in profile.items() if key != "database_password"} for profile in profiles],
         "env_file": str(env_path),
     }
 
@@ -196,6 +238,42 @@ def _test_database_url(database_url: str) -> dict:
     except Exception as exc:
         logger.warning("Database connection test failed for %s: %s", database_url, exc)
         return {"ok": False, "message": f"Connection failed: {exc}"}
+
+
+def _copy_critical_database_data(source_url: str, target_url: str) -> dict:
+    source_engine = create_engine(source_url, pool_pre_ping=True)
+    target_engine = create_engine(target_url, pool_pre_ping=True)
+    copied = {}
+    try:
+        with source_engine.connect() as source, target_engine.begin() as target:
+            for table in CRITICAL_DATABASE_TABLES:
+                source_inspector = inspect(source_engine)
+                target_inspector = inspect(target_engine)
+                if table not in source_inspector.get_table_names() or table not in target_inspector.get_table_names():
+                    copied[table] = {"copied": 0, "skipped": "table missing"}
+                    continue
+                source_columns = [column["name"] for column in source_inspector.get_columns(table)]
+                target_columns = {column["name"] for column in target_inspector.get_columns(table)}
+                columns = [column for column in source_columns if column in target_columns]
+                if not columns:
+                    copied[table] = {"copied": 0, "skipped": "no shared columns"}
+                    continue
+                rows = source.execute(text(f'SELECT {", ".join(f"{column}" for column in columns)} FROM "{table}"')).mappings().all()
+                if not rows:
+                    copied[table] = {"copied": 0, "skipped": "empty"}
+                    continue
+                column_sql = ", ".join(f'"{column}"' for column in columns)
+                values_sql = ", ".join(f":value_{index}" for index in range(len(columns)))
+                insert_sql = text(f'INSERT INTO "{table}" ({column_sql}) VALUES ({values_sql}) ON CONFLICT DO NOTHING')
+                inserted = 0
+                for row in rows:
+                    result = target.execute(insert_sql, {f"value_{index}": row[column] for index, column in enumerate(columns)})
+                    inserted += result.rowcount or 0
+                copied[table] = {"copied": inserted, "examined": len(rows)}
+    finally:
+        source_engine.dispose()
+        target_engine.dispose()
+    return copied
 
 
 def redact_row(row: dict) -> dict:
@@ -1009,6 +1087,7 @@ def admin_database_config(
         "provider_label": "Supabase postgres" if provider_label == "supabase" else "Neon postgres" if provider_label == "neon" else "SQLite" if provider_label == "sqlite" else "Postgres",
         "preferred_postgres_url": preferred_url,
         "preferred_provider": preferred_provider,
+        "profiles": _database_profiles(),
         "is_connected_to_postgres": bool(active_url and active_url.startswith("postgresql")),
         "is_connected_to_supabase": provider_label == "supabase",
         "is_connected_to_neon": provider_label == "neon",
@@ -1024,7 +1103,16 @@ def admin_test_database_config(
     if payload.database_mode not in {"sqlite", "postgres"}:
         raise HTTPException(status_code=422, detail="database_mode must be either sqlite or postgres.")
 
-    candidate_url = _normalize_database_url(payload.database_mode, payload.database_url)
+    candidate_url = _normalize_database_url(
+        payload.database_mode,
+        payload.database_url,
+        payload.database_user,
+        payload.database_password,
+        payload.database_host,
+        payload.database_name,
+        payload.ssl_mode,
+        payload.database_port,
+    )
     result = _test_database_url(candidate_url)
     return {
         "ok": result["ok"],
@@ -1032,6 +1120,36 @@ def admin_test_database_config(
         "database_url": candidate_url,
         "message": result["message"],
         "requires_restart": True,
+    }
+
+
+@router.post("/system/database-config/copy")
+def admin_copy_database_config(
+    payload: DatabaseCopyRequest,
+    admin_user: User = Depends(require_admin),
+):
+    if payload.source_provider == payload.target_provider:
+        raise HTTPException(status_code=422, detail="Choose two different database providers.")
+    profiles = {profile.get("title"): profile for profile in _database_profiles() if profile.get("title")}
+    source = profiles.get(payload.source_provider)
+    target = profiles.get(payload.target_provider)
+    if not source or not target:
+        raise HTTPException(status_code=422, detail="Both selected providers must be saved and tested first.")
+    source_url = str(source.get("database_url") or "")
+    target_url = str(target.get("database_url") or "")
+    if not source_url.startswith("postgresql") or not target_url.startswith("postgresql"):
+        raise HTTPException(status_code=422, detail="Database copy supports saved PostgreSQL providers only.")
+    try:
+        copied = _copy_critical_database_data(source_url, target_url)
+    except Exception as exc:
+        logger.exception("Critical database copy failed")
+        raise HTTPException(status_code=502, detail=f"Database copy failed: {exc}") from exc
+    return {
+        "ok": True,
+        "source_provider": payload.source_provider,
+        "target_provider": payload.target_provider,
+        "tables": copied,
+        "message": "Critical application data was copied additively. Existing target rows were preserved.",
     }
 
 
@@ -1043,12 +1161,32 @@ def admin_apply_database_config(
     if payload.database_mode not in {"sqlite", "postgres"}:
         raise HTTPException(status_code=422, detail="database_mode must be either sqlite or postgres.")
 
-    database_url = _normalize_database_url(payload.database_mode, payload.database_url)
+    database_url = _normalize_database_url(
+        payload.database_mode,
+        payload.database_url,
+        payload.database_user,
+        payload.database_password,
+        payload.database_host,
+        payload.database_name,
+        payload.ssl_mode,
+        payload.database_port,
+    )
     validation = _test_database_url(database_url)
     if not validation["ok"]:
         raise HTTPException(status_code=400, detail=validation["message"])
 
-    saved = _persist_runtime_database_config(database_url, payload.database_mode, payload.disable_sqlite_fallback)
+    saved = _persist_runtime_database_config(
+        database_url,
+        payload.database_mode,
+        payload.disable_sqlite_fallback,
+        payload.provider_title,
+        payload.database_user,
+        payload.database_password,
+        payload.database_host,
+        payload.database_name,
+        payload.ssl_mode,
+        payload.database_port,
+    )
 
     globals()["DATABASE_URL"] = database_url
     os.environ["DATABASE_URL"] = database_url
