@@ -80,6 +80,8 @@ const el = {
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
+  hyperdriveSetupBanner: document.getElementById("hyperdriveSetupBanner"),
+  hyperdriveSetupMessage: document.getElementById("hyperdriveSetupMessage"),
   databaseModeSelect: document.getElementById("databaseModeSelect"),
   databaseProfileSelect: document.getElementById("databaseProfileSelect"),
   databaseProviderTitleInput: document.getElementById("databaseProviderTitleInput"),
@@ -2185,6 +2187,11 @@ async function loadDatabaseConfig() {
     el.databaseConfigSummary.textContent = `${data.live_database_confirmed ? "LIVE DATABASE" : "NOT LIVE"}: ${liveLabel} · ${data.active_database_source || summary.label || "Unknown"}`;
     el.databaseConfigSummary.classList.toggle("database-connection-active", Boolean(data.live_database_confirmed));
     el.databaseConfigSummary.classList.toggle("database-connection-inactive", !data.live_database_confirmed);
+  }
+  if (el.hyperdriveSetupBanner && data.runtime === "cloudflare-worker") {
+    const hyperdriveLive = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
+    el.hyperdriveSetupBanner.hidden = hyperdriveLive;
+    if (el.hyperdriveSetupMessage) el.hyperdriveSetupMessage.textContent = data.message || "Configure and redeploy the Hyperdrive binding before testing again.";
   }
   if (el.databaseConfigStatus) {
     const statusText = data.message

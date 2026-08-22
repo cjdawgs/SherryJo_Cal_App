@@ -108,28 +108,43 @@ async function systemRoute(client, request, parts, url, env) {
     const action = parts[2];
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
-        if (request.method === "GET") return {
-            database_mode: "postgres",
-            database_url: "",
-            disable_sqlite_fallback: true,
-            requires_restart: true,
-            runtime: "cloudflare-worker",
-            provider_label: "Cloudflare Hyperdrive / Postgres",
-            active_provider_title: "Cloudflare Hyperdrive / Postgres (active)",
-            active_database_source: "cloudflare-hyperdrive",
-            live_database_confirmed: hyperdriveConfigured,
-            is_connected_to_postgres: hyperdriveConfigured,
-            profiles: [],
-            copy_supported: false,
-            hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
-            hyperdrive_configured: hyperdriveConfigured,
-            message: hyperdriveConfigured
-                ? "The Worker uses its configured Hyperdrive Postgres connection."
-                : "Hyperdrive is not configured for this Worker.",
-            next_steps: hyperdriveConfigured
-                ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare, then redeploy the Worker."]
-                : ["Create or update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare.", "Point it at the intended Supabase or Neon Postgres database.", "Redeploy the Worker, then run Test Connection here."]
-        };
+        if (request.method === "GET") {
+            let hyperdriveReachable = false;
+            if (hyperdriveConfigured) {
+                try {
+                    await client.query("SELECT 1 AS connected");
+                    hyperdriveReachable = true;
+                } catch {
+                    hyperdriveReachable = false;
+                }
+            }
+            const live = hyperdriveConfigured && hyperdriveReachable;
+            return {
+                database_mode: "postgres",
+                database_url: "",
+                disable_sqlite_fallback: true,
+                requires_restart: true,
+                runtime: "cloudflare-worker",
+                provider_label: "Cloudflare Hyperdrive / Postgres",
+                active_provider_title: "Cloudflare Hyperdrive / Postgres (active)",
+                active_database_source: "cloudflare-hyperdrive",
+                live_database_confirmed: live,
+                is_connected_to_postgres: live,
+                profiles: [],
+                copy_supported: false,
+                hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
+                hyperdrive_configured: hyperdriveConfigured,
+                hyperdrive_reachable: hyperdriveReachable,
+                message: live
+                    ? "The Worker is live on its configured Hyperdrive Postgres connection."
+                    : hyperdriveConfigured
+                        ? "The Hyperdrive binding exists, but the Worker could not reach its Postgres database."
+                        : "Hyperdrive is not configured for this Worker.",
+                next_steps: live
+                    ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare, then redeploy the Worker."]
+                    : ["Open Cloudflare Hyperdrive and create or update the HYPERDRIVE_RLS_NO_CACHE binding.", "Point Hyperdrive at the intended Neon or Supabase Postgres connection.", "Redeploy with: cd platform/cloudflare && npm ci && npm run deploy.", "Return here and run Test active Worker DB."]
+            };
+        }
         if (request.method === "POST" && parts[3] === "test") {
             if (!hyperdriveConfigured) return {
                 ok: false,

@@ -41,6 +41,26 @@
   padding: 8px 10px;
 }
 
+.hyperdrive-setup-banner {
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-left: 4px solid #f97316;
+  color: #7c2d12;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 10px 0;
+  padding: 10px 12px;
+}
+
+.hyperdrive-setup-banner p {
+  margin: 4px 0 6px;
+}
+
+.hyperdrive-setup-banner ol {
+  margin: 6px 0 10px 20px;
+  padding: 0;
+}
+
 /* =====================================================
 ✅ GLOBAL BASE
 ===================================================== */

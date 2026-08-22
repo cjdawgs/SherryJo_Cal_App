@@ -669,6 +669,18 @@
         <div class="repository-control-body">
           <div>
             <h3>Active database</h3>
+            <div id="hyperdriveSetupBanner" class="hyperdrive-setup-banner" hidden>
+              <strong>Cloudflare Hyperdrive is not live</strong>
+              <p id="hyperdriveSetupMessage">The Worker is not connected to the intended database yet.</p>
+              <ol>
+                <li>Open Cloudflare Dashboard &gt; Storage and databases &gt; Hyperdrive.</li>
+                <li>Edit the configuration used by <code>HYPERDRIVE_RLS_NO_CACHE</code>.</li>
+                <li>Point it to your Neon or Supabase Postgres connection and save it.</li>
+                <li>Redeploy from the repository root with <code>cd platform/cloudflare &amp;&amp; npm ci &amp;&amp; npm run deploy</code>.</li>
+                <li>Return here and click <strong>Test active Worker DB</strong>.</li>
+              </ol>
+              <a class="ghost-btn" href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Open Cloudflare Dashboard</a>
+            </div>
             <p id="databaseConfigSummary" class="database-connection-inactive">Loading database status...</p>
             <p class="database-field-help">App admin authorization lets you use this panel. Neon or Supabase credentials below authenticate the database connection; they are separate from the SherryJo admin password.</p>
             <div class="git-confirm-row" style="margin-top:10px;">

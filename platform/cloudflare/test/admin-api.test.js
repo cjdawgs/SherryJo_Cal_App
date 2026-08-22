@@ -72,3 +72,23 @@ test("rejects database saves in the single-binding Worker runtime", async () => 
     assert.match(body.detail, /cannot be changed/);
     assert.equal(body.next_steps.length, 3);
 });
+
+test("reports an inactive Hyperdrive binding with setup instructions", async () => {
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [{ allowed: true }] }),
+        })
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/database-config"),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    const body = await result.json();
+    assert.equal(body.live_database_confirmed, false);
+    assert.equal(body.hyperdrive_configured, false);
+    assert.match(body.message, /not configured/);
+    assert.match(body.next_steps.join(" "), /npm run deploy/);
+});
