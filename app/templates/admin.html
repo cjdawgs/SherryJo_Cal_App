@@ -663,6 +663,51 @@
       </details>
     </section>
 
+    <section class="panel database-config-panel" id="databaseConfigPanel">
+      <details id="databaseConfigDetails" open>
+        <summary>Database Runtime Control</summary>
+        <div class="repository-control-body">
+          <div>
+            <h3>Active database</h3>
+            <p id="databaseConfigSummary">Loading database status...</p>
+            <div class="git-confirm-row" style="margin-top:10px;">
+              <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+                <span style="font-size:12px;opacity:0.75;min-width:72px;">Mode</span>
+                <select id="databaseModeSelect" style="flex:1;min-width:0;">
+                  <option value="postgres">Postgres / Neon</option>
+                  <option value="sqlite">SQLite</option>
+                </select>
+              </label>
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;">
+              <input id="databaseUrlInput" type="text" placeholder="postgresql://user:pass@host/dbname or sqlite:///./app.db" autocomplete="off">
+            </div>
+            <div class="git-confirm-row" style="margin-top:10px;">
+              <label style="display:flex;align-items:center;gap:8px;font-size:12px;opacity:0.8;">
+               <input id="databaseFallbackToggle" type="checkbox" checked>
+               <span>Auto Allow (fallback to SQLite if Postgres fails)</span>
+              </label>
+            </div>
+            <div class="deployment-sync-actions" style="margin-top:12px;">
+              <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect Supabase / Neon</button>
+              <button id="databaseTestBtn" class="ghost-btn" type="button">Test Connection</button>
+              <button id="databaseSaveBtn" type="button">Save Database</button>
+            </div>
+            <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Add your Neon URL or switch to SQLite before testing.</p>
+          </div>
+          <div>
+            <h3>Live test notes</h3>
+            <p>Use Neon for a live test database, then select Postgres mode and save. The app validates the connection before writing the setting to the local .env file and updating the runtime.</p>
+            <ul style="margin:10px 0 0 18px; padding:0; font-size:12px; line-height:1.6; opacity:0.8;">
+              <li>SQLite is best for quick local testing.</li>
+              <li>Neon/Postgres is recommended for production-like live validation.</li>
+              <li>Save + restart when you want a full engine reload.</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+    </section>
+
     <section class="panel repository-control-panel" id="repositoryControlPanel">
       <details id="repositoryControlDetails">
         <summary>GitHub Repository Control</summary>

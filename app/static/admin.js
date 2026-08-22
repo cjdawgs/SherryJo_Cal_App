@@ -79,6 +79,14 @@ const el = {
   deploymentSyncPlatform: document.getElementById("deploymentSyncPlatform"),
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
+  databaseConfigSummary: document.getElementById("databaseConfigSummary"),
+  databaseModeSelect: document.getElementById("databaseModeSelect"),
+  databaseUrlInput: document.getElementById("databaseUrlInput"),
+  databaseFallbackToggle: document.getElementById("databaseFallbackToggle"),
+  databaseConnectBtn: document.getElementById("databaseConnectBtn"),
+  databaseTestBtn: document.getElementById("databaseTestBtn"),
+  databaseSaveBtn: document.getElementById("databaseSaveBtn"),
+  databaseConfigStatus: document.getElementById("databaseConfigStatus"),
   gitCommitPasswordInput: document.getElementById("gitCommitPasswordInput"),
   gitCommitPushBtn: document.getElementById("gitCommitPushBtn"),
   gitCommitPushHint: document.getElementById("gitCommitPushHint"),
@@ -1992,6 +2000,155 @@ function bindEvents() {
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
   el.applyTokenEncryptionKeyBtn?.addEventListener("click", applyTokenEncryptionKey);
   el.runFailureHistoryBtn?.addEventListener("click", loadFailureHistory);
+  el.databaseConnectBtn?.addEventListener("click", connectPreferredDatabase);
+  el.databaseTestBtn?.addEventListener("click", testDatabaseConfig);
+  el.databaseSaveBtn?.addEventListener("click", saveDatabaseConfig);
+}
+
+async function connectPreferredDatabase() {
+  const preferredUrl = (window.__databasePreferredUrl || "").trim();
+  if (!preferredUrl) {
+    setStatus("No Supabase or Neon Postgres URL is configured yet.", true);
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = "No Supabase or Neon Postgres URL is configured yet.";
+      el.databaseConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  if (el.databaseModeSelect) el.databaseModeSelect.value = "postgres";
+  if (el.databaseUrlInput) el.databaseUrlInput.value = preferredUrl;
+  await saveDatabaseConfig({ mode: "postgres", url: preferredUrl });
+}
+
+async function loadDatabaseConfig() {
+  const res = await apiRequest("/admin/system/database-config", { method: "GET" });
+  if (!res) {
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = "Unable to load database settings right now.";
+      el.databaseConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (handleAdminForbidden(res, data)) {
+    return;
+  }
+
+  if (!res.ok) {
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = data.detail || "Database settings could not be loaded.";
+      el.databaseConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  const mode = (data.database_mode || "postgres").toLowerCase();
+  const fallback = Boolean(data.disable_sqlite_fallback === true || data.disable_sqlite_fallback === "true");
+  const preferredUrl = (data.preferred_postgres_url || "").trim();
+  const activeUrl = (data.database_url || "").trim();
+  window.__databasePreferredUrl = preferredUrl;
+  if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
+  if (el.databaseUrlInput) el.databaseUrlInput.value = activeUrl || preferredUrl || "";
+  if (el.databaseFallbackToggle) el.databaseFallbackToggle.checked = !fallback;
+  if (el.databaseConnectBtn) {
+    el.databaseConnectBtn.disabled = !preferredUrl;
+    el.databaseConnectBtn.textContent = preferredUrl ? "Connect Supabase / Neon" : "No Supabase / Neon URL";
+  }
+  if (el.databaseConfigSummary) {
+    const summary = data.summary || { label: "Unknown", engine: "unknown" };
+    const providerLabel = data.provider_label || (summary.label || "Unknown");
+    el.databaseConfigSummary.textContent = `Active: ${summary.label || "Unknown"} (${summary.engine || "unknown"}) · ${data.database_mode || "postgres"} · ${providerLabel}`;
+  }
+  if (el.databaseConfigStatus) {
+    const statusText = data.is_connected_to_supabase
+      ? "Supabase Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
+      : data.is_connected_to_neon
+        ? "Neon Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
+        : "Auto Allow is enabled by default so SQLite can be used as a safe fallback.";
+    el.databaseConfigStatus.textContent = statusText;
+    el.databaseConfigStatus.classList.remove("error");
+  }
+}
+
+async function testDatabaseConfig(options = {}) {
+  const mode = options.mode || el.databaseModeSelect?.value || "postgres";
+  const url = (options.url ?? el.databaseUrlInput?.value || "").trim();
+  const payload = {
+    database_mode: mode,
+    database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
+    disable_sqlite_fallback: !(el.databaseFallbackToggle?.checked ?? true),
+  };
+
+  const res = await apiRequest("/admin/system/database-config/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res) {
+    setStatus("Database test request failed.", true);
+    return;
+  }
+  const data = await res.json().catch(() => ({}));
+  if (handleAdminForbidden(res, data)) return;
+
+  if (!res.ok) {
+    setStatus(data.detail || "Database connection test failed.", true);
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = data.detail || "Database connection test failed.";
+      el.databaseConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  setStatus(data.message || "Database connection test passed.");
+  if (el.databaseConfigStatus) {
+    el.databaseConfigStatus.textContent = data.message || "Database connection test passed.";
+    el.databaseConfigStatus.classList.remove("error");
+  }
+}
+
+async function saveDatabaseConfig(options = {}) {
+  const mode = options.mode || el.databaseModeSelect?.value || "postgres";
+  const url = (options.url ?? el.databaseUrlInput?.value || "").trim();
+  const fallbackChecked = el.databaseFallbackToggle?.checked ?? true;
+  const payload = {
+    database_mode: mode,
+    database_url: mode === "sqlite" ? (url || "sqlite:///./app.db") : url,
+    disable_sqlite_fallback: !fallbackChecked,
+  };
+
+  const res = await apiRequest("/admin/system/database-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res) {
+    setStatus("Save database settings request failed.", true);
+    return;
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (handleAdminForbidden(res, data)) return;
+
+  if (!res.ok) {
+    setStatus(data.detail || "Unable to save database settings.", true);
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = data.detail || "Unable to save database settings.";
+      el.databaseConfigStatus.classList.add("error");
+    }
+    return;
+  }
+
+  setStatus(data.message || "Database settings saved.");
+  if (el.databaseConfigStatus) {
+    el.databaseConfigStatus.textContent = "Database settings saved. Restart the app to fully apply the runtime engine.";
+    el.databaseConfigStatus.classList.remove("error");
+  }
+  await loadDatabaseConfig();
 }
 
 if (el.historyStartDate && !el.historyStartDate.value) {
@@ -2003,5 +2160,6 @@ if (el.historyEndDate && !el.historyEndDate.value) {
 }
 
 bindEvents();
+loadDatabaseConfig();
 loadSystemOverview();
 loadData();

@@ -13,9 +13,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
+import app.database as database_module
 from app.database import DATABASE_URL, engine, get_db
 from app.config import is_trusted_edge_request, settings
 from app.deps import require_admin
@@ -66,6 +67,102 @@ class GitCommitPushRequest(BaseModel):
     password: str
 
 
+class DatabaseRuntimeConfigUpdate(BaseModel):
+    database_mode: str = "postgres"
+    database_url: str | None = None
+    disable_sqlite_fallback: bool = False
+
+
+def _database_runtime_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower()
+    if mode in {"postgres", "postgresql"}:
+        return "postgres"
+    if mode in {"sqlite", "sqlite3"}:
+        return "sqlite"
+    if str(value or "").lower().startswith("sqlite"):
+        return "sqlite"
+    if str(value or "").lower().startswith("postgresql") or "postgres" in str(value or "").lower():
+        return "postgres"
+    return "postgres"
+
+
+def _normalize_database_url(database_mode: str, candidate: str | None) -> str:
+    mode = (database_mode or "postgres").strip().lower()
+    value = (candidate or "").strip()
+
+    if mode == "sqlite":
+        return value or "sqlite:///./app.db"
+
+    if not value:
+        raise HTTPException(status_code=422, detail="A Postgres URL is required when Postgres mode is selected.")
+
+    if not value.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg2cffi://")):
+        raise HTTPException(status_code=422, detail="Use a valid PostgreSQL URL such as postgresql://user:pass@host/dbname or a Neon connection string.")
+    return value
+
+
+def _persist_runtime_database_config(database_url: str, database_mode: str, disable_sqlite_fallback: bool) -> dict:
+    env_path = Path(BASE_DIR) / ".env"
+    existing_lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+
+    replacements = {
+        "DATABASE_URL": database_url,
+        "REQUIRE_DB_KIND": database_mode,
+        "DISABLE_SQLITE_FALLBACK": "1" if disable_sqlite_fallback else "0",
+        "DB_TYPE": database_mode,
+    }
+    updated_lines = []
+    seen_keys = set()
+
+    for line in existing_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            updated_lines.append(line)
+            continue
+        if "=" not in line:
+            updated_lines.append(line)
+            continue
+        key, _ = line.split("=", 1)
+        if key.strip() in replacements:
+            updated_lines.append(f"{key.strip()}={replacements[key.strip()]}")
+            seen_keys.add(key.strip())
+        else:
+            updated_lines.append(line)
+
+    for key, value in replacements.items():
+        if key not in seen_keys:
+            updated_lines.append(f"{key}={value}")
+
+    env_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+    os.environ["DATABASE_URL"] = database_url
+    os.environ["REQUIRE_DB_KIND"] = database_mode
+    os.environ["DISABLE_SQLITE_FALLBACK"] = "1" if disable_sqlite_fallback else "0"
+    os.environ["DB_TYPE"] = database_mode
+
+    return {
+        "database_url": database_url,
+        "database_mode": database_mode,
+        "disable_sqlite_fallback": disable_sqlite_fallback,
+        "env_file": str(env_path),
+    }
+
+
+def _test_database_url(database_url: str) -> dict:
+    try:
+        if database_url.startswith("sqlite"):
+            test_engine = create_engine(database_url, connect_args={"check_same_thread": False})
+        else:
+            connect_args = {"sslmode": "require"} if database_url.startswith("postgresql") else {}
+            test_engine = create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+        with test_engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"ok": True, "message": "Database connection verified."}
+    except Exception as exc:
+        logger.warning("Database connection test failed for %s: %s", database_url, exc)
+        return {"ok": False, "message": f"Connection failed: {exc}"}
+
+
 def redact_row(row: dict) -> dict:
     return {
         key: (REDACTED_PLACEHOLDER if key in REDACTED_COLUMNS and value is not None else value)
@@ -91,9 +188,16 @@ def _safe_database_summary(url: str) -> dict:
         }
 
     if value.startswith("postgresql"):
+        hostname = (parsed.hostname or "unknown").lower()
+        if "supabase" in hostname:
+            label = "Supabase Postgres"
+        elif "neon" in hostname:
+            label = "Neon Postgres"
+        else:
+            label = "PostgreSQL"
         return {
             "engine": "postgresql",
-            "label": "PostgreSQL",
+            "label": label,
             "database": parsed.path.lstrip("/") or "postgres",
             "host": parsed.hostname or "unknown",
         }
@@ -104,6 +208,36 @@ def _safe_database_summary(url: str) -> dict:
         "database": parsed.path.lstrip("/") or "unknown",
         "host": parsed.hostname or "unknown",
     }
+
+
+def _preferred_postgres_url() -> str | None:
+    for env_name in (
+        "SUPABASE_URL",
+        "SUPABASE_DATABASE_URL",
+        "NEON_DATABASE_URL",
+        "POSTGRES_URL",
+        "POSTGRES_DATABASE_URL",
+        "DATABASE_URL",
+    ):
+        value = str(os.getenv(env_name) or "").strip()
+        if value.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg2cffi://")):
+            return value
+    return None
+
+
+def _database_provider_label(url: str | None) -> str:
+    value = str(url or "").strip()
+    if not value:
+        return "not-configured"
+    hostname = urlparse(value).hostname or ""
+    lowered = hostname.lower()
+    if "supabase" in lowered:
+        return "supabase"
+    if "neon" in lowered:
+        return "neon"
+    if value.startswith("sqlite"):
+        return "sqlite"
+    return "postgres"
 
 
 def _credential_encryption_health(db: Session, tables: list[str]) -> dict:
@@ -815,6 +949,90 @@ def admin_system_overview(
         },
         "security": security_info,
         "deployment": _deployment_sync_payload(request),
+    }
+
+
+@router.get("/system/database-config")
+def admin_database_config(
+    admin_user: User = Depends(require_admin),
+):
+    active_mode = _database_runtime_mode(os.getenv("REQUIRE_DB_KIND") or DATABASE_URL)
+    active_url = os.getenv("DATABASE_URL") or DATABASE_URL
+    preferred_url = _preferred_postgres_url()
+    if active_url and active_url.startswith("postgresql") and not preferred_url:
+        preferred_url = active_url
+    provider_label = _database_provider_label(active_url)
+    preferred_provider = _database_provider_label(preferred_url)
+    return {
+        "database_mode": active_mode,
+        "database_url": active_url,
+        "disable_sqlite_fallback": str(os.getenv("DISABLE_SQLITE_FALLBACK", "0")).strip().lower() in {"1", "true", "yes", "on"},
+        "require_db_kind": os.getenv("REQUIRE_DB_KIND") or active_mode,
+        "requires_restart": True,
+        "summary": _safe_database_summary(active_url),
+        "provider": provider_label,
+        "provider_label": "Supabase postgres" if provider_label == "supabase" else "Neon postgres" if provider_label == "neon" else "SQLite" if provider_label == "sqlite" else "Postgres",
+        "preferred_postgres_url": preferred_url,
+        "preferred_provider": preferred_provider,
+        "is_connected_to_postgres": bool(active_url and active_url.startswith("postgresql")),
+        "is_connected_to_supabase": provider_label == "supabase",
+        "is_connected_to_neon": provider_label == "neon",
+        "is_sqlite_fallback_active": active_mode == "sqlite" or not active_url or active_url.startswith("sqlite"),
+    }
+
+
+@router.post("/system/database-config/test")
+def admin_test_database_config(
+    payload: DatabaseRuntimeConfigUpdate,
+    admin_user: User = Depends(require_admin),
+):
+    if payload.database_mode not in {"sqlite", "postgres"}:
+        raise HTTPException(status_code=422, detail="database_mode must be either sqlite or postgres.")
+
+    candidate_url = _normalize_database_url(payload.database_mode, payload.database_url)
+    result = _test_database_url(candidate_url)
+    return {
+        "ok": result["ok"],
+        "database_mode": payload.database_mode,
+        "database_url": candidate_url,
+        "message": result["message"],
+        "requires_restart": True,
+    }
+
+
+@router.post("/system/database-config")
+def admin_apply_database_config(
+    payload: DatabaseRuntimeConfigUpdate,
+    admin_user: User = Depends(require_admin),
+):
+    if payload.database_mode not in {"sqlite", "postgres"}:
+        raise HTTPException(status_code=422, detail="database_mode must be either sqlite or postgres.")
+
+    database_url = _normalize_database_url(payload.database_mode, payload.database_url)
+    validation = _test_database_url(database_url)
+    if not validation["ok"]:
+        raise HTTPException(status_code=400, detail=validation["message"])
+
+    saved = _persist_runtime_database_config(database_url, payload.database_mode, payload.disable_sqlite_fallback)
+
+    globals()["DATABASE_URL"] = database_url
+    os.environ["DATABASE_URL"] = database_url
+    os.environ["REQUIRE_DB_KIND"] = payload.database_mode
+    os.environ["DISABLE_SQLITE_FALLBACK"] = "1" if payload.disable_sqlite_fallback else "0"
+    os.environ["DB_TYPE"] = payload.database_mode
+
+    build_engine = create_engine
+    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else ({"sslmode": "require"} if database_url.startswith("postgresql") else {})
+    database_module.DATABASE_URL = database_url
+    database_module.engine = build_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
+    database_module.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=database_module.engine)
+
+    return {
+        "ok": True,
+        "message": "Database configuration saved. Restart the app to fully reload the engine, but the app has been updated for the next runtime cycle.",
+        "saved": saved,
+        "summary": _safe_database_summary(database_url),
+        "requires_restart": True,
     }
 
 
