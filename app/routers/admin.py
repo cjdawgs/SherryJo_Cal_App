@@ -70,6 +70,11 @@ class GitCommitPushRequest(BaseModel):
 class DatabaseRuntimeConfigUpdate(BaseModel):
     database_mode: str = "postgres"
     database_url: str | None = None
+    database_user: str | None = None
+    database_password: str | None = None
+    database_host: str | None = None
+    database_name: str | None = None
+    ssl_mode: str = "require"
     disable_sqlite_fallback: bool = False
 
 
@@ -86,22 +91,34 @@ def _database_runtime_mode(value: str | None) -> str:
     return "postgres"
 
 
-def _normalize_database_url(database_mode: str, candidate: str | None) -> str:
+def _normalize_database_url(database_mode: str, candidate: str | None, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None) -> str:
     mode = (database_mode or "postgres").strip().lower()
     value = (candidate or "").strip()
 
     if mode == "sqlite":
         return value or "sqlite:///./app.db"
 
-    if not value:
-        raise HTTPException(status_code=422, detail="A Postgres URL is required when Postgres mode is selected.")
+    if value and value.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg2cffi://")):
+        return value
 
-    if not value.startswith(("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg2cffi://")):
-        raise HTTPException(status_code=422, detail="Use a valid PostgreSQL URL such as postgresql://user:pass@host/dbname or a Neon connection string.")
-    return value
+    user = (database_user or "").strip()
+    password = (database_password or "").strip()
+    host = (database_host or "").strip()
+    name = (database_name or "").strip()
+    ssl_value = (ssl_mode or "require").strip().lower()
+
+    if not (host and name):
+        raise HTTPException(status_code=422, detail="Provide a Postgres host and database name or paste a complete Postgres URL.")
+
+    if not user:
+        raise HTTPException(status_code=422, detail="Provide a Postgres username for the datasource.")
+
+    auth = f":{password}" if password else ""
+    suffix = "" if ssl_value == "off" else "?sslmode=require"
+    return f"postgresql://{user}{auth}@{host}/{name}{suffix}"
 
 
-def _persist_runtime_database_config(database_url: str, database_mode: str, disable_sqlite_fallback: bool) -> dict:
+def _persist_runtime_database_config(database_url: str, database_mode: str, disable_sqlite_fallback: bool, database_user: str | None = None, database_password: str | None = None, database_host: str | None = None, database_name: str | None = None, ssl_mode: str | None = None) -> dict:
     env_path = Path(BASE_DIR) / ".env"
     existing_lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
 
@@ -110,6 +127,11 @@ def _persist_runtime_database_config(database_url: str, database_mode: str, disa
         "REQUIRE_DB_KIND": database_mode,
         "DISABLE_SQLITE_FALLBACK": "1" if disable_sqlite_fallback else "0",
         "DB_TYPE": database_mode,
+        "DB_USER": database_user or "",
+        "DB_PASSWORD": database_password or "",
+        "DB_HOST": database_host or "",
+        "DB_NAME": database_name or "",
+        "DB_SSL_MODE": (ssl_mode or "require").strip() or "require",
     }
     updated_lines = []
     seen_keys = set()
@@ -139,11 +161,24 @@ def _persist_runtime_database_config(database_url: str, database_mode: str, disa
     os.environ["REQUIRE_DB_KIND"] = database_mode
     os.environ["DISABLE_SQLITE_FALLBACK"] = "1" if disable_sqlite_fallback else "0"
     os.environ["DB_TYPE"] = database_mode
+    if database_user is not None:
+        os.environ["DB_USER"] = database_user
+    if database_password is not None:
+        os.environ["DB_PASSWORD"] = database_password
+    if database_host is not None:
+        os.environ["DB_HOST"] = database_host
+    if database_name is not None:
+        os.environ["DB_NAME"] = database_name
+    os.environ["DB_SSL_MODE"] = (ssl_mode or "require").strip() or "require"
 
     return {
         "database_url": database_url,
         "database_mode": database_mode,
         "disable_sqlite_fallback": disable_sqlite_fallback,
+        "database_user": database_user,
+        "database_host": database_host,
+        "database_name": database_name,
+        "ssl_mode": (ssl_mode or "require").strip() or "require",
         "env_file": str(env_path),
     }
 

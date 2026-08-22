@@ -4,6 +4,7 @@
 import hmac
 import logging
 import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -16,6 +17,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 
 logger = logging.getLogger(__name__)
+BASE_DIR = Path(__file__).resolve().parent.parent
+DOTENV_PATH = BASE_DIR / ".env"
 
 
 def mask_database_url(url: str | None) -> str:
@@ -54,7 +57,7 @@ def is_production_environment() -> bool:
 # Dev-only: never let local .env override production runtime settings.
 # --------------------------------------------------
 if not is_production_environment() and not _is_truthy(os.getenv("DISABLE_DOTENV")):
-    load_dotenv(override=False)
+    load_dotenv(dotenv_path=str(DOTENV_PATH), override=False)
 
 
 # --------------------------------------------------
@@ -63,7 +66,9 @@ if not is_production_environment() and not _is_truthy(os.getenv("DISABLE_DOTENV"
 # --------------------------------------------------
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        extra="ignore"  # ✅ Allows extra vars in .env (CRITICAL FIX)
+        extra="ignore",  # ✅ Allows extra vars in .env (CRITICAL FIX)
+        env_file=str(DOTENV_PATH),
+        case_sensitive=False,
     )
 
     # Environment (dev, prod, etc.)
