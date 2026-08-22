@@ -228,6 +228,62 @@ def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_conne
     assert account.access_token == "stale_access_token"
     assert account.status == "error"
     assert "invalid_grant" in (account.last_error or "").lower()
+    assert account.account_email == "needs-reconnect@gmail.com"
+    assert account.refresh_token == "refresh_token_123"
+
+
+def test_google_missing_refresh_token_marks_account_for_reconnect_without_deleting_connection(db: Session, multi_account_user: User):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="missing-refresh@gmail.com",
+        access_token="existing_access_token",
+        refresh_token=None,
+        status="ok",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    result = ensure_valid_token(db, account)
+
+    db.refresh(account)
+    assert result is None
+    assert account.access_token == "existing_access_token"
+    assert account.account_email == "missing-refresh@gmail.com"
+    assert account.status == "error"
+    assert "missing refresh_token" in (account.last_error or "").lower()
+
+
+def test_reconnecting_google_account_without_new_refresh_token_preserves_existing_refresh_token(
+    db: Session, multi_account_user: User
+):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="reconnect@gmail.com",
+        access_token="old_access_token",
+        refresh_token="existing_refresh_token",
+        status="error",
+        last_error="invalid_grant",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    updated = MultiAccountOAuthService.add_oauth_account(
+        db=db,
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="reconnect@gmail.com",
+        access_token="new_access_token",
+        refresh_token=None,
+    )
+
+    assert updated.access_token == "new_access_token"
+    assert updated.refresh_token == "existing_refresh_token"
+    assert updated.status == "ok"
+    assert updated.last_error is None
 
 
 def test_get_user_accounts_all(db: Session, multi_account_user: User, oauth_accounts_setup):

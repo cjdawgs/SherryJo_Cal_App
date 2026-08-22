@@ -536,6 +536,14 @@ def ensure_valid_token(db: Session, account: OAuthAccount):
                 return None
 
         logger.error(f"🚫 No refresh token → cannot recover: {account.account_email}")
+        if hasattr(account, "status"):
+            account.status = "error"
+        if hasattr(account, "last_error"):
+            account.last_error = "Google refresh token is missing (missing refresh_token); reconnect this account to restore access." if account.provider == "google" else "Refresh token is missing; reconnect this account to restore access."
+        if hasattr(account, "token_expires_at"):
+            account.token_expires_at = datetime.now(timezone.utc)
+        account.updated_at = datetime.now(timezone.utc)
+        safe_commit(db)
         return None
 
     # --------------------------------------------------
