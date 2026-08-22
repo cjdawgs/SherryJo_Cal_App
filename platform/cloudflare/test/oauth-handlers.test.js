@@ -1,6 +1,15 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 
+import { OAUTH_UPSERT_SQL } from "../src/oauth-account-postgres.js";
+
+it("clears stale provider health errors when OAuth upserts an account", () => {
+    assert.match(OAUTH_UPSERT_SQL, /status\s*=\s*'ok'/);
+    assert.match(OAUTH_UPSERT_SQL, /last_error\s*=\s*NULL/);
+    assert.match(OAUTH_UPSERT_SQL, /last_sync_failure\s*=\s*NULL/);
+    assert.match(OAUTH_UPSERT_SQL, /last_sync_success\s*=\s*now\(\)/);
+});
+
 // Minimal env with the required secrets to exercise the handlers.
 function makeEnv(overrides = {}) {
     return {

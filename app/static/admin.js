@@ -80,6 +80,8 @@ const el = {
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
+  hyperdriveLiveBadge: document.getElementById("hyperdriveLiveBadge"),
+  hyperdriveLiveBadgeText: document.getElementById("hyperdriveLiveBadgeText"),
   hyperdriveSetupBanner: document.getElementById("hyperdriveSetupBanner"),
   hyperdriveSetupMessage: document.getElementById("hyperdriveSetupMessage"),
   databaseModeSelect: document.getElementById("databaseModeSelect"),
@@ -2193,6 +2195,15 @@ async function loadDatabaseConfig() {
     const hyperdriveLive = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
     el.hyperdriveSetupBanner.hidden = hyperdriveLive;
     if (el.hyperdriveSetupMessage) el.hyperdriveSetupMessage.textContent = data.message || "Configure and redeploy the Hyperdrive binding before testing again.";
+  }
+  if (el.hyperdriveLiveBadge && data.runtime === "cloudflare-worker") {
+    const live = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
+    const provider = data.provider_label || "Cloudflare Hyperdrive / Postgres";
+    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
+    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
+    if (el.hyperdriveLiveBadgeText) el.hyperdriveLiveBadgeText.textContent = live
+      ? `LIVE and connected: ${provider}`
+      : `NOT LIVE: ${provider} is not connected`;
   }
   if (el.databaseConfigStatus) {
     const statusText = data.message

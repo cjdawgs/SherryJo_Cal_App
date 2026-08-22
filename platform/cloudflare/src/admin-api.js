@@ -108,6 +108,15 @@ async function systemRoute(client, request, parts, url, env) {
     const action = parts[2];
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
+        let hyperdriveProvider = "Cloudflare Hyperdrive / Postgres";
+        if (hyperdriveConfigured) {
+            try {
+                const hostname = new URL(env.HYPERDRIVE_RLS_NO_CACHE.connectionString).hostname.toLowerCase();
+                hyperdriveProvider = hostname.includes("neon") ? "Neon - Postgres" : hostname.includes("supabase") ? "Supabase - Postgres" : hyperdriveProvider;
+            } catch {
+                // Keep the generic provider label when the managed connection string is not URL-shaped.
+            }
+        }
         if (request.method === "GET") {
             let hyperdriveReachable = false;
             if (hyperdriveConfigured) {
@@ -125,8 +134,8 @@ async function systemRoute(client, request, parts, url, env) {
                 disable_sqlite_fallback: true,
                 requires_restart: true,
                 runtime: "cloudflare-worker",
-                provider_label: "Cloudflare Hyperdrive / Postgres",
-                active_provider_title: "Cloudflare Hyperdrive / Postgres (active)",
+                provider_label: hyperdriveProvider,
+                active_provider_title: `${hyperdriveProvider} (active)`,
                 active_database_source: "cloudflare-hyperdrive",
                 live_database_confirmed: live,
                 is_connected_to_postgres: live,

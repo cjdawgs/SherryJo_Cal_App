@@ -13,7 +13,13 @@ export const OAUTH_UPSERT_SQL = `
         refresh_token     = COALESCE(EXCLUDED.refresh_token, oauth_accounts.refresh_token),
         token_expires_at  = EXCLUDED.token_expires_at,
         display_name      = EXCLUDED.display_name,
-        provider_id       = COALESCE(EXCLUDED.provider_id, oauth_accounts.provider_id)
+        provider_id       = COALESCE(EXCLUDED.provider_id, oauth_accounts.provider_id),
+        status            = 'ok',
+        last_error        = NULL,
+        last_sync_failure = NULL,
+        last_sync         = now(),
+        last_sync_success = now(),
+        updated_at        = now()
     RETURNING id
 `;
 

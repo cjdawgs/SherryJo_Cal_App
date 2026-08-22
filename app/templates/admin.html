@@ -669,6 +669,10 @@
         <div class="repository-control-body">
           <div>
             <h3>Active database</h3>
+            <div id="hyperdriveLiveBadge" class="hyperdrive-live-badge hyperdrive-live-badge-inactive" role="status" aria-live="polite">
+              <span class="hyperdrive-live-dot" aria-hidden="true"></span>
+              <span id="hyperdriveLiveBadgeText">Checking live database connection...</span>
+            </div>
             <div id="hyperdriveSetupBanner" class="hyperdrive-setup-banner" hidden>
               <strong>Cloudflare Hyperdrive is not live</strong>
               <p id="hyperdriveSetupMessage">The Worker is not connected to the intended database yet.</p>

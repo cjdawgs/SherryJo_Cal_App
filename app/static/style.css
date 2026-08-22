@@ -61,6 +61,37 @@
   padding: 0;
 }
 
+.hyperdrive-live-badge {
+  align-items: center;
+  border-radius: 6px;
+  display: flex;
+  font-size: 14px;
+  font-weight: 700;
+  gap: 8px;
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+}
+
+.hyperdrive-live-badge-active {
+  background: #dcfce7;
+  border: 2px solid #22c55e;
+  color: #166534;
+}
+
+.hyperdrive-live-badge-inactive {
+  background: #f1f5f9;
+  border: 2px solid #cbd5e1;
+  color: #475569;
+}
+
+.hyperdrive-live-dot {
+  background: currentColor;
+  border-radius: 50%;
+  flex: 0 0 10px;
+  height: 10px;
+  width: 10px;
+}
+
 /* =====================================================
 ✅ GLOBAL BASE
 ===================================================== */
