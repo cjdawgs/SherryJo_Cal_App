@@ -2062,13 +2062,15 @@ async function loadDatabaseConfig() {
     el.databaseConfigSummary.textContent = `Active: ${summary.label || "Unknown"} (${summary.engine || "unknown"}) · ${data.database_mode || "postgres"} · ${providerLabel}`;
   }
   if (el.databaseConfigStatus) {
-    const statusText = data.is_connected_to_supabase
-      ? "Supabase Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
-      : data.is_connected_to_neon
-        ? "Neon Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
-        : "Auto Allow is enabled by default so SQLite can be used as a safe fallback.";
+    const statusText = data.message
+      ? [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].join(" ")
+      : data.is_connected_to_supabase
+        ? "Supabase Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
+        : data.is_connected_to_neon
+          ? "Neon Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
+          : "Auto Allow is enabled by default so SQLite can be used as a safe fallback.";
     el.databaseConfigStatus.textContent = statusText;
-    el.databaseConfigStatus.classList.remove("error");
+    el.databaseConfigStatus.classList.toggle("error", data.hyperdrive_configured === false);
   }
 }
 
@@ -2103,10 +2105,11 @@ async function testDatabaseConfig(options = {}) {
     return;
   }
 
-  setStatus(data.message || "Database connection test passed.");
+  const message = [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].filter(Boolean).join(" ");
+  setStatus(message || "Database connection test passed.");
   if (el.databaseConfigStatus) {
-    el.databaseConfigStatus.textContent = data.message || "Database connection test passed.";
-    el.databaseConfigStatus.classList.remove("error");
+    el.databaseConfigStatus.textContent = message || "Database connection test passed.";
+    el.databaseConfigStatus.classList.toggle("error", data.ok === false);
   }
 }
 
@@ -2135,9 +2138,10 @@ async function saveDatabaseConfig(options = {}) {
   if (handleAdminForbidden(res, data)) return;
 
   if (!res.ok) {
-    setStatus(data.detail || "Unable to save database settings.", true);
+    const message = [data.detail, ...(data.next_steps || []).map((step) => `Next: ${step}`)].filter(Boolean).join(" ");
+    setStatus(message || "Unable to save database settings.", true);
     if (el.databaseConfigStatus) {
-      el.databaseConfigStatus.textContent = data.detail || "Unable to save database settings.";
+      el.databaseConfigStatus.textContent = message || "Unable to save database settings.";
       el.databaseConfigStatus.classList.add("error");
     }
     return;

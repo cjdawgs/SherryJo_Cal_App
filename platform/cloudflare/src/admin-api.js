@@ -98,7 +98,7 @@ async function providersRoute(client, request, parts, body) {
     if (!id) return { error: "Provider not found", status: 404 };
     if (request.method === "GET" && action === "related-data") { const value = await related(client, "providers", id); if (!value) return { error: "Provider not found", status: 404 }; return { id, related: value, total: Object.values(value).reduce((sum, count) => sum + Number(count), 0) }; }
     if (request.method === "POST" && action === "purge-related") { const deleted = await purgeRelated(client, "providers", id); return deleted ? { id, deleted } : { error: "Provider not found", status: 404 }; }
-    if (request.method === "POST" && action === "status") { if (!['active','inactive'].includes(body.status)) return { error: "Invalid status", status: 422 }; const result = await client.query("UPDATE oauth_accounts SET sync_enabled=$2,updated_at=now() WHERE id=$1 RETURNING *", [id, body.status === "active"]); return result.rows[0] ? serializeProvider(result.rows[0]) : { error: "Provider not found", status: 404 }; }
+    if (request.method === "POST" && action === "status") { if (!['active', 'inactive'].includes(body.status)) return { error: "Invalid status", status: 422 }; const result = await client.query("UPDATE oauth_accounts SET sync_enabled=$2,updated_at=now() WHERE id=$1 RETURNING *", [id, body.status === "active"]); return result.rows[0] ? serializeProvider(result.rows[0]) : { error: "Provider not found", status: 404 }; }
     if (request.method === "PUT") { if (!validEmail(body.contact_email) || !validColor(body.color)) return { error: "Invalid provider fields", status: 422 }; const result = await client.query(`UPDATE oauth_accounts SET account_email=lower($2),display_name=$3,provider_id=$4,color=$5,is_primary=$6,sync_enabled=$7,updated_at=now() WHERE id=$1 RETURNING *`, [id, body.contact_email.trim(), body.display_name || body.provider_name || null, body.provider_id || null, body.color || null, Boolean(body.is_primary), body.status === "active"]); return result.rows[0] ? serializeProvider(result.rows[0]) : { error: "Provider not found", status: 404 }; }
     if (request.method === "DELETE") { const result = await client.query("DELETE FROM oauth_accounts WHERE id=$1", [id]); return result.rowCount ? { deleted: true } : { error: "Provider not found", status: 404 }; }
     return { error: "Unsupported admin provider operation", status: 405 };
@@ -106,6 +106,55 @@ async function providersRoute(client, request, parts, body) {
 
 async function systemRoute(client, request, parts, url, env) {
     const action = parts[2];
+    if (action === "database-config") {
+        const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
+        if (request.method === "GET") return {
+            database_mode: "postgres",
+            database_url: "",
+            disable_sqlite_fallback: true,
+            requires_restart: true,
+            runtime: "cloudflare-worker",
+            provider_label: "Cloudflare Hyperdrive / Postgres",
+            hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
+            hyperdrive_configured: hyperdriveConfigured,
+            message: hyperdriveConfigured
+                ? "The Worker uses its configured Hyperdrive Postgres connection."
+                : "Hyperdrive is not configured for this Worker.",
+            next_steps: hyperdriveConfigured
+                ? ["Run Test Connection to verify the active Hyperdrive database.", "To change databases, update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare, then redeploy the Worker."]
+                : ["Create or update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare.", "Point it at the intended Supabase or Neon Postgres database.", "Redeploy the Worker, then run Test Connection here."]
+        };
+        if (request.method === "POST" && parts[3] === "test") {
+            if (!hyperdriveConfigured) return {
+                ok: false,
+                database_mode: "postgres",
+                message: "Reconnect cannot start because HYPERDRIVE_RLS_NO_CACHE is not configured on this Worker.",
+                next_steps: ["Configure the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare.", "Redeploy the Worker.", "Run Test Connection again."]
+            };
+            try {
+                await client.query("SELECT 1 AS connected");
+                return {
+                    ok: true,
+                    database_mode: "postgres",
+                    message: "Connected to the active Cloudflare Hyperdrive Postgres database.",
+                    next_steps: ["No reconnect is required on this Worker.", "To switch databases, update the Hyperdrive binding and redeploy."]
+                };
+            } catch (error) {
+                return {
+                    ok: false,
+                    database_mode: "postgres",
+                    message: `The Worker could not connect to its Hyperdrive database: ${error?.message || "unknown database error"}`,
+                    next_steps: ["Verify the Hyperdrive binding points to the intended Supabase or Neon database.", "Check database credentials, network access, and migrations.", "Redeploy the Worker and run Test Connection again."]
+                };
+            }
+        }
+        if (request.method === "POST") return {
+            ok: false,
+            message: "Database settings cannot be changed from the Worker admin page.",
+            next_steps: ["Update the HYPERDRIVE_RLS_NO_CACHE binding in Cloudflare.", "Redeploy the Worker.", "Run Test Connection to verify the new database."]
+        };
+        return { error: "Unsupported database configuration operation", status: 405 };
+    }
     if (action === "overview") {
         const tables = [...MANAGED_TABLES].sort();
         return { generated_at: new Date().toISOString(), database: { engine: "postgresql", label: "PostgreSQL", database: "hyperdrive", host: "cloudflare-hyperdrive" }, tables, table_count: tables.length, admin_operations: { users: ["List, create, edit, reset, delete"], providers: ["List, create, edit, activate, delete"] }, security: { token_key_configured: Boolean(env.TOKEN_ENCRYPTION_KEY) }, deployment: { active_platform: "cloudflare", active_platform_label: "Cloudflare Worker", current_commit: env.WORKER_GIT_COMMIT || null, current_commit_source: "Cloudflare Worker build", repository_url: "https://github.com/cjdawgs/SherryJo_Cal_App", compare_base_url: "https://github.com/cjdawgs/SherryJo_Cal_App/compare", github_latest_commit: null, status: "unknown", message: "Cloudflare Worker is the active runtime.", platforms: [{ id: "cloudflare", label: "Cloudflare edge", role: "Primary application runtime", dashboard_url: "https://dash.cloudflare.com/", manual_deploy_available: Boolean(env.CLOUDFLARE_DEPLOY_HOOK_URL), manual_deploy_endpoint: env.CLOUDFLARE_DEPLOY_HOOK_URL ? "/admin/system/cloudflare/redeploy" : null }], repository_controls: { commit_push_endpoint: null, commit_push_hint: "Commit and push is unavailable in the Worker runtime." } } };
@@ -115,38 +164,38 @@ async function systemRoute(client, request, parts, url, env) {
     if (action === "table" && parts[4] === "rows") {
         const table = decodeURIComponent(parts[3] || ""); if (!MANAGED_TABLES.has(table)) return { table, columns: [], rows: [], count: 0, error: "Table not found" };
         const result = await client.query(`SELECT * FROM public.${table} ORDER BY 1 LIMIT 200`); const columns = result.fields.map((field) => field.name);
-        return { table, columns, redacted_columns: columns.filter((column) => REDACTED.has(column)), rows: result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key,value]) => [key, REDACTED.has(key) && value != null ? "***" : value]))), count: result.rowCount, limit: 200, offset: 0 };
+        return { table, columns, redacted_columns: columns.filter((column) => REDACTED.has(column)), rows: result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, REDACTED.has(key) && value != null ? "***" : value]))), count: result.rowCount, limit: 200, offset: 0 };
     }
     const historical = action === "current-user-failure-history";
     if (action === "current-user-failures-today" || historical) {
         const end = historical ? new Date(`${url.searchParams.get("end_date")}T00:00:00Z`) : new Date(); if (historical) end.setUTCDate(end.getUTCDate() + 1);
         const start = historical ? new Date(`${url.searchParams.get("start_date")}T00:00:00Z`) : new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start || end - start > 91 * 86400000) return { error: "Invalid date range", status: 422 };
-        const failures = (await client.query("SELECT provider,account_email,last_sync_failure,last_error FROM oauth_accounts WHERE user_id=public.worker_app_user_id() AND last_sync_failure >= $1 AND last_sync_failure < $2 ORDER BY id", [start,end])).rows;
-        const diagnostics = (await client.query("SELECT ts_server,details FROM tv_diag_log WHERE user_id=public.worker_app_user_id() AND event='calendar_publish_result' AND ts_server >= $1 AND ts_server < $2 ORDER BY ts_server DESC", [start,end])).rows;
-        if (historical) return { checked_at: new Date().toISOString(), window: { start: start.toISOString(), end: end.toISOString(), start_date: url.searchParams.get("start_date"), end_date: url.searchParams.get("end_date") }, counts: { sync_failures: failures.length, publish_failure_rows: diagnostics.length, distinct_publish_failure_reasons: 0, total_publish_diagnostics: diagnostics.length }, meaningful_points: ["Report uses persisted diagnostics."], sync_failure_accounts: failures, publish_failure_reasons: [], publish_failures: diagnostics.slice(0,25), recent_error_messages: [...new Set(failures.map((item) => item.last_error).filter(Boolean))].slice(0,10) };
+        const failures = (await client.query("SELECT provider,account_email,last_sync_failure,last_error FROM oauth_accounts WHERE user_id=public.worker_app_user_id() AND last_sync_failure >= $1 AND last_sync_failure < $2 ORDER BY id", [start, end])).rows;
+        const diagnostics = (await client.query("SELECT ts_server,details FROM tv_diag_log WHERE user_id=public.worker_app_user_id() AND event='calendar_publish_result' AND ts_server >= $1 AND ts_server < $2 ORDER BY ts_server DESC", [start, end])).rows;
+        if (historical) return { checked_at: new Date().toISOString(), window: { start: start.toISOString(), end: end.toISOString(), start_date: url.searchParams.get("start_date"), end_date: url.searchParams.get("end_date") }, counts: { sync_failures: failures.length, publish_failure_rows: diagnostics.length, distinct_publish_failure_reasons: 0, total_publish_diagnostics: diagnostics.length }, meaningful_points: ["Report uses persisted diagnostics."], sync_failure_accounts: failures, publish_failure_reasons: [], publish_failures: diagnostics.slice(0, 25), recent_error_messages: [...new Set(failures.map((item) => item.last_error).filter(Boolean))].slice(0, 10) };
         return { checked_at: new Date().toISOString(), window: { label: "today_utc", start: start.toISOString(), end: end.toISOString() }, has_failures: Boolean(failures.length || diagnostics.length), summary_lines: failures.length || diagnostics.length ? ["Persisted failures were recorded today."] : ["No sync or publish failures were recorded for this user today."], counts: { decrypt_warning_accounts: 0, sync_failures_today: failures.length, publish_failures_today: diagnostics.length, publish_diagnostics_today: diagnostics.length }, decrypt_warning_accounts: [], sync_failure_accounts: failures, publish_failures: diagnostics };
     }
-    if (action === "tv-stale-refresh-summary") { const hours = Math.min(336, Math.max(1, Number(url.searchParams.get("hours")) || 24)); const rows = (await client.query("SELECT ts_server,user_id,device_id,details reason,elapsed_min,visibility FROM tv_diag_log WHERE event='stale_snapshot_used' AND ts_server >= now()-make_interval(hours=>$1) ORDER BY ts_server DESC LIMIT 200", [hours])).rows; return { checked_at: new Date().toISOString(), window: { hours }, counts: { stale_snapshot_events: rows.length, unique_users: new Set(rows.map(r=>r.user_id).filter(Boolean)).size, unique_devices: new Set(rows.map(r=>r.device_id).filter(Boolean)).size }, reason_counts: [], meaningful_points: ["Stale snapshots preserved visible TV events during refresh failures."], recent_rows: rows }; }
+    if (action === "tv-stale-refresh-summary") { const hours = Math.min(336, Math.max(1, Number(url.searchParams.get("hours")) || 24)); const rows = (await client.query("SELECT ts_server,user_id,device_id,details reason,elapsed_min,visibility FROM tv_diag_log WHERE event='stale_snapshot_used' AND ts_server >= now()-make_interval(hours=>$1) ORDER BY ts_server DESC LIMIT 200", [hours])).rows; return { checked_at: new Date().toISOString(), window: { hours }, counts: { stale_snapshot_events: rows.length, unique_users: new Set(rows.map(r => r.user_id).filter(Boolean)).size, unique_devices: new Set(rows.map(r => r.device_id).filter(Boolean)).size }, reason_counts: [], meaningful_points: ["Stale snapshots preserved visible TV events during refresh failures."], recent_rows: rows }; }
     return { error: "Unsupported admin system operation", status: 404 };
 }
 
 async function maintenanceRoute(client, request, parts) {
     const scan = async () => ({
-        users: (await client.query("SELECT u.id FROM users u WHERE NOT EXISTS(SELECT 1 FROM oauth_accounts a WHERE a.user_id=u.id) AND NOT EXISTS(SELECT 1 FROM events e WHERE e.owner_id=u.id) AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.owner_id=u.id) AND NOT EXISTS(SELECT 1 FROM date_sticky_notes d WHERE d.owner_id=u.id) LIMIT 500")).rows.map(r=>r.id),
-        oauth_accounts: (await client.query("SELECT a.id FROM oauth_accounts a LEFT JOIN users u ON u.id=a.user_id WHERE u.id IS NULL LIMIT 500")).rows.map(r=>r.id),
-        events: (await client.query("SELECT e.id FROM events e LEFT JOIN users u ON u.id=e.owner_id WHERE e.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r=>r.id),
-        notes: (await client.query("SELECT n.id FROM notes n LEFT JOIN events e ON e.id=n.event_id WHERE n.event_id IS NOT NULL AND e.id IS NULL LIMIT 500")).rows.map(r=>r.id),
-        tasks: (await client.query("SELECT t.id FROM tasks t LEFT JOIN users u ON u.id=t.owner_id WHERE t.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r=>r.id),
-        date_sticky_notes: (await client.query("SELECT d.id FROM date_sticky_notes d LEFT JOIN users u ON u.id=d.owner_id WHERE d.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r=>r.id),
+        users: (await client.query("SELECT u.id FROM users u WHERE NOT EXISTS(SELECT 1 FROM oauth_accounts a WHERE a.user_id=u.id) AND NOT EXISTS(SELECT 1 FROM events e WHERE e.owner_id=u.id) AND NOT EXISTS(SELECT 1 FROM tasks t WHERE t.owner_id=u.id) AND NOT EXISTS(SELECT 1 FROM date_sticky_notes d WHERE d.owner_id=u.id) LIMIT 500")).rows.map(r => r.id),
+        oauth_accounts: (await client.query("SELECT a.id FROM oauth_accounts a LEFT JOIN users u ON u.id=a.user_id WHERE u.id IS NULL LIMIT 500")).rows.map(r => r.id),
+        events: (await client.query("SELECT e.id FROM events e LEFT JOIN users u ON u.id=e.owner_id WHERE e.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r => r.id),
+        notes: (await client.query("SELECT n.id FROM notes n LEFT JOIN events e ON e.id=n.event_id WHERE n.event_id IS NOT NULL AND e.id IS NULL LIMIT 500")).rows.map(r => r.id),
+        tasks: (await client.query("SELECT t.id FROM tasks t LEFT JOIN users u ON u.id=t.owner_id WHERE t.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r => r.id),
+        date_sticky_notes: (await client.query("SELECT d.id FROM date_sticky_notes d LEFT JOIN users u ON u.id=d.owner_id WHERE d.owner_id IS NOT NULL AND u.id IS NULL LIMIT 500")).rows.map(r => r.id),
     });
     if (request.method === "GET" && parts[2] === "orphans") return scan();
-    if (request.method === "POST" && parts[2] === "orphans" && parts[3] === "delete") { const found = await scan(); for (const [table, ids] of Object.entries(found)) if (ids.length) await client.query(`DELETE FROM ${table} WHERE id=ANY($1)`, [ids]); return { deleted: Object.fromEntries(Object.entries(found).map(([key,value])=>[key,value.length])) }; }
+    if (request.method === "POST" && parts[2] === "orphans" && parts[3] === "delete") { const found = await scan(); for (const [table, ids] of Object.entries(found)) if (ids.length) await client.query(`DELETE FROM ${table} WHERE id=ANY($1)`, [ids]); return { deleted: Object.fromEntries(Object.entries(found).map(([key, value]) => [key, value.length])) }; }
     return { error: "Unsupported maintenance operation", status: 404 };
 }
 
 export async function handleAdminApi(request, env, adapter, userId) {
-    let body = {}; if (!["GET","DELETE"].includes(request.method)) { try { body = await request.json(); } catch { return response({ detail: "Invalid JSON body" }, 400); } }
+    let body = {}; if (!["GET", "DELETE"].includes(request.method)) { try { body = await request.json(); } catch { return response({ detail: "Invalid JSON body" }, 400); } }
     const url = new URL(request.url); const parts = url.pathname.split("/").filter(Boolean);
     try {
         const result = await adapter.runWithIdentity(userId, async (client) => {
