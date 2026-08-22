@@ -11,6 +11,7 @@ binding = "ASSETS"
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
 ORIGIN_FALLBACK_MODE = "severed"
+HYPERDRIVE_PROVIDER = "neon"
 JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"
@@ -73,6 +74,7 @@ workers_dev = true
 [env.canary.vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
 ORIGIN_FALLBACK_MODE = "proxy"
+HYPERDRIVE_PROVIDER = "neon"
 JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"
 JWT_CLOCK_SKEW_SECONDS = "30"

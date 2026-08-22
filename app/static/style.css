@@ -19,10 +19,10 @@
 }
 
 .database-provider-live {
-  background: #86efac;
-  border: 2px solid #22c55e;
-  color: #ffffff;
-  font-weight: 700;
+  background: #86efac !important;
+  border: 2px solid #22c55e !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
 }
 
 .database-provider-inactive {
