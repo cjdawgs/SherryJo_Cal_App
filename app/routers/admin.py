@@ -1329,10 +1329,23 @@ def admin_table_rows(
         if rows
         else [col["name"] for col in inspector.get_columns(table_name)]
     )
+    pk_columns = set(inspector.get_pk_constraint(table_name).get("constrained_columns") or [])
+    schema = [
+        {
+            "name": col["name"],
+            "type": str(col.get("type") or ""),
+            "nullable": bool(col.get("nullable")),
+            "default": col.get("default"),
+            "primary_key": col["name"] in pk_columns,
+            "redacted": col["name"] in REDACTED_COLUMNS,
+        }
+        for col in inspector.get_columns(table_name)
+    ]
 
     return {
         "table": table_name,
         "columns": columns,
+        "schema": schema,
         "redacted_columns": sorted(set(columns) & REDACTED_COLUMNS),
         "rows": [redact_row(dict(row)) for row in rows],
         "count": len(rows),

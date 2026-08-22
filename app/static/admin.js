@@ -1533,6 +1533,7 @@ function renderTableQueryResult(payload) {
 
   const rows = Array.isArray(payload?.rows) ? payload.rows : [];
   const columns = Array.isArray(payload?.columns) ? payload.columns : [];
+  const schema = Array.isArray(payload?.schema) ? payload.schema : [];
   const tableName = payload?.table || "unknown";
   const error = payload?.error;
 
@@ -1544,8 +1545,25 @@ function renderTableQueryResult(payload) {
     return;
   }
 
+  const schemaHtml = schema.length ? `
+    <h4>Schema</h4>
+    <table>
+      <thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th><th>PK</th><th>Protected</th></tr></thead>
+      <tbody>${schema.map((col) => `
+        <tr>
+          <td>${escapeHtml(col.name || "")}</td>
+          <td>${escapeHtml(col.type || "")}</td>
+          <td>${col.nullable ? "yes" : "no"}</td>
+          <td>${escapeHtml(col.default ?? "")}</td>
+          <td>${col.primary_key ? "yes" : ""}</td>
+          <td>${col.redacted ? "redacted" : ""}</td>
+        </tr>
+      `).join("")}</tbody>
+    </table>
+  ` : "";
+
   if (!rows.length) {
-    el.tableQueryResult.innerHTML = `<p class="status-line">No rows found in ${escapeHtml(tableName)}.</p>`;
+    el.tableQueryResult.innerHTML = `${schemaHtml}<p class="status-line">No rows found in ${escapeHtml(tableName)}.</p>`;
     return;
   }
 
@@ -1556,7 +1574,9 @@ function renderTableQueryResult(payload) {
   }).join("");
 
   el.tableQueryResult.innerHTML = `
-    <div class="status-line">Loaded ${rows.length} row(s).</div>
+    <div class="status-line">Loaded ${rows.length} row(s) from the active app database.</div>
+    ${schemaHtml}
+    <h4>Rows</h4>
     <table>
       <thead><tr>${header}</tr></thead>
       <tbody>${body}</tbody>

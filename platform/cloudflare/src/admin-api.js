@@ -243,7 +243,33 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
     if (action === "table" && parts[4] === "rows") {
         const table = decodeURIComponent(parts[3] || ""); if (!MANAGED_TABLES.has(table)) return { table, columns: [], rows: [], count: 0, error: "Table not found" };
         const result = await client.query(`SELECT * FROM public.${table} ORDER BY 1 LIMIT 200`); const columns = result.fields.map((field) => field.name);
-        return { table, columns, redacted_columns: columns.filter((column) => REDACTED.has(column)), rows: result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, REDACTED.has(key) && value != null ? "***" : value]))), count: result.rowCount, limit: 200, offset: 0 };
+        const schemaResult = await client.query(`
+            SELECT c.column_name, c.data_type, c.udt_name, c.is_nullable, c.column_default,
+                   EXISTS (
+                       SELECT 1
+                       FROM information_schema.table_constraints tc
+                       JOIN information_schema.key_column_usage kcu
+                         ON tc.constraint_name = kcu.constraint_name
+                        AND tc.table_schema = kcu.table_schema
+                        AND tc.table_name = kcu.table_name
+                       WHERE tc.constraint_type = 'PRIMARY KEY'
+                         AND tc.table_schema = 'public'
+                         AND tc.table_name = c.table_name
+                         AND kcu.column_name = c.column_name
+                   ) AS primary_key
+            FROM information_schema.columns c
+            WHERE c.table_schema = 'public' AND c.table_name = $1
+            ORDER BY c.ordinal_position
+        `, [table]);
+        const schema = schemaResult.rows.map((column) => ({
+            name: column.column_name,
+            type: column.data_type === "USER-DEFINED" ? column.udt_name : column.data_type,
+            nullable: column.is_nullable === "YES",
+            default: column.column_default || null,
+            primary_key: Boolean(column.primary_key),
+            redacted: REDACTED.has(column.column_name),
+        }));
+        return { table, columns, schema, redacted_columns: columns.filter((column) => REDACTED.has(column)), rows: result.rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, REDACTED.has(key) && value != null ? "***" : value]))), count: result.rowCount, limit: 200, offset: 0 };
     }
     const historical = action === "current-user-failure-history";
     if (action === "current-user-failures-today" || historical) {
