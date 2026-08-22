@@ -155,6 +155,10 @@ def connect_apple_account(
         # --------------------------------------------------
         # ✅ SAVE ACCOUNT
         # --------------------------------------------------
+        # Apple app passwords don't expire, so set to 10 years in the future
+        from datetime import timedelta, timezone
+        far_future = datetime.now(timezone.utc) + timedelta(days=365*10)
+        
         account = MultiAccountOAuthService.add_oauth_account(
             db=db,
             user_id=current_user.id,
@@ -164,6 +168,9 @@ def connect_apple_account(
             # ✅ Apple does NOT use tokens
             access_token=None,
             refresh_token=None,
+            
+            # ✅ Apple app passwords don't expire, set to 10 years out
+            token_expires_at=far_future,
 
             # ✅ Apple credentials
             caldav_url=payload.caldav_url,
@@ -384,9 +391,37 @@ def get_my_accounts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    from app.services.multi_account_oauth_service import ensure_valid_token, safe_commit
+    
     accounts = MultiAccountOAuthService.get_user_accounts(
         db, current_user.id, provider
     )
+    
+    # ✅ Auto-refresh tokens that are close to expiring (within next 5 minutes)
+    # This extends token lifetime by refreshing before they expire
+    now = datetime.now(timezone.utc)
+    for account in accounts:
+        normalized = (account.provider or "").lower().strip()
+        if normalized in ("google", "microsoft"):
+            expires_at = getattr(account, "token_expires_at", None)
+            
+            # Only attempt refresh if:
+            # 1. Token has an expiration time set
+            # 2. Token is within 5 minutes of expiring
+            # 3. We have a valid refresh token
+            if expires_at and isinstance(expires_at, datetime):
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                
+                time_until_expiry = (expires_at - now).total_seconds() / 60
+                if time_until_expiry < 5 and getattr(account, "refresh_token", None):
+                    try:
+                        # This will update token_expires_at if successful
+                        ensure_valid_token(db, account)
+                    except Exception as e:
+                        # Log but don't fail the account list - let the account keep its current status
+                        logger.debug(f"⚠️ Token refresh failed for {account.provider} {account.account_email}: {e}")
+                        pass
 
     return [account_summary(acc) for acc in accounts]
 
