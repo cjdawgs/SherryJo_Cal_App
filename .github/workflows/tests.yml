@@ -84,11 +84,16 @@ jobs:
       - name: Test Cloudflare edge contract
         run: node --test platform/cloudflare/test/*.test.js
 
+      - name: Build Cloudflare Worker assets
+        run: |
+          npm run assets:build --prefix platform/cloudflare
+          npm run auth:build --prefix platform/cloudflare
+
       - name: Validate Cloudflare Worker bundle
-        run: npx --yes wrangler@4 deploy --dry-run
+        run: npx --yes wrangler@4 deploy --dry-run --config wrangler.toml
 
       - name: Validate Cloudflare canary bundle
-        run: npx --yes wrangler@4 deploy --dry-run --env canary
+        run: npx --yes wrangler@4 deploy --dry-run --env canary --config wrangler.toml
 
       - name: Validate Alembic migration graph
         run: |
