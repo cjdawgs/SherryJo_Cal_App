@@ -153,17 +153,11 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
     const action = parts[2];
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
-        let hyperdriveProvider = ["neon", "supabase"].includes(String(env.HYPERDRIVE_PROVIDER || "").toLowerCase())
+        // Hyperdrive's connectionString is a proxy address, not the origin host, so the
+        // provider label can only come from the HYPERDRIVE_PROVIDER var, not URL sniffing.
+        const hyperdriveProvider = ["neon", "supabase"].includes(String(env.HYPERDRIVE_PROVIDER || "").toLowerCase())
             ? `${String(env.HYPERDRIVE_PROVIDER).toLowerCase() === "neon" ? "Neon" : "Supabase"} - Postgres`
             : "Cloudflare Hyperdrive / Postgres";
-        if (hyperdriveConfigured) {
-            try {
-                const hostname = new URL(env.HYPERDRIVE_RLS_NO_CACHE.connectionString).hostname.toLowerCase();
-                hyperdriveProvider = hostname.includes("neon") ? "Neon - Postgres" : hostname.includes("supabase") ? "Supabase - Postgres" : hyperdriveProvider;
-            } catch {
-                // Keep the generic provider label when the managed connection string is not URL-shaped.
-            }
-        }
         if (request.method === "GET") {
             let hyperdriveReachable = false;
             if (hyperdriveConfigured) {
