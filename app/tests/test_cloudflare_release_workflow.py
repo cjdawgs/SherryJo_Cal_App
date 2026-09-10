@@ -24,7 +24,10 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
     jobs = workflow["jobs"]
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
-    assert jobs["deploy-canary"]["needs"] == "verify"
+    assert jobs["check-canary-config"]["needs"] == "verify"
+    assert jobs["check-canary-config"]["environment"] == "cloudflare-canary"
+    assert jobs["deploy-canary"]["needs"] == ["verify", "check-canary-config"]
+    assert "check-canary-config.outputs.ready" in jobs["deploy-canary"]["if"]
     assert jobs["deploy-canary"]["environment"] == "cloudflare-canary"
     assert jobs["smoke-unauthenticated-canary"]["needs"] == "deploy-canary"
     assert jobs["smoke-authenticated-canary"]["needs"] == "deploy-canary"
@@ -38,7 +41,9 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
     assert set(promotion["needs"]) == {
         "smoke-unauthenticated-canary",
         "smoke-authenticated-canary",
+        "check-production-config",
     }
+    assert "check-production-config.outputs.ready" in promotion["if"]
     assert promotion["environment"] == "cloudflare-production"
     assert jobs["smoke-unauthenticated-production"]["needs"] == "promote-root-worker"
     assert jobs["smoke-authenticated-production"]["needs"] == "promote-root-worker"
@@ -46,6 +51,11 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
         "group": "sherryjo-authenticated-smoke",
         "cancel-in-progress": "false",
     }
+    assert set(jobs["check-production-config"]["needs"]) == {
+        "smoke-unauthenticated-canary",
+        "smoke-authenticated-canary",
+    }
+    assert jobs["check-production-config"]["environment"] == "cloudflare-production"
 
 
 def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
@@ -80,6 +90,14 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
         "CLOUDFLARE_API_TOKEN": "${{ secrets.CLOUDFLARE_API_TOKEN }}",
         "CLOUDFLARE_ACCOUNT_ID": "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}",
     }
+    canary_check_step = jobs["check-canary-config"]["steps"][0]
+    production_check_step = jobs["check-production-config"]["steps"][0]
+    assert canary_check_step["env"] == deploy_step["env"]
+    assert production_check_step["env"] == deploy_step["env"]
+    assert 'echo "ready=true" >> "$GITHUB_OUTPUT"' in canary_check_step["run"]
+    assert 'echo "ready=false" >> "$GITHUB_OUTPUT"' in canary_check_step["run"]
+    assert "skipping canary release jobs" in canary_check_step["run"]
+    assert "skipping production promotion jobs" in production_check_step["run"]
 
     canary_smoke = next(
         step for step in jobs["smoke-authenticated-canary"]["steps"]
