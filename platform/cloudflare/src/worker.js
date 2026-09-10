@@ -1097,7 +1097,8 @@ export default {
         const incomingUrl = new URL(request.url);
         const workerOnlyMode = originFallbackMode(env) === "severed";
         if ((request.method === "GET" || request.method === "HEAD")
-            && NATIVE_PAGE_ASSETS.has(incomingUrl.pathname)
+            && (NATIVE_PAGE_ASSETS.has(incomingUrl.pathname)
+                || incomingUrl.pathname.startsWith("/static/"))
             && incomingUrl.pathname !== "/tv/kiosk") {
             const pageResponse = incomingUrl.pathname === "/tv/dashboard" && tvPairingMode(env) === "native"
                 ? await nativeTvDashboard(request, incomingUrl, env)
