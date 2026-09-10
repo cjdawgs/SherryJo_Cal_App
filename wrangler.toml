@@ -25,7 +25,7 @@ run_worker_first = [
 
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"
-ORIGIN_FALLBACK_MODE = "severed"
+ORIGIN_FALLBACK_MODE = "proxy"
 HYPERDRIVE_PROVIDER = "supabase"
 JWT_ISSUER = "sherryjo-calendar"
 JWT_AUDIENCE = "sherryjo-calendar-app"

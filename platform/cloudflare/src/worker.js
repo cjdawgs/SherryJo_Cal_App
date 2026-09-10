@@ -307,6 +307,26 @@ function jsonResponse(payload, status = 200) {
     });
 }
 
+function normalizeAssetResponseHeaders(response) {
+    const headers = new Headers(response.headers);
+    const contentType = headers.get("content-type");
+    if (contentType) {
+        const mediaType = contentType.split(";", 1)[0].trim().toLowerCase();
+        if ((mediaType === "text/html" || mediaType === "text/javascript" || mediaType === "application/javascript" || mediaType === "text/css")
+            && !/;\s*charset=/i.test(contentType)) {
+            headers.set("content-type", `${contentType}; charset=utf-8`);
+        }
+    }
+    if (!headers.has("x-sherryjo-edge")) {
+        headers.set("x-sherryjo-edge", "cloudflare");
+    }
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    });
+}
+
 async function nativeAssetResponse(request, incomingUrl, env) {
     const pageAsset = NATIVE_PAGE_ASSETS.get(incomingUrl.pathname);
     if (!pageAsset && !incomingUrl.pathname.startsWith("/static/")) {
@@ -321,7 +341,8 @@ async function nativeAssetResponse(request, incomingUrl, env) {
 
     const assetUrl = new URL(pageAsset || `${incomingUrl.pathname}${incomingUrl.search}`, incomingUrl.origin);
     const assetRequest = new Request(assetUrl, request);
-    return env.ASSETS.fetch(assetRequest);
+    const assetResponse = await env.ASSETS.fetch(assetRequest);
+    return normalizeAssetResponseHeaders(assetResponse);
 }
 
 function tvAppVersion(env) {
@@ -836,7 +857,9 @@ async function proxyRequest(request, incomingUrl, env) {
     }
 
     const rewritten = rewriteOriginRedirect(response, origin, incomingUrl);
-    if (response.status >= 300 && response.status < 400 && isSelfRedirect(rewritten, request.url)) {
+    if (response.status >= 300 && response.status < 400
+        && isSelfRedirect(rewritten, request.url)
+        && incomingUrl.pathname === "/") {
         const assetResponse = await nativeAssetResponse(request, incomingUrl, env);
         if (assetResponse) {
             return assetResponse;

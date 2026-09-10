@@ -33,6 +33,72 @@ test("public health and schema probes are Worker-native", async () => {
     }
 });
 
+test("native asset responses preserve the public HTML/JS contract and edge marker", async () => {
+    const response = await worker.fetch(new Request("https://calendar.example.com/login"), {
+        ORIGIN_FALLBACK_MODE: "proxy",
+        ASSETS: {
+            async fetch() {
+                return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
+            },
+        },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
+    assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+
+    const scriptResponse = await worker.fetch(new Request("https://calendar.example.com/static/admin.js"), {
+        ORIGIN_FALLBACK_MODE: "proxy",
+        ASSETS: {
+            async fetch() {
+                return new Response("const ok = 1;", { status: 200, headers: { "content-type": "text/javascript" } });
+            },
+        },
+    });
+
+    assert.equal(scriptResponse.headers.get("content-type"), "text/javascript; charset=utf-8");
+    assert.equal(scriptResponse.headers.get("x-sherryjo-edge"), "cloudflare");
+});
+
+test("proxy-mode root redirects only fall back to native assets for the true loop case", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (request) => {
+        assert.equal(request.url, "https://render.example/");
+        return new Response(null, {
+            status: 307,
+            headers: { location: "/" },
+        });
+    };
+
+    try {
+        const response = await worker.fetch(new Request("https://calendar.example.com/"), {
+            ORIGIN_BASE_URL: "https://render.example",
+            ASSETS: {
+                async fetch(request) {
+                    return new Response("index asset", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+                },
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "index asset");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    const redirectResponse = await worker.fetch(new Request("https://calendar.example.com/admin"), {
+        ORIGIN_BASE_URL: "https://render.example",
+        ASSETS: {
+            async fetch(request) {
+                return new Response("admin asset", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+            },
+        },
+    });
+
+    assert.equal(redirectResponse.status, 200);
+    assert.equal(await redirectResponse.text(), "admin asset");
+});
+
 test("proxy-mode health probes preserve the Render response and edge marker", async () => {
     const originalFetch = globalThis.fetch;
     let originRequest;
