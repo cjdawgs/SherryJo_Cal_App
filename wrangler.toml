@@ -10,17 +10,6 @@ binding = "ASSETS"
 html_handling = "auto-trailing-slash"
 run_worker_first = [
 	"/*",
-	"!/",
-	"!/login",
-	"!/tv",
-	"!/admin",
-	"!/static/*",
-	"!/index.html",
-	"!/tv.html",
-	"!/accounts.html",
-	"!/admin.html",
-	"!/login.html",
-	"!/tv-kiosk.html",
 ]
 
 [vars]
