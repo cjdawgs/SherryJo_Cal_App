@@ -7,7 +7,21 @@ workers_dev = true
 [assets]
 directory = "platform/cloudflare/.worker-assets"
 binding = "ASSETS"
-run_worker_first = true
+html_handling = "auto-trailing-slash"
+run_worker_first = [
+	"/*",
+	"!/",
+	"!/login",
+	"!/tv",
+	"!/admin",
+	"!/static/*",
+	"!/index.html",
+	"!/tv.html",
+	"!/accounts.html",
+	"!/admin.html",
+	"!/login.html",
+	"!/tv-kiosk.html",
+]
 
 [vars]
 ORIGIN_BASE_URL = "https://sherryjo-cal-app.onrender.com"

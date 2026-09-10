@@ -87,6 +87,7 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
             provider: account.provider,
             status: reauthRequired ? "reauth_required" : "failed",
             errorType: error instanceof Error ? error.name : "UnknownError",
+            errorMessage: String(error?.message || error).slice(0, 300),
         };
     }
 }

@@ -21,6 +21,29 @@ test("serializes owner-scoped account rows without returning credentials", async
     assert.match(ACCOUNT_READ_SQL, /worker_app_user_id/);
 });
 
+test("does not mark refreshable expired Google credentials as disconnected", async () => {
+    const accounts = await executeAccountRead(adapterFor([{
+        id: 4, provider: "google", account_email: "google@example.com", access_token: "expired-access",
+        refresh_token: "refresh-token", token_expires_at: "2020-01-01T00:00:00Z", sync_enabled: true,
+        sync_frequency_minutes: 5, sync_range_days: 30, is_primary: true, status: "error",
+        last_sync_failure: "2026-09-09T00:00:00Z", last_error: "token expired", color: null,
+    }]), { userId: 42, tokenEncryptionKey: "unused" });
+
+    assert.equal(accounts[0].status, "ok");
+    assert.equal(accounts[0].token_issue.code, "none");
+});
+
+test("does not apply OAuth expiry semantics to Apple CalDAV accounts", async () => {
+    const accounts = await executeAccountRead(adapterFor([{
+        id: 5, provider: "apple", account_email: "apple@example.com", access_token: "https://caldav.icloud.com",
+        refresh_token: "app-password", token_expires_at: "2020-01-01T00:00:00Z", sync_enabled: true,
+        sync_frequency_minutes: 240, sync_range_days: 30, is_primary: true, status: "ok",
+    }]), { userId: 42, tokenEncryptionKey: "unused" });
+
+    assert.equal(accounts[0].status, "ok");
+    assert.equal(accounts[0].token_issue.code, "none");
+});
+
 test("returns bounded sync rollups and a Monday-based current week", async () => {
     const payload = await executeSyncRollupRead(adapterFor([{
         snapshot_date: "2026-08-10", week_start_date: "2026-08-10", changes: 2,

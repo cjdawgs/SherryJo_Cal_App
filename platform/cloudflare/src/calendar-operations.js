@@ -19,7 +19,7 @@ function formatSyncFailureMessage(accounts, results) {
         const label = email ? `${provider} (${email})` : provider;
         return result.status === "reauth_required"
             ? `Reconnect ${label}`
-            : `${label} sync failed (${result.errorType || "ProviderError"})`;
+            : `${label} sync failed (${result.errorMessage || result.errorType || "ProviderError"})`;
     });
     return details.join("; ");
 }

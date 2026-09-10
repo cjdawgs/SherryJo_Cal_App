@@ -57,6 +57,36 @@ test("proxy-mode health probes preserve the Render response and edge marker", as
     }
 });
 
+test("proxy redirects back to the same public URL serve the native page instead of looping", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (request) => {
+        assert.equal(request.url, "https://render.example/");
+        return new Response(null, {
+            status: 307,
+            headers: { location: "/" },
+        });
+    };
+
+    const assetCalls = [];
+    try {
+        const response = await worker.fetch(new Request("https://calendar.example.com/"), {
+            ORIGIN_BASE_URL: "https://render.example",
+            ASSETS: {
+                async fetch(request) {
+                    assetCalls.push(new URL(request.url).pathname);
+                    return new Response("index asset", { status: 200, headers: { "content-type": "text/html" } });
+                },
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "index asset");
+        assert.deepEqual(assetCalls, ["/index.html"]);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("platform status is Worker-native and does not contact Render", async () => {
     const originalFetch = globalThis.fetch;
     let originContacted = false;
@@ -179,7 +209,7 @@ test("serves browser pages and static files from Worker assets without contactin
     };
 
     try {
-        for (const path of ["/", "/calendar-ui", "/login", "/accounts/ui", "/admin", "/admin/ui", "/static/calendar.js"]) {
+        for (const path of ["/", "/calendar-ui", "/login", "/accounts/ui", "/admin", "/admin/ui", "/tv", "/tv/dashboard", "/tv/kiosk", "/static/calendar.js"]) {
             const response = await worker.fetch(new Request(`https://calendar.example.com${path}`), env);
             assert.equal(response.status, 200);
             assert.equal(await response.text(), "native asset");
@@ -188,9 +218,12 @@ test("serves browser pages and static files from Worker assets without contactin
             "/index.html",
             "/index.html",
             "/login.html",
-            "/accounts.html",
-            "/admin.html",
-            "/admin.html",
+            "/accounts",
+            "/admin",
+            "/admin",
+            "/tv.html",
+            "/tv.html",
+            "/tv-kiosk.html",
             "/static/calendar.js",
         ]);
     } finally {
@@ -215,7 +248,7 @@ test("serves the TV dashboard from Worker assets only in native pairing mode", a
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "no-store, max-age=0, must-revalidate");
     assert.equal(await response.text(), "<script>window.TV_APP_VERSION='tv-test-version'</script>");
-    assert.deepEqual(paths, ["/tv.html"]);
+    assert.deepEqual(paths, ["/tv"]);
 });
 
 test("native date-sticky write mode fails closed without Worker authentication", async () => {

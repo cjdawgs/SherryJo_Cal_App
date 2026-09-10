@@ -34,13 +34,16 @@ export async function executeOAuthAccountUpsert(adapter, {
     providerId,
     tokenEncryptionKey,
 }) {
+    const normalizedProvider = String(provider || "").trim().toLowerCase();
+    const normalizedEmail = String(accountEmail || "").trim().toLowerCase();
+    if (!normalizedProvider || !normalizedEmail) throw new TypeError("Provider and account email are required");
     const encryptedAccess = await fernetEncrypt(accessToken, tokenEncryptionKey);
     const encryptedRefresh = refreshToken ? await fernetEncrypt(refreshToken, tokenEncryptionKey) : null;
     const expiresIso = tokenExpiresAt ? new Date(tokenExpiresAt * 1000).toISOString() : null;
 
     const result = await adapter.runWithIdentity(userId, (client) =>
         client.query(OAUTH_UPSERT_SQL, [
-            userId, provider, accountEmail,
+            userId, normalizedProvider, normalizedEmail,
             encryptedAccess, encryptedRefresh, expiresIso,
             displayName || accountEmail, providerId || null,
         ]),

@@ -106,9 +106,12 @@ const NATIVE_PAGE_ASSETS = new Map([
     ["/", "/index.html"],
     ["/calendar-ui", "/index.html"],
     ["/login", "/login.html"],
-    ["/accounts/ui", "/accounts.html"],
-    ["/admin", "/admin.html"],
-    ["/admin/ui", "/admin.html"],
+    ["/accounts/ui", "/accounts"],
+    ["/admin", "/admin"],
+    ["/admin/ui", "/admin"],
+    ["/tv", "/tv.html"],
+    ["/tv/dashboard", "/tv.html"],
+    ["/tv/kiosk", "/tv-kiosk.html"],
 ]);
 const CALENDAR_READ_MODES = new Set(["proxy", "shadow", "canary", "native"]);
 const WRITE_MODES = new Set(["proxy", "canary", "native"]);
@@ -342,7 +345,7 @@ async function tvHtmlAsset(request, incomingUrl, env, assetPath, replacements = 
 }
 
 async function nativeTvDashboard(request, incomingUrl, env) {
-    return tvHtmlAsset(request, incomingUrl, env, "/tv.html");
+    return tvHtmlAsset(request, incomingUrl, env, "/tv");
 }
 
 async function nativeTvKiosk(request, incomingUrl, env) {
@@ -430,6 +433,18 @@ function rewriteOriginRedirect(response, origin, publicOrigin) {
         statusText: response.statusText,
         headers,
     });
+}
+
+function isSelfRedirect(response, requestUrl) {
+    const location = response.headers.get("location");
+    if (!location) {
+        return false;
+    }
+    const target = new URL(location, requestUrl);
+    const current = new URL(requestUrl);
+    return target.origin === current.origin
+        && target.pathname === current.pathname
+        && target.search === current.search;
 }
 
 function calendarReadMode(env) {
@@ -821,6 +836,13 @@ async function proxyRequest(request, incomingUrl, env) {
     }
 
     const rewritten = rewriteOriginRedirect(response, origin, incomingUrl);
+    if (response.status >= 300 && response.status < 400 && isSelfRedirect(rewritten, request.url)) {
+        const assetResponse = await nativeAssetResponse(request, incomingUrl, env);
+        if (assetResponse) {
+            return assetResponse;
+        }
+    }
+
     const headers = new Headers(rewritten.headers);
     headers.set("x-sherryjo-edge", "cloudflare");
     return new Response(rewritten.body, {
@@ -1051,6 +1073,14 @@ export default {
     async fetch(request, env) {
         const incomingUrl = new URL(request.url);
         const workerOnlyMode = originFallbackMode(env) === "severed";
+        if ((request.method === "GET" || request.method === "HEAD")
+            && NATIVE_PAGE_ASSETS.has(incomingUrl.pathname)
+            && incomingUrl.pathname !== "/tv/kiosk") {
+            const pageResponse = incomingUrl.pathname === "/tv/dashboard" && tvPairingMode(env) === "native"
+                ? await nativeTvDashboard(request, incomingUrl, env)
+                : await nativeAssetResponse(request, incomingUrl, env);
+            if (pageResponse) return pageResponse;
+        }
         if (workerOnlyMode && (request.method === "GET" || request.method === "HEAD")) {
             const assetResponse = await nativeAssetResponse(request, incomingUrl, env);
             if (assetResponse) return assetResponse;

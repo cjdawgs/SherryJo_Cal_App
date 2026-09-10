@@ -46,6 +46,15 @@ function issue(code, message, action = "none", label = "", extra = {}) {
     };
 }
 
+function hasRefreshableExpiredToken(row, accessToken) {
+    const normalizedProvider = provider(row.provider);
+    return ["google", "microsoft"].includes(normalizedProvider)
+        && Boolean(accessToken)
+        && Boolean(row.refresh_token)
+        && row.token_expires_at
+        && new Date(row.token_expires_at).getTime() < Date.now();
+}
+
 function tokenIssue(row, accessToken, decryptError) {
     if (decryptError) {
         return {
@@ -54,16 +63,26 @@ function tokenIssue(row, accessToken, decryptError) {
         };
     }
     if (accessToken === "__REAUTH_REQUIRED__") {
+        if (provider(row.provider) === "apple") {
+            return issue("apple_credentials_invalid", "Apple CalDAV credentials were rejected. Reconnect with a valid app password.", "reconnect", "Reconnect");
+        }
         return issue("token_expired_or_invalid", "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect");
     }
     if (!accessToken && !row.refresh_token) {
         return issue("token_never_connected", "No credential has been saved for this account yet. Connect this account to create one.", "open_accounts", "Open Accounts");
     }
-    if (row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()) {
+    if (provider(row.provider) !== "apple" && row.token_expires_at && new Date(row.token_expires_at).getTime() < Date.now()
+        && !hasRefreshableExpiredToken(row, accessToken)) {
         return issue("token_expired_or_invalid", "Token is expired. Reconnect this account.", "reconnect", "Reconnect");
     }
     const lastError = String(row.last_error || "").toLowerCase();
-    if (row.status === "error") {
+    if (row.status === "error" && !hasRefreshableExpiredToken(row, accessToken)) {
+        if (provider(row.provider) === "apple") {
+            const appleAuthFailure = ["401", "403", "unauthorized", "forbidden", "credentials", "authorization"].some((flag) => lastError.includes(flag));
+            return appleAuthFailure
+                ? issue("apple_credentials_invalid", "Apple CalDAV credentials were rejected. Reconnect with a valid app password.", "reconnect", "Reconnect")
+                : issue("apple_sync_error", "Apple CalDAV sync failed. Retry sync from Account Manager.", "retry_sync", "Retry Sync");
+        }
         if (["expired", "invalid", "revoked", "invalid_grant", "reauth", "no valid token"].some((flag) => lastError.includes(flag))) {
             return issue("token_expired_or_invalid", "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect");
         }
@@ -82,7 +101,8 @@ async function serializeAccount(row, tokenEncryptionKey) {
         accessToken = "";
     }
     const normalizedProvider = provider(row.provider);
-    const status = decryptError || accessToken === "__REAUTH_REQUIRED__" || row.last_sync_failure || row.status === "error"
+    const status = decryptError || accessToken === "__REAUTH_REQUIRED__"
+        || (!hasRefreshableExpiredToken(row, accessToken) && (row.last_sync_failure || row.status === "error"))
         ? "error" : "ok";
     const frequency = Math.max(1, Number(row.sync_frequency_minutes || 5));
     return {
