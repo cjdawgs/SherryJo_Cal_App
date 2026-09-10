@@ -21,12 +21,37 @@ test("public health and schema probes are Worker-native", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => { throw new Error("Health probes must not contact origin"); };
     try {
-        const health = await worker.fetch(new Request("https://calendar.example/health"), {});
-        const schema = await worker.fetch(new Request("https://calendar.example/health/schema"), {});
+        const environment = { ORIGIN_FALLBACK_MODE: "severed" };
+        const health = await worker.fetch(new Request("https://calendar.example/health"), environment);
+        const schema = await worker.fetch(new Request("https://calendar.example/health/schema"), environment);
         assert.equal(health.status, 200);
         assert.equal((await health.json()).platform, "cloudflare-worker");
         assert.equal(schema.status, 200);
         assert.equal((await schema.json()).runtime, "cloudflare-worker");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("proxy-mode health probes preserve the Render response and edge marker", async () => {
+    const originalFetch = globalThis.fetch;
+    let originRequest;
+    globalThis.fetch = async (request) => {
+        originRequest = request;
+        return new Response('{"status":"ok","app":"running","schema_status":"ok"}', {
+            headers: { "content-type": "application/json" },
+        });
+    };
+
+    try {
+        const response = await worker.fetch(
+            new Request("https://calendar.example/health"),
+            { ORIGIN_BASE_URL: "https://render.example", EDGE_PROXY_SECRET: "configured-secret" },
+        );
+        assert.equal(originRequest.url, "https://render.example/health");
+        assert.equal(originRequest.headers.get("x-sherryjo-edge-auth"), "configured-secret");
+        assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+        assert.deepEqual(await response.json(), { status: "ok", app: "running", schema_status: "ok" });
     } finally {
         globalThis.fetch = originalFetch;
     }

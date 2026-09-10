@@ -1050,11 +1050,12 @@ export default {
 
     async fetch(request, env) {
         const incomingUrl = new URL(request.url);
-        if (request.method === "GET" || request.method === "HEAD") {
+        const workerOnlyMode = originFallbackMode(env) === "severed";
+        if (workerOnlyMode && (request.method === "GET" || request.method === "HEAD")) {
             const assetResponse = await nativeAssetResponse(request, incomingUrl, env);
             if (assetResponse) return assetResponse;
         }
-        if (incomingUrl.pathname === "/favicon.ico") {
+        if (workerOnlyMode && incomingUrl.pathname === "/favicon.ico") {
             return new Response(null, { status: 204 });
         }
         if (incomingUrl.pathname === EDGE_HEALTH_PATH) {
@@ -1064,13 +1065,13 @@ export default {
                 mode: originFallbackMode(env) === "severed" ? "worker-only" : "render-origin-proxy",
             });
         }
-        if (incomingUrl.pathname === "/health") {
+        if (workerOnlyMode && incomingUrl.pathname === "/health") {
             return request.method === "HEAD" ? new Response(null, { status: 200 }) : jsonResponse({ status: "ok", platform: "cloudflare-worker" });
         }
-        if (incomingUrl.pathname === "/health/schema") {
+        if (workerOnlyMode && incomingUrl.pathname === "/health/schema") {
             return jsonResponse({ status: "ok", database: "postgresql", connectivity: "unchecked", runtime: "cloudflare-worker" });
         }
-        if (incomingUrl.pathname === "/openapi.json") {
+        if (workerOnlyMode && incomingUrl.pathname === "/openapi.json") {
             return jsonResponse({ openapi: "3.1.0", info: { title: "SherryJo Calendar Worker", version: "1.0" }, paths: {} });
         }
 
