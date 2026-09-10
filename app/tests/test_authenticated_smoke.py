@@ -94,6 +94,32 @@ def test_operational_reads_require_running_scheduler(monkeypatch):
         )
 
 
+def test_operational_reads_accept_stopped_scheduler_when_requested(monkeypatch):
+    def fake_request(_origin, _token, _method, path, **_kwargs):
+        if path in {"/tasks/", "/accounts"}:
+            return _response(200, [])
+        if path == "/accounts/sync-status":
+            return _response(200, {"scheduler": {"running": False}})
+        if path == "/tv/version":
+            return _response(200, {"appVersion": "test-version"})
+        if path == "/tv/state":
+            return _response(200, {"selectedDate": None, "currentView": "day"})
+        if path == "/static/calendar.js":
+            return authenticated_smoke.HttpResult(200, b"window.selectedDate" + (b" " * 100))
+        raise AssertionError(path)
+
+    monkeypatch.setattr(authenticated_smoke, "_request", fake_request)
+
+    checks = authenticated_smoke._verify_operational_reads(
+        "https://edge.example.com",
+        "temporary-token",
+        "cloudflare",
+        expected_scheduler_running=False,
+    )
+
+    assert "cloudflare_scheduler_stopped" in checks
+
+
 def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
     token = "secret-smoke-token"
     ticket = "secret-one-time-ticket"

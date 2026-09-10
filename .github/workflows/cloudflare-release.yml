@@ -163,6 +163,7 @@ jobs:
               run: >-
                   python deployment/authenticated_smoke.py
                   --allow-remote
+                  --cloudflare-scheduler-stopped
                   --render-url "${{ inputs.render_url }}"
                   --cloudflare-url "${{ inputs.canary_url }}"
                   --json-output canary-authenticated-report.json
