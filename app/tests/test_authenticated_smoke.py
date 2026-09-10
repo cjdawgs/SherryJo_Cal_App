@@ -127,7 +127,7 @@ def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
             return _response(200, [])
         if method == "GET" and path == "/accounts/sync-status":
             return _response(200, {
-                "scheduler": {"running": origin.endswith("edge.example.com")},
+                "scheduler": {"running": False},
                 "accounts": [],
             })
         if method == "GET" and path == "/tv/version":
@@ -161,6 +161,7 @@ def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
             "https://edge.example.com",
             token,
             run_id="fixed-run",
+            expected_cloudflare_scheduler_running=False,
         )
     )
 
@@ -169,7 +170,7 @@ def test_authenticated_smoke_cleans_up_and_never_reports_secrets(monkeypatch):
     assert "render_note_create" in report["checks"]
     assert "cloudflare_note_read" in report["checks"]
     assert "render_scheduler_stopped" in report["checks"]
-    assert "cloudflare_scheduler_running" in report["checks"]
+    assert "cloudflare_scheduler_stopped" in report["checks"]
     assert "cloudflare_calendar_asset" in report["checks"]
     assert "note_cleanup_verified" in report["checks"]
     assert ("https://edge.example.com", "DELETE", f"/calendar/event/{event_id}") in requests

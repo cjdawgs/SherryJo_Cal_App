@@ -93,6 +93,8 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
     assert 'inputs.production_url' in production_smoke["run"]
     assert "--allow-remote" in canary_smoke["run"]
     assert "--allow-remote" in production_smoke["run"]
+    assert "--expect-cloudflare-scheduler-stopped" in canary_smoke["run"]
+    assert "--expect-cloudflare-scheduler-stopped" not in production_smoke["run"]
 
 
 def test_root_and_canary_workers_require_edge_proxy_authentication():

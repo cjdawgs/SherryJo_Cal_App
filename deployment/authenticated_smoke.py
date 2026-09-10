@@ -260,6 +260,7 @@ async def run_authenticated_smoke(
     token: str,
     *,
     run_id: str | None = None,
+    expected_cloudflare_scheduler_running: bool = True,
 ) -> dict[str, Any]:
     identifier = run_id or uuid.uuid4().hex
     title = f"[SMOKE] {identifier}"
@@ -369,7 +370,7 @@ async def run_authenticated_smoke(
             cloudflare_url,
             token,
             "cloudflare",
-            expected_scheduler_running=True,
+            expected_scheduler_running=expected_cloudflare_scheduler_running,
         ))
 
         for origin, name in (
@@ -429,6 +430,7 @@ def main() -> int:
     parser.add_argument("--render-url", default=DEFAULT_RENDER_URL)
     parser.add_argument("--cloudflare-url", default=DEFAULT_CLOUDFLARE_URL)
     parser.add_argument("--allow-remote", action="store_true")
+    parser.add_argument("--expect-cloudflare-scheduler-stopped", action="store_true")
     parser.add_argument("--json-output")
     args = parser.parse_args()
 
@@ -451,7 +453,14 @@ def main() -> int:
         except SmokeFailure as exc:
             parser.error(str(exc))
 
-    report = asyncio.run(run_authenticated_smoke(render_url, cloudflare_url, token))
+    report = asyncio.run(
+        run_authenticated_smoke(
+            render_url,
+            cloudflare_url,
+            token,
+            expected_cloudflare_scheduler_running=not args.expect_cloudflare_scheduler_stopped,
+        )
+    )
     output = json.dumps(report, indent=2)
     print(output)
     if args.json_output:
