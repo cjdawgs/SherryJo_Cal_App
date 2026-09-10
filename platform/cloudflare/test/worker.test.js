@@ -35,7 +35,7 @@ test("public health and schema probes are Worker-native", async () => {
 
 test("native asset responses preserve the public HTML/JS contract and edge marker", async () => {
     const response = await worker.fetch(new Request("https://calendar.example.com/login"), {
-        ORIGIN_FALLBACK_MODE: "proxy",
+        ORIGIN_FALLBACK_MODE: "severed",
         ASSETS: {
             async fetch() {
                 return new Response("<html></html>", { status: 200, headers: { "content-type": "text/html" } });
@@ -48,7 +48,7 @@ test("native asset responses preserve the public HTML/JS contract and edge marke
     assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
 
     const scriptResponse = await worker.fetch(new Request("https://calendar.example.com/static/admin.js"), {
-        ORIGIN_FALLBACK_MODE: "proxy",
+        ORIGIN_FALLBACK_MODE: "severed",
         ASSETS: {
             async fetch() {
                 return new Response("const ok = 1;", { status: 200, headers: { "content-type": "text/javascript" } });
@@ -86,17 +86,28 @@ test("proxy-mode root redirects only fall back to native assets for the true loo
         globalThis.fetch = originalFetch;
     }
 
-    const redirectResponse = await worker.fetch(new Request("https://calendar.example.com/admin"), {
-        ORIGIN_BASE_URL: "https://render.example",
-        ASSETS: {
-            async fetch(request) {
-                return new Response("admin asset", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    globalThis.fetch = async (request) => {
+        assert.equal(request.url, "https://render.example/admin");
+        return new Response("origin admin", {
+            status: 200,
+            headers: { "content-type": "text/html; charset=utf-8" },
+        });
+    };
+    try {
+        const proxyResponse = await worker.fetch(new Request("https://calendar.example.com/admin"), {
+            ORIGIN_BASE_URL: "https://render.example",
+            ASSETS: {
+                async fetch() {
+                    throw new Error("proxy-mode admin must not use native assets");
+                },
             },
-        },
-    });
+        });
 
-    assert.equal(redirectResponse.status, 200);
-    assert.equal(await redirectResponse.text(), "admin asset");
+        assert.equal(proxyResponse.status, 200);
+        assert.equal(await proxyResponse.text(), "origin admin");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
 });
 
 test("proxy-mode health probes preserve the Render response and edge marker", async () => {
