@@ -30,6 +30,26 @@ async function responsePayload(response) {
     }
 }
 
+// Google/Microsoft both reuse HTTP 403 for quota/rate-limit responses, which are
+// transient and must NOT be treated like a revoked/invalid token (that would wipe
+// the stored credential and force the user to reconnect an otherwise-healthy account).
+const QUOTA_REASONS = new Set([
+    "ratelimitexceeded",
+    "userratelimitexceeded",
+    "dailylimitexceeded",
+    "quotaexceeded",
+    "resource_exhausted",
+]);
+const THROTTLE_CODES = new Set(["applicationthrottled", "toomanyrequests"]);
+
+function isQuotaOrThrottleResponse(payload) {
+    const googleReasons = (payload?.error?.errors || []).map((entry) => String(entry?.reason || "").toLowerCase());
+    const googleStatus = String(payload?.error?.status || "").toLowerCase();
+    if (googleReasons.some((reason) => QUOTA_REASONS.has(reason)) || QUOTA_REASONS.has(googleStatus)) return true;
+    const msCode = String(payload?.error?.code || "").toLowerCase();
+    return THROTTLE_CODES.has(msCode);
+}
+
 async function fetchProviderJson(fetchImpl, url, init = {}) {
     const requestInit = { ...init };
     if (!requestInit.signal && typeof AbortSignal?.timeout === "function") {
@@ -37,7 +57,10 @@ async function fetchProviderJson(fetchImpl, url, init = {}) {
     }
     const response = await fetchImpl(url, requestInit);
     const payload = await responsePayload(response);
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
+        throw new ProviderAuthorizationError(`Provider authorization failed (${response.status})`);
+    }
+    if (response.status === 403 && !isQuotaOrThrottleResponse(payload)) {
         throw new ProviderAuthorizationError(`Provider authorization failed (${response.status})`);
     }
     if (!response.ok) {
@@ -275,10 +298,6 @@ export async function fetchMicrosoftChanges({ account, accessToken, start, end, 
     throw new ProviderResponseError("Microsoft event pagination limit exceeded", 508);
 }
 
-function calDavTime(value) {
-    return value.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
-}
-
 function icalTimeToIso(value) {
     if (!value) return null;
     const date = value.toJSDate();
@@ -365,9 +384,10 @@ export async function fetchAppleChanges({
         if (calendars.length > 100) throw new ProviderResponseError("Apple calendar limit exceeded", 508);
         const events = [];
         for (const calendar of calendars) {
+            // tsdav validates/reformats timeRange itself; it must be a plain ISO8601 string, not pre-stripped CalDAV basic format.
             const objects = await client.fetchCalendarObjects({
                 calendar,
-                timeRange: { start: calDavTime(start), end: calDavTime(end) },
+                timeRange: { start: start.toISOString(), end: end.toISOString() },
                 expand: true,
             });
             if (!Array.isArray(objects)) throw new ProviderResponseError("Apple CalDAV returned invalid calendar objects", 502);

@@ -149,6 +149,29 @@ async function updateHyperdriveConfig(body, env) {
     return { ok: true, message: "Hyperdrive configuration updated. Test the active Worker database to confirm the new datasource is live.", provider_title: body.provider_title || "SherryJo Postgres", hyperdrive_config_id: configId, cloudflare_token_accepted: Boolean(body.cloudflare_api_token), requires_redeploy: true };
 }
 
+const DEFAULT_GITHUB_REPOSITORY = "cjdawgs/SherryJo_Cal_App";
+const DEFAULT_GITHUB_BRANCH = "main";
+
+// Mirrors app/routers/admin.py::_fetch_github_latest_commit_probe so the native Worker
+// admin overview can compare its own build against GitHub without proxying to Render.
+async function fetchGithubLatestCommit(repo, branch) {
+    const url = `https://api.github.com/repos/${repo}/commits/${branch}`;
+    try {
+        const res = await fetch(url, {
+            headers: { accept: "application/vnd.github+json", "user-agent": "SherryJo-Cal-App" },
+            signal: AbortSignal.timeout(5000),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            return { commit: null, error: `GitHub API HTTP ${res.status}`, error_code: res.status === 403 ? "rate_limited" : "http_error", http_status: res.status };
+        }
+        const commit = /^[0-9a-f]{7,40}$/i.test(String(payload?.sha || "")) ? String(payload.sha).toLowerCase() : null;
+        return { commit, error: commit ? null : "GitHub API returned a response but no commit SHA.", error_code: commit ? null : "missing_sha", http_status: res.status };
+    } catch (error) {
+        return { commit: null, error: `Network error contacting GitHub: ${error?.message || error}`, error_code: "network_error", http_status: null };
+    }
+}
+
 async function systemRoute(client, request, parts, url, env, body = {}) {
     const action = parts[2];
     if (action === "database-config") {
@@ -230,7 +253,28 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
     }
     if (action === "overview") {
         const tables = [...MANAGED_TABLES].sort();
-        return { generated_at: new Date().toISOString(), database: { engine: "postgresql", label: "PostgreSQL", database: "hyperdrive", host: "cloudflare-hyperdrive" }, tables, table_count: tables.length, admin_operations: { users: ["List, create, edit, reset, delete"], providers: ["List, create, edit, activate, delete"] }, security: { token_key_configured: Boolean(env.TOKEN_ENCRYPTION_KEY) }, deployment: { active_platform: "cloudflare", active_platform_label: "Cloudflare Worker", current_commit: env.WORKER_GIT_COMMIT || null, current_commit_source: "Cloudflare Worker build", repository_url: "https://github.com/cjdawgs/SherryJo_Cal_App", compare_base_url: "https://github.com/cjdawgs/SherryJo_Cal_App/compare", github_latest_commit: null, status: "unknown", message: "Cloudflare Worker is the active runtime.", platforms: [{ id: "cloudflare", label: "Cloudflare edge", role: "Primary application runtime", dashboard_url: "https://dash.cloudflare.com/", manual_deploy_available: Boolean(env.CLOUDFLARE_DEPLOY_HOOK_URL), manual_deploy_endpoint: env.CLOUDFLARE_DEPLOY_HOOK_URL ? "/admin/system/cloudflare/redeploy" : null }], repository_controls: { commit_push_endpoint: null, commit_push_hint: "Commit and push is unavailable in the Worker runtime." } } };
+        const repo = String(env.GITHUB_REPOSITORY || DEFAULT_GITHUB_REPOSITORY).trim() || DEFAULT_GITHUB_REPOSITORY;
+        const branch = String(env.GITHUB_BRANCH || DEFAULT_GITHUB_BRANCH).trim() || DEFAULT_GITHUB_BRANCH;
+        const workerCommitValue = String(env.WORKER_GIT_COMMIT || "").trim().toLowerCase();
+        const currentCommit = /^[0-9a-f]{7,40}$/.test(workerCommitValue) ? workerCommitValue : null;
+        const githubProbe = await fetchGithubLatestCommit(repo, branch);
+        const githubLatestCommit = githubProbe.commit;
+
+        let status = "unknown";
+        let message = "Cloudflare Worker is the active runtime, but its deployed Git commit is unavailable.";
+        if (currentCommit && githubLatestCommit) {
+            status = currentCommit === githubLatestCommit ? "synced" : "out_of_sync";
+            message = status === "synced"
+                ? "The active Cloudflare Worker matches the latest GitHub commit."
+                : "The active Cloudflare Worker is not on the latest GitHub commit yet.";
+        } else if (!currentCommit) {
+            message = "WORKER_GIT_COMMIT is not set on this Worker, so its deployed commit cannot be identified.";
+        } else if (githubProbe.error) {
+            message = `Cloudflare Worker commit is known, but GitHub could not be verified: ${githubProbe.error}`;
+        }
+
+        const repoUrls = { repository_url: `https://github.com/${repo}`, compare_base_url: `https://github.com/${repo}/compare` };
+        return { generated_at: new Date().toISOString(), database: { engine: "postgresql", label: "PostgreSQL", database: "hyperdrive", host: "cloudflare-hyperdrive" }, tables, table_count: tables.length, admin_operations: { users: ["List, create, edit, reset, delete"], providers: ["List, create, edit, activate, delete"] }, security: { token_key_configured: Boolean(env.TOKEN_ENCRYPTION_KEY) }, deployment: { active_platform: "cloudflare", active_platform_label: "Cloudflare Worker", repository: repo, branch, current_commit: currentCommit, current_commit_source: "Cloudflare Worker build", repository_url: repoUrls.repository_url, compare_base_url: repoUrls.compare_base_url, github_latest_commit: githubLatestCommit, github_error: githubProbe.error, github_error_code: githubProbe.error_code, status, message, platforms: [{ id: "cloudflare", label: "Cloudflare edge", role: "Primary application runtime", dashboard_url: "https://dash.cloudflare.com/", manual_deploy_available: Boolean(env.CLOUDFLARE_DEPLOY_HOOK_URL), manual_deploy_endpoint: env.CLOUDFLARE_DEPLOY_HOOK_URL ? "/admin/system/cloudflare/redeploy" : null }], repository_controls: { commit_push_endpoint: null, commit_push_hint: "Commit and push is unavailable in the Worker runtime." } } };
     }
     if (action === "cloudflare" && parts[3] === "redeploy" && request.method === "POST") { if (!env.CLOUDFLARE_DEPLOY_HOOK_URL) return { error: "CLOUDFLARE_DEPLOY_HOOK_URL is not configured", status: 400 }; const hook = await fetch(env.CLOUDFLARE_DEPLOY_HOOK_URL, { method: "POST" }); return hook.ok ? { triggered: true, message: "Cloudflare deploy hook triggered." } : { error: `Cloudflare deploy hook failed (${hook.status})`, status: 502 }; }
     if (action === "token-encryption-key") return { error: "Worker secrets cannot be changed by an HTTP request; update TOKEN_ENCRYPTION_KEY through Cloudflare secret management.", status: 409 };

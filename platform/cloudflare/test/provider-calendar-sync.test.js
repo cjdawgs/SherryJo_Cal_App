@@ -7,6 +7,8 @@ import {
     fetchGoogleChanges,
     fetchMicrosoftChanges,
     parseAppleCalendarObject,
+    ProviderAuthorizationError,
+    ProviderResponseError,
 } from "../src/provider-calendar-sync.js";
 
 function jsonResponse(body, status = 200) {
@@ -102,6 +104,57 @@ test("falls back from an expired Microsoft delta link and returns a new cursor",
     assert.equal(result.syncToken.delta_link, "https://graph.microsoft.com/new-delta");
 });
 
+test("treats a Google quota 403 as a transient failure, not an authorization failure", async () => {
+    const fetchImpl = async () => jsonResponse({
+        error: { code: 403, message: "Rate Limit Exceeded", errors: [{ reason: "rateLimitExceeded" }] },
+    }, 403);
+
+    await assert.rejects(
+        () => fetchGoogleChanges({
+            account: { account_email: "agent@example.com", sync_token: {} },
+            accessToken: "token",
+            start: new Date("2026-08-01T00:00:00Z"),
+            end: new Date("2026-09-01T00:00:00Z"),
+            fetchImpl,
+        }),
+        (error) => error instanceof ProviderResponseError && !(error instanceof ProviderAuthorizationError),
+    );
+});
+
+test("still treats a genuine Google permission 403 as an authorization failure", async () => {
+    const fetchImpl = async () => jsonResponse({
+        error: { code: 403, message: "Insufficient Permission", errors: [{ reason: "insufficientPermissions" }] },
+    }, 403);
+
+    await assert.rejects(
+        () => fetchGoogleChanges({
+            account: { account_email: "agent@example.com", sync_token: {} },
+            accessToken: "token",
+            start: new Date("2026-08-01T00:00:00Z"),
+            end: new Date("2026-09-01T00:00:00Z"),
+            fetchImpl,
+        }),
+        (error) => error instanceof ProviderAuthorizationError,
+    );
+});
+
+test("treats a Microsoft throttled 403 as a transient failure, not an authorization failure", async () => {
+    const fetchImpl = async () => jsonResponse({
+        error: { code: "ApplicationThrottled", message: "Throttled" },
+    }, 403);
+
+    await assert.rejects(
+        () => fetchMicrosoftChanges({
+            account: { account_email: "agent@example.com", sync_token: {} },
+            accessToken: "token",
+            start: new Date("2026-08-01T00:00:00Z"),
+            end: new Date("2026-09-01T00:00:00Z"),
+            fetchImpl,
+        }),
+        (error) => error instanceof ProviderResponseError && !(error instanceof ProviderAuthorizationError),
+    );
+});
+
 test("parses Apple events and gives recurring occurrences stable unique IDs", () => {
     const events = parseAppleCalendarObject({
         data: [
@@ -169,7 +222,7 @@ test("fetches Apple calendars in a bounded range and never converts failures to 
     });
 
     assert.equal(result.events[0].externalId, "apple-1");
-    assert.deepEqual(calls[1], ["objects", { start: "20260801T000000Z", end: "20260901T000000Z" }, true]);
+    assert.deepEqual(calls[1], ["objects", { start: "2026-08-01T00:00:00.000Z", end: "2026-09-01T00:00:00.000Z" }, true]);
 
     await assert.rejects(fetchAppleChanges({
         account,

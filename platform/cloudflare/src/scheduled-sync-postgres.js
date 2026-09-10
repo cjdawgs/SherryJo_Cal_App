@@ -50,7 +50,7 @@ export const UPDATE_SYNC_EVENT_SQL = `
     UPDATE public.events
     SET start_time = $2::timestamptz,
         end_time = $3::timestamptz,
-        external_ids = COALESCE(external_ids, '{}'::jsonb) || $4::jsonb,
+        external_ids = (COALESCE(external_ids::jsonb, '{}'::jsonb) || $4::jsonb)::json,
         updated_at = $5::timestamptz
     WHERE id = $1
 `;

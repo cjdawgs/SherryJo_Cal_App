@@ -28,6 +28,53 @@ test("redacts credentials from the managed table browser", async () => {
     assert.deepEqual(body.redacted_columns, ["access_token"]);
 });
 
+test("overview reports synced when the deployed Worker commit matches GitHub's latest", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ sha: "9cfb04d26497c55fc6933e634c91e5965d8171d8" }), { status: 200 });
+    try {
+        const adapter = { runWithIdentity: async (_userId, operation) => operation({ query: async () => ({ rows: [{ allowed: true }] }) }) };
+        const env = { WORKER_GIT_COMMIT: "9cfb04d26497c55fc6933e634c91e5965d8171d8" };
+        const result = await handleAdminApi(new Request("https://calendar.test/admin/system/overview"), env, adapter, 1);
+        const body = await result.json();
+        assert.equal(body.deployment.status, "synced");
+        assert.equal(body.deployment.github_latest_commit, "9cfb04d26497c55fc6933e634c91e5965d8171d8");
+        assert.match(body.deployment.message, /matches the latest GitHub commit/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("overview reports out_of_sync when the deployed Worker commit trails GitHub", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ sha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }), { status: 200 });
+    try {
+        const adapter = { runWithIdentity: async (_userId, operation) => operation({ query: async () => ({ rows: [{ allowed: true }] }) }) };
+        const env = { WORKER_GIT_COMMIT: "9cfb04d26497c55fc6933e634c91e5965d8171d8" };
+        const result = await handleAdminApi(new Request("https://calendar.test/admin/system/overview"), env, adapter, 1);
+        const body = await result.json();
+        assert.equal(body.deployment.status, "out_of_sync");
+        assert.match(body.deployment.message, /not on the latest GitHub commit/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("overview surfaces a specific GitHub error instead of a generic comparison-unavailable message", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ message: "rate limited" }), { status: 403 });
+    try {
+        const adapter = { runWithIdentity: async (_userId, operation) => operation({ query: async () => ({ rows: [{ allowed: true }] }) }) };
+        const env = { WORKER_GIT_COMMIT: "9cfb04d26497c55fc6933e634c91e5965d8171d8" };
+        const result = await handleAdminApi(new Request("https://calendar.test/admin/system/overview"), env, adapter, 1);
+        const body = await result.json();
+        assert.equal(body.deployment.status, "unknown");
+        assert.equal(body.deployment.github_error_code, "rate_limited");
+        assert.match(body.deployment.message, /GitHub could not be verified/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("reports the Worker database reconnect steps instead of returning 404", async () => {
     const adapter = {
         runWithIdentity: async (_userId, operation) => operation({
