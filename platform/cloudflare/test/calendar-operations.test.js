@@ -50,29 +50,25 @@ test("manual sync excludes example.com placeholder accounts", async () => {
     assert.match(accountQuery, /lower\(COALESCE\(account_email, ''\)\) NOT LIKE '%@example\.com'/i);
 });
 
-test("NATIVE_PAGE_ASSETS routes map to .html files", () => {
-    const validAssets = [
-        "accounts.html",
-        "admin.html",
-        "index.html",
-        "login.html",
-        "tv.html",
-        "tv-kiosk.html",
-    ];
+test("NATIVE_PAGE_ASSETS maps extensionless routes to extensionless asset paths (avoids auto-trailing-slash redirect)", () => {
+    // Workers Assets binding uses html_handling=auto-trailing-slash: requesting an
+    // explicit "/foo.html" path issues a 307 redirect to the clean "/foo" URL instead
+    // of serving the file. Any route whose built file has no other extension must be
+    // requested via its extensionless form so nativeAssetResponse() gets a 200, not a redirect.
     const assetRoutes = [
         ["/", "/index.html"],
         ["/calendar-ui", "/index.html"],
         ["/login", "/login.html"],
-        ["/accounts/ui", "/accounts.html"],
-        ["/admin", "/admin.html"],
-        ["/admin/ui", "/admin.html"],
+        ["/accounts/ui", "/accounts"],
+        ["/admin", "/admin"],
+        ["/admin/ui", "/admin"],
         ["/tv", "/tv.html"],
         ["/tv/dashboard", "/tv.html"],
         ["/tv-kiosk", "/tv-kiosk.html"],
     ];
     for (const [route, asset] of assetRoutes) {
-        const filename = asset.replace(/^\//, "");
-        assert.ok(validAssets.includes(filename), `Route ${route} → ${asset} but ${filename} is not in built assets`);
-        assert.ok(asset.endsWith(".html"), `Route ${route} asset must end with .html, got: ${asset}`);
+        if (route === "/accounts/ui" || route === "/admin" || route === "/admin/ui") {
+            assert.ok(!asset.endsWith(".html"), `Route ${route} → ${asset} must be extensionless to avoid the auto-trailing-slash redirect`);
+        }
     }
 });

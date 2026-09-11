@@ -86,7 +86,7 @@ test("native account manager is served by Worker assets without contacting Rende
             ACCOUNT_READ_MODE: "native",
             ASSETS: {
                 async fetch(request) {
-                    assert.equal(new URL(request.url).pathname, "/accounts.html");
+                    assert.equal(new URL(request.url).pathname, "/accounts");
                     return new Response("native accounts", { status: 200, headers: { "content-type": "text/html" } });
                 },
             },
@@ -96,6 +96,37 @@ test("native account manager is served by Worker assets without contacting Rende
         assert.equal(await response.text(), "native accounts");
         assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
         assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("native account manager request never asks the Assets binding for an extensioned path (avoids auto-trailing-slash redirect)", async () => {
+    // Cloudflare's Workers Assets binding (html_handling=auto-trailing-slash) issues a
+    // 307 redirect to the clean URL when asked for an explicit "/foo.html" path instead
+    // of serving the file. Simulate that binding behavior here so a regression that
+    // reintroduces the ".html" suffix in NATIVE_PAGE_ASSETS surfaces as a failed test
+    // instead of a silent production redirect loop into the JSON /accounts API.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+        throw new Error("native account manager must not contact Render");
+    };
+    try {
+        const response = await worker.fetch(new Request("https://calendar.example.com/accounts/ui"), {
+            ACCOUNT_READ_MODE: "native",
+            ASSETS: {
+                async fetch(request) {
+                    const pathname = new URL(request.url).pathname;
+                    if (pathname.endsWith(".html")) {
+                        return new Response(null, { status: 307, headers: { location: pathname.replace(/\.html$/, "") } });
+                    }
+                    return new Response("native accounts", { status: 200, headers: { "content-type": "text/html" } });
+                },
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "native accounts");
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -336,9 +367,9 @@ test("serves browser pages and static files from Worker assets without contactin
             "/index.html",
             "/index.html",
             "/login.html",
-            "/accounts.html",
-            "/admin.html",
-            "/admin.html",
+            "/accounts",
+            "/admin",
+            "/admin",
             "/tv.html",
             "/tv.html",
             "/tv-kiosk.html",

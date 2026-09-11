@@ -106,9 +106,12 @@ const NATIVE_PAGE_ASSETS = new Map([
     ["/", "/index.html"],
     ["/calendar-ui", "/index.html"],
     ["/login", "/login.html"],
-    ["/accounts/ui", "/accounts.html"],
-    ["/admin", "/admin.html"],
-    ["/admin/ui", "/admin.html"],
+    // Assets binding uses html_handling=auto-trailing-slash: requesting the
+    // extensioned path (e.g. /accounts.html) triggers a 307 redirect to the
+    // clean URL instead of serving the file, so map to the extension-less path.
+    ["/accounts/ui", "/accounts"],
+    ["/admin", "/admin"],
+    ["/admin/ui", "/admin"],
     ["/tv", "/tv.html"],
     ["/tv/dashboard", "/tv.html"],
     ["/tv/kiosk", "/tv-kiosk.html"],
