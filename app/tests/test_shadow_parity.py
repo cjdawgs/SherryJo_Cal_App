@@ -1,4 +1,7 @@
 import json
+import errno
+import urllib.error
+from email.message import Message
 
 from deployment import shadow_parity
 
@@ -79,3 +82,40 @@ def test_native_worker_accepts_migrated_authentication_contracts():
         checks = shadow_parity._native_worker_checks(cases[case_name], response, origins)
         assert checks is not None
         assert all(checks.values())
+
+
+def test_http_request_retries_transient_connection_reset(monkeypatch):
+    class FakeResponse:
+        status = 200
+        headers = Message()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b"ok"
+
+    calls = 0
+
+    def open_request(_request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise urllib.error.URLError(OSError(errno.ECONNRESET, "reset"))
+        return FakeResponse()
+
+    class FakeOpener:
+        open = staticmethod(open_request)
+
+    monkeypatch.setattr(shadow_parity.time, "sleep", lambda _seconds: None)
+    result = shadow_parity._request(
+        FakeOpener(),
+        "https://edge.example.com",
+        shadow_parity.HttpCase("health_get", "GET", "/health"),
+    )
+
+    assert result.status == 200
+    assert calls == 2

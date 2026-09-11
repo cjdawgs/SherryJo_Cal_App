@@ -7,6 +7,8 @@ import asyncio
 import hashlib
 import json
 import sys
+import ssl
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,6 +21,8 @@ import websockets
 DEFAULT_RENDER_URL = "https://sherryjo-cal-app.onrender.com"
 DEFAULT_CLOUDFLARE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 USER_AGENT = "curl/8.10.1 SherryJo-shadow-parity/1.0"
+REQUEST_ATTEMPTS = 3
+RETRYABLE_ERRNOS = {104, 110, 113}
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -115,10 +119,21 @@ def _request(opener, origin: str, case: HttpCase) -> HttpResult:
         headers=headers,
         method=case.method,
     )
-    try:
-        response = opener.open(request, timeout=45)
-    except urllib.error.HTTPError as error:
-        response = error
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            response = opener.open(request, timeout=45)
+            break
+        except urllib.error.HTTPError as error:
+            response = error
+            break
+        except urllib.error.URLError as error:
+            reason = error.reason
+            retryable = isinstance(reason, TimeoutError)
+            retryable = retryable or isinstance(reason, OSError) and reason.errno in RETRYABLE_ERRNOS
+            retryable = retryable or isinstance(reason, ssl.SSLError)
+            if not retryable or attempt == REQUEST_ATTEMPTS - 1:
+                raise
+            time.sleep(2 ** attempt)
 
     with response:
         body = response.read()
@@ -332,18 +347,23 @@ def main() -> int:
 
     render_url = args.render_url.rstrip("/")
     cloudflare_url = args.cloudflare_url.rstrip("/")
-    rows, failures = run_http_parity(render_url, cloudflare_url, native_worker=args.native_worker)
-    edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
-    rows.append(edge_health_row)
-    failures.extend(edge_health_failures)
-    native_row, native_failures = run_worker_native_status(render_url, cloudflare_url)
-    rows.append(native_row)
-    failures.extend(native_failures)
-    websocket_row, websocket_failures = asyncio.run(
-        run_websocket_parity(render_url, cloudflare_url)
-    )
-    rows.append(websocket_row)
-    failures.extend(websocket_failures)
+    rows: list[dict] = []
+    failures: list[str] = []
+    try:
+        rows, failures = run_http_parity(render_url, cloudflare_url, native_worker=args.native_worker)
+        edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
+        rows.append(edge_health_row)
+        failures.extend(edge_health_failures)
+        native_row, native_failures = run_worker_native_status(render_url, cloudflare_url)
+        rows.append(native_row)
+        failures.extend(native_failures)
+        websocket_row, websocket_failures = asyncio.run(
+            run_websocket_parity(render_url, cloudflare_url)
+        )
+        rows.append(websocket_row)
+        failures.extend(websocket_failures)
+    except Exception as error:
+        failures.append(f"transport: {type(error).__name__}: {error}")
 
     report = {
         "render_url": render_url,
