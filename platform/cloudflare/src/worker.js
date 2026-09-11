@@ -308,6 +308,16 @@ function jsonResponse(payload, status = 200) {
     });
 }
 
+function withEdgeMarker(response) {
+    const headers = new Headers(response.headers);
+    headers.set("x-sherryjo-edge", "cloudflare");
+    return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+    });
+}
+
 function normalizeAssetResponseHeaders(response) {
     const headers = new Headers(response.headers);
     const contentType = headers.get("content-type");
@@ -1285,10 +1295,10 @@ export default {
             }
 
             if (request.method === "POST" && incomingUrl.pathname === AUTH_LOGIN_PATH && authenticationMode === "native") {
-                return await handleNativeLogin(request, env, createNativeAuthPostgresAdapter(env));
+                return withEdgeMarker(await handleNativeLogin(request, env, createNativeAuthPostgresAdapter(env)));
             }
             if (request.method === "POST" && incomingUrl.pathname === AUTH_REGISTER_PATH && authenticationMode === "native") {
-                return await handleNativeRegistration(request, env, createNativeAuthPostgresAdapter(env));
+                return withEdgeMarker(await handleNativeRegistration(request, env, createNativeAuthPostgresAdapter(env)));
             }
             if (request.method === "GET" && accountsReadMode === "native") {
                 if (incomingUrl.pathname === ACCOUNT_LIST_PATH) return await nativeAccountRead(request, env);

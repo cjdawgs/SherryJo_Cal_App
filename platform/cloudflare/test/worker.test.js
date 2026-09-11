@@ -60,6 +60,22 @@ test("native asset responses preserve the public HTML/JS contract and edge marke
     assert.equal(scriptResponse.headers.get("x-sherryjo-edge"), "cloudflare");
 });
 
+test("native login failures retain the edge ownership marker", async () => {
+    const response = await worker.fetch(new Request("https://calendar.example.com/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+    }), {
+        AUTH_MODE: "native",
+        HYPERDRIVE_RLS_NO_CACHE: { connectionString: "postgres://test" },
+    });
+
+    assert.equal(response.status, 401);
+    assert.equal(response.headers.get("content-type"), "application/json; charset=utf-8");
+    assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+    assert.deepEqual(await response.json(), { detail: "Invalid email, username, or password" });
+});
+
 test("proxy-mode root redirects only fall back to native assets for the true loop case", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (request) => {
