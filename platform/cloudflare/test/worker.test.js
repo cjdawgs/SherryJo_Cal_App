@@ -76,6 +76,31 @@ test("native login failures retain the edge ownership marker", async () => {
     assert.deepEqual(await response.json(), { detail: "Invalid email, username, or password" });
 });
 
+test("native account manager is served by Worker assets without contacting Render", async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+        throw new Error("native account manager must not contact Render");
+    };
+    try {
+        const response = await worker.fetch(new Request("https://calendar.example.com/accounts/ui"), {
+            ACCOUNT_READ_MODE: "native",
+            ASSETS: {
+                async fetch(request) {
+                    assert.equal(new URL(request.url).pathname, "/accounts.html");
+                    return new Response("native accounts", { status: 200, headers: { "content-type": "text/html" } });
+                },
+            },
+        });
+
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "native accounts");
+        assert.equal(response.headers.get("content-type"), "text/html; charset=utf-8");
+        assert.equal(response.headers.get("x-sherryjo-edge"), "cloudflare");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("proxy-mode root redirects only fall back to native assets for the true loop case", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (request) => {
@@ -311,9 +336,9 @@ test("serves browser pages and static files from Worker assets without contactin
             "/index.html",
             "/index.html",
             "/login.html",
-            "/accounts",
-            "/admin",
-            "/admin",
+            "/accounts.html",
+            "/admin.html",
+            "/admin.html",
             "/tv.html",
             "/tv.html",
             "/tv-kiosk.html",

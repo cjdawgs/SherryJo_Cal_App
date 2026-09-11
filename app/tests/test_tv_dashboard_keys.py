@@ -52,6 +52,15 @@ def test_tv_dashboard_prevents_overlapping_events_requests():
     assert "if (state.eventsRequestInFlight)" in text
 
 
+def test_tv_dashboard_rolls_stale_persisted_date_forward_before_initial_refresh():
+    text = _tv_js_text()
+    assert "async function normalizeSelectedDateOnBootstrap()" in text
+    assert "const todayKey = toISO(new Date());" in text
+    assert "selected_date_bootstrap_rollover" in text
+    assert "{ selectedDate: todayKey, focusedEventId: null }" in text
+    assert "await normalizeSelectedDateOnBootstrap();\n  startPolling();" in text
+
+
 def test_tv_dashboard_normalizes_pairing_codes_with_dash_separator():
     text = _tv_js_text()
     assert "function normalizePairingCode(raw)" in text

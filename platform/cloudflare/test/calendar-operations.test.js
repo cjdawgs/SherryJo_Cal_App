@@ -49,3 +49,30 @@ test("manual sync excludes example.com placeholder accounts", async () => {
     assert.equal(result.status, "success");
     assert.match(accountQuery, /lower\(COALESCE\(account_email, ''\)\) NOT LIKE '%@example\.com'/i);
 });
+
+test("NATIVE_PAGE_ASSETS routes map to .html files", () => {
+    const validAssets = [
+        "accounts.html",
+        "admin.html",
+        "index.html",
+        "login.html",
+        "tv.html",
+        "tv-kiosk.html",
+    ];
+    const assetRoutes = [
+        ["/", "/index.html"],
+        ["/calendar-ui", "/index.html"],
+        ["/login", "/login.html"],
+        ["/accounts/ui", "/accounts.html"],
+        ["/admin", "/admin.html"],
+        ["/admin/ui", "/admin.html"],
+        ["/tv", "/tv.html"],
+        ["/tv/dashboard", "/tv.html"],
+        ["/tv-kiosk", "/tv-kiosk.html"],
+    ];
+    for (const [route, asset] of assetRoutes) {
+        const filename = asset.replace(/^\//, "");
+        assert.ok(validAssets.includes(filename), `Route ${route} → ${asset} but ${filename} is not in built assets`);
+        assert.ok(asset.endsWith(".html"), `Route ${route} asset must end with .html, got: ${asset}`);
+    }
+});

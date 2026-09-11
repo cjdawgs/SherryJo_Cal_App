@@ -106,9 +106,9 @@ const NATIVE_PAGE_ASSETS = new Map([
     ["/", "/index.html"],
     ["/calendar-ui", "/index.html"],
     ["/login", "/login.html"],
-    ["/accounts/ui", "/accounts"],
-    ["/admin", "/admin"],
-    ["/admin/ui", "/admin"],
+    ["/accounts/ui", "/accounts.html"],
+    ["/admin", "/admin.html"],
+    ["/admin/ui", "/admin.html"],
     ["/tv", "/tv.html"],
     ["/tv/dashboard", "/tv.html"],
     ["/tv/kiosk", "/tv-kiosk.html"],
@@ -1112,6 +1112,7 @@ export default {
             && ((workerOnlyMode
                 && (NATIVE_PAGE_ASSETS.has(incomingUrl.pathname)
                     || incomingUrl.pathname.startsWith("/static/")))
+                || (incomingUrl.pathname === "/accounts/ui" && accountReadMode(env) === "native")
                 || (incomingUrl.pathname === "/tv/dashboard" && tvPairingMode(env) === "native"));
         if (shouldServeNativeAsset) {
             const pageResponse = incomingUrl.pathname === "/tv/dashboard" && tvPairingMode(env) === "native"

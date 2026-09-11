@@ -1385,7 +1385,28 @@ async function init() {
 
 async function bootstrapFromBackend() {
   await fetchTvState();
+  await normalizeSelectedDateOnBootstrap();
   startPolling();
+}
+
+async function normalizeSelectedDateOnBootstrap() {
+  if (!state.token || !state.selectedDate) return;
+
+  const todayKey = toISO(new Date());
+  if (state.selectedDate === todayKey) return;
+
+  const previousDate = state.selectedDate;
+  state.selectedDate = todayKey;
+  state.focusedEventId = null;
+  state.monthDetailOpen = false;
+  state.lastObservedDayKey = todayKey;
+  if (tvDiag) tvDiag.log('selected_date_bootstrap_rollover', `${previousDate} -> ${todayKey}`);
+
+  const patched = await patchTvState(
+    { selectedDate: todayKey, focusedEventId: null },
+    { recordHistory: false },
+  );
+  if (patched && patched.selectedDate) state.selectedDate = patched.selectedDate;
 }
 
 async function attemptLanAutoPair() {
