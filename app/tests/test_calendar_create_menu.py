@@ -13,3 +13,4 @@ def test_create_action_menu_wires_visible_event_and_import_actions():
     assert "importEventsMenuBtn?.addEventListener(\"click\"" in source
     assert "openCreateModal();" in source
     assert "importFileInput?.click();" in source
+    assert "bindUIEvents();\n  wireCreateActionMenu();" in source

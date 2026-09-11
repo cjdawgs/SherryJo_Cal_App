@@ -201,6 +201,7 @@ function applyControlBandDensity(mode) {
 }
 
 function wireCreateActionMenu() {
+  const createMenuShell = document.getElementById("createMenuShell");
   const createBtn = document.getElementById("createBtn");
   const createNewEventBtn = document.getElementById("createNewEventBtn");
   const importEventsMenuBtn = document.getElementById("importEventsMenuBtn");
@@ -215,21 +216,45 @@ function wireCreateActionMenu() {
 
   createBtn.dataset.bound = "1";
 
+  const closeCreateMenu = () => {
+    createMenuShell?.classList.remove("open");
+    createBtn.setAttribute("aria-expanded", "false");
+    // CSS also reveals the dropdown via :focus-within, so a focused descendant
+    // must be blurred or it stays visible after the "open" class is removed.
+    if (createMenuShell?.contains(document.activeElement)) {
+      document.activeElement.blur();
+    }
+  };
+
+  // ✅ Create is a split button: clicking it only toggles the dropdown.
+  // The dropdown's own "Create Event" / "Import Events" items perform the actions.
   createBtn.addEventListener("click", (event) => {
     event.preventDefault();
-    if (window.isModalOpen) return;
-    openCreateModal();
+    event.stopPropagation();
+    createMenuShell?.classList.toggle("open");
+    createBtn.setAttribute("aria-expanded", createMenuShell?.classList.contains("open") ? "true" : "false");
   });
 
   createNewEventBtn?.addEventListener("click", (event) => {
     event.preventDefault();
+    closeCreateMenu();
     if (window.isModalOpen) return;
     openCreateModal();
   });
 
   importEventsMenuBtn?.addEventListener("click", (event) => {
     event.preventDefault();
+    closeCreateMenu();
     importFileInput?.click();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!createMenuShell || !createMenuShell.classList.contains("open")) return;
+    if (!createMenuShell.contains(event.target)) closeCreateMenu();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeCreateMenu();
   });
 
   importBtn?.addEventListener("click", () => {
@@ -1812,6 +1837,7 @@ async function init() {
   applyRangeTooltips();
 
   bindUIEvents();
+  wireCreateActionMenu();
   applyRangeTooltips(); // ✅ ensures hover text shows immediately
 
   window.addEventListener("accountsUpdated", async () => {
@@ -3561,7 +3587,13 @@ async function publishNow(options = {}) {
       const warningText = warnings.length ? `: ${warnings[0]}` : "";
       showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed${warningText}`, "error");
     } else if (published === 0 && deleted === 0 && localOnlyChanges.length === 0) {
-      showToast("ℹ️ Nothing published — events may not be linked to provider accounts yet", "info");
+      // Nothing to send externally (event has no linked provider account) — still resolve the request.
+      showToast("ℹ️ No provider accounts linked — nothing to publish externally", "info");
+      if (selectedChanges.length) {
+        removePendingPublishChanges(selectedChanges.map((change) => change.key));
+      } else {
+        clearPendingPublishChanges();
+      }
     } else {
       showToast(`✅ Published ${published} updates, ${deleted} deletes → ${accountSummary}${rangeSummary}`);
       if (selectedChanges.length) {
