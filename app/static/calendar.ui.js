@@ -937,15 +937,15 @@ function buildPublishRemediationHtml(message, selectedRows = []) {
   const lower = String(message || "").toLowerCase();
   const selectedMicrosoft = (selectedRows || []).find((row) => row && row.provider === "microsoft");
   const accountParam = encodeURIComponent(selectedMicrosoft?.email || "");
-  const remediationHref = selectedMicrosoft
-    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${accountParam}&remedy_action=verify_access`
-    : "/accounts/ui";
+  const buildHref = (action) => (selectedMicrosoft
+    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${accountParam}&remedy_action=${action}`
+    : "/accounts/ui");
 
   if (lower.includes("erroraccessdenied") || lower.includes("access is denied") || lower.includes("forbidden")) {
     const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "microsoft account";
     return `
       <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
-        Resolution path: <a href="${remediationHref}" style="font-weight:600;">Open Account Manager</a>,
+        Resolution path: <a href="${buildHref("verify_access")}" style="font-weight:600;">Open Account Manager</a>,
         click <strong>Verify Access</strong> for <strong>${escapeHtml(accountLabel)}</strong>.
         If write access is still denied, click <strong>Reconnect</strong>, complete Microsoft consent,
         return here, then publish again.
@@ -954,10 +954,11 @@ function buildPublishRemediationHtml(message, selectedRows = []) {
 
   if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid")) {
     const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "the account";
+    // A missing/invalid token can't be fixed by Verify Access/Retry — route straight to Reconnect.
     return `
       <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
         Resolution path: Reconnect <strong>${escapeHtml(accountLabel)}</strong> in
-        <a href="${remediationHref}" style="font-weight:600;">Account Manager</a>, then retry publish.
+        <a href="${buildHref("reconnect")}" style="font-weight:600;">Account Manager</a>, then retry publish.
       </div>`;
   }
 

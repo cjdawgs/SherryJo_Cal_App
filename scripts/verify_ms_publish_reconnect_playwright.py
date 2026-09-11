@@ -183,8 +183,10 @@ def main(base_url: str) -> int:
             failures.append(f"Remediation link missing remedy_provider=microsoft. Got href: {href!r}")
         if f"remedy_account={MS_EMAIL.replace('@', '%40')}" not in href:
             failures.append(f"Remediation link missing remedy_account for {MS_EMAIL}. Got href: {href!r}")
-        if "remedy_action=verify_access" not in href:
-            failures.append(f"Remediation link missing remedy_action. Got href: {href!r}")
+        if "remedy_action=reconnect" not in href:
+            # A missing/invalid token can't be fixed by Verify Access/Retry, so the
+            # no-token failure must route straight to Reconnect, not verify_access.
+            failures.append(f"Remediation link should route straight to reconnect for a no-token failure. Got href: {href!r}")
 
         # ── Step 2: following the link highlights the account + shows Reconnect ──
         page.goto(f"{base_url.rstrip('/')}{href}", wait_until="domcontentloaded")
@@ -198,6 +200,8 @@ def main(base_url: str) -> int:
         error_banner = page.locator("#error").inner_text()
         if "Resolution target" not in error_banner or MS_KEY not in error_banner:
             failures.append(f"Expected resolution-target guidance message. Got: {error_banner!r}")
+        if "Click Reconnect" not in error_banner:
+            failures.append(f"No-token failures must guide straight to Reconnect, not Verify Access first. Got: {error_banner!r}")
 
         reconnect_btn = account_card.locator('[data-action="reconnect"]')
         if reconnect_btn.count() == 0:
