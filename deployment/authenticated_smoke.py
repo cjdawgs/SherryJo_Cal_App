@@ -23,6 +23,8 @@ TOKEN_ENV = "SHERRYJO_SMOKE_TOKEN"
 EMAIL_ENV = "SHERRYJO_SMOKE_EMAIL"
 PASSWORD_ENV = "SHERRYJO_SMOKE_PASSWORD"
 USER_AGENT = "curl/8.10.1 SherryJo-authenticated-smoke/1.0"
+HTTP_RETRY_ATTEMPTS = 3
+RETRYABLE_NETWORK_ERRNOS = {104, 110, 113}
 
 
 class SmokeFailure(RuntimeError):
@@ -56,6 +58,13 @@ def _validate_target(url: str, allow_remote: bool) -> str:
     return normalized
 
 
+def _is_retryable_network_error(error: urllib.error.URLError) -> bool:
+    reason = error.reason
+    if isinstance(reason, TimeoutError):
+        return True
+    return isinstance(reason, OSError) and reason.errno in RETRYABLE_NETWORK_ERRNOS
+
+
 def _request(
     origin: str,
     token: str,
@@ -86,10 +95,16 @@ def _request(
         headers=headers,
         method=method,
     )
-    try:
-        response = urllib.request.urlopen(request, timeout=45)
-    except urllib.error.HTTPError as error:
-        response = error
+    for attempt in range(HTTP_RETRY_ATTEMPTS):
+        try:
+            response = urllib.request.urlopen(request, timeout=45)
+            break
+        except urllib.error.HTTPError as error:
+            response = error
+            break
+        except urllib.error.URLError as error:
+            if not _is_retryable_network_error(error) or attempt == HTTP_RETRY_ATTEMPTS - 1:
+                raise
     with response:
         return HttpResult(status=response.status, body=response.read())
 

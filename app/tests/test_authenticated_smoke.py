@@ -1,8 +1,10 @@
 import asyncio
+import errno
 import json
 from pathlib import Path
 import subprocess
 import sys
+import urllib.error
 
 import pytest
 import yaml
@@ -53,6 +55,66 @@ def test_login_obtains_fresh_token_without_reporting_credentials(monkeypatch):
             {"payload": {"email": "smoke@example.com", "password": "secret-password"}},
         )
     ]
+
+
+def test_request_retries_a_connection_reset_with_the_same_idempotency_key(monkeypatch):
+    requests = []
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"event":{"id":7}}'
+
+    responses = iter(
+        (
+            urllib.error.URLError(ConnectionResetError(errno.ECONNRESET, "Connection reset by peer")),
+            FakeResponse(),
+        )
+    )
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(authenticated_smoke.urllib.request, "urlopen", fake_urlopen)
+
+    result = authenticated_smoke._request(
+        "https://render.example.com",
+        "temporary-token",
+        "POST",
+        "/calendar/event",
+        payload={"title": "smoke"},
+    )
+
+    assert result.status == 200
+    assert len(requests) == 2
+    assert requests[0][1] == requests[1][1] == 45
+    assert requests[0][0].headers["Idempotency-key"] == requests[1][0].headers["Idempotency-key"]
+
+
+def test_request_does_not_retry_non_retryable_network_errors(monkeypatch):
+    calls = 0
+
+    def fake_urlopen(_request, *, timeout):
+        nonlocal calls
+        calls += 1
+        raise urllib.error.URLError(OSError(errno.ECONNREFUSED, "Connection refused"))
+
+    monkeypatch.setattr(authenticated_smoke.urllib.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(urllib.error.URLError):
+        authenticated_smoke._request("https://render.example.com", "", "GET", "/tasks/")
+
+    assert calls == 1
 
 
 def test_websocket_ticket_failure_names_target(monkeypatch):
