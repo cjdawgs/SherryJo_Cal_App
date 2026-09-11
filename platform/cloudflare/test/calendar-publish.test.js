@@ -15,7 +15,7 @@ test("publishes selected events to Google with a deterministic create id", async
             events: [{ id: 7, title: "Publish", description: "", start_time: new Date("2026-08-16T12:00:00Z"), end_time: new Date("2026-08-16T13:00:00Z"), external_ids: {} }],
             accounts: [{ id: 2, provider: "google", account_email: "user@example.test", access_token: token, refresh_token: refresh, token_expires_at: new Date(Date.now() + 3600000) }],
         }),
-        updateEventLinks: async (...args) => links.push(args), updateAccountToken: async () => {},
+        updateEventLinks: async (...args) => links.push(args), updateAccountToken: async () => { },
     };
     let providerBody;
     const result = await executeCalendarPublish(adapter, {
@@ -42,7 +42,7 @@ test("does not mistake a Microsoft transaction id for a provider event id", asyn
             events: [{ id: 8, title: "Publish", start_time: new Date("2026-08-16T12:00:00Z"), external_ids: {} }],
             accounts: [{ id: 3, provider: "microsoft", account_email: "user@example.test", access_token: token, refresh_token: "", token_expires_at: new Date(Date.now() + 3600000) }],
         }),
-        updateEventLinks: async () => { throw new Error("must not persist a transaction id"); }, updateAccountToken: async () => {},
+        updateEventLinks: async () => { throw new Error("must not persist a transaction id"); }, updateAccountToken: async () => { },
     };
     const result = await executeCalendarPublish(adapter, {
         userId: 42, env: { TOKEN_ENCRYPTION_KEY: KEY },
@@ -52,4 +52,33 @@ test("does not mistake a Microsoft transaction id for a provider event id", asyn
     assert.equal(result.published, 0);
     assert.equal(result.failed, 1);
     assert.match(result.warnings[0], /without an event identifier/);
+});
+
+test("reports a reconnectable Microsoft no-token result without calling Graph", async () => {
+    const invalidToken = "v1:stored-credential-that-cannot-be-decrypted";
+    const adapter = {
+        loadPublishData: async () => ({
+            events: [{ id: 9, title: "Publish", start_time: new Date("2026-08-16T12:00:00Z"), external_ids: {} }],
+            accounts: [{ id: 4, provider: "microsoft", account_email: "user@example.test", access_token: invalidToken, refresh_token: "", token_expires_at: new Date(Date.now() + 3600000) }],
+        }),
+        updateEventLinks: async () => { throw new Error("must not persist a failed publish"); },
+        updateAccountToken: async () => { },
+    };
+    let graphCalled = false;
+    const result = await executeCalendarPublish(adapter, {
+        userId: 42,
+        env: { TOKEN_ENCRYPTION_KEY: KEY },
+        body: { event_ids: [9], publish_targets: { "9": ["microsoft:user@example.test"] } },
+        fetchImpl: async () => {
+            graphCalled = true;
+            return new Response(null, { status: 500 });
+        },
+    });
+
+    assert.equal(graphCalled, false);
+    assert.equal(result.published, 0);
+    assert.equal(result.created, 0);
+    assert.equal(result.failed, 1);
+    assert.match(result.warnings[0], /No valid token for microsoft:user@example.test/);
+    assert.equal(result.account_results[0].status, "no_token");
 });

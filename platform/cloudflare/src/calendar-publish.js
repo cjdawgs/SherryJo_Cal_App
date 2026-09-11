@@ -73,6 +73,9 @@ function providerCreatedId(result, provider) {
 
 async function publishTarget({ userId, event, account, targetKey, rawId, env, fetchImpl }) {
     const tokenResult = await ensureProviderAccessToken(account, env, fetchImpl);
+    if (!String(tokenResult.accessToken || "").trim()) {
+        throw new Error("Provider access token is missing");
+    }
     const provider = normalizeProvider(account.provider);
     const calendarId = encodeURIComponent(account.account_email || "primary");
     const base = provider === "google" ? `${GOOGLE_EVENTS}/${calendarId}/events` : GRAPH_EVENTS;
@@ -161,7 +164,14 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
         for (const key of keys) {
             const target = targetParts(key); const account = target && accounts.get(target.key);
             const resultRow = { target_key: target?.key || key, provider: target?.provider, account_email: target?.email, linked: Boolean(externalIds[key]), action: externalIds[key] ? "update" : "create", ok: false, status: "pending", message: "" };
-            if (!target || !account) { resultRow.status = "no_token"; resultRow.message = `No valid token for ${key}`; warnings.push(resultRow.message); accountResults.push(resultRow); continue; }
+            if (!target || !account) {
+                resultRow.status = "no_token";
+                resultRow.message = `No valid token for ${key}`;
+                warnings.push(resultRow.message);
+                failed += 1;
+                accountResults.push(resultRow);
+                continue;
+            }
             try {
                 const result = await publishTarget({ userId, event, account, targetKey: target.key, rawId: externalIds[target.key], env, fetchImpl });
                 await persistToken(account, result.tokenResult);
