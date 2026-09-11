@@ -8,8 +8,11 @@ const { chromium } = require('playwright');
         localStorage.setItem('token', 'frontend-dom-smoke-token');
     });
 
-    await page.goto('http://127.0.0.1:8000/calendar-ui', { waitUntil: 'domcontentloaded' });
+    await page.goto(process.env.CALENDAR_URL || 'http://127.0.0.1:8000/calendar-ui', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1200);
+
+    await page.locator('#createNewEventBtn').click();
+    await page.waitForSelector('#createEventModal.show');
 
     const result = await page.evaluate(() => {
         const mk = (id) => {
@@ -23,6 +26,7 @@ const { chromium } = require('playwright');
         return {
             createBtn: mk('createBtn'),
             accountsBtn: mk('accountsBtn'),
+            createModalOpen: document.getElementById('createEventModal')?.classList.contains('show') === true,
             path: window.location.pathname,
             title: document.title,
         };
@@ -35,6 +39,7 @@ const { chromium } = require('playwright');
     if (!result.accountsBtn.exists) failures.push('accountsBtn missing');
     if (!result.createBtn.svg) failures.push('createBtn missing svg icon');
     if (!result.accountsBtn.svg) failures.push('accountsBtn missing svg icon');
+    if (!result.createModalOpen) failures.push('Create Event menu action did not open the modal');
     if (result.createBtn.label !== 'Create / Import') failures.push(`createBtn label mismatch: ${result.createBtn.label}`);
     if (result.accountsBtn.label !== 'Account Menu') failures.push(`accountsBtn label mismatch: ${result.accountsBtn.label}`);
 

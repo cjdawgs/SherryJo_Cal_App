@@ -202,6 +202,8 @@ function applyControlBandDensity(mode) {
 
 function wireCreateActionMenu() {
   const createBtn = document.getElementById("createBtn");
+  const createNewEventBtn = document.getElementById("createNewEventBtn");
+  const importEventsMenuBtn = document.getElementById("importEventsMenuBtn");
   const importBtn = document.getElementById("importBtn");
   const importFileInput = document.getElementById("importFileInput");
   const accountsBtn = document.getElementById("accountsBtn");
@@ -217,6 +219,17 @@ function wireCreateActionMenu() {
     event.preventDefault();
     if (window.isModalOpen) return;
     openCreateModal();
+  });
+
+  createNewEventBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    if (window.isModalOpen) return;
+    openCreateModal();
+  });
+
+  importEventsMenuBtn?.addEventListener("click", (event) => {
+    event.preventDefault();
+    importFileInput?.click();
   });
 
   importBtn?.addEventListener("click", () => {

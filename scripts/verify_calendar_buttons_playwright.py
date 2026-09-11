@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import argparse
 import json
 from urllib.parse import urlparse
 
 from playwright.sync_api import Route, sync_playwright
 
-BASE = "http://127.0.0.1:8000"
+DEFAULT_BASE = "http://127.0.0.1:8000"
 
 
 def _mock_api(route: Route) -> None:
     url = route.request.url
     path = urlparse(url).path
+
+    if path == "/calendar-ui":
+        route.continue_()
+        return
 
     if path == "/users/me":
         route.fulfill(
@@ -31,17 +36,20 @@ def _mock_api(route: Route) -> None:
     route.continue_()
 
 
-def main() -> int:
+def main(base_url: str) -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.route("**/*", _mock_api)
         page.add_init_script("localStorage.setItem('token', 'frontend-dom-smoke-token')")
 
-        page.goto(f"{BASE}/calendar-ui", wait_until="domcontentloaded")
+        page.goto(f"{base_url.rstrip('/')}/calendar-ui", wait_until="domcontentloaded")
         page.wait_for_selector("#createBtn", timeout=10000)
+        page.wait_for_selector("#createNewEventBtn", timeout=10000)
         page.wait_for_selector("#accountsBtn", timeout=10000)
         page.wait_for_timeout(1200)
+        page.locator("#createNewEventBtn").click()
+        page.wait_for_selector("#createEventModal.show", timeout=5000)
 
         data = page.evaluate(
             r"""
@@ -60,7 +68,8 @@ def main() -> int:
                 path: window.location.pathname,
                 title: document.title,
                 createBtn: pick('createBtn'),
-                accountsBtn: pick('accountsBtn')
+                accountsBtn: pick('accountsBtn'),
+                createModalOpen: document.getElementById('createEventModal')?.classList.contains('show') === true
               };
             }
             """
@@ -81,10 +90,12 @@ def main() -> int:
         errors.append("createBtn icon svg missing")
     if not data["accountsBtn"].get("hasSvg"):
         errors.append("accountsBtn icon svg missing")
-    if data["createBtn"].get("label") != "Create / Import":
+    if data["createBtn"].get("label") != "Create":
         errors.append(f"create label mismatch: {data['createBtn'].get('label')}")
-    if data["accountsBtn"].get("label") != "Account Menu":
+    if data["accountsBtn"].get("label") != "Accounts":
         errors.append(f"accounts label mismatch: {data['accountsBtn'].get('label')}")
+    if not data.get("createModalOpen"):
+        errors.append("Create Event menu action did not open the modal")
 
     if errors:
         print("FRONTEND_VERIFY_FAILED")
@@ -97,4 +108,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--base-url", default=DEFAULT_BASE)
+    raise SystemExit(main(parser.parse_args().base_url))
