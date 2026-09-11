@@ -303,6 +303,7 @@ function jsonResponse(payload, status = 200) {
         headers: {
             "cache-control": "no-store",
             "content-type": "application/json; charset=utf-8",
+            "x-sherryjo-edge": "cloudflare",
         },
     });
 }

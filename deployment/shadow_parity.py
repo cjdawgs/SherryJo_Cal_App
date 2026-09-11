@@ -155,7 +155,32 @@ def _digest(body: bytes) -> str:
     return hashlib.sha256(body).hexdigest()[:12]
 
 
-def run_http_parity(render_url: str, cloudflare_url: str) -> tuple[list[dict], list[str]]:
+def _native_worker_checks(case: HttpCase, cloudflare: HttpResult, origins: Iterable[str]) -> dict[str, bool] | None:
+    if case.name == "invalid_login":
+        return {
+            "status": cloudflare.status == 401,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "body": cloudflare.body == b'{"detail":"Invalid email, username, or password"}',
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name in {"google_callback_invalid_state", "microsoft_callback_invalid_state"}:
+        provider = "google" if case.name.startswith("google") else "microsoft"
+        return {
+            "status": cloudflare.status == 302,
+            "location": _normalize_location(cloudflare.location, origins) == f"/accounts/ui?error={provider}_invalid_state",
+            "body": cloudflare.body == b"",
+        }
+    if case.name in {"protected_api", "multipart_auth_rejection"}:
+        return {
+            "status": cloudflare.status == 401,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "body": cloudflare.body == b'{"error":"Authentication required"}',
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    return None
+
+
+def run_http_parity(render_url: str, cloudflare_url: str, *, native_worker: bool = False) -> tuple[list[dict], list[str]]:
     opener = urllib.request.build_opener(NoRedirectHandler)
     rows = []
     failures = []
@@ -164,7 +189,9 @@ def run_http_parity(render_url: str, cloudflare_url: str) -> tuple[list[dict], l
     for case in _cases(cloudflare_url):
         render = _request(opener, render_url, case)
         cloudflare = _request(opener, cloudflare_url, case)
-        checks = {
+        checks = _native_worker_checks(case, cloudflare, origins) if native_worker else None
+        if checks is None:
+            checks = {
             "status": render.status == cloudflare.status,
             "content_type": render.content_type == cloudflare.content_type,
             "location": _normalize_location(render.location, origins)
@@ -173,7 +200,7 @@ def run_http_parity(render_url: str, cloudflare_url: str) -> tuple[list[dict], l
             "body": not case.compare_body
             or _normalize_body(render.body, origins) == _normalize_body(cloudflare.body, origins),
             "edge_marker": cloudflare.edge_marker == "cloudflare",
-        }
+            }
         failed_checks = [name for name, passed in checks.items() if not passed]
         if failed_checks:
             failures.append(f"{case.name}: {', '.join(failed_checks)}")
@@ -299,12 +326,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--render-url", default=DEFAULT_RENDER_URL)
     parser.add_argument("--cloudflare-url", default=DEFAULT_CLOUDFLARE_URL)
+    parser.add_argument("--native-worker", action="store_true")
     parser.add_argument("--json-output")
     args = parser.parse_args()
 
     render_url = args.render_url.rstrip("/")
     cloudflare_url = args.cloudflare_url.rstrip("/")
-    rows, failures = run_http_parity(render_url, cloudflare_url)
+    rows, failures = run_http_parity(render_url, cloudflare_url, native_worker=args.native_worker)
     edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
     rows.append(edge_health_row)
     failures.extend(edge_health_failures)

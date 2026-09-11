@@ -62,3 +62,20 @@ def test_worker_edge_health_reports_wrong_worker_contract(monkeypatch):
     assert row["passed"] is False
     assert row["failed_checks"] == ["cloudflare_body"]
     assert failures == ["worker_edge_health: cloudflare_body"]
+
+
+def test_native_worker_accepts_migrated_authentication_contracts():
+    cases = {case.name: case for case in shadow_parity._cases("https://edge.example.com")}
+    origins = ("https://render.example.com", "https://edge.example.com")
+    expected_responses = {
+        "invalid_login": shadow_parity.HttpResult(401, "application/json; charset=utf-8", None, (), "cloudflare", b'{"detail":"Invalid email, username, or password"}'),
+        "google_callback_invalid_state": shadow_parity.HttpResult(302, None, "https://edge.example.com/accounts/ui?error=google_invalid_state", (), None, b""),
+        "microsoft_callback_invalid_state": shadow_parity.HttpResult(302, None, "https://edge.example.com/accounts/ui?error=microsoft_invalid_state", (), None, b""),
+        "protected_api": shadow_parity.HttpResult(401, "application/json; charset=utf-8", None, (), "cloudflare", b'{"error":"Authentication required"}'),
+        "multipart_auth_rejection": shadow_parity.HttpResult(401, "application/json; charset=utf-8", None, (), "cloudflare", b'{"error":"Authentication required"}'),
+    }
+
+    for case_name, response in expected_responses.items():
+        checks = shadow_parity._native_worker_checks(cases[case_name], response, origins)
+        assert checks is not None
+        assert all(checks.values())
