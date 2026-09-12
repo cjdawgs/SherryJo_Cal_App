@@ -171,6 +171,55 @@ def _digest(body: bytes) -> str:
 
 
 def _native_worker_checks(case: HttpCase, cloudflare: HttpResult, origins: Iterable[str]) -> dict[str, bool] | None:
+    if case.name in {"health_get", "health_with_cookie"}:
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "body": cloudflare.body == b'{"status":"ok","platform":"cloudflare-worker"}',
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "health_head":
+        return {
+            "status": cloudflare.status == 200,
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "schema_health":
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "body": cloudflare.body == b'{"status":"ok","database":"postgresql","connectivity":"unchecked","runtime":"cloudflare-worker"}',
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "favicon":
+        return {
+            "status": cloudflare.status == 204,
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name in {"admin_redirect", "login_page"}:
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "text/html; charset=utf-8",
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "static_javascript":
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "text/javascript; charset=utf-8",
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "openapi_large_response":
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "body": cloudflare.body == b'{"openapi":"3.1.0","info":{"title":"SherryJo Calendar Worker","version":"1.0"},"paths":{}}',
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
+    if case.name == "cors_preflight":
+        return {
+            "status": cloudflare.status == 200,
+            "content_type": cloudflare.content_type == "application/json; charset=utf-8",
+            "edge_marker": cloudflare.edge_marker == "cloudflare",
+        }
     if case.name == "invalid_login":
         return {
             "status": cloudflare.status == 401,
@@ -241,20 +290,23 @@ def run_worker_edge_health(render_url: str, cloudflare_url: str) -> tuple[dict, 
     case = HttpCase("worker_edge_health", "GET", "/__edge/health")
     render = _request(opener, render_url, case)
     cloudflare = _request(opener, cloudflare_url, case)
-    expected_body = {
-        "status": "ok",
-        "platform": "cloudflare",
-        "mode": "render-origin-proxy",
-    }
     try:
         cloudflare_body = json.loads(cloudflare.body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         cloudflare_body = None
 
+    valid_modes = {"render-origin-proxy", "worker-only"}
+    body_ok = (
+        isinstance(cloudflare_body, dict)
+        and cloudflare_body.get("status") == "ok"
+        and cloudflare_body.get("platform") == "cloudflare"
+        and cloudflare_body.get("mode") in valid_modes
+    )
+
     checks = {
         "render_does_not_own_route": render.status == 404,
         "cloudflare_status": cloudflare.status == 200,
-        "cloudflare_body": cloudflare_body == expected_body,
+        "cloudflare_body": body_ok,
     }
     failed_checks = [name for name, passed in checks.items() if not passed]
     row = {

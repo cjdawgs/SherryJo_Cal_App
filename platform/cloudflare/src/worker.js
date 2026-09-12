@@ -103,18 +103,18 @@ const TV_AUTO_PAIR_PATH = "/tv/auto-pair";
 const TV_STATE_PATH = "/tv/state";
 const TV_EVENTS_PATH = "/tv/events";
 const NATIVE_PAGE_ASSETS = new Map([
-    ["/", "/index.html"],
-    ["/calendar-ui", "/index.html"],
-    ["/login", "/login.html"],
+    ["/", "/"],
+    ["/calendar-ui", "/"],
+    ["/login", "/login"],
     // Assets binding uses html_handling=auto-trailing-slash: requesting the
     // extensioned path (e.g. /accounts.html) triggers a 307 redirect to the
     // clean URL instead of serving the file, so map to the extension-less path.
     ["/accounts/ui", "/accounts"],
     ["/admin", "/admin"],
     ["/admin/ui", "/admin"],
-    ["/tv", "/tv.html"],
-    ["/tv/dashboard", "/tv.html"],
-    ["/tv/kiosk", "/tv-kiosk.html"],
+    ["/tv", "/tv"],
+    ["/tv/dashboard", "/tv"],
+    ["/tv/kiosk", "/tv-kiosk"],
 ]);
 const CALENDAR_READ_MODES = new Set(["proxy", "shadow", "canary", "native"]);
 const WRITE_MODES = new Set(["proxy", "canary", "native"]);
@@ -1128,7 +1128,7 @@ export default {
             if (assetResponse) return assetResponse;
         }
         if (workerOnlyMode && incomingUrl.pathname === "/favicon.ico") {
-            return new Response(null, { status: 204 });
+            return withEdgeMarker(new Response(null, { status: 204 }));
         }
         if (incomingUrl.pathname === EDGE_HEALTH_PATH) {
             return jsonResponse({
@@ -1138,7 +1138,9 @@ export default {
             });
         }
         if (workerOnlyMode && incomingUrl.pathname === "/health") {
-            return request.method === "HEAD" ? new Response(null, { status: 200 }) : jsonResponse({ status: "ok", platform: "cloudflare-worker" });
+            return request.method === "HEAD"
+                ? withEdgeMarker(new Response(null, { status: 200 }))
+                : jsonResponse({ status: "ok", platform: "cloudflare-worker" });
         }
         if (workerOnlyMode && incomingUrl.pathname === "/health/schema") {
             return jsonResponse({ status: "ok", database: "postgresql", connectivity: "unchecked", runtime: "cloudflare-worker" });
