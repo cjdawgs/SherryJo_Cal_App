@@ -347,6 +347,19 @@ def test_create_event_defaults_title(mock_post, service):
 
 
 @patch("app.services.google_calendar_service.requests.post")
+@patch("app.services.google_calendar_service.requests.patch")
+def test_create_event_uses_deterministic_identity(mock_patch, mock_post, service):
+    mock_post.return_value = make_response(status_code=409, text="already exists")
+    mock_patch.return_value = make_response(status_code=200)
+
+    event_id = service.create_event("token", {"title": "Replay"}, create_identity="sj0123456789abcdefghijklmn")
+
+    assert event_id == "sj0123456789abcdefghijklmn"
+    assert mock_post.call_args[1]["json"]["id"] == event_id
+    assert mock_patch.call_args[0][0].endswith(f"/events/{event_id}")
+
+
+@patch("app.services.google_calendar_service.requests.post")
 def test_create_event_returns_none_on_failure(mock_post, service):
     mock_post.return_value = make_response(status_code=400, text="bad request")
 
@@ -376,7 +389,7 @@ def test_delete_event_targets_account_calendar(mock_delete, service):
 def test_delete_event_tolerates_failure(mock_delete, service):
     mock_delete.return_value = make_response(status_code=404, text="missing")
 
-    assert service.delete_event("token", "event-1") is None
+    assert service.delete_event("token", "event-1") == 404
 
 
 # ==================================================

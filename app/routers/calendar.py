@@ -793,6 +793,7 @@ async def publish_to_providers(
                 _graph_client,
             )
             deleted += int(delete_result.get("deleted") or 0)
+            failed += int(delete_result.get("failed") or 0)
             for key in (delete_result.get("affected_accounts") or []):
                 affected_accounts.add(key)
             warnings.extend(delete_result.get("warnings") or [])
@@ -853,6 +854,25 @@ async def publish_to_providers(
         "warnings":           warnings,
         "account_results":    account_results,
     }
+
+
+@router.post("/publish/pending")
+async def replay_pending_publishes(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    target_key = str(body.get("target_key") or "").strip().lower()
+    try:
+        return _event_actions.replay_pending_publishes(
+            db, current_user, target_key, _google_service, _graph_client,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/import-events")

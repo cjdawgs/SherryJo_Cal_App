@@ -198,6 +198,15 @@ def test_create_event_defaults_title(mock_post):
 
 
 @patch("app.services.graph_client.requests.post")
+def test_create_event_uses_transaction_id(mock_post):
+    mock_post.return_value = make_response(json_data={"id": "created-2"})
+
+    GraphClient().create_event("token", {}, transaction_id="97b0f868-50b1-5f25-9ad2-5f01956026ea")
+
+    assert mock_post.call_args[1]["json"]["transactionId"] == "97b0f868-50b1-5f25-9ad2-5f01956026ea"
+
+
+@patch("app.services.graph_client.requests.post")
 def test_create_event_returns_none_on_failure(mock_post):
     mock_post.return_value = make_response(status_code=400, text="bad request")
 
@@ -226,4 +235,4 @@ def test_delete_event_targets_event_url(mock_delete):
 def test_delete_event_tolerates_failure(mock_delete):
     mock_delete.return_value = make_response(status_code=404, text="missing")
 
-    assert GraphClient().delete_event("token", "event-1") is None
+    assert GraphClient().delete_event("token", "event-1") == 404

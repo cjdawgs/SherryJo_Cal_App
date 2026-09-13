@@ -67,7 +67,7 @@ import { assembleTvEvents, tvViewWindow } from "./tv-events.js";
 import { executeTvAccountLegendRead } from "./tv-events-postgres.js";
 import { executeTvDiagnosticsRead, executeTvDiagnosticsWrite, TvDiagnosticsForbiddenError } from "./tv-diagnostics-postgres.js";
 import { CalendarImportError, handleCalendarImport } from "./calendar-import.js";
-import { executeCalendarPublish } from "./calendar-publish.js";
+import { executeCalendarPublish, replayPendingCalendarPublishes } from "./calendar-publish.js";
 import { CalendarPublishPostgresAdapter } from "./calendar-publish-postgres.js";
 import { issueWebSocketTicket, openNativeWebSocket } from "./websocket-postgres.js";
 import { handleAdminApi } from "./admin-api.js";
@@ -1298,6 +1298,16 @@ export default {
                 const body = await request.json();
                 const adapter = new CalendarPublishPostgresAdapter(createHyperdriveCalendarReadAdapter(env));
                 return jsonResponse(await executeCalendarPublish(adapter, { userId: claims.user_id, body, env }));
+            }
+            if (publishMode === "native" && request.method === "POST" && incomingUrl.pathname === "/calendar/publish/pending") {
+                const claims = await authenticateWorkerRequest(request, env);
+                const body = await request.json();
+                const adapter = new CalendarPublishPostgresAdapter(createHyperdriveCalendarReadAdapter(env));
+                return jsonResponse(await replayPendingCalendarPublishes(adapter, {
+                    userId: claims.user_id,
+                    targetKey: body?.target_key,
+                    env,
+                }));
             }
 
             if (request.method === "POST" && incomingUrl.pathname === AUTH_LOGIN_PATH && authenticationMode === "native") {

@@ -222,12 +222,14 @@ class GraphClient:
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================
-    def create_event(self, token, event_payload, raise_on_error: bool = False):
+    def create_event(self, token, event_payload, raise_on_error: bool = False, transaction_id=None):
         url = f"{GRAPH_BASE_URL}/me/events"
 
         payload = {
             "subject": event_payload.get("title") or "Untitled Event",
         }
+        if transaction_id:
+            payload["transactionId"] = transaction_id
 
         if event_payload.get("description"):
             payload["body"] = {
@@ -368,6 +370,7 @@ class GraphClient:
 
         if response.status_code not in [200, 204]:
             logger.error("❌ Outlook delete failed: %s", response.text)
+        return response.status_code
 
     def verify_calendar_write_access(self, token) -> tuple[bool, str]:
         """Verify Microsoft write permission by creating and deleting a probe event."""

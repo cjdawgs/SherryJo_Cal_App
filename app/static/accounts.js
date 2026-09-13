@@ -375,11 +375,6 @@ async function saveSyncSettings() {
     const res = await api.put(`/accounts/${accountId}/sync-settings`, payload);
     if (!res) {
       setGlobalMessage("Unable to save sync settings.");
-      window.__oauthResult = {
-        provider: connected || "",
-        account: connectedAccount || "",
-        error: oauthError || "",
-      };
       return;
     }
 
@@ -619,6 +614,17 @@ async function reconnectAccount(provider, email, button) {
   } finally {
     resetButton(button);
   }
+}
+
+async function replayPendingPublishes(provider, email) {
+  const targetKey = normalizeAccountKey(provider, email);
+  const res = await api.post("/calendar/publish/pending", { target_key: targetKey });
+  if (!res) return null;
+  const data = await res.json();
+  if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
+    throw new Error(data?.message || data?.error || `Queued publish retry failed (${res.status})`);
+  }
+  return data;
 }
 
 async function setPrimary(id) {
@@ -929,6 +935,11 @@ function applyQueryState() {
   }
 
   if (connected) {
+    window.__oauthResult = {
+      provider: connected,
+      account: connectedAccount || "",
+      error: oauthError || "",
+    };
     setGlobalMessage(
       connectedAccount ? `Connected ${connectedAccount} successfully.` : `Connected ${connected} successfully.`,
       "success"
@@ -993,7 +1004,21 @@ async function init() {
       && String(account.account_email || "").trim().toLowerCase() === oauthResult.account.trim().toLowerCase()
     );
     if (connectedAccount) {
-      setGlobalMessage(`${oauthResult.provider} account ${oauthResult.account} is connected and visible in this database.`, "success");
+      try {
+        const replay = await replayPendingPublishes(oauthResult.provider, oauthResult.account);
+        const recovered = Number(replay?.published || 0);
+        const failed = Number(replay?.failed || 0);
+        if (failed > 0) {
+          setGlobalMessage(`${oauthResult.provider} reconnected. ${recovered} queued event${recovered === 1 ? "" : "s"} published; ${failed} still pending.`, "error");
+        } else if (Number(replay?.replayed || 0) > 0) {
+          setGlobalMessage(`${oauthResult.provider} reconnected and ${recovered} queued event${recovered === 1 ? "" : "s"} published automatically.`, "success");
+        } else {
+          setGlobalMessage(`${oauthResult.provider} account ${oauthResult.account} is connected and visible in this database.`, "success");
+        }
+      } catch (error) {
+        console.error("Queued publish replay failed", error);
+        setGlobalMessage(`${oauthResult.provider} reconnected, but queued publishes are still pending and will be retried.`, "error");
+      }
     } else {
       setGlobalMessage(`${oauthResult.provider} OAuth completed, but ${oauthResult.account} is not visible in the current database account list. Check the active datasource and TOKEN_ENCRYPTION_KEY.`, "error");
     }

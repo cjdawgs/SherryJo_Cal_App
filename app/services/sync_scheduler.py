@@ -26,6 +26,7 @@ import os
 from sqlalchemy import func
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
+from app.services.event_actions import EventActions, PUBLISH_DELETE_OPERATION_TYPE, PUBLISH_OPERATION_TYPE
 from app.services.sync_operation_ledger import (
     SYNC_ROLLUP_OPERATION_TYPE,
     SYNC_TV_DIAG_PRUNE_OPERATION_TYPE,
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 scheduler = BackgroundScheduler()
 calendar_service = CalendarService()
+event_actions = EventActions()
 last_global_sync_started_at = None
 last_global_sync_finished_at = None
 last_global_sync_error = None
@@ -607,6 +609,33 @@ def run_event_sync():
         db.close()
 
 
+def replay_pending_calendar_publishes():
+    db = SessionLocal()
+    try:
+        rows = db.query(SyncOperationLedger).filter(
+            SyncOperationLedger.operation_type.in_((PUBLISH_OPERATION_TYPE, PUBLISH_DELETE_OPERATION_TYPE)),
+            SyncOperationLedger.status.in_(("pending", "retry_pending")),
+        ).all()
+        scopes = sorted({
+            (row.owner_user_id, str((row.request_payload or {}).get("target_key") or "").lower())
+            for row in rows
+            if row.owner_user_id and (row.request_payload or {}).get("target_key")
+        })
+        for user_id, target_key in scopes:
+            user = db.query(User).filter(User.id == user_id).first()
+            if user is None:
+                continue
+            try:
+                event_actions.replay_pending_publishes(
+                    db, user, target_key, calendar_service.google, calendar_service.graph,
+                )
+            except Exception as exc:
+                db.rollback()
+                logger.warning("[PUBLISH] replay failed user=%s target=%s: %s", user_id, target_key, exc)
+    finally:
+        db.close()
+
+
 # ==================================================
 # TV DIAGNOSTICS RETENTION
 # ==================================================
@@ -705,6 +734,14 @@ def start_scheduler():
             id="event_sync_job",
             replace_existing=True
         )
+        if _scheduler_execution_enabled():
+            scheduler.add_job(
+                replay_pending_calendar_publishes,
+                "interval",
+                minutes=heartbeat_minutes,
+                id="calendar_publish_replay_job",
+                replace_existing=True,
+            )
 
     if maintenance_jobs_enabled:
         scheduler.add_job(

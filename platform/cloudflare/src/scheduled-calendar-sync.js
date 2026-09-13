@@ -8,6 +8,8 @@ import {
     ProviderAuthorizationError,
 } from "./provider-calendar-sync.js";
 import { ScheduledSyncPostgresAdapter } from "./scheduled-sync-postgres.js";
+import { replayPendingCalendarPublishes } from "./calendar-publish.js";
+import { CalendarPublishPostgresAdapter } from "./calendar-publish-postgres.js";
 
 const HYPERDRIVE_BINDING = "HYPERDRIVE_RLS_NO_CACHE";
 
@@ -78,7 +80,20 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
             ledger.id,
             now,
         );
-        return { accountId: account.id, provider: account.provider, status: "succeeded", ...result };
+        let publishReplay = null;
+        if (["google", "microsoft"].includes(account.provider) && typeof adapter.runWithIdentity === "function") {
+            try {
+                publishReplay = await replayPendingCalendarPublishes(new CalendarPublishPostgresAdapter(adapter), {
+                    userId: account.user_id,
+                    targetKey: `${account.provider}:${String(account.account_email || "").trim().toLowerCase()}`,
+                    env,
+                    fetchImpl,
+                });
+            } catch (error) {
+                publishReplay = { status: "failed", errorMessage: String(error?.message || error).slice(0, 300) };
+            }
+        }
+        return { accountId: account.id, provider: account.provider, status: "succeeded", publishReplay, ...result };
     } catch (error) {
         const reauthRequired = error instanceof ProviderAuthorizationError;
         await adapter.failAccountSync(account, ledger.id, error, reauthRequired, ledger.attempt_count, now);

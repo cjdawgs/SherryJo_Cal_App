@@ -88,7 +88,18 @@ async function publishTarget({ userId, event, account, targetKey, rawId, env, fe
         ? await googleCreateId(userId, event.id, targetKey)
         : await microsoftTransactionId(userId, event.id, targetKey);
     const created = await providerRequest(base, tokenResult.accessToken, "POST", eventPayload(event, provider, identity), fetchImpl);
-    if (!created.response.ok && !(provider === "google" && created.response.status === 409)) {
+    if (provider === "google" && created.response.status === 409) {
+        const reconciled = await providerRequest(
+            `${base}/${encodeURIComponent(identity)}`,
+            tokenResult.accessToken,
+            "PATCH",
+            eventPayload(event, provider),
+            fetchImpl,
+        );
+        if (!reconciled.response.ok) throw new Error(`${provider} create conflict reconciliation failed (${reconciled.response.status})`);
+        return { action: "created", rawId: identity, tokenResult };
+    }
+    if (!created.response.ok) {
         throw new Error(`${provider} create failed (${created.response.status})`);
     }
     const createdId = providerCreatedId(created, provider) || (provider === "google" ? identity : null);
@@ -124,6 +135,11 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
         return { status: "success", published: 0, failed: 0, message: "No modified events to publish — make edits first" };
     }
     const data = await adapter.loadPublishData(userId, requestedIds);
+    if (requestedIds) {
+        const foundIds = new Set(data.events.map((event) => Number(event.id)));
+        const missingIds = requestedIds.filter((eventId) => !foundIds.has(Number(eventId)));
+        if (missingIds.length) await adapter.deadLetterMissingPublishTargets?.(userId, missingIds);
+    }
     const accounts = new Map();
     for (const row of data.accounts) {
         const provider = normalizeProvider(row.provider);
@@ -149,9 +165,22 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
     for (const deletedEntry of deletedEntries) {
         for (const [key, rawId] of Object.entries(deletedEntry?.external_ids || {})) {
             const target = targetParts(key); const account = target && accounts.get(target.key);
-            if (!target || !account || !rawId) continue;
-            try { const token = await deleteTarget({ account, rawId, env, fetchImpl }); await persistToken(account, token); deleted += 1; affected.add(target.key); }
-            catch (error) { failed += 1; warnings.push(`Delete failed for ${target.key}: ${error.message}`); }
+            if (!target || !rawId) continue;
+            await adapter.queueDeleteTarget?.(userId, target.key, rawId);
+            if (!account) {
+                const message = `No valid token for ${target.key}`;
+                failed += 1; warnings.push(message);
+                await adapter.finishDeleteTarget?.(userId, target.key, rawId, { succeeded: false, error: message });
+                continue;
+            }
+            try {
+                const token = await deleteTarget({ account, rawId, env, fetchImpl });
+                await persistToken(account, token); deleted += 1; affected.add(target.key);
+                await adapter.finishDeleteTarget?.(userId, target.key, rawId, { succeeded: true });
+            } catch (error) {
+                failed += 1; warnings.push(`Delete failed for ${target.key}: ${error.message}`);
+                await adapter.finishDeleteTarget?.(userId, target.key, rawId, { succeeded: false, error: error.message });
+            }
         }
     }
     for (const event of data.events) {
@@ -164,11 +193,13 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
         for (const key of keys) {
             const target = targetParts(key); const account = target && accounts.get(target.key);
             const resultRow = { target_key: target?.key || key, provider: target?.provider, account_email: target?.email, linked: Boolean(externalIds[key]), action: externalIds[key] ? "update" : "create", ok: false, status: "pending", message: "" };
+            if (target) await adapter.queuePublishTarget?.(userId, event.id, target.key);
             if (!target || !account) {
                 resultRow.status = "no_token";
                 resultRow.message = `No valid token for ${key}`;
                 warnings.push(resultRow.message);
                 failed += 1;
+                if (target) await adapter.finishPublishTarget?.(userId, event.id, target.key, { succeeded: false, error: resultRow.message });
                 accountResults.push(resultRow);
                 continue;
             }
@@ -176,13 +207,42 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
                 const result = await publishTarget({ userId, event, account, targetKey: target.key, rawId: externalIds[target.key], env, fetchImpl });
                 await persistToken(account, result.tokenResult);
                 externalIds[target.key] = result.rawId;
+                await adapter.updateEventLinks(userId, event.id, externalIds);
+                await adapter.finishPublishTarget?.(userId, event.id, target.key, {
+                    succeeded: true,
+                    result: { action: result.action, provider_event_id: result.rawId },
+                });
                 resultRow.ok = true; resultRow.status = result.action; resultRow.message = `${result.action === "created" ? "Created" : "Updated"} ${target.key}`;
                 created += result.action === "created" ? 1 : 0; eventSucceeded = true; affected.add(target.key);
-            } catch (error) { failed += 1; resultRow.status = "failed"; resultRow.message = `Publish failed for ${target.key}: ${error.message}`; warnings.push(resultRow.message); }
+            } catch (error) {
+                failed += 1; resultRow.status = "failed"; resultRow.message = `Publish failed for ${target.key}: ${error.message}`; warnings.push(resultRow.message);
+                await adapter.finishPublishTarget?.(userId, event.id, target.key, { succeeded: false, error: resultRow.message });
+            }
             accountResults.push(resultRow);
         }
-        if (eventSucceeded) { published += 1; await adapter.updateEventLinks(userId, event.id, externalIds); }
+        if (eventSucceeded) published += 1;
     }
     const starts = data.events.map((event) => event.start_time).filter(Boolean).sort();
     return { status: "success", published, created, deleted, failed, total_events: data.events.length, affected_accounts: [...affected].sort(), range_start: starts[0]?.toISOString?.().slice(0, 10) || String(starts[0] || "").slice(0, 10) || null, range_end: starts.at(-1)?.toISOString?.().slice(0, 10) || String(starts.at(-1) || "").slice(0, 10) || null, warnings, account_results: accountResults };
+}
+
+export async function replayPendingCalendarPublishes(adapter, { userId, targetKey, env, fetchImpl = fetch }) {
+    const target = targetParts(targetKey);
+    if (!target) throw new TypeError("A valid Google or Microsoft target_key is required");
+    const pending = await adapter.loadPendingPublishTargets(userId, target.key);
+    const eventIds = [...new Set(pending.filter((item) => item.operation_type === "calendar_publish").map((item) => Number(item.event_id)).filter(Number.isSafeInteger))];
+    const deletedEvents = pending
+        .filter((item) => item.operation_type === "calendar_publish_delete" && item.provider_event_id)
+        .map((item) => ({ external_ids: { [target.key]: item.provider_event_id } }));
+    if (!eventIds.length && !deletedEvents.length) {
+        return { status: "success", replayed: 0, published: 0, created: 0, failed: 0, warnings: [] };
+    }
+    const publishTargets = Object.fromEntries(eventIds.map((eventId) => [String(eventId), [target.key]]));
+    const result = await executeCalendarPublish(adapter, {
+        userId,
+        body: { event_ids: eventIds, publish_targets: publishTargets, deleted_events: deletedEvents },
+        env,
+        fetchImpl,
+    });
+    return { ...result, replayed: eventIds.length + deletedEvents.length };
 }

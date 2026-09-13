@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 import jwt
 from app.routers.auth import SECRET_KEY
-from app.models import Event, User, OAuthAccount, TVDiagLog
+from app.models import Event, User, OAuthAccount, SyncOperationLedger, TVDiagLog
 
 client = TestClient(app)
 
@@ -390,6 +390,67 @@ def test_publish_returns_detailed_microsoft_target_failure(mock_ms_create, _mock
         for result in data["account_results"]
     )
     mock_ms_create.assert_called_once()
+    ledger = db.query(SyncOperationLedger).filter(
+        SyncOperationLedger.owner_user_id == user.id,
+        SyncOperationLedger.operation_type == "calendar_publish",
+    ).one()
+    assert ledger.status == "retry_pending"
+    assert ledger.request_payload == {
+        "event_id": event.id,
+        "target_key": "microsoft:publish-ms@example.com",
+    }
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-ms")
+@patch("app.services.graph_client.GraphClient.create_event", return_value="ms-replayed-123")
+def test_pending_publish_replays_after_reconnect(mock_ms_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="replay-ms@example.com",
+        access_token="token-ms",
+        refresh_token="refresh-ms",
+        status="ok",
+    )
+    event = Event(
+        title="Queued Microsoft Publish",
+        start_time=datetime(2026, 7, 18, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 18, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:queued-ms-publish",
+        external_ids={},
+    )
+    db.add_all([account, event])
+    db.commit()
+    db.refresh(event)
+    db.add(SyncOperationLedger(
+        operation_key=f"calendar-publish:user:{user.id}:event:{event.id}:target:microsoft:replay-ms@example.com",
+        operation_type="calendar_publish",
+        owner_user_id=user.id,
+        status="retry_pending",
+        attempt_count=1,
+        request_payload={"event_id": event.id, "target_key": "microsoft:replay-ms@example.com"},
+    ))
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish/pending",
+        headers=auth_headers,
+        json={"target_key": "microsoft:replay-ms@example.com"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["published"] == 1
+    db.refresh(event)
+    assert event.external_ids["microsoft:replay-ms@example.com"] == "ms-replayed-123"
+    ledger = db.query(SyncOperationLedger).filter(
+        SyncOperationLedger.operation_key.contains("target:microsoft:replay-ms@example.com")
+    ).one()
+    assert ledger.status == "succeeded"
+    mock_ms_create.assert_called_once()
 
 
 @patch("app.services.event_actions.ensure_valid_token", side_effect=["token-ms-old", "token-ms-new"])
@@ -641,7 +702,7 @@ def test_publish_recreates_missing_provider_event(mock_google_update, mock_googl
 
 
 @patch("app.services.event_actions.ensure_valid_token", return_value="token-1")
-@patch("app.services.google_calendar_service.GoogleCalendarService.delete_event")
+@patch("app.services.google_calendar_service.GoogleCalendarService.delete_event", return_value=204)
 def test_publish_deleted_event_targets_provider_accounts(mock_google_delete, _mock_token, client, auth_headers, db):
     user = db.query(User).filter(User.email.like("%@test.com")).first()
     assert user is not None
@@ -679,3 +740,60 @@ def test_publish_deleted_event_targets_provider_accounts(mock_google_delete, _mo
         event_id="g-delete-1",
         account_email="delete@example.com",
     )
+    ledger = db.query(SyncOperationLedger).filter(
+        SyncOperationLedger.operation_type == "calendar_publish_delete",
+        SyncOperationLedger.owner_user_id == user.id,
+    ).one()
+    assert ledger.status == "succeeded"
+    assert ledger.request_payload == {
+        "target_key": "google:delete@example.com",
+        "provider_event_id": "g-delete-1",
+    }
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="token-ms")
+@patch("app.services.graph_client.GraphClient.delete_event", side_effect=[500, 204])
+def test_failed_delete_replays_after_reconnect(mock_ms_delete, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="microsoft",
+        account_email="delete-replay@example.com",
+        access_token="token-ms",
+        refresh_token="refresh-ms",
+        status="ok",
+    ))
+    db.commit()
+
+    publish_response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [],
+            "deleted_events": [{
+                "external_ids": {"microsoft:delete-replay@example.com": "ms-delete-1"},
+            }],
+        },
+    )
+
+    assert publish_response.status_code == 200
+    assert publish_response.json()["failed"] == 1
+    ledger = db.query(SyncOperationLedger).filter(
+        SyncOperationLedger.operation_type == "calendar_publish_delete",
+        SyncOperationLedger.owner_user_id == user.id,
+    ).one()
+    assert ledger.status == "retry_pending"
+
+    replay_response = client.post(
+        "/calendar/publish/pending",
+        headers=auth_headers,
+        json={"target_key": "microsoft:delete-replay@example.com"},
+    )
+
+    assert replay_response.status_code == 200
+    assert replay_response.json()["replayed"] == 1
+    assert replay_response.json()["deleted"] == 1
+    assert replay_response.json()["failed"] == 0
+    db.refresh(ledger)
+    assert ledger.status == "succeeded"
+    assert mock_ms_delete.call_count == 2

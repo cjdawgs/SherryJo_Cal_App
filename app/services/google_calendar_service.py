@@ -524,13 +524,15 @@ class GoogleCalendarService:
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================
-    def create_event(self, token, event_payload, account_email=None):
+    def create_event(self, token, event_payload, account_email=None, create_identity=None):
         calendar_id = account_email or "primary"
         url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 
         payload = {
             "summary": event_payload.get("title") or "Untitled Event",
         }
+        if create_identity:
+            payload["id"] = create_identity
 
         if event_payload.get("description"):
             payload["description"] = event_payload["description"]
@@ -550,6 +552,18 @@ class GoogleCalendarService:
             timeout=self.REQUEST_TIMEOUT,
         )
 
+        if response.status_code == 409 and create_identity:
+            reconcile_payload = {key: value for key, value in payload.items() if key != "id"}
+            reconcile = requests.patch(
+                f"{url}/{create_identity}",
+                json=reconcile_payload,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=self.REQUEST_TIMEOUT,
+            )
+            if reconcile.status_code in [200, 204]:
+                return create_identity
+            logger.error("❌ Google create conflict reconciliation failed: %s", reconcile.text)
+            return None
         if response.status_code not in [200, 201]:
             logger.error("❌ Google create failed: %s", response.text)
             return None
@@ -574,6 +588,7 @@ class GoogleCalendarService:
 
         if response.status_code not in [200, 204]:
             logger.error("❌ Google delete failed: %s", response.text)
+        return response.status_code
 
     # ==================================================
     # ✅ GET USER EMAIL

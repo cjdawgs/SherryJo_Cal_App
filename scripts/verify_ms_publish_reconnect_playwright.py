@@ -135,6 +135,10 @@ def make_router(requests_log: list[str]):
             _json(route, {"rows": [], "current_week": {"rows": []}})
             return
 
+        if path == "/calendar/publish/pending" and method == "POST":
+            _json(route, {"status": "success", "replayed": 1, "published": 1, "created": 1, "failed": 0})
+            return
+
         if path == "/ms/login":
             route.fulfill(status=200, content_type="text/html", body="<html><body>ms-login-stub</body></html>")
             return
@@ -219,8 +223,19 @@ def main(base_url: str) -> int:
             if f"reconnect={MS_EMAIL.replace('@', '%40')}" not in final_url:
                 failures.append(f"Reconnect URL missing reconnect param for {MS_EMAIL}. Got: {final_url}")
 
+            # Simulate the OAuth provider returning to the account manager. The
+            # callback query is what triggers scoped durable outbox replay.
+            callback_url = (
+                f"{base_url.rstrip('/')}/accounts/ui"
+                f"?connected=microsoft&account={MS_EMAIL.replace('@', '%40')}"
+                "&token=ms-reconnect-smoke-token"
+            )
+            page.goto(callback_url, wait_until="networkidle")
+
         if any(request.endswith("/retry") for request in requests_log):
             failures.append("Reconnect remediation incorrectly sent an account retry request.")
+        if "POST /calendar/publish/pending" not in requests_log:
+            failures.append("Successful reconnect did not replay the queued publish intent.")
 
         browser.close()
 

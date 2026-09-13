@@ -161,6 +161,10 @@ export class ScheduledSyncPostgresAdapter {
         }
     }
 
+    async runWithIdentity(userId, operation) {
+        return this.runTransaction(operation, userId);
+    }
+
     async claimDueAccounts(limit = 10, claimSeconds = 240) {
         return this.runTransaction(async (client) => {
             const result = await client.query(CLAIM_DUE_ACCOUNTS_SQL, [limit, claimSeconds]);
