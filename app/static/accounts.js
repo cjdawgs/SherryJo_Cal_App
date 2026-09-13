@@ -671,8 +671,11 @@ function renderProviderAccounts(provider, list) {
     const recommendedLabel = String(acc?.token_issue?.recommended_label || "Resolve").trim();
     const isRecommendedRetry = recommendedAction === "retry_sync";
     const isRecommendedReconnect = recommendedAction === "reconnect";
+    const isRequestedReconnect = normalizeRemedyAction(pendingRemediationTarget?.action) === "reconnect"
+      && normalizeAccountKey(pendingRemediationTarget?.provider, pendingRemediationTarget?.account) === div.dataset.accountKey;
     const showIssue = acc.status === "error" && (issueMessage || issueCode);
-    const showVerify = normalizedProvider !== "apple";
+    const showVerify = normalizedProvider !== "apple" && !isRecommendedReconnect && !isRequestedReconnect;
+    const showReconnect = reconnectVisible || isRequestedReconnect;
 
     div.innerHTML = `
       <div class="left">
@@ -688,7 +691,7 @@ function renderProviderAccounts(provider, list) {
         <button data-action="toggle" title="${acc.sync_enabled ? "Turns off background syncing for this account." : "Turns on background syncing for this account."}">${acc.sync_enabled ? "Disable Sync" : "Enable Sync"}</button>
         <button data-action="remove" title="Disconnects this account from the app.">Disconnect</button>
         ${showVerify ? `<button data-action="retry" title="${retryTitle}">${isRecommendedRetry ? recommendedLabel : retryLabel}</button>` : ""}
-        ${reconnectVisible ? "<button data-action=\"reconnect\" title=\"Reconnects OAuth permissions for this account.\">Reconnect</button>" : ""}
+        ${showReconnect ? "<button data-action=\"reconnect\" title=\"Reconnects OAuth permissions for this account.\">Reconnect</button>" : ""}
         ${acc.status === "error" && acc?.token_issue?.requires_admin ? "<button data-action=\"admin-fix\" title=\"Opens Admin Dashboard for app-level key or permission fixes.\">Admin Fix Needed</button>" : ""}
       </div>
     `;
@@ -736,6 +739,7 @@ function focusRemediationTargetIfRequested() {
   const action = normalizeRemedyAction(pendingRemediationTarget.action);
   if (action === "reconnect") {
     setGlobalMessage(`Resolution target: ${targetKey}. Click Reconnect for this account, complete consent, then retry publish.`, "info");
+    target.querySelector('[data-action="reconnect"]')?.focus();
   } else {
     setGlobalMessage(`Resolution target: ${targetKey}. Click Verify Access first. If write access is still denied, click Reconnect, then retry publish.`, "info");
   }

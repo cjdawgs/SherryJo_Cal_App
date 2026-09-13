@@ -204,6 +204,9 @@ def main(base_url: str) -> int:
             failures.append(f"No-token failures must guide straight to Reconnect, not Verify Access first. Got: {error_banner!r}")
 
         reconnect_btn = account_card.locator('[data-action="reconnect"]')
+        retry_btn = account_card.locator('[data-action="retry"]')
+        if retry_btn.count() != 0:
+            failures.append("Reconnect remediation must not offer Verify Access/Retry for a tokenless account.")
         if reconnect_btn.count() == 0:
             failures.append("Reconnect button was not offered for the failed Microsoft account.")
         else:
@@ -215,6 +218,9 @@ def main(base_url: str) -> int:
                 failures.append(f"Reconnect click did not navigate to /ms/login. Got: {final_url}")
             if f"reconnect={MS_EMAIL.replace('@', '%40')}" not in final_url:
                 failures.append(f"Reconnect URL missing reconnect param for {MS_EMAIL}. Got: {final_url}")
+
+        if any(request.endswith("/retry") for request in requests_log):
+            failures.append("Reconnect remediation incorrectly sent an account retry request.")
 
         browser.close()
 
