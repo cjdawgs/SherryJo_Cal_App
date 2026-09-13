@@ -46,6 +46,16 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
         "group": "sherryjo-authenticated-smoke",
         "cancel-in-progress": "false",
     }
+    canary_parity = next(
+        step for step in jobs["smoke-unauthenticated-canary"]["steps"]
+        if step.get("name") == "Run canary parity smoke"
+    )
+    production_parity = next(
+        step for step in jobs["smoke-unauthenticated-production"]["steps"]
+        if step.get("name") == "Run production parity smoke"
+    )
+    assert "--native-worker" not in canary_parity["run"]
+    assert "--native-worker" in production_parity["run"]
 
 
 def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
@@ -151,6 +161,7 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
     )
     assert "--render-url" in monitor_step["run"]
     assert "--cloudflare-url" in monitor_step["run"]
+    assert "--native-worker" not in monitor_step["run"]
     assert "max_attempts" not in monitor_step["run"]
     assert "sleep 30" not in monitor_step["run"]
 

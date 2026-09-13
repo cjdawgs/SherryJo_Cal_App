@@ -128,7 +128,6 @@ jobs:
                   python deployment/shadow_parity.py
                   --render-url "${{ inputs.render_url }}"
                   --cloudflare-url "${{ inputs.canary_url }}"
-                  --native-worker
                   --json-output canary-parity-report.json
 
             - name: Upload canary parity report

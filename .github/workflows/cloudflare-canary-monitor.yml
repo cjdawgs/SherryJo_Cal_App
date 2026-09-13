@@ -46,7 +46,6 @@ jobs:
                   python deployment/shadow_parity.py \
                       --render-url "$RENDER_URL" \
                       --cloudflare-url "$CANARY_URL" \
-                      --native-worker \
                       --json-output canary-monitor-report.json
 
             - name: Upload monitor report
