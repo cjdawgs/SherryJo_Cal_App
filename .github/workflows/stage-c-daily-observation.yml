@@ -37,7 +37,7 @@ jobs:
         steps:
             - uses: actions/checkout@v7
 
-            - uses: actions/setup-python@v5
+            - uses: actions/setup-python@v6
               with:
                   python-version: "3.x"
 
@@ -51,7 +51,6 @@ jobs:
                   python deployment/shadow_parity.py
                   --render-url "$RENDER_URL"
                   --cloudflare-url "$CANARY_URL"
-                  --native-worker
                   --json-output stage-c-unauthenticated.json
 
             - name: Run authenticated canary smoke

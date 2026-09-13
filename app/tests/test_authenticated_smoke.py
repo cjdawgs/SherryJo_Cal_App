@@ -355,6 +355,15 @@ def test_authenticated_workflow_is_manual_secret_safe_and_serialized():
         (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
+    setup_python_steps = [
+        step["uses"]
+        for job_config in workflow["jobs"].values()
+        for step in job_config.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    ]
+    assert setup_python_steps
+    assert set(setup_python_steps) == {"actions/setup-python@v6"}
+
     dispatch = workflow["on"]["workflow_dispatch"]["inputs"]
     job = workflow["jobs"]["authenticated-smoke"]
     run_step = next(step for step in job["steps"] if step.get("name") == "Run reversible authenticated smoke checks")
@@ -416,8 +425,13 @@ def test_render_monitor_is_independent_default_disabled_and_secret_safe():
         Loader=yaml.BaseLoader,
     )
     job = workflow["jobs"]["direct-render-synthetic"]
+    setup_python_step = next(
+        step for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
     run_step = next(step for step in job["steps"] if step.get("name") == "Run direct Render synthetic")
 
+    assert setup_python_step["uses"] == "actions/setup-python@v6"
     assert "RENDER_HOT_SPARE_MONITOR_ENABLED" in job["if"]
     assert job["environment"] == "render-monitor"
     assert workflow["concurrency"] == {

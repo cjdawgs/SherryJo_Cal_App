@@ -22,6 +22,15 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
     assert inputs["canary_url"]["default"] == "https://sherryjo-cal-app-canary.realty-cal.workers.dev"
 
     jobs = workflow["jobs"]
+    setup_python_steps = [
+        step["uses"]
+        for job_config in jobs.values()
+        for step in job_config.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    ]
+    assert setup_python_steps
+    assert set(setup_python_steps) == {"actions/setup-python@v6"}
+
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
     assert jobs["deploy-canary"]["needs"] == "verify"
@@ -155,6 +164,12 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
         assert "CLOUDFLARE_CANARY_MONITOR_ENABLED" in gate_expr
     assert "secrets." not in monitor_path.read_text(encoding="utf-8")
 
+    setup_python_step = next(
+        step for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+    assert setup_python_step["uses"] == "actions/setup-python@v6"
+
     monitor_step = next(
         step for step in job["steps"]
         if step.get("name") == "Run direct Render and canary parity"
@@ -171,3 +186,22 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
     )
     assert upload_step["if"] == "${{ always() }}"
     assert upload_step["with"]["retention-days"] == "14"
+
+
+def test_stage_c_observation_uses_proxy_canary_and_current_python_action():
+    workflow = yaml.load(
+        (ROOT / ".github" / "workflows" / "stage-c-daily-observation.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    job = workflow["jobs"]["observe"]
+    setup_python_step = next(
+        step for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+    parity_step = next(
+        step for step in job["steps"]
+        if step.get("name") == "Run unauthenticated canary parity"
+    )
+
+    assert setup_python_step["uses"] == "actions/setup-python@v6"
+    assert "--native-worker" not in parity_step["run"]
