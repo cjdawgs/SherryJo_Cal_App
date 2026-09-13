@@ -230,7 +230,7 @@ test("proxy redirects back to the same public URL serve the native page instead 
 
         assert.equal(response.status, 200);
         assert.equal(await response.text(), "index asset");
-        assert.deepEqual(assetCalls, ["/index.html"]);
+        assert.deepEqual(assetCalls, ["/"]);
     } finally {
         globalThis.fetch = originalFetch;
     }
@@ -364,15 +364,15 @@ test("serves browser pages and static files from Worker assets without contactin
             assert.equal(await response.text(), "native asset");
         }
         assert.deepEqual(requestedPaths, [
-            "/index.html",
-            "/index.html",
-            "/login.html",
+            "/",
+            "/",
+            "/login",
             "/accounts",
             "/admin",
             "/admin",
-            "/tv.html",
-            "/tv.html",
-            "/tv-kiosk.html",
+            "/tv",
+            "/tv",
+            "/tv-kiosk",
             "/static/calendar.js",
         ]);
     } finally {
