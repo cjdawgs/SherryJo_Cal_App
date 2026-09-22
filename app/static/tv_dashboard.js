@@ -1537,15 +1537,19 @@ async function maintainLocalTvGuard() {
 async function pulseTvConnection() {
   if (!state.token || document.hidden || state.connectionKeepaliveInFlight) return;
   state.connectionKeepaliveInFlight = true;
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort(), TV_FETCH_TIMEOUT_MS);
   try {
     await fetch('/__edge/health', {
       method: 'GET',
       cache: 'no-store',
       keepalive: true,
+      signal: abortController.signal,
     });
   } catch {
     // Calendar polling and lifecycle recovery own user-visible network status.
   } finally {
+    clearTimeout(timeoutHandle);
     state.connectionKeepaliveInFlight = false;
   }
 }
@@ -2114,12 +2118,11 @@ async function refreshEvents(force = false, options = {}) {
 async function authFetch(url, options = {}) {
   if (!state.token) return null;
   let timeoutHandle = null;
-  let suppressNetworkHint = false;
+  const abortController = new AbortController();
   try {
     const timeoutMs = Number(options.timeoutMs || TV_FETCH_TIMEOUT_MS);
     const requestOptions = Object.assign({}, options);
     delete requestOptions.timeoutMs;
-    suppressNetworkHint = Boolean(requestOptions.suppressNetworkHint);
     delete requestOptions.suppressNetworkHint;
 
     const headers = Object.assign({}, options.headers || {}, { Authorization: `Bearer ${state.token}` });
@@ -2133,13 +2136,8 @@ async function authFetch(url, options = {}) {
         byte => byte.toString(16).padStart(2, '0')
       ).join('');
     }
-    const fetchPromise = fetch(url, Object.assign({}, requestOptions, { headers }));
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutHandle = setTimeout(() => {
-        reject(new Error(`Request timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
-    const res = await Promise.race([fetchPromise, timeoutPromise]);
+    timeoutHandle = setTimeout(() => abortController.abort(), timeoutMs);
+    const res = await fetch(url, Object.assign({}, requestOptions, { headers, signal: abortController.signal }));
     state.lastAuthFetchError = null;
     if (res.status === 401) {
       const previousAuthIssue = state.lastAuthIssue;
@@ -2170,8 +2168,8 @@ async function authFetch(url, options = {}) {
     }
     return res;
   } catch (err) {
-    const message = err && err.message ? err.message : 'Network request failed';
-    const isTimeout = /timed out/i.test(String(message));
+    const isTimeout = err && err.name === 'AbortError';
+    const message = isTimeout ? `Request timed out after ${Number(options.timeoutMs || TV_FETCH_TIMEOUT_MS)}ms` : (err && err.message ? err.message : 'Network request failed');
     if (tvDiag) {
       const method = String(options.method || 'GET').toUpperCase();
       const pathname = new URL(url, window.location.origin).pathname;

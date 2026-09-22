@@ -23,6 +23,8 @@ DEFAULT_CLOUDFLARE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 USER_AGENT = "curl/8.10.1 SherryJo-shadow-parity/1.0"
 REQUEST_ATTEMPTS = 3
 RETRYABLE_ERRNOS = {104, 110, 113}
+RENDER_WARMUP_ATTEMPTS = 4
+RENDER_WARMUP_TIMEOUT = 60
 
 
 class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -145,6 +147,28 @@ def _request(opener, origin: str, case: HttpCase) -> HttpResult:
             edge_marker=response.headers.get("x-sherryjo-edge"),
             body=body,
         )
+
+
+def _warm_up_render(render_url: str) -> None:
+    # Render's free tier sleeps after inactivity; a cold start can take well
+    # over the per-check request timeout, so wake it up first and swallow
+    # any failures here rather than letting them abort the whole report.
+    request = urllib.request.Request(
+        f"{render_url}/health",
+        headers={"Accept": "*/*", "User-Agent": USER_AGENT},
+        method="GET",
+    )
+    for attempt in range(RENDER_WARMUP_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(request, timeout=RENDER_WARMUP_TIMEOUT) as response:
+                response.read()
+            return
+        except urllib.error.HTTPError:
+            return
+        except Exception:
+            if attempt == RENDER_WARMUP_ATTEMPTS - 1:
+                return
+            time.sleep(2 ** attempt)
 
 
 def _normalize_location(location: str | None, origins: Iterable[str]) -> str | None:
@@ -401,6 +425,7 @@ def main() -> int:
     cloudflare_url = args.cloudflare_url.rstrip("/")
     rows: list[dict] = []
     failures: list[str] = []
+    _warm_up_render(render_url)
     try:
         rows, failures = run_http_parity(render_url, cloudflare_url, native_worker=args.native_worker)
         edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
