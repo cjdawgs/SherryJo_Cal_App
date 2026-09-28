@@ -440,6 +440,35 @@ function _buildHealthBadge(row) {
   return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#124a2b;color:#d5ffe8;border:1px solid #2f8f5a;font-size:10px;font-weight:700;letter-spacing:0.2px;">GREEN · healthy</span>';
 }
 
+function _connectionDiagnosis(rows) {
+  const timeoutCount = rows.filter((row) => String(row?.event || "") === "tv_fetch_timeout").length;
+  const latestSession = rows.find((row) => String(row?.event || "") === "session_start");
+  const hasAbortFix = /\bfetch-timeout=abort\b/.test(String(latestSession?.details || ""));
+  let restartDiagnosis = "";
+  if (latestSession) {
+    const sessionIndex = rows.indexOf(latestSession);
+    const previousHeartbeat = rows.slice(sessionIndex + 1).find((row) => String(row?.event || "") === "heartbeat");
+    const sessionMs = _toTsMs(latestSession.ts_server);
+    const heartbeatMs = _toTsMs(previousHeartbeat?.ts_server);
+    if (Number.isFinite(sessionMs) && Number.isFinite(heartbeatMs) && sessionMs - heartbeatMs >= 75 * 60 * 1000) {
+      const gapMinutes = Math.floor((sessionMs - heartbeatMs) / 60000);
+      restartDiagnosis = `Session restarted after ${Math.floor(gapMinutes / 60)}h ${gapMinutes % 60}m without a heartbeat. Check Fire OS sleep/screensaver, HDMI-CEC, and page lifecycle events.`;
+    }
+  }
+
+  if (timeoutCount && hasAbortFix) {
+    const timeoutDiagnosis = `${timeoutCount} fetch timeout(s); this session aborts timed-out requests. Repeated timeouts point to network/origin latency, not leaked fetches.`;
+    return [timeoutDiagnosis, restartDiagnosis].filter(Boolean).join(" ");
+  }
+  if (timeoutCount) {
+    const timeoutDiagnosis = `${timeoutCount} fetch timeout(s); abort protection is not confirmed. Older clients left timed-out fetches running, which could exhaust Silk connections. Reload the TV dashboard to load the AbortController fix.`;
+    return [timeoutDiagnosis, restartDiagnosis].filter(Boolean).join(" ");
+  }
+  if (restartDiagnosis) return restartDiagnosis;
+  if (latestSession && !hasAbortFix) return "Client abort-fix marker not seen yet; refresh TV dashboard and check this snapshot again.";
+  return "No connection-drop signature in the available diagnostics.";
+}
+
 function _sortHealthRows(rows) {
   const mode = String(tvHealthSort?.value || "severity");
   if (mode === "recent-heartbeat") {
@@ -516,6 +545,7 @@ async function loadTvHealth() {
       const lastHeartbeat = deviceRows.find((row) => String(row?.event || "") === "heartbeat");
       const lastFailure = deviceRows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
       const hidden = _deriveHiddenStatus(deviceRows);
+      const connectionDiagnosis = _connectionDiagnosis(deviceRows);
       const lastSeenMs = _toTsMs(deviceRows[0]?.ts_server) || 0;
 
       const lastHeartbeatMs = _toTsMs(lastHeartbeat?.ts_server) || 0;
@@ -530,6 +560,7 @@ async function loadTvHealth() {
         lastHeartbeat,
         lastHeartbeatMs,
         hidden,
+        connectionDiagnosis,
         hiddenDurationMinutes,
         lastFailure,
         lastFailureMs,
@@ -545,7 +576,7 @@ async function loadTvHealth() {
     }
 
     if (!rows.length) {
-      tvHealthBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">No devices found in the last 7 days.</td></tr>';
+      tvHealthBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">No devices found in the last 7 days.</td></tr>';
       return;
     }
 
@@ -564,6 +595,7 @@ async function loadTvHealth() {
         <td>${_escapeHtml(hb)}</td>
         <td style="${hiddenStyle}">${_escapeHtml(row.hidden.label)}</td>
         <td>${failure}</td>
+        <td>${_escapeHtml(row.connectionDiagnosis)}</td>
       </tr>`;
     }).join("");
   } catch (err) {
@@ -781,7 +813,7 @@ if (tvHealthLoadBtn) {
 
 if (tvHealthClearBtn) {
   tvHealthClearBtn.addEventListener("click", () => {
-    if (tvHealthBody) tvHealthBody.innerHTML = '<tr><td colspan="5" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
+    if (tvHealthBody) tvHealthBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
     if (tvHealthCount) tvHealthCount.textContent = "cleared";
   });
 }

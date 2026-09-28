@@ -201,6 +201,28 @@ def test_tv_dashboard_auth_fetch_handles_network_exceptions():
     assert "Network issue:" in text
 
 
+def test_tv_dashboard_aborts_timed_out_requests_and_marks_fixed_sessions():
+    text = _tv_js_text()
+    auth_fetch = text.split("async function authFetch(url, options = {})", 1)[1].split("function snapshotTvState", 1)[0]
+    assert "const abortController = new AbortController();" in auth_fetch
+    assert "setTimeout(() => abortController.abort(), timeoutMs)" in auth_fetch
+    assert "signal: abortController.signal" in auth_fetch
+    assert "Promise.race" not in auth_fetch
+    assert "fetch-timeout=abort client=${state.clientAppVersion}" in text
+
+
+def test_admin_tv_health_snapshot_identifies_connection_drop_signatures():
+    root = Path(__file__).resolve().parents[2]
+    admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+    admin_html = (root / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert 'String(row?.event || "") === "tv_fetch_timeout"' in admin_js
+    assert "fetch-timeout=abort" in admin_js
+    assert "Older clients left timed-out fetches running" in admin_js
+    assert "Session restarted after" in admin_js
+    assert "<th>Connection diagnosis</th>" in admin_html
+
+
 def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     text = _tv_js_text()
     assert "const POLL_MS = 600000;" in text

@@ -1447,7 +1447,7 @@ function startPolling() {
     render();
     ensureMainNotBlank('startup-guard');
   }, 120);
-  if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min`);
+  if (tvDiag) tvDiag.log('session_start', `guard=${state.sleepGuardEnabled} timeout=${state.sleepGuardTimeoutMinutes}min fetch-timeout=abort client=${state.clientAppVersion}`);
   refreshEvents(true);
   state.startupRefreshRetryHandle = setTimeout(() => {
     state.startupRefreshRetryHandle = null;
