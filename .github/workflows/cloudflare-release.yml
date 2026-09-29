@@ -123,6 +123,26 @@ jobs:
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
 
+            - name: Wait for canary static asset propagation
+              env:
+                  RENDER_URL: ${{ inputs.render_url }}
+                  CANARY_URL: ${{ inputs.canary_url }}
+              run: |
+                  for attempt in {1..7}; do
+                      if render_hash="$(curl --fail --silent --show-error "${RENDER_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
+                          && canary_hash="$(curl --fail --silent --show-error "${CANARY_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
+                          && [[ "$render_hash" == "$canary_hash" ]]; then
+                          echo "Canary admin.js matches Render (sha256: $render_hash)."
+                          exit 0
+                      fi
+                      echo "Canary admin.js has not converged (attempt $attempt/7); retrying."
+                      if [[ "$attempt" -lt 7 ]]; then
+                          sleep 10
+                      fi
+                  done
+                  echo "::error::Canary admin.js did not match Render after 60 seconds."
+                  exit 1
+
             - name: Run canary parity smoke
               run: >-
                   python deployment/shadow_parity.py
