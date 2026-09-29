@@ -113,7 +113,7 @@ class ExternalCalendarService:
         calendar.add_component(component)
         return calendar
 
-    def publish_icloud_event(self, url, username, password, event_payload, uid):
+    def publish_icloud_event(self, url, username, password, event_payload, uid, *, lookup_existing=True):
         """Create or update one VEVENT in the first available iCloud calendar."""
         if caldav is None:
             raise ImportError("caldav package is not installed")
@@ -128,7 +128,10 @@ class ExternalCalendarService:
         if not calendars:
             raise RuntimeError("Apple account has no available calendars")
 
-        _existing_calendar, existing_event = self._find_icloud_event(calendars, normalized_uid)
+        _existing_calendar, existing_event = (
+            self._find_icloud_event(calendars, normalized_uid)
+            if lookup_existing else (None, None)
+        )
         if existing_event is not None:
             component = existing_event.icalendar_component
             component["SUMMARY"] = str(event_payload.get("title") or "Untitled Event")

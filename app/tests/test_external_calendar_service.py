@@ -379,9 +379,11 @@ def test_publish_icloud_event_creates_an_escaped_vevent(service, monkeypatch):
             "end_time": datetime(2026, 9, 29, 16, tzinfo=timezone.utc),
         },
         "publish-uid@example.test",
+        lookup_existing=False,
     )
 
     assert result == {"action": "created", "uid": "publish-uid@example.test"}
+    calendar.event_by_uid.assert_not_called()
     calendar.save_event.assert_called_once()
     from icalendar import Calendar
     published = Calendar.from_ical(calendar.save_event.call_args.kwargs["ical"])

@@ -287,6 +287,7 @@ def test_publish_to_apple_account_works_when_background_sync_is_disabled(
     assert event.external_ids["apple:publisher@icloud.com"] == "apple-published@example.test"
     mock_apple_publish.assert_called_once()
     assert mock_apple_publish.call_args.kwargs["username"] == "publisher@icloud.com"
+    assert mock_apple_publish.call_args.kwargs["lookup_existing"] is False
 
 
 @patch("app.services.event_actions.ensure_valid_token", return_value="APPLE_CREDENTIALS")

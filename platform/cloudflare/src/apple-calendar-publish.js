@@ -123,6 +123,7 @@ export async function publishAppleCalendarEvent({
     account,
     event,
     uid: rawUid,
+    lookupExisting = false,
     fetchImpl = fetch,
     clientFactory = createDAVClient,
 }) {
@@ -130,7 +131,7 @@ export async function publishAppleCalendarEvent({
     if (!uid) throw new TypeError("Apple publish requires an event UID");
     try {
         const { client, calendars } = await openAppleAccount(account, fetchImpl, clientFactory);
-        const existing = await findAppleEvent(client, calendars, uid);
+        const existing = lookupExisting ? await findAppleEvent(client, calendars, uid) : null;
         if (existing) {
             const calendarObject = { ...existing.object, data: updateVeventData(existing.object.data, event) };
             const response = await client.updateCalendarObject({ calendarObject });

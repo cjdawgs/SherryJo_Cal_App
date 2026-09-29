@@ -54,7 +54,7 @@ test("updates an existing Apple UID while preserving recurrence rules", async ()
     ].join("\r\n");
     const mock = makeClient({ objects: [{ url: "https://caldav.example.test/calendars/default/series.ics", etag: "v1", data: existingData }] });
     const result = await publishAppleCalendarEvent({
-        account, event, uid: "series@example.test", clientFactory: mock.clientFactory,
+        account, event, uid: "series@example.test", lookupExisting: true, clientFactory: mock.clientFactory,
     });
 
     assert.equal(result.action, "updated");

@@ -610,6 +610,7 @@ class EventActions:
                         password=apple_account.refresh_token,
                         event_payload=updates,
                         uid=create_identity,
+                        lookup_existing=False,
                     )
                     new_raw_id = apple_result["uid"]
                     target_result["action"] = apple_result["action"]

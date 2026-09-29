@@ -66,7 +66,7 @@ test("publishes selected events to Apple CalDAV and persists the VEVENT UID", as
         assert.deepEqual(options.credentials, { username: "user@icloud.com", password: "apple-app-password" });
         return {
             fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", components: ["VEVENT"] }],
-            fetchCalendarObjects: async () => [],
+            fetchCalendarObjects: async () => { throw new Error("Collection query failed: 412 Precondition Failed"); },
             createCalendarObject: async () => new Response(null, { status: 201 }),
         };
     };

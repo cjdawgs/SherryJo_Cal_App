@@ -834,8 +834,8 @@ function renderConfirmPublishButtonState(options = {}) {
   }
 
   if (transientState === "error") {
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Publish Failed";
+    confirmBtn.disabled = !canPublish;
+    confirmBtn.textContent = canPublish ? "Retry Publish" : "Publish Failed";
     confirmBtn.classList.add("publishBtnError");
     return;
   }
@@ -2159,7 +2159,7 @@ async function publishCurrentEvent() {
 
   const selectedRows = getActionablePublishTargetSummary();
   if (!selectedRows.length) {
-    window.showToast?.("Select at least one Google or Microsoft calendar", "error");
+    window.showToast?.("Select at least one publish-capable calendar", "error");
     return;
   }
 
@@ -2176,7 +2176,7 @@ async function confirmPublishCurrentEvent() {
   const selectedKeys = selectedRows.map((row) => row.key);
 
   if (!selectedKeys.length) {
-    window.showToast?.("Select at least one Google or Microsoft calendar", "error");
+    window.showToast?.("Select at least one publish-capable calendar", "error");
     return;
   }
 
@@ -2209,7 +2209,7 @@ async function confirmPublishCurrentEvent() {
     const created = Number(data.created || 0);
     const failureMessage = buildPublishFailureMessage(data, selectedKeys.map((key) => String(key).toLowerCase()));
 
-    if (published === 0 && created === 0) {
+    if ((published === 0 && created === 0) || Number(data.failed || 0) > 0) {
       throw new Error(failureMessage);
     }
 
@@ -2240,9 +2240,13 @@ async function confirmPublishCurrentEvent() {
   } catch (err) {
     console.error("❌ Single-event publish failed", err);
     const message = String(err?.message || "").trim();
+    window.trackModifiedEvent?.(eventId, {
+      category: "event",
+      summary: `Publish failed: ${modalState.eventRef?.title || "Untitled event"}`
+    });
     const remediationHtml = buildPublishRemediationHtml(message, selectedRows, publishResponseData?.account_results);
     modalState.publishAttemptState = "error";
-    modalState.publishAttemptConsumed = true;
+    modalState.publishAttemptConsumed = false;
     renderConfirmPublishButtonState({ state: "error" });
     const summary = document.getElementById("publishConfirmSummary");
     if (summary) {
@@ -2253,12 +2257,6 @@ async function confirmPublishCurrentEvent() {
       }
     }
     window.showToast?.(`❌ Publish failed${message ? `: ${message}` : ""}${remediationHtml ? " — see resolution path in the publish panel" : ""}`, "error");
-    window.setTimeout(() => {
-      if (!isPublishingEvent) {
-        modalState.publishAttemptState = "idle";
-        renderConfirmPublishButtonState();
-      }
-    }, 900);
   } finally {
     isPublishingEvent = false;
     renderEventPublishControls();

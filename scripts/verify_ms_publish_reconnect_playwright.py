@@ -192,6 +192,19 @@ def main(base_url: str) -> int:
             # no-token failure must route straight to Reconnect, not verify_access.
             failures.append(f"Remediation link should route straight to reconnect for a no-token failure. Got href: {href!r}")
 
+        retry_button = page.locator("#confirmPublishEventBtn")
+        if not retry_button.is_enabled():
+            failures.append("Failed publish left Confirm Publish disabled instead of retryable.")
+        if retry_button.inner_text().strip() != "Retry Publish":
+            failures.append(f"Failed publish button should offer Retry Publish. Got: {retry_button.inner_text()!r}")
+        pending_state = page.evaluate("""() => ({
+          count: window.pendingPublishChanges.size,
+          badge: document.querySelector('#publishBtn .publishCountBadge')?.textContent || '',
+          toolbarDisabled: document.getElementById('publishBtn')?.disabled ?? true
+        })""")
+        if pending_state["count"] != 1 or pending_state["badge"] != "1" or pending_state["toolbarDisabled"]:
+            failures.append(f"Failed event was not retained in the active Publish queue: {pending_state!r}")
+
         # ── Step 2: following the link highlights the account + shows Reconnect ──
         page.goto(f"{base_url.rstrip('/')}{href}", wait_until="domcontentloaded")
         account_card = page.locator(f'.account[data-account-key="{MS_KEY}"]')

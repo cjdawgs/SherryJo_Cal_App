@@ -83,7 +83,14 @@ async function publishTarget({ userId, event, account, targetKey, rawId, env, fe
     const provider = normalizeProvider(account.provider);
     if (provider === "apple") {
         const uid = rawId || `${await googleCreateId(userId, event.id, targetKey)}@sherryjo-cal.app`;
-        const result = await publishAppleCalendarEvent({ account, event, uid, fetchImpl, clientFactory: appleClientFactory });
+        const result = await publishAppleCalendarEvent({
+            account,
+            event,
+            uid,
+            lookupExisting: Boolean(rawId),
+            fetchImpl,
+            clientFactory: appleClientFactory,
+        });
         return { ...result, rawId: result.uid, tokenResult: { refreshed: false } };
     }
     const tokenResult = await ensureProviderAccessToken(account, env, fetchImpl);
