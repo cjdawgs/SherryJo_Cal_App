@@ -1059,7 +1059,9 @@ function applyMobileWeekCompression() {
   if (view.type === "timeGridWeek" && isMobileMode && !mobileShowAllDays) {
     hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => !activeDows.has(dow));
     if (hiddenDays.length >= 6) {
-      hiddenDays = [0, 1, 2, 3, 4, 5, 6].filter((dow) => dow !== new Date(window.selectedDate || Date.now()).getDay());
+      hiddenDays = window.selectedDate
+        ? [0, 1, 2, 3, 4, 5, 6].filter((dow) => dow !== new Date(window.selectedDate).getDay())
+        : [];
     }
   }
 
