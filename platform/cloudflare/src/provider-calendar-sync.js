@@ -50,6 +50,10 @@ function isQuotaOrThrottleResponse(payload) {
     return THROTTLE_CODES.has(msCode);
 }
 
+export function isProviderAuthorizationFailure(status, payload) {
+    return status === 401 || (status === 403 && !isQuotaOrThrottleResponse(payload));
+}
+
 async function fetchProviderJson(fetchImpl, url, init = {}) {
     const requestInit = { ...init };
     if (!requestInit.signal && typeof AbortSignal?.timeout === "function") {
@@ -57,10 +61,11 @@ async function fetchProviderJson(fetchImpl, url, init = {}) {
     }
     const response = await fetchImpl(url, requestInit);
     const payload = await responsePayload(response);
-    if (response.status === 401) {
-        throw new ProviderAuthorizationError(`Provider authorization failed (${response.status})`);
+    const oauthError = typeof payload?.error === "string" ? payload.error : payload?.error?.code;
+    if (response.status === 400 && String(oauthError || "").toLowerCase() === "invalid_grant") {
+        throw new ProviderAuthorizationError(payload?.error_description || "Provider refresh token is expired or revoked");
     }
-    if (response.status === 403 && !isQuotaOrThrottleResponse(payload)) {
+    if (isProviderAuthorizationFailure(response.status, payload)) {
         throw new ProviderAuthorizationError(`Provider authorization failed (${response.status})`);
     }
     if (!response.ok) {

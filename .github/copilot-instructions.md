@@ -40,3 +40,10 @@ FastAPI + FullCalendar web app. Backend in `app/`, frontend static files in `app
 - All views must read from `window.selectedDate` only — never fall back to `new Date()` or `today()`
 - Never create duplicate/variant files per machine — edit the canonical file directly
 - All new features go into the existing canonical files, not new machine-named copies
+
+## Parallel Runtime Parity Standard
+
+- User-facing behavior may be implemented in both the Cloudflare Worker (`platform/cloudflare/`) and the FastAPI/Render app (`app/`). Before changing a shared workflow, identify every active implementation path and inspect both runtimes.
+- When both runtimes support the workflow, keep externally observable behavior and failure/remediation contracts equivalent. If a runtime intentionally differs, document the reason and expected behavior.
+- Add or update focused regression tests for each affected runtime, and run each runtime's relevant test suite plus any required asset build or frontend checks.
+- In the completion summary, name the implementations and tests covered, and clearly identify any live-provider or deployed-environment checks that were not run.

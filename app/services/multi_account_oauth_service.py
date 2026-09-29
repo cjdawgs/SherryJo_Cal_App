@@ -628,6 +628,7 @@ def _refresh_google_token(db: Session, account: OAuthAccount):
         if error == "invalid_grant":
             logger.error(f"🚫 TOKEN REVOKED → preserving OAuth record and requiring reconnect: {account.account_email}")
 
+            account.access_token = "__REAUTH_REQUIRED__"
             if hasattr(account, "status"):
                 account.status = "error"
             if hasattr(account, "last_error"):

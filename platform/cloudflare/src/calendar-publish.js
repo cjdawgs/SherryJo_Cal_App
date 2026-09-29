@@ -1,5 +1,5 @@
 import { fernetDecrypt, fernetEncrypt } from "./fernet.js";
-import { ensureProviderAccessToken } from "./provider-calendar-sync.js";
+import { ensureProviderAccessToken, isProviderAuthorizationFailure, ProviderAuthorizationError } from "./provider-calendar-sync.js";
 
 const GOOGLE_EVENTS = "https://www.googleapis.com/calendar/v3/calendars";
 const GRAPH_EVENTS = "https://graph.microsoft.com/v1.0/me/events";
@@ -56,6 +56,13 @@ async function providerRequest(url, token, method, body, fetchImpl) {
     });
     let payload = {};
     try { payload = await response.json(); } catch { /* Empty provider response. */ }
+    if (isProviderAuthorizationFailure(response.status, payload)) {
+        const detail = payload?.error?.message || payload?.error_description;
+        const fallback = response.status === 403
+            ? "Provider access denied (403)"
+            : "Provider access token is expired or invalid (401)";
+        throw new ProviderAuthorizationError(String(detail || fallback));
+    }
     return { response, payload };
 }
 
@@ -215,6 +222,11 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
                 resultRow.ok = true; resultRow.status = result.action; resultRow.message = `${result.action === "created" ? "Created" : "Updated"} ${target.key}`;
                 created += result.action === "created" ? 1 : 0; eventSucceeded = true; affected.add(target.key);
             } catch (error) {
+                if (error instanceof ProviderAuthorizationError) {
+                    try {
+                        await adapter.markAccountReauthRequired?.(userId, account.id, error.message);
+                    } catch { /* Keep the provider failure visible if health-state persistence also fails. */ }
+                }
                 failed += 1; resultRow.status = "failed"; resultRow.message = `Publish failed for ${target.key}: ${error.message}`; warnings.push(resultRow.message);
                 await adapter.finishPublishTarget?.(userId, event.id, target.key, { succeeded: false, error: resultRow.message });
             }

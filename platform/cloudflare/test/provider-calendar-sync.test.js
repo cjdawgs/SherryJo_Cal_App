@@ -41,6 +41,21 @@ test("refreshes a rotating Microsoft token before provider polling", async () =>
     assert.equal(request.init.body.get("grant_type"), "refresh_token");
 });
 
+test("classifies an OAuth invalid_grant refresh response as requiring reconnect", async () => {
+    await assert.rejects(
+        () => ensureProviderAccessToken({
+            provider: "google",
+            access_token: "old-access",
+            refresh_token: "revoked-refresh",
+            token_expires_at: "2020-01-01T00:00:00Z",
+        }, {
+            GOOGLE_CLIENT_ID: "client",
+            GOOGLE_CLIENT_SECRET: "secret",
+        }, async () => jsonResponse({ error: "invalid_grant", error_description: "Token has been expired or revoked." }, 400), new Date("2026-08-16T12:00:00Z")),
+        (error) => error instanceof ProviderAuthorizationError && /expired or revoked/.test(error.message),
+    );
+});
+
 test("fetches Google calendars, skips system calendars, and records cancellations", async () => {
     const urls = [];
     const fetchImpl = async (input) => {

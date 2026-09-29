@@ -98,6 +98,18 @@ def test_refresh_token_returns_empty_dict_on_failure(mock_post, service):
     assert service.refresh_token("rt") == {}
 
 
+@patch("app.services.google_calendar_service.requests.post")
+def test_create_event_can_raise_provider_authorization_failure(mock_post, service):
+    mock_post.return_value = make_response(
+        status_code=401,
+        json_data={"error": {"message": "Invalid Credentials"}},
+        text="Invalid Credentials",
+    )
+
+    with pytest.raises(RuntimeError, match="Google create failed"):
+        service.create_event("expired-token", {"title": "Publish"}, raise_on_error=True)
+
+
 # ==================================================
 # FETCH EVENTS
 # ==================================================

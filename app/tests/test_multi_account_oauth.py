@@ -19,6 +19,7 @@ from app.services.multi_account_oauth_service import (
     ensure_valid_token,
     resolve_account_status,
 )
+from app.utils.serializers import account_summary
 from app.database import get_db
 
 
@@ -212,6 +213,7 @@ def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_conne
         refresh_token="refresh_token_123",
         token_expires_at=datetime.now(timezone.utc) - timedelta(minutes=5),
         status="ok",
+        last_sync_success=datetime.now(timezone.utc),
         sync_enabled=True,
     )
     db.add(account)
@@ -225,8 +227,10 @@ def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_conne
 
     db.refresh(account)
     assert result is None
-    assert account.access_token == "stale_access_token"
+    assert account.access_token == "__REAUTH_REQUIRED__"
     assert account.status == "error"
+    assert resolve_account_status(account) == "error"
+    assert account_summary(account)["token_issue"]["recommended_action"] == "reconnect"
     assert "invalid_grant" in (account.last_error or "").lower()
     assert account.account_email == "needs-reconnect@gmail.com"
     assert account.refresh_token == "refresh_token_123"

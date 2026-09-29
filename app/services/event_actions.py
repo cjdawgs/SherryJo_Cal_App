@@ -244,6 +244,24 @@ def _is_missing_provider_event(result):
     return isinstance(result, int) and result in {404, 410}
 
 
+def _is_provider_authorization_failure(error: Exception) -> bool:
+    message = str(error or "").lower()
+    transient_markers = (
+        "429", "too many requests", "rate limit exceeded", "ratelimitexceeded",
+        "userratelimitexceeded", "dailylimitexceeded", "quotaexceeded",
+        "resource_exhausted", "applicationthrottled", "toomanyrequests",
+    )
+    if any(marker in message for marker in transient_markers):
+        return False
+    authorization_markers = (
+        "401", "unauthorized", "invalid credentials", "invalid_grant",
+        "invalidauthenticationtoken", "token expired", "expired or revoked",
+        "erroraccessdenied", "access is denied", "access denied",
+        "insufficient permission", "insufficient privileges", "forbidden",
+    )
+    return any(marker in message for marker in authorization_markers)
+
+
 def _is_retryable_microsoft_create_error(exc: Exception) -> bool:
     message = str(exc or "").lower()
     retryable_markers = (
@@ -262,7 +280,16 @@ def _is_retryable_microsoft_create_error(exc: Exception) -> bool:
     return any(marker in message for marker in retryable_markers)
 
 
-def _set_account_publish_status(db: Session, user_id: int, provider: str, account_email: str, *, ok: bool, message: str = "") -> None:
+def _set_account_publish_status(
+    db: Session,
+    user_id: int,
+    provider: str,
+    account_email: str,
+    *,
+    ok: bool,
+    message: str = "",
+    reauth_required: bool = False,
+) -> None:
     """Reflect publish write outcome on the account row so UI remediation is accurate."""
     normalized_email = (account_email or "").lower().strip()
     query = db.query(OAuthAccount).filter(
@@ -283,6 +310,8 @@ def _set_account_publish_status(db: Session, user_id: int, provider: str, accoun
         account.last_sync_success = now
         account.last_sync_failure = None
     else:
+        if reauth_required:
+            account.access_token = "__REAUTH_REQUIRED__"
         account.status = "error"
         account.last_error = str(message or "Publish failed")[:512]
         account.last_sync_failure = now
@@ -490,9 +519,12 @@ class EventActions:
                 if raw_id:
                     if provider == "google":
                         update_result = google_service.update_event(token=token, event_id=raw_id,
-                                                                    updates=updates, account_email=acct_email or None)
+                                                                    updates=updates, account_email=acct_email or None,
+                                                                    raise_on_error=True)
                     elif provider == "microsoft":
-                        update_result = graph_client.update_event(token=token, event_id=raw_id, updates=updates)
+                        update_result = graph_client.update_event(
+                            token=token, event_id=raw_id, updates=updates, raise_on_error=True,
+                        )
 
                     if _is_update_success(update_result):
                         pushed += 1
@@ -506,9 +538,13 @@ class EventActions:
                         continue
 
                     if not _is_missing_provider_event(update_result):
-                        target_result["status"] = "update_failed"
+                        auth_failure = _is_provider_authorization_failure(RuntimeError(f"Provider update failed ({update_result})"))
+                        target_result["status"] = "reauth_required" if auth_failure else "update_failed"
                         target_result["message"] = f"Update failed for {target_key} (status {update_result})"
-                        _set_account_publish_status(db, user.id, provider, acct_email, ok=False, message=target_result["message"])
+                        _set_account_publish_status(
+                            db, user.id, provider, acct_email, ok=False,
+                            message=target_result["message"], reauth_required=auth_failure,
+                        )
                         account_results.append(target_result)
                         warnings.append(target_result["message"])
                         _finish_publish_target(
@@ -527,7 +563,8 @@ class EventActions:
                 if provider == "google":
                     new_raw_id = google_service.create_event(token=token, event_payload=updates,
                                                              account_email=acct_email or None,
-                                                             create_identity=create_identity)
+                                                             create_identity=create_identity,
+                                                             raise_on_error=True)
                 elif provider == "microsoft":
                     try:
                         new_raw_id = graph_client.create_event(
@@ -573,7 +610,11 @@ class EventActions:
                 logger.warning(f"WARNING: push_to_providers failed for {provider}:{acct_email}: {e}")
                 target_result["status"] = "failed"
                 target_result["message"] = f"Publish failed for {target_key}: {e}"
-                _set_account_publish_status(db, user.id, provider, acct_email, ok=False, message=target_result["message"])
+                _set_account_publish_status(
+                    db, user.id, provider, acct_email, ok=False,
+                    message=target_result["message"],
+                    reauth_required=_is_provider_authorization_failure(e),
+                )
                 account_results.append(target_result)
                 warnings.append(target_result["message"])
                 _finish_publish_target(

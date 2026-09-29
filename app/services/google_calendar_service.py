@@ -496,7 +496,7 @@ class GoogleCalendarService:
     # ==================================================
     # ✅ UPDATE EVENT
     # ==================================================
-    def update_event(self, token, event_id, updates, account_email=None):
+    def update_event(self, token, event_id, updates, account_email=None, raise_on_error=False):
         calendar_id = account_email or "primary"
         url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events/{event_id}"
         payload = {}
@@ -518,13 +518,15 @@ class GoogleCalendarService:
 
         if response.status_code not in [200, 204]:
             logger.error("❌ Google update failed: %s", response.text)
+            if raise_on_error and response.status_code in (401, 403):
+                raise RuntimeError(f"Google update failed ({response.status_code}): {response.text}")
 
         return response.status_code
 
     # ==================================================
     # ✅ CREATE EVENT
     # ==================================================
-    def create_event(self, token, event_payload, account_email=None, create_identity=None):
+    def create_event(self, token, event_payload, account_email=None, create_identity=None, raise_on_error=False):
         calendar_id = account_email or "primary"
         url = f"https://www.googleapis.com/calendar/v3/calendars/{calendar_id}/events"
 
@@ -563,9 +565,13 @@ class GoogleCalendarService:
             if reconcile.status_code in [200, 204]:
                 return create_identity
             logger.error("❌ Google create conflict reconciliation failed: %s", reconcile.text)
+            if raise_on_error and reconcile.status_code in (401, 403):
+                raise RuntimeError(f"Google create conflict reconciliation failed ({reconcile.status_code}): {reconcile.text}")
             return None
         if response.status_code not in [200, 201]:
             logger.error("❌ Google create failed: %s", response.text)
+            if raise_on_error and response.status_code in (401, 403):
+                raise RuntimeError(f"Google create failed ({response.status_code}): {response.text}")
             return None
 
         try:

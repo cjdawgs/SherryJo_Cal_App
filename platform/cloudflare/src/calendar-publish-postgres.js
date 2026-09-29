@@ -21,7 +21,7 @@ export class CalendarPublishPostgresAdapter {
             const accounts = await client.query(`
                 SELECT id, provider, account_email, access_token, refresh_token, token_expires_at
                 FROM public.oauth_accounts
-                WHERE user_id = public.worker_app_user_id() AND sync_enabled IS TRUE
+                WHERE user_id = public.worker_app_user_id()
             `);
             return { events: events.rows, accounts: accounts.rows };
         });
@@ -40,6 +40,15 @@ export class CalendarPublishPostgresAdapter {
             SET access_token = $2, refresh_token = $3, token_expires_at = $4, updated_at = now()
             WHERE id = $1 AND user_id = public.worker_app_user_id()
         `, [accountId, token.accessToken, token.refreshToken, token.expiresAt]));
+    }
+
+    async markAccountReauthRequired(userId, accountId, message) {
+        await this.baseAdapter.runWithIdentity(userId, (client) => client.query(`
+            UPDATE public.oauth_accounts
+            SET access_token = '__REAUTH_REQUIRED__', status = 'error',
+                last_sync_failure = now(), last_error = $2, updated_at = now()
+            WHERE id = $1 AND user_id = public.worker_app_user_id()
+        `, [accountId, String(message || "Provider authorization failed").slice(0, 1000)]));
     }
 
     async queuePublishTarget(userId, eventId, targetKey) {

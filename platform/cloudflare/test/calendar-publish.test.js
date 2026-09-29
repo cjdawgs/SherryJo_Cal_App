@@ -2,9 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { executeCalendarPublish, replayPendingCalendarPublishes } from "../src/calendar-publish.js";
+import { CalendarPublishPostgresAdapter } from "../src/calendar-publish-postgres.js";
 import { fernetEncrypt } from "../src/fernet.js";
 
 const KEY = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
+test("loads publish targets even when background sync is disabled", async () => {
+    let accountQuery = "";
+    const adapter = new CalendarPublishPostgresAdapter({
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (query) => {
+                if (query.includes("FROM public.oauth_accounts")) {
+                    accountQuery = query;
+                    return { rows: [{ id: 9, provider: "microsoft", account_email: "user@example.test", sync_enabled: false }] };
+                }
+                return { rows: [] };
+            },
+        }),
+    });
+
+    const data = await adapter.loadPublishData(42, [9]);
+
+    assert.equal(data.accounts.length, 1);
+    assert.doesNotMatch(accountQuery, /sync_enabled\s+IS\s+TRUE/i);
+});
 
 test("publishes selected events to Google with a deterministic create id", async () => {
     const links = [];
@@ -128,6 +149,58 @@ test("reports a reconnectable Microsoft no-token result without calling Graph", 
     assert.deepEqual(queued, [[42, 9, "microsoft:user@example.test"]]);
     assert.equal(finished.length, 1);
     assert.equal(finished[0][3].succeeded, false);
+});
+
+test("marks an account reauth-required when publish receives an invalid grant", async () => {
+    const token = await fernetEncrypt("old-access", KEY);
+    const refresh = await fernetEncrypt("revoked-refresh", KEY);
+    const reauth = [];
+    const adapter = {
+        loadPublishData: async () => ({
+            events: [{ id: 10, title: "Publish", start_time: new Date("2026-08-16T12:00:00Z"), external_ids: {} }],
+            accounts: [{ id: 5, provider: "google", account_email: "user@example.test", access_token: token, refresh_token: refresh, token_expires_at: new Date("2020-01-01T00:00:00Z") }],
+        }),
+        updateEventLinks: async () => { },
+        markAccountReauthRequired: async (...args) => reauth.push(args),
+    };
+    const result = await executeCalendarPublish(adapter, {
+        userId: 42,
+        env: { TOKEN_ENCRYPTION_KEY: KEY, GOOGLE_CLIENT_ID: "client", GOOGLE_CLIENT_SECRET: "secret" },
+        body: { event_ids: [10], publish_targets: { "10": ["google:user@example.test"] } },
+        fetchImpl: async () => new Response(JSON.stringify({ error: "invalid_grant", error_description: "Token has been expired or revoked." }), { status: 400 }),
+    });
+
+    assert.equal(result.failed, 1);
+    assert.match(result.account_results[0].message, /expired or revoked/);
+    assert.equal(reauth.length, 1);
+    assert.equal(reauth[0][0], 42);
+    assert.equal(reauth[0][1], 5);
+    assert.match(reauth[0][2], /expired or revoked/);
+});
+
+test("marks an account reauth-required when a provider rejects an unexpired access token", async () => {
+    const token = await fernetEncrypt("revoked-access", KEY);
+    const refresh = await fernetEncrypt("refresh", KEY);
+    const reauth = [];
+    const adapter = {
+        loadPublishData: async () => ({
+            events: [{ id: 11, title: "Publish", start_time: new Date("2026-08-16T12:00:00Z"), external_ids: {} }],
+            accounts: [{ id: 6, provider: "google", account_email: "user@example.test", access_token: token, refresh_token: refresh, token_expires_at: new Date("2099-01-01T00:00:00Z") }],
+        }),
+        updateEventLinks: async () => { },
+        markAccountReauthRequired: async (...args) => reauth.push(args),
+    };
+    const result = await executeCalendarPublish(adapter, {
+        userId: 42,
+        env: { TOKEN_ENCRYPTION_KEY: KEY },
+        body: { event_ids: [11], publish_targets: { "11": ["google:user@example.test"] } },
+        fetchImpl: async () => new Response(JSON.stringify({ error: { message: "Invalid Credentials" } }), { status: 401 }),
+    });
+
+    assert.equal(result.failed, 1);
+    assert.match(result.account_results[0].message, /Invalid Credentials/);
+    assert.equal(reauth.length, 1);
+    assert.equal(reauth[0][1], 6);
 });
 
 test("replays pending publishes only for the reconnected account", async () => {

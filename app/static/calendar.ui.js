@@ -933,32 +933,53 @@ function buildPublishFailureMessage(data, selectedKeys = []) {
   return "No calendars were updated.";
 }
 
-function buildPublishRemediationHtml(message, selectedRows = []) {
+function buildPublishRemediationHtml(message, selectedRows = [], accountResults = []) {
   const lower = String(message || "").toLowerCase();
-  const selectedMicrosoft = (selectedRows || []).find((row) => row && row.provider === "microsoft");
-  const accountParam = encodeURIComponent(selectedMicrosoft?.email || "");
-  const buildHref = (action) => (selectedMicrosoft
-    ? `/accounts/ui?remedy_provider=microsoft&remedy_account=${accountParam}&remedy_action=${action}`
-    : "/accounts/ui");
+  const targets = [];
+  (accountResults || []).forEach((result) => {
+    if (!result || result.ok === true || !result.target_key) return;
+    const failure = String(result.message || "").toLowerCase();
+    const authFailure = ["no valid token", "expired", "invalid", "revoked", "access denied", "access is denied", "forbidden", "insufficient permission", "401"]
+      .some((signal) => failure.includes(signal));
+    if (!authFailure) return;
+    const [provider, ...emailParts] = String(result.target_key).split(":");
+    const email = emailParts.join(":").trim().toLowerCase();
+    const normalizedProvider = String(provider || "").trim().toLowerCase();
+    if (!["google", "microsoft"].includes(normalizedProvider) || !email) return;
+    if (!targets.some((target) => target.provider === normalizedProvider && target.email === email)) {
+      targets.push({ provider: normalizedProvider, email });
+    }
+  });
+  if (!targets.length) {
+    const failedKeys = String(message || "").matchAll(/\b(google|microsoft):([^\s;]+)/gi);
+    for (const match of failedKeys) {
+      const provider = match[1].toLowerCase();
+      const email = match[2].replace(/[.,]+$/, "").toLowerCase();
+      if (email.includes("@") && !targets.some((target) => target.provider === provider && target.email === email)) {
+        targets.push({ provider, email });
+      }
+    }
+  }
+  const buildHref = (target, action) => `/accounts/ui?remedy_provider=${target.provider}&remedy_account=${encodeURIComponent(target.email)}&remedy_action=${action}`;
 
-  if (lower.includes("erroraccessdenied") || lower.includes("access is denied") || lower.includes("forbidden")) {
-    const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "microsoft account";
-    return `
+  if (lower.includes("erroraccessdenied") || lower.includes("access is denied") || lower.includes("access denied") || lower.includes("insufficient permission") || lower.includes("forbidden")) {
+    const microsoftTargets = targets.filter((target) => target.provider === "microsoft");
+    if (microsoftTargets.length) return `
       <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
-        Resolution path: <a href="${buildHref("verify_access")}" style="font-weight:600;">Open Account Manager</a>,
-        click <strong>Verify Access</strong> for <strong>${escapeHtml(accountLabel)}</strong>.
-        If write access is still denied, click <strong>Reconnect</strong>, complete Microsoft consent,
-        return here, then publish again.
+        Resolution path: ${microsoftTargets.map((target) => `Open <a href="${buildHref(target, "verify_access")}" style="font-weight:600;">Account Manager</a> and click <strong>Verify Access</strong> for <strong>${escapeHtml(`microsoft:${target.email}`)}</strong>; reconnect that account if write access is still denied.`).join(" ")}
       </div>`;
   }
 
-  if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid")) {
-    const accountLabel = selectedMicrosoft ? `microsoft:${selectedMicrosoft.email}` : "the account";
-    // A missing/invalid token can't be fixed by Verify Access/Retry — route straight to Reconnect.
+  if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid") || lower.includes("revoked")) {
+    const reconnectTargets = targets.length ? targets : (selectedRows || []).filter((row) => row && row.provider && row.email);
+    if (!reconnectTargets.length) return "";
     return `
       <div style="margin-top:8px; font-size:12px; line-height:1.45; color:#7f1d1d;">
-        Resolution path: Reconnect <strong>${escapeHtml(accountLabel)}</strong> in
-        <a href="${buildHref("reconnect")}" style="font-weight:600;">Account Manager</a>, then retry publish.
+        Resolution path: ${reconnectTargets.map((target) => {
+      const provider = String(target.provider || "").toLowerCase();
+      const email = String(target.email || "").toLowerCase();
+      return `Reconnect <strong>${escapeHtml(`${provider}:${email}`)}</strong> in <a href="${buildHref({ provider, email }, "reconnect")}" style="font-weight:600;">Account Manager</a>`;
+    }).join("; ")}, then retry publish.
       </div>`;
   }
 
@@ -2159,6 +2180,7 @@ async function confirmPublishCurrentEvent() {
   renderEventPublishControls();
   renderConfirmPublishButtonState();
 
+  let publishResponseData = null;
   try {
     const res = await apiFetch("/calendar/publish", {
       method: "POST",
@@ -2172,6 +2194,7 @@ async function confirmPublishCurrentEvent() {
 
     const raw = await res.text();
     const data = raw ? JSON.parse(raw) : {};
+    publishResponseData = data;
     if (!res.ok || String(data?.status || "").toLowerCase() === "error") {
       throw new Error(data?.message || `Publish failed (${res.status})`);
     }
@@ -2213,7 +2236,7 @@ async function confirmPublishCurrentEvent() {
   } catch (err) {
     console.error("❌ Single-event publish failed", err);
     const message = String(err?.message || "").trim();
-    const remediationHtml = buildPublishRemediationHtml(message, selectedRows);
+    const remediationHtml = buildPublishRemediationHtml(message, selectedRows, publishResponseData?.account_results);
     modalState.publishAttemptState = "error";
     modalState.publishAttemptConsumed = true;
     renderConfirmPublishButtonState({ state: "error" });

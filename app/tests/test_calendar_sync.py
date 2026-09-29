@@ -9,6 +9,8 @@ from app.main import app
 import jwt
 from app.routers.auth import SECRET_KEY
 from app.models import Event, User, OAuthAccount, SyncOperationLedger, TVDiagLog
+from app.services.multi_account_oauth_service import resolve_account_status
+from app.utils.serializers import account_summary
 
 client = TestClient(app)
 
@@ -235,6 +237,52 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
 
     db.refresh(event)
     assert event.external_ids["google:publish@example.com"] == "google-new-1"
+    mock_google_create.assert_called_once()
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="expired-access")
+@patch(
+    "app.services.google_calendar_service.GoogleCalendarService.create_event",
+    side_effect=RuntimeError("Google create failed (401): Invalid Credentials"),
+)
+def test_publish_marks_rejected_access_token_for_reconnect(mock_google_create, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="google",
+        account_email="rejected@example.com",
+        access_token="expired-access",
+        refresh_token="refresh-token",
+        token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        status="ok",
+        last_sync_success=datetime.now(timezone.utc),
+    )
+    event = Event(
+        title="Rejected Provider Token",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:rejected-token",
+        external_ids={},
+    )
+    db.add_all([account, event])
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={"event_ids": [event.id], "publish_targets": {str(event.id): ["google:rejected@example.com"]}},
+    )
+
+    assert response.status_code == 200
+    result = response.json()["account_results"][0]
+    db.refresh(account)
+    assert result["status"] == "failed"
+    assert account.access_token == "__REAUTH_REQUIRED__"
+    assert resolve_account_status(account) == "error"
+    assert account_summary(account)["token_issue"]["recommended_action"] == "reconnect"
     mock_google_create.assert_called_once()
 
 
