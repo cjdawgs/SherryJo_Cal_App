@@ -1,5 +1,6 @@
 import { fernetDecrypt, fernetEncrypt } from "./fernet.js";
 import { ensureProviderAccessToken, isProviderAuthorizationFailure, ProviderAuthorizationError } from "./provider-calendar-sync.js";
+import { deleteAppleCalendarEvent, publishAppleCalendarEvent } from "./apple-calendar-publish.js";
 
 const GOOGLE_EVENTS = "https://www.googleapis.com/calendar/v3/calendars";
 const GRAPH_EVENTS = "https://graph.microsoft.com/v1.0/me/events";
@@ -78,12 +79,17 @@ function providerCreatedId(result, provider) {
     return null;
 }
 
-async function publishTarget({ userId, event, account, targetKey, rawId, env, fetchImpl }) {
+async function publishTarget({ userId, event, account, targetKey, rawId, env, fetchImpl, appleClientFactory }) {
+    const provider = normalizeProvider(account.provider);
+    if (provider === "apple") {
+        const uid = rawId || `${await googleCreateId(userId, event.id, targetKey)}@sherryjo-cal.app`;
+        const result = await publishAppleCalendarEvent({ account, event, uid, fetchImpl, clientFactory: appleClientFactory });
+        return { ...result, rawId: result.uid, tokenResult: { refreshed: false } };
+    }
     const tokenResult = await ensureProviderAccessToken(account, env, fetchImpl);
     if (!String(tokenResult.accessToken || "").trim()) {
         throw new Error("Provider access token is missing");
     }
-    const provider = normalizeProvider(account.provider);
     const calendarId = encodeURIComponent(account.account_email || "primary");
     const base = provider === "google" ? `${GOOGLE_EVENTS}/${calendarId}/events` : GRAPH_EVENTS;
     if (rawId) {
@@ -114,9 +120,13 @@ async function publishTarget({ userId, event, account, targetKey, rawId, env, fe
     return { action: "created", rawId: createdId, tokenResult };
 }
 
-async function deleteTarget({ account, rawId, env, fetchImpl }) {
-    const tokenResult = await ensureProviderAccessToken(account, env, fetchImpl);
+async function deleteTarget({ account, rawId, env, fetchImpl, appleClientFactory }) {
     const provider = normalizeProvider(account.provider);
+    if (provider === "apple") {
+        await deleteAppleCalendarEvent({ account, uid: rawId, fetchImpl, clientFactory: appleClientFactory });
+        return { refreshed: false };
+    }
+    const tokenResult = await ensureProviderAccessToken(account, env, fetchImpl);
     const calendarId = encodeURIComponent(account.account_email || "primary");
     const url = provider === "google"
         ? `${GOOGLE_EVENTS}/${calendarId}/events/${encodeURIComponent(rawId)}`
@@ -131,10 +141,10 @@ function targetParts(key) {
     const [providerPart, ...emailParts] = key.split(":");
     const provider = normalizeProvider(providerPart);
     const email = emailParts.join(":").trim().toLowerCase();
-    return ["google", "microsoft"].includes(provider) && email ? { provider, email, key: `${provider}:${email}` } : null;
+    return ["google", "microsoft", "apple"].includes(provider) && email ? { provider, email, key: `${provider}:${email}` } : null;
 }
 
-export async function executeCalendarPublish(adapter, { userId, body, env, fetchImpl = fetch }) {
+export async function executeCalendarPublish(adapter, { userId, body, env, fetchImpl = fetch, appleClientFactory }) {
     if (!body || typeof body !== "object" || Array.isArray(body)) throw new TypeError("Publish request must be an object");
     const requestedIds = body.event_ids === undefined ? null : Array.isArray(body.event_ids) ? body.event_ids.map(Number).filter(Number.isSafeInteger) : [];
     const deletedEntries = Array.isArray(body.deleted_events) ? body.deleted_events : [];
@@ -181,7 +191,7 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
                 continue;
             }
             try {
-                const token = await deleteTarget({ account, rawId, env, fetchImpl });
+                const token = await deleteTarget({ account, rawId, env, fetchImpl, appleClientFactory });
                 await persistToken(account, token); deleted += 1; affected.add(target.key);
                 await adapter.finishDeleteTarget?.(userId, target.key, rawId, { succeeded: true });
             } catch (error) {
@@ -211,7 +221,7 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
                 continue;
             }
             try {
-                const result = await publishTarget({ userId, event, account, targetKey: target.key, rawId: externalIds[target.key], env, fetchImpl });
+                const result = await publishTarget({ userId, event, account, targetKey: target.key, rawId: externalIds[target.key], env, fetchImpl, appleClientFactory });
                 await persistToken(account, result.tokenResult);
                 externalIds[target.key] = result.rawId;
                 await adapter.updateEventLinks(userId, event.id, externalIds);
@@ -238,7 +248,7 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
     return { status: "success", published, created, deleted, failed, total_events: data.events.length, affected_accounts: [...affected].sort(), range_start: starts[0]?.toISOString?.().slice(0, 10) || String(starts[0] || "").slice(0, 10) || null, range_end: starts.at(-1)?.toISOString?.().slice(0, 10) || String(starts.at(-1) || "").slice(0, 10) || null, warnings, account_results: accountResults };
 }
 
-export async function replayPendingCalendarPublishes(adapter, { userId, targetKey, env, fetchImpl = fetch }) {
+export async function replayPendingCalendarPublishes(adapter, { userId, targetKey, env, fetchImpl = fetch, appleClientFactory }) {
     const target = targetParts(targetKey);
     if (!target) throw new TypeError("A valid Google or Microsoft target_key is required");
     const pending = await adapter.loadPendingPublishTargets(userId, target.key);
@@ -255,6 +265,7 @@ export async function replayPendingCalendarPublishes(adapter, { userId, targetKe
         body: { event_ids: eventIds, publish_targets: publishTargets, deleted_events: deletedEvents },
         env,
         fetchImpl,
+        appleClientFactory,
     });
     return { ...result, replayed: eventIds.length + deletedEvents.length };
 }

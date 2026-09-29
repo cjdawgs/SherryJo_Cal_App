@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from app.models import Event, OAuthAccount, SyncOperationLedger
 from app.services.multi_account_oauth_service import ensure_valid_token, normalize_provider
+from app.services.external_calendar_service import ExternalCalendarService
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,8 @@ def _provider_create_identity(user_id: int, event_id: int, target_key: str, prov
     if provider == "google":
         alphabet = "0123456789abcdefghijklmnopqrstuv"
         return "sj" + "".join(alphabet[value & 31] for value in digest)[:24]
+    if provider == "apple":
+        return f"sj{digest.hex()[:24]}@sherryjo-cal.app"
     digest[6] = (digest[6] & 0x0F) | 0x50
     digest[8] = (digest[8] & 0x3F) | 0x80
     return str(uuid.UUID(bytes=bytes(digest[:16])))
@@ -176,7 +179,7 @@ def _get_token(db: Session, user_id: int, provider: str, account_email: str):
     return None
 
 
-def _iter_write_back_targets(external_ids: dict, fallback_account_email: str):
+def _iter_write_back_targets(external_ids: dict, fallback_account_email: str, *, include_apple: bool = False):
     """
     Yield (provider, account_email, raw_id) for every write-back target.
     Handles new format {"google:user@gmail.com": "raw_id"} and
@@ -192,7 +195,7 @@ def _iter_write_back_targets(external_ids: dict, fallback_account_email: str):
         else:
             provider = normalize_provider(id_key)
             acct_email = fallback_account_email or ""
-        if provider not in ("google", "microsoft"):
+        if provider not in (("google", "microsoft", "apple") if include_apple else ("google", "microsoft")):
             continue
         yield provider, acct_email, raw_id
 
@@ -217,7 +220,7 @@ def _normalize_target_keys(event, selected_account_keys=None):
         for raw_key in external_ids.keys()
         if isinstance(raw_key, str) and ":" in raw_key
         for provider_part, email_part in [raw_key.split(":", 1)]
-        if normalize_provider(provider_part) in ("google", "microsoft") and (email_part or "").strip()
+        if normalize_provider(provider_part) in ("google", "microsoft", "apple") and (email_part or "").strip()
     }
 
 
@@ -257,7 +260,8 @@ def _is_provider_authorization_failure(error: Exception) -> bool:
         "401", "unauthorized", "invalid credentials", "invalid_grant",
         "invalidauthenticationtoken", "token expired", "expired or revoked",
         "erroraccessdenied", "access is denied", "access denied",
-        "insufficient permission", "insufficient privileges", "forbidden",
+        "insufficient permission", "insufficientpermissions", "insufficient privileges",
+        "permissiondenied", "forbidden",
     )
     return any(marker in message for marker in authorization_markers)
 
@@ -324,7 +328,7 @@ class EventActions:
     def replay_pending_publishes(self, db: Session, user, target_key: str, google_service, graph_client) -> dict:
         normalized_targets = _normalize_target_keys(type("Target", (), {"external_ids": {}})(), [target_key])
         if len(normalized_targets) != 1:
-            raise ValueError("A valid Google or Microsoft target_key is required")
+            raise ValueError("A valid Google, Microsoft, or Apple target_key is required")
         normalized_target = next(iter(normalized_targets))
         rows = db.query(SyncOperationLedger).filter(
             SyncOperationLedger.owner_user_id == user.id,
@@ -469,6 +473,7 @@ class EventActions:
         warnings = []
         account_results = []
         succeeded_targets = []
+        apple_service = ExternalCalendarService()
 
         if not targets:
             warnings.append(f"No publishable targets resolved for event {getattr(event, 'id', 'unknown')}")
@@ -495,7 +500,7 @@ class EventActions:
                 "message": "",
             }
 
-            if provider not in ("google", "microsoft"):
+            if provider not in ("google", "microsoft", "apple"):
                 target_result["status"] = "unsupported"
                 target_result["message"] = f"Publish not supported for {target_key}"
                 account_results.append(target_result)
@@ -504,7 +509,18 @@ class EventActions:
 
             _queue_publish_target(db, user.id, event.id, target_key)
             try:
-                token = _get_token(db, user.id, provider, acct_email)
+                apple_account = None
+                if provider == "apple":
+                    apple_account = db.query(OAuthAccount).filter(
+                        OAuthAccount.user_id == user.id,
+                        OAuthAccount.provider == "apple",
+                        OAuthAccount.account_email == acct_email.lower().strip(),
+                    ).order_by(OAuthAccount.id.desc()).first()
+                    token = ensure_valid_token(db, apple_account) if apple_account else None
+                    if apple_account and (not apple_account.access_token or not apple_account.refresh_token):
+                        token = None
+                else:
+                    token = _get_token(db, user.id, provider, acct_email)
                 if not token:
                     target_result["status"] = "no_token"
                     target_result["message"] = f"No valid token for {target_key}"
@@ -517,6 +533,28 @@ class EventActions:
                     continue
 
                 if raw_id:
+                    if provider == "apple":
+                        apple_result = apple_service.publish_icloud_event(
+                            url=apple_account.access_token,
+                            username=apple_account.account_email,
+                            password=apple_account.refresh_token,
+                            event_payload=updates,
+                            uid=raw_id,
+                        )
+                        action = str(apple_result.get("action") or "updated")
+                        external_ids[target_key] = apple_result["uid"]
+                        if action == "created":
+                            created += 1
+                        else:
+                            pushed += 1
+                        affected_accounts.append(target_key)
+                        target_result["ok"] = True
+                        target_result["status"] = action
+                        target_result["message"] = f"{action.title()} {target_key}"
+                        _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
+                        succeeded_targets.append((target_key, target_result.copy()))
+                        account_results.append(target_result)
+                        continue
                     if provider == "google":
                         update_result = google_service.update_event(token=token, event_id=raw_id,
                                                                     updates=updates, account_email=acct_email or None,
@@ -565,6 +603,16 @@ class EventActions:
                                                              account_email=acct_email or None,
                                                              create_identity=create_identity,
                                                              raise_on_error=True)
+                elif provider == "apple":
+                    apple_result = apple_service.publish_icloud_event(
+                        url=apple_account.access_token,
+                        username=apple_account.account_email,
+                        password=apple_account.refresh_token,
+                        event_payload=updates,
+                        uid=create_identity,
+                    )
+                    new_raw_id = apple_result["uid"]
+                    target_result["action"] = apple_result["action"]
                 elif provider == "microsoft":
                     try:
                         new_raw_id = graph_client.create_event(
@@ -589,11 +637,15 @@ class EventActions:
 
                 if new_raw_id:
                     external_ids[target_key] = new_raw_id
-                    created += 1
+                    action = "updated" if target_result.get("action") == "updated" else "created"
+                    if action == "updated":
+                        pushed += 1
+                    else:
+                        created += 1
                     affected_accounts.append(target_key)
                     target_result["ok"] = True
-                    target_result["status"] = "created"
-                    target_result["message"] = f"Created {target_key}"
+                    target_result["status"] = action
+                    target_result["message"] = f"{action.title()} {target_key}"
                     _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
                     succeeded_targets.append((target_key, target_result.copy()))
                 else:
@@ -646,13 +698,25 @@ class EventActions:
         failed = 0
         affected_accounts = []
         warnings = []
+        apple_service = ExternalCalendarService()
 
-        for provider, acct_email, raw_id in _iter_write_back_targets(external_ids or {}, ""):
+        for provider, acct_email, raw_id in _iter_write_back_targets(external_ids or {}, "", include_apple=True):
             target_key = f"{provider}:{(acct_email or '').lower().strip()}"
             _queue_publish_delete(db, user.id, target_key, str(raw_id))
 
             try:
-                token = _get_token(db, user.id, provider, acct_email)
+                apple_account = None
+                if provider == "apple":
+                    apple_account = db.query(OAuthAccount).filter(
+                        OAuthAccount.user_id == user.id,
+                        OAuthAccount.provider == "apple",
+                        OAuthAccount.account_email == (acct_email or "").lower().strip(),
+                    ).order_by(OAuthAccount.id.desc()).first()
+                    token = ensure_valid_token(db, apple_account) if apple_account else None
+                    if apple_account and (not apple_account.access_token or not apple_account.refresh_token):
+                        token = None
+                else:
+                    token = _get_token(db, user.id, provider, acct_email)
                 if not token:
                     message = f"No valid token for {target_key}"
                     failed += 1
@@ -662,7 +726,15 @@ class EventActions:
                     )
                     continue
 
-                if provider == "google":
+                if provider == "apple":
+                    apple_service.delete_icloud_event(
+                        url=apple_account.access_token,
+                        username=apple_account.account_email,
+                        password=apple_account.refresh_token,
+                        uid=str(raw_id),
+                    )
+                    delete_status = 204
+                elif provider == "google":
                     delete_status = google_service.delete_event(
                         token=token, event_id=raw_id, account_email=acct_email or None,
                     )

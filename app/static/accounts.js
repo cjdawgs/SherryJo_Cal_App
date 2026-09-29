@@ -420,13 +420,15 @@ async function manualRefreshSelectedAccount() {
 }
 
 function getHealthStatus(acc) {
+  const apple = normalizeProvider(acc?.provider) === "apple";
   if (acc.status === "ok") return `<span style="color:#16a34a; font-weight:600;">OK</span>`;
   if (acc.status === "error") {
     const code = String(acc?.token_issue?.code || "").trim();
     if (code) {
-      return `<span style="color:#dc2626; font-weight:600;">Needs Attention (${code.replaceAll("_", " ")})</span>`;
+      const issueLabel = apple ? `Apple Account Issue: ${code.replaceAll("_", " ")}` : `Needs Attention (${code.replaceAll("_", " ")})`;
+      return `<span style="color:#dc2626; font-weight:600;">${issueLabel}</span>`;
     }
-    return `<span style="color:#dc2626; font-weight:600;">Needs Attention</span>`;
+    return `<span style="color:#dc2626; font-weight:600;">${apple ? "Apple Account Issue" : "Needs Attention"}</span>`;
   }
   return `<span style="color:#64748b;">Unknown</span>`;
 }
@@ -689,7 +691,7 @@ function renderProviderAccounts(provider, list) {
         <span>${asciiText(acc.account_email, "UNKNOWN")}</span>
         ${acc.is_primary ? "[PRIMARY]" : ""}
         <span style="margin-left:8px; font-size:12px;">${getHealthStatus(acc)}</span>
-        ${showIssue ? `<div style="margin-top:4px; font-size:12px; color:#7f1d1d;"><strong>${issueCode ? issueCode.replaceAll("_", " ") : "issue"}:</strong> ${issueMessage || "Token action required."}</div>` : ""}
+        ${showIssue ? `<div style="margin-top:4px; font-size:12px; color:#7f1d1d;"><strong>${normalizedProvider === "apple" ? "Apple Account Issue" : (issueCode ? issueCode.replaceAll("_", " ") : "issue")}:</strong> ${issueMessage || "Token action required."}</div>` : ""}
         ${showIssue && issueGuidance ? `<div style="margin-top:2px; font-size:11px; color:#7f1d1d;">${issueGuidance}</div>` : ""}
       </div>
       <div class="account-actions">
@@ -880,6 +882,22 @@ async function connectApple(button) {
 
     const accounts = await loadAccounts();
     window.dispatchEvent(new Event("accountsUpdated"));
+    try {
+      const replay = await replayPendingPublishes("apple", email);
+      const replayed = Number(replay?.replayed || 0);
+      const failed = Number(replay?.failed || 0);
+      if (failed > 0) {
+        statusDiv.textContent = `Apple Account reconnected. ${failed} queued publish operation${failed === 1 ? "" : "s"} still need attention.`;
+        statusDiv.className = "status-line error";
+      } else if (replayed > 0) {
+        statusDiv.textContent = `Apple Account reconnected and ${Number(replay?.published || 0)} queued event${Number(replay?.published || 0) === 1 ? " was" : "s were"} published.`;
+        statusDiv.className = "status-line success";
+      }
+    } catch (error) {
+      console.error("Apple publish replay failed", error);
+      statusDiv.textContent = "Apple Account connected, but queued publishes could not be retried. They remain pending.";
+      statusDiv.className = "status-line error";
+    }
 
     const isOnboarding = document.body.dataset.onboarding === "1";
     if (isOnboarding && Array.isArray(accounts) && accounts.length > 0) {

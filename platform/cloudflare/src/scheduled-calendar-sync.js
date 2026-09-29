@@ -81,7 +81,7 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
             now,
         );
         let publishReplay = null;
-        if (["google", "microsoft"].includes(account.provider) && typeof adapter.runWithIdentity === "function") {
+        if (["google", "microsoft", "apple"].includes(account.provider) && typeof adapter.runWithIdentity === "function") {
             try {
                 publishReplay = await replayPendingCalendarPublishes(new CalendarPublishPostgresAdapter(adapter), {
                     userId: account.user_id,

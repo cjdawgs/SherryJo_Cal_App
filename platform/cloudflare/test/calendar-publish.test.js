@@ -50,6 +50,40 @@ test("publishes selected events to Google with a deterministic create id", async
     assert.equal(links[0][2]["google:user@example.test"], "provider-7");
 });
 
+test("publishes selected events to Apple CalDAV and persists the VEVENT UID", async () => {
+    const links = [];
+    const serverUrl = await fernetEncrypt("https://caldav.example.test", KEY);
+    const appPassword = await fernetEncrypt("apple-app-password", KEY);
+    const adapter = {
+        loadPublishData: async () => ({
+            events: [{ id: 71, title: "Apple publish", description: "Notes", start_time: new Date("2026-08-16T12:00:00Z"), end_time: new Date("2026-08-16T13:00:00Z"), external_ids: {} }],
+            accounts: [{ id: 12, provider: "apple", account_email: "user@icloud.com", access_token: serverUrl, refresh_token: appPassword, token_expires_at: null }],
+        }),
+        updateEventLinks: async (...args) => links.push(args),
+    };
+    const appleClientFactory = async (options) => {
+        assert.equal(options.serverUrl, "https://caldav.example.test");
+        assert.deepEqual(options.credentials, { username: "user@icloud.com", password: "apple-app-password" });
+        return {
+            fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", components: ["VEVENT"] }],
+            fetchCalendarObjects: async () => [],
+            createCalendarObject: async () => new Response(null, { status: 201 }),
+        };
+    };
+
+    const result = await executeCalendarPublish(adapter, {
+        userId: 42,
+        env: { TOKEN_ENCRYPTION_KEY: KEY },
+        body: { event_ids: [71], publish_targets: { "71": ["apple:user@icloud.com"] } },
+        appleClientFactory,
+    });
+
+    assert.equal(result.published, 1);
+    assert.equal(result.created, 1);
+    assert.equal(result.failed, 0);
+    assert.match(links[0][2]["apple:user@icloud.com"], /^sj[0-9a-v]{24}@sherryjo-cal\.app$/);
+});
+
 test("reconciles a deterministic Google create conflict before completing", async () => {
     const token = await fernetEncrypt("access", KEY);
     const methods = [];
@@ -238,6 +272,40 @@ test("replays pending publishes only for the reconnected account", async () => {
     assert.equal(result.failed, 0);
     assert.equal(queued.length, 2);
     assert.equal(finished.filter((entry) => entry[3].succeeded).length, 2);
+});
+
+test("replays a pending Apple publish to CalDAV", async () => {
+    const serverUrl = await fernetEncrypt("https://caldav.example.test", KEY);
+    const appPassword = await fernetEncrypt("apple-app-password", KEY);
+    const links = [];
+    const adapter = {
+        loadPendingPublishTargets: async (_userId, targetKey) => {
+            assert.equal(targetKey, "apple:user@icloud.com");
+            return [{ operation_type: "calendar_publish", event_id: 72 }];
+        },
+        loadPublishData: async () => ({
+            events: [{ id: 72, title: "Replay Apple", start_time: new Date("2026-08-16T12:00:00Z"), external_ids: {} }],
+            accounts: [{ id: 14, provider: "apple", account_email: "user@icloud.com", access_token: serverUrl, refresh_token: appPassword }],
+        }),
+        updateEventLinks: async (...args) => links.push(args),
+        queuePublishTarget: async () => { },
+        finishPublishTarget: async () => { },
+    };
+    const result = await replayPendingCalendarPublishes(adapter, {
+        userId: 42,
+        targetKey: "apple:user@icloud.com",
+        env: { TOKEN_ENCRYPTION_KEY: KEY },
+        appleClientFactory: async () => ({
+            fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", components: ["VEVENT"] }],
+            fetchCalendarObjects: async () => [],
+            createCalendarObject: async () => new Response(null, { status: 201 }),
+        }),
+    });
+
+    assert.equal(result.replayed, 1);
+    assert.equal(result.published, 1);
+    assert.equal(result.failed, 0);
+    assert.match(links[0][2]["apple:user@icloud.com"], /^sj[0-9a-v]{24}@sherryjo-cal\.app$/);
 });
 
 test("replays a queued provider delete after reconnect", async () => {

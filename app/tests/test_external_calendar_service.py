@@ -363,6 +363,87 @@ def test_fetch_apple_calendar_events_without_credentials():
     assert ExternalCalendarService.fetch_apple_calendar_events(account) == []
 
 
+def test_publish_icloud_event_creates_an_escaped_vevent(service, monkeypatch):
+    calendar = MagicMock()
+    calendar.event_by_uid.side_effect = Exception("event not found")
+    monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
+
+    result = service.publish_icloud_event(
+        "https://caldav.icloud.com",
+        "user@icloud.com",
+        "app-password",
+        {
+            "title": "Review, final",
+            "description": "Bring notes; laptop",
+            "start_time": datetime(2026, 9, 29, 15, tzinfo=timezone.utc),
+            "end_time": datetime(2026, 9, 29, 16, tzinfo=timezone.utc),
+        },
+        "publish-uid@example.test",
+    )
+
+    assert result == {"action": "created", "uid": "publish-uid@example.test"}
+    calendar.save_event.assert_called_once()
+    from icalendar import Calendar
+    published = Calendar.from_ical(calendar.save_event.call_args.kwargs["ical"])
+    vevent = next(component for component in published.walk() if component.name == "VEVENT")
+    assert str(vevent.get("UID")) == "publish-uid@example.test"
+    assert str(vevent.get("SUMMARY")) == "Review, final"
+    assert str(vevent.get("DESCRIPTION")) == "Bring notes; laptop"
+    assert calendar.save_event.call_args.kwargs["no_overwrite"] is True
+
+
+def test_publish_icloud_event_updates_by_uid_and_preserves_recurrence(service, monkeypatch):
+    from icalendar import Event
+
+    component = Event()
+    component.add("uid", "series@example.test")
+    component.add("summary", "Old title")
+    component.add("dtstart", datetime(2026, 9, 1, 15, tzinfo=timezone.utc))
+    component.add("dtend", datetime(2026, 9, 1, 16, tzinfo=timezone.utc))
+    component.add("rrule", {"freq": "weekly", "count": 4})
+    existing = MagicMock()
+    existing.icalendar_component = component
+    calendar = MagicMock()
+    calendar.event_by_uid.return_value = existing
+    monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
+
+    result = service.publish_icloud_event(
+        "https://caldav.icloud.com",
+        "user@icloud.com",
+        "app-password",
+        {
+            "title": "Updated title",
+            "description": "Updated details",
+            "start_time": datetime(2026, 9, 29, 15, tzinfo=timezone.utc),
+            "end_time": datetime(2026, 9, 29, 16, tzinfo=timezone.utc),
+        },
+        "series@example.test",
+    )
+
+    assert result == {"action": "updated", "uid": "series@example.test"}
+    assert str(component.get("SUMMARY")) == "Updated title"
+    assert component.get("RRULE")["FREQ"] == "weekly"
+    assert component.get("RRULE")["COUNT"] == 4
+    existing.save.assert_called_once()
+
+
+def test_delete_icloud_event_by_uid_is_idempotent(service, monkeypatch):
+    existing = MagicMock()
+    calendar = MagicMock()
+    calendar.event_by_uid.return_value = existing
+    monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
+
+    assert service.delete_icloud_event(
+        "https://caldav.icloud.com", "user@icloud.com", "app-password", "event@example.test"
+    ) is True
+    existing.delete.assert_called_once()
+
+    calendar.event_by_uid.side_effect = Exception("event not found")
+    assert service.delete_icloud_event(
+        "https://caldav.icloud.com", "user@icloud.com", "app-password", "missing@example.test"
+    ) is False
+
+
 def test_fetch_apple_calendar_events_swallows_errors():
     assert ExternalCalendarService.fetch_apple_calendar_events(object()) == []
 

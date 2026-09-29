@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from cryptography.fernet import Fernet
 
@@ -727,6 +728,36 @@ def test_admin_cleanup_classifies_legacy_placeholder_rows(client, db):
 
     db.refresh(legacy)
     assert legacy.is_service_provider is True
+
+
+def test_admin_shows_apple_connection_issue_separately_from_sync_state(client, db):
+    headers = _admin_headers(client)
+    owner = _register_user(client, role="staff")
+    apple_account = OAuthAccount(
+        user_id=owner["id"],
+        provider="apple",
+        account_email="needs-reconnect@icloud.com",
+        access_token="__REAUTH_REQUIRED__",
+        refresh_token="app-password",
+        sync_enabled=False,
+        status="error",
+        last_error="Apple CalDAV credentials were rejected; reconnect this Apple account.",
+    )
+    db.add(apple_account)
+    db.commit()
+
+    response = client.get("/admin/providers", headers=headers)
+
+    assert response.status_code == 200
+    row = next(item for item in response.json() if item["contact_email"] == "needs-reconnect@icloud.com")
+    assert row["metadata"]["provider"] == "apple"
+    assert row["metadata"]["sync_enabled"] is False
+    assert row["metadata"]["health_status"] == "error"
+    assert "Apple CalDAV credentials were rejected" in row["metadata"]["last_error"]
+
+    admin_source = (Path(__file__).resolve().parents[1] / "static" / "admin.js").read_text(encoding="utf-8")
+    assert 'return "Apple";' in admin_source
+    assert '`${providerLabel(item)} Account Issue`' in admin_source
 
 
 def test_accounts_endpoint_hides_service_provider_rows(client, db):

@@ -918,22 +918,36 @@ function activeConfig() {
     };
   }
 
+  const providerLabel = (item) => {
+    const provider = String(item.metadata?.provider || item.provider_name || "provider").toLowerCase();
+    if (["apple", "icloud", "caldav"].includes(provider)) return "Apple";
+    if (["google", "gmail"].includes(provider)) return "Google";
+    if (["microsoft", "outlook", "office365", "ms", "msft"].includes(provider)) return "Microsoft";
+    return provider.charAt(0).toUpperCase() + provider.slice(1);
+  };
+  const connectionHealth = (item) => item.metadata?.health_status === "error"
+    ? `${providerLabel(item)} Account Issue`
+    : "Healthy";
+
   return {
     endpoint: "/admin/providers",
-    columns: ["ID", "Provider Name", "Contact", "Status", "Owner User ID", "Owner Email", "Actions"],
+    columns: ["ID", "Provider", "Contact", "Sync", "Connection Health", "Last Error", "Owner User ID", "Owner Email", "Actions"],
     row: (item) => [
       item.id,
-      item.provider_name || "-",
+      String(item.metadata?.provider || item.provider_name || "-").toUpperCase(),
       item.contact_email || "-",
-      item.status || "inactive",
+      item.metadata?.sync_enabled ? "Enabled" : "Disabled",
+      connectionHealth(item),
+      item.metadata?.last_error || "-",
       item.metadata?.user_id ?? "-",
       item.metadata?.owner_email || "-",
     ],
-    cardTitle: (item) => item.provider_name || item.metadata?.provider || "Provider",
+    cardTitle: (item) => `${String(item.metadata?.provider || "Provider").toUpperCase()} Account: ${item.contact_email || "unknown account"}`,
     cardBody: (item) => [
       `Contact: ${item.contact_email || "-"}`,
-      `Status: ${item.status || "inactive"}`,
-      `Provider: ${item.metadata?.provider || "-"}`,
+      `Connection health: ${connectionHealth(item)}`,
+      `Background sync: ${item.metadata?.sync_enabled ? "Enabled" : "Disabled"}`,
+      `Last error: ${item.metadata?.last_error || "-"}`,
       `Owner User ID: ${item.metadata?.user_id ?? "-"}`,
       `Owner Email: ${item.metadata?.owner_email || "-"}`,
     ],

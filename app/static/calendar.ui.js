@@ -33,7 +33,7 @@ let activeRichEditorId = null;
 let modalWindowControlsReady = false;
 let modalResizeReady = false;
 
-const PUBLISHABLE_PROVIDERS = new Set(["google", "microsoft"]);
+const PUBLISHABLE_PROVIDERS = new Set(["google", "microsoft", "apple"]);
 const MODAL_VIEWPORT_GUTTER = 14;
 const DEFAULT_EVENT_COLOR = "#4F8EF7";
 const TAG_COLOR_STORAGE_KEY = "sj_event_tag_color_settings_v1";
@@ -782,8 +782,10 @@ function renderAccountSelectionChecklist(containerId, options = {}) {
     const hint = row.disabled
       ? (row.lockedLinked
         ? "Already published here. This row is locked until the event has edits that need republishing."
-        : "Apple visibility is shown here, but direct publish to Apple is not supported in this build.")
-      : (row.linked ? "Already linked to this event." : "Create or update this event on this calendar when published.");
+        : "This calendar cannot receive published events.")
+      : (row.provider === "apple"
+        ? "Publish to the first available calendar on this Apple account."
+        : (row.linked ? "Already linked to this event." : "Create or update this event on this calendar when published."));
     return `
       <label class="accountPublishRow ${row.linked ? "is-linked" : ""} ${row.disabled ? "is-disabled" : ""} ${row.lockedLinked ? "is-locked-linked" : ""}">
         <input type="checkbox" data-publish-account-key="1" value="${escapeHtml(row.key)}" ${checked} ${disabled} />
@@ -939,19 +941,19 @@ function buildPublishRemediationHtml(message, selectedRows = [], accountResults 
   (accountResults || []).forEach((result) => {
     if (!result || result.ok === true || !result.target_key) return;
     const failure = String(result.message || "").toLowerCase();
-    const authFailure = ["no valid token", "expired", "invalid", "revoked", "access denied", "access is denied", "forbidden", "insufficient permission", "401"]
+    const authFailure = ["no valid token", "expired", "invalid", "revoked", "access denied", "access is denied", "forbidden", "insufficient permission", "unauthorized", "credentials", "401", "403"]
       .some((signal) => failure.includes(signal));
     if (!authFailure) return;
     const [provider, ...emailParts] = String(result.target_key).split(":");
     const email = emailParts.join(":").trim().toLowerCase();
     const normalizedProvider = String(provider || "").trim().toLowerCase();
-    if (!["google", "microsoft"].includes(normalizedProvider) || !email) return;
+    if (!["google", "microsoft", "apple"].includes(normalizedProvider) || !email) return;
     if (!targets.some((target) => target.provider === normalizedProvider && target.email === email)) {
       targets.push({ provider: normalizedProvider, email });
     }
   });
   if (!targets.length) {
-    const failedKeys = String(message || "").matchAll(/\b(google|microsoft):([^\s;]+)/gi);
+    const failedKeys = String(message || "").matchAll(/\b(google|microsoft|apple):([^\s;]+)/gi);
     for (const match of failedKeys) {
       const provider = match[1].toLowerCase();
       const email = match[2].replace(/[.,]+$/, "").toLowerCase();
@@ -970,7 +972,9 @@ function buildPublishRemediationHtml(message, selectedRows = [], accountResults 
       </div>`;
   }
 
-  if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid") || lower.includes("revoked")) {
+  if (lower.includes("no valid token") || lower.includes("expired") || lower.includes("invalid") || lower.includes("revoked")
+    || lower.includes("unauthorized") || lower.includes("credentials") || lower.includes("401") || lower.includes("403")
+    || lower.includes("access denied") || lower.includes("forbidden")) {
     const reconnectTargets = targets.length ? targets : (selectedRows || []).filter((row) => row && row.provider && row.email);
     if (!reconnectTargets.length) return "";
     return `

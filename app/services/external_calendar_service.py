@@ -12,10 +12,12 @@ SAFE DESIGN:
 """
     
 from datetime import datetime, timedelta, timezone
+import re
 from typing import List, Dict, Any
 import logging
 
 from app.utils import ensure_utc
+from icalendar import Calendar as ICalendar, Event as ICalendarEvent
 
 # Optional dependencies (install if not already present)
 try:
@@ -33,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 class ExternalCalendarService:
     """
-    Service to fetch events from external providers
+    Service to fetch and publish Apple CalDAV events and fetch external calendars.
     """
 
     def __init__(self):
@@ -63,6 +65,106 @@ class ExternalCalendarService:
                 logger.warning(f"⚠️ Apple ICS parse failed: {e}")
 
         return None
+
+    @staticmethod
+    def _apple_uid(value: str) -> str:
+        return re.sub(r":\d{9,}$", "", str(value or "").strip())
+
+    @staticmethod
+    def _apple_not_found(error: Exception) -> bool:
+        name = error.__class__.__name__.lower()
+        message = str(error or "").lower()
+        return "notfound" in name or "not found" in message or "404" in message
+
+    @staticmethod
+    def _event_datetime(value, field: str) -> datetime:
+        parsed = ensure_utc(value)
+        if parsed is None:
+            raise ValueError(f"Apple publish requires a valid {field}")
+        return parsed
+
+    def _find_icloud_event(self, calendars, uid):
+        for calendar in calendars:
+            try:
+                event = calendar.event_by_uid(uid)
+            except Exception as error:
+                if self._apple_not_found(error):
+                    continue
+                raise
+            if event is not None:
+                return calendar, event
+        return None, None
+
+    def _build_icloud_event(self, uid, event_payload):
+        start = self._event_datetime(event_payload.get("start_time"), "start time")
+        component = ICalendarEvent()
+        component.add("uid", uid)
+        component.add("dtstamp", datetime.now(timezone.utc))
+        component.add("dtstart", start)
+        if event_payload.get("end_time"):
+            component.add("dtend", self._event_datetime(event_payload["end_time"], "end time"))
+        component.add("summary", str(event_payload.get("title") or "Untitled Event"))
+        component.add("description", str(event_payload.get("description") or ""))
+
+        calendar = ICalendar()
+        calendar.add("prodid", "-//SherryJo Cal App//Apple Publish//EN")
+        calendar.add("version", "2.0")
+        calendar.add("calscale", "GREGORIAN")
+        calendar.add_component(component)
+        return calendar
+
+    def publish_icloud_event(self, url, username, password, event_payload, uid):
+        """Create or update one VEVENT in the first available iCloud calendar."""
+        if caldav is None:
+            raise ImportError("caldav package is not installed")
+        if not url or not username or not password:
+            raise ValueError("Apple ID email, app-specific password, and CalDAV URL are required")
+        normalized_uid = self._apple_uid(uid)
+        if not normalized_uid:
+            raise ValueError("Apple publish requires an event UID")
+
+        client = caldav.DAVClient(url=url, username=username, password=password)
+        calendars = client.principal().calendars() or []
+        if not calendars:
+            raise RuntimeError("Apple account has no available calendars")
+
+        _existing_calendar, existing_event = self._find_icloud_event(calendars, normalized_uid)
+        if existing_event is not None:
+            component = existing_event.icalendar_component
+            component["SUMMARY"] = str(event_payload.get("title") or "Untitled Event")
+            component["DESCRIPTION"] = str(event_payload.get("description") or "")
+            component["DTSTART"] = self._event_datetime(event_payload.get("start_time"), "start time")
+            if event_payload.get("end_time"):
+                component["DTEND"] = self._event_datetime(event_payload["end_time"], "end time")
+            else:
+                component.pop("DTEND", None)
+            component.pop("DURATION", None)
+            component["DTSTAMP"] = datetime.now(timezone.utc)
+            component["SEQUENCE"] = int(component.get("SEQUENCE", 0)) + 1
+            existing_event.save(increase_seqno=False)
+            return {"action": "updated", "uid": normalized_uid}
+
+        target_calendar = calendars[0]
+        target_calendar.save_event(
+            ical=self._build_icloud_event(normalized_uid, event_payload).to_ical().decode("utf-8"),
+            no_overwrite=True,
+        )
+        return {"action": "created", "uid": normalized_uid}
+
+    def delete_icloud_event(self, url, username, password, uid):
+        """Delete an iCloud event by UID; a missing event is an idempotent success."""
+        if caldav is None:
+            raise ImportError("caldav package is not installed")
+        if not url or not username or not password:
+            raise ValueError("Apple ID email, app-specific password, and CalDAV URL are required")
+        normalized_uid = self._apple_uid(uid)
+        client = caldav.DAVClient(url=url, username=username, password=password)
+        calendars = client.principal().calendars() or []
+        _calendar, event = self._find_icloud_event(calendars, normalized_uid)
+        if event is None:
+            return False
+        event.delete()
+        return True
 
     # --------------------------------------------------
     # ✅ VALIDATE ICLOUD CREDENTIALS (REQUIRED FIX)

@@ -240,6 +240,143 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
     mock_google_create.assert_called_once()
 
 
+@patch("app.services.event_actions.ensure_valid_token", return_value="APPLE_CREDENTIALS")
+@patch(
+    "app.services.external_calendar_service.ExternalCalendarService.publish_icloud_event",
+    return_value={"action": "created", "uid": "apple-published@example.test"},
+)
+def test_publish_to_apple_account_works_when_background_sync_is_disabled(
+    mock_apple_publish, _mock_token, client, auth_headers, db
+):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="apple",
+        account_email="publisher@icloud.com",
+        access_token="https://caldav.icloud.com",
+        refresh_token="app-password",
+        sync_enabled=False,
+        status="ok",
+    )
+    event = Event(
+        title="Publish to Apple",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:publish-apple",
+        external_ids={},
+    )
+    db.add_all([account, event])
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={"event_ids": [event.id], "publish_targets": {str(event.id): ["apple:publisher@icloud.com"]}},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["published"] == 1
+    assert payload["created"] == 1
+    assert payload["failed"] == 0
+    assert payload["affected_accounts"] == ["apple:publisher@icloud.com"]
+    db.refresh(event)
+    assert event.external_ids["apple:publisher@icloud.com"] == "apple-published@example.test"
+    mock_apple_publish.assert_called_once()
+    assert mock_apple_publish.call_args.kwargs["username"] == "publisher@icloud.com"
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="APPLE_CREDENTIALS")
+@patch("app.services.external_calendar_service.ExternalCalendarService.delete_icloud_event", return_value=True)
+def test_publish_deletes_apple_event_by_uid(mock_apple_delete, _mock_token, client, auth_headers, db):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    db.add(OAuthAccount(
+        user_id=user.id,
+        provider="apple",
+        account_email="delete@icloud.com",
+        access_token="https://caldav.icloud.com",
+        refresh_token="app-password",
+    ))
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish",
+        headers=auth_headers,
+        json={
+            "event_ids": [],
+            "deleted_events": [{"external_ids": {"apple:delete@icloud.com": "remove@example.test"}}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["deleted"] == 1
+    assert response.json()["failed"] == 0
+    mock_apple_delete.assert_called_once_with(
+        url="https://caldav.icloud.com",
+        username="delete@icloud.com",
+        password="app-password",
+        uid="remove@example.test",
+    )
+
+
+@patch("app.services.event_actions.ensure_valid_token", return_value="APPLE_CREDENTIALS")
+@patch(
+    "app.services.external_calendar_service.ExternalCalendarService.publish_icloud_event",
+    return_value={"action": "created", "uid": "queued-apple@example.test"},
+)
+def test_reconnected_apple_account_replays_queued_publish(
+    mock_apple_publish, _mock_token, client, auth_headers, db
+):
+    user = db.query(User).filter(User.email.like("%@test.com")).first()
+    account = OAuthAccount(
+        user_id=user.id,
+        provider="apple",
+        account_email="recover@icloud.com",
+        access_token="https://caldav.icloud.com",
+        refresh_token="app-password",
+        sync_enabled=False,
+    )
+    event = Event(
+        title="Queued Apple event",
+        start_time=datetime(2026, 7, 12, 17, 0, tzinfo=timezone.utc),
+        end_time=datetime(2026, 7, 12, 18, 0, tzinfo=timezone.utc),
+        owner_id=user.id,
+        source="local",
+        account_email="local",
+        externalId="local:queued-apple",
+        external_ids={},
+    )
+    db.add_all([account, event])
+    db.commit()
+    db.add(SyncOperationLedger(
+        operation_key=f"calendar-publish:user:{user.id}:event:{event.id}:target:apple:recover@icloud.com",
+        operation_type="calendar_publish",
+        owner_user_id=user.id,
+        status="retry_pending",
+        attempt_count=1,
+        request_payload={"event_id": event.id, "target_key": "apple:recover@icloud.com"},
+    ))
+    db.commit()
+
+    response = client.post(
+        "/calendar/publish/pending",
+        headers=auth_headers,
+        json={"target_key": "apple:recover@icloud.com"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["replayed"] == 1
+    assert payload["published"] == 1
+    assert payload["failed"] == 0
+    db.refresh(event)
+    assert event.external_ids["apple:recover@icloud.com"] == "queued-apple@example.test"
+    mock_apple_publish.assert_called_once()
+
+
 @patch("app.services.event_actions.ensure_valid_token", return_value="expired-access")
 @patch(
     "app.services.google_calendar_service.GoogleCalendarService.create_event",
