@@ -237,6 +237,7 @@ export async function executeCalendarPublish(adapter, { userId, body, env, fetch
                     result: { action: result.action, provider_event_id: result.rawId },
                 });
                 resultRow.ok = true; resultRow.status = result.action; resultRow.message = `${result.action === "created" ? "Created" : "Updated"} ${target.key}`;
+                if (result.destinationCalendar) resultRow.destination_calendar = result.destinationCalendar;
                 created += result.action === "created" ? 1 : 0; eventSucceeded = true; affected.add(target.key);
             } catch (error) {
                 if (error instanceof ProviderAuthorizationError) {

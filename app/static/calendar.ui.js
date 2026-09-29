@@ -2207,6 +2207,7 @@ async function confirmPublishCurrentEvent() {
     const warnings = data.warnings || [];
     const published = Number(data.published || 0);
     const created = Number(data.created || 0);
+    const destinationSummary = window.describePublishDestinations?.(data.account_results) || "";
     const failureMessage = buildPublishFailureMessage(data, selectedKeys.map((key) => String(key).toLowerCase()));
 
     if ((published === 0 && created === 0) || Number(data.failed || 0) > 0) {
@@ -2224,6 +2225,10 @@ async function confirmPublishCurrentEvent() {
     modalState.publishAttemptState = "success";
     modalState.publishAttemptConsumed = true;
     renderConfirmPublishButtonState({ state: "success" });
+    const summary = document.getElementById("publishConfirmSummary");
+    if (summary && destinationSummary) {
+      summary.textContent = `Publish succeeded. Destination: ${destinationSummary}`;
+    }
 
     await new Promise((resolve) => window.setTimeout(resolve, 700));
 
@@ -2235,7 +2240,10 @@ async function confirmPublishCurrentEvent() {
       const warningSuffix = firstWarning ? `: ${firstWarning}` : "";
       window.showToast?.(`⚠️ Published ${published} event${published === 1 ? "" : "s"}; ${warnings.length} warning${warnings.length === 1 ? "" : "s"}${warningSuffix}`, "error");
     } else {
-      window.showToast?.(`✅ Published event to ${touched.length || selectedKeys.length} calendar${(touched.length || selectedKeys.length) === 1 ? "" : "s"} (${created} new link${created === 1 ? "" : "s"})`);
+      const destinationText = destinationSummary
+        ? `: ${destinationSummary}`
+        : ` to ${touched.length || selectedKeys.length} calendar${(touched.length || selectedKeys.length) === 1 ? "" : "s"}`;
+      window.showToast?.(`✅ Published event${destinationText} (${created} new link${created === 1 ? "" : "s"})`);
     }
   } catch (err) {
     console.error("❌ Single-event publish failed", err);

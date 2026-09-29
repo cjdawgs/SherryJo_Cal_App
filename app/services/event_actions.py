@@ -551,6 +551,7 @@ class EventActions:
                         target_result["ok"] = True
                         target_result["status"] = action
                         target_result["message"] = f"{action.title()} {target_key}"
+                        target_result["destination_calendar"] = apple_result.get("destination_calendar")
                         _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
                         succeeded_targets.append((target_key, target_result.copy()))
                         account_results.append(target_result)
@@ -647,6 +648,8 @@ class EventActions:
                     target_result["ok"] = True
                     target_result["status"] = action
                     target_result["message"] = f"{action.title()} {target_key}"
+                    if provider == "apple":
+                        target_result["destination_calendar"] = apple_result.get("destination_calendar")
                     _set_account_publish_status(db, user.id, provider, acct_email, ok=True)
                     succeeded_targets.append((target_key, target_result.copy()))
                 else:

@@ -65,7 +65,7 @@ test("publishes selected events to Apple CalDAV and persists the VEVENT UID", as
         assert.equal(options.serverUrl, "https://caldav.example.test");
         assert.deepEqual(options.credentials, { username: "user@icloud.com", password: "apple-app-password" });
         return {
-            fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", components: ["VEVENT"] }],
+            fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", displayName: "Family", components: ["VEVENT"] }],
             fetchCalendarObjects: async () => { throw new Error("Collection query failed: 412 Precondition Failed"); },
             createCalendarObject: async () => new Response(null, { status: 201 }),
         };
@@ -82,6 +82,10 @@ test("publishes selected events to Apple CalDAV and persists the VEVENT UID", as
     assert.equal(result.created, 1);
     assert.equal(result.failed, 0);
     assert.match(links[0][2]["apple:user@icloud.com"], /^sj[0-9a-v]{24}@sherryjo-cal\.app$/);
+    assert.deepEqual(result.account_results[0].destination_calendar, {
+        name: "Family",
+        url: "https://caldav.example.test/calendars/default/",
+    });
 });
 
 test("reconciles a deterministic Google create conflict before completing", async () => {

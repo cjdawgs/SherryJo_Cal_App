@@ -20,7 +20,7 @@ const event = {
 function makeClient({ objects = [], createResponse = new Response(null, { status: 201 }) } = {}) {
     const calls = [];
     const client = {
-        fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", components: ["VEVENT"] }],
+        fetchCalendars: async () => [{ url: "https://caldav.example.test/calendars/default/", displayName: "Family", components: ["VEVENT"] }],
         fetchCalendarObjects: async (params) => { calls.push(["find", params]); return objects; },
         createCalendarObject: async (params) => { calls.push(["create", params]); return createResponse; },
         updateCalendarObject: async (params) => { calls.push(["update", params]); return new Response(null, { status: 204 }); },
@@ -35,7 +35,11 @@ test("creates an Apple VEVENT with stable UID and escaped content", async () => 
         account, event, uid: "sj-publish@example.test", clientFactory: mock.clientFactory,
     });
 
-    assert.deepEqual(result, { action: "created", uid: "sj-publish@example.test" });
+    assert.deepEqual(result, {
+        action: "created",
+        uid: "sj-publish@example.test",
+        destinationCalendar: { name: "Family", url: "https://caldav.example.test/calendars/default/" },
+    });
     const [, request] = mock.calls.find(([action]) => action === "create");
     const component = ICAL.Component.fromString(request.iCalString);
     const vevent = new ICAL.Event(component.getFirstSubcomponent("vevent"));
@@ -58,6 +62,10 @@ test("updates an existing Apple UID while preserving recurrence rules", async ()
     });
 
     assert.equal(result.action, "updated");
+    assert.deepEqual(result.destinationCalendar, {
+        name: "Family",
+        url: "https://caldav.example.test/calendars/default/",
+    });
     const [, request] = mock.calls.find(([action]) => action === "update");
     const updated = ICAL.Component.fromString(request.calendarObject.data);
     const vevent = updated.getFirstSubcomponent("vevent");

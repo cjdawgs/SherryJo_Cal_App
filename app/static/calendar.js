@@ -3572,6 +3572,7 @@ async function publishNow(options = {}) {
     const failed = data.failed ?? 0;
     const warnings = data.warnings || [];
     const accounts = (data.affected_accounts || []);
+    const destinationSummary = describePublishDestinations(data.account_results);
     const rangeStart = data.range_start;
     const rangeEnd = data.range_end;
 
@@ -3585,7 +3586,8 @@ async function publishNow(options = {}) {
 
     if (failed > 0) {
       const warningText = warnings.length ? `: ${warnings[0]}` : "";
-      showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed${warningText}`, "error");
+      const destinationText = destinationSummary ? `; succeeded at ${destinationSummary}` : "";
+      showToast(`⚠️ Published ${published} / ${published + failed} events — ${failed} failed${destinationText}${warningText}`, "error");
     } else if (published === 0 && deleted === 0 && localOnlyChanges.length === 0) {
       // Nothing to send externally (event has no linked provider account) — still resolve the request.
       showToast("ℹ️ No provider accounts linked — nothing to publish externally", "info");
@@ -3595,7 +3597,8 @@ async function publishNow(options = {}) {
         clearPendingPublishChanges();
       }
     } else {
-      showToast(`✅ Published ${published} updates, ${deleted} deletes → ${accountSummary}${rangeSummary}`);
+      const destinationText = destinationSummary ? `; destination: ${destinationSummary}` : "";
+      showToast(`✅ Published ${published} updates, ${deleted} deletes → ${accountSummary}${rangeSummary}${destinationText}`);
       if (selectedChanges.length) {
         removePendingPublishChanges(selectedChanges.map((change) => change.key));
       } else {
@@ -3620,6 +3623,21 @@ async function publishNow(options = {}) {
 }
 
 window.publishNow = publishNow;
+
+function describePublishDestinations(accountResults = []) {
+  const destinations = (Array.isArray(accountResults) ? accountResults : [])
+    .filter((result) => result?.ok === true && result?.destination_calendar)
+    .map((result) => {
+      const destination = result.destination_calendar;
+      const provider = String(result.provider || "calendar").toUpperCase();
+      const name = String(destination.name || destination.url || "Apple calendar").trim();
+      const url = String(destination.url || "").trim();
+      return `${provider} “${name}”${url && url !== name ? ` (${url})` : ""}`;
+    });
+  return [...new Set(destinations)].join("; ");
+}
+
+window.describePublishDestinations = describePublishDestinations;
 
 function closePublishReviewMenu() {
   document.getElementById("publishReviewMenu")?.remove();

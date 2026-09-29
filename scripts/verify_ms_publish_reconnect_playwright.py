@@ -29,6 +29,12 @@ DEFAULT_BASE = "http://127.0.0.1:8000"
 
 MS_EMAIL = "chipjohansson@outlook.com"
 MS_KEY = f"microsoft:{MS_EMAIL}"
+APPLE_EMAIL = "ui-smoke@icloud.com"
+APPLE_KEY = f"apple:{APPLE_EMAIL}"
+APPLE_DESTINATION = {
+    "name": "Family Calendar",
+    "url": "https://caldav.example.test/calendars/family/",
+}
 EVENT_ID = 4242
 
 ACCOUNTS_PAYLOAD = [
@@ -48,7 +54,15 @@ ACCOUNTS_PAYLOAD = [
             "recommended_label": "Reconnect",
             "resolution_steps": ["Click Reconnect", "Complete Microsoft consent", "Retry publish"],
         },
-    }
+    },
+    {
+        "id": 10,
+        "provider": "apple",
+        "account_email": APPLE_EMAIL,
+        "status": "ok",
+        "is_primary": False,
+        "sync_enabled": True,
+    },
 ]
 
 
@@ -120,7 +134,26 @@ def make_router(requests_log: list[str]):
             return
 
         if path == "/calendar/publish" and method == "POST":
-            _json(route, _publish_failure_payload())
+            targets = request.post_data_json.get("publish_targets", {})
+            selected_keys = {key for values in targets.values() for key in values}
+            if APPLE_KEY in selected_keys:
+                _json(route, {
+                    "status": "success",
+                    "published": 1,
+                    "created": 1,
+                    "failed": 0,
+                    "affected_accounts": [APPLE_KEY],
+                    "warnings": [],
+                    "account_results": [{
+                        "target_key": APPLE_KEY,
+                        "provider": "apple",
+                        "ok": True,
+                        "status": "created",
+                        "destination_calendar": APPLE_DESTINATION,
+                    }],
+                })
+            else:
+                _json(route, _publish_failure_payload())
             return
 
         if path == "/accounts" and method == "GET":
@@ -250,6 +283,31 @@ def main(base_url: str) -> int:
         if "POST /calendar/publish/pending" not in requests_log:
             failures.append("Successful reconnect did not replay the queued publish intent.")
 
+        apple_page = browser.new_page()
+        apple_page.route("**/*", make_router(requests_log))
+        apple_page.add_init_script("localStorage.setItem('token', 'apple-destination-smoke-token')")
+        apple_page.goto(f"{base_url.rstrip('/')}/calendar-ui", wait_until="domcontentloaded")
+        apple_page.wait_for_selector(".fc-event", timeout=15000)
+        apple_page.locator(".fc-event").first.dblclick()
+        apple_page.wait_for_selector("#createEventModal.show", timeout=5000)
+        apple_checkbox = apple_page.locator(
+            f'#eventPublishTargets input[data-publish-account-key][value="{APPLE_KEY}"]'
+        )
+        apple_checkbox.wait_for(state="visible", timeout=5000)
+        apple_checkbox.check()
+        apple_page.locator("#publishEventBtn").click()
+        apple_page.wait_for_selector("#publishConfirmDialog.show", timeout=5000)
+        apple_page.locator("#confirmPublishEventBtn").click()
+        apple_page.wait_for_function(
+            "() => document.getElementById('publishConfirmSummary')?.textContent.includes('Destination: APPLE')",
+            timeout=5000,
+        )
+        apple_destination_summary = apple_page.locator("#publishConfirmSummary").inner_text()
+        if APPLE_DESTINATION["name"] not in apple_destination_summary:
+            failures.append(f"Apple publish confirmation omitted destination name: {apple_destination_summary!r}")
+        if APPLE_DESTINATION["url"] not in apple_destination_summary:
+            failures.append(f"Apple publish confirmation omitted destination URL: {apple_destination_summary!r}")
+
         browser.close()
 
     if failures:
@@ -262,6 +320,7 @@ def main(base_url: str) -> int:
     print(f"  - Publish failure message: {summary_text.strip()}")
     print(f"  - Remediation link: {href}")
     print(f"  - Reconnect target navigated to: {final_url}")
+    print(f"  - Apple publish destination: {apple_destination_summary.strip()}")
     return 0
 
 

@@ -133,6 +133,10 @@ class ExternalCalendarService:
             if lookup_existing else (None, None)
         )
         if existing_event is not None:
+            destination_calendar = {
+                "name": str(getattr(_existing_calendar, "name", "") or getattr(_existing_calendar, "url", "Apple calendar")),
+                "url": str(getattr(_existing_calendar, "url", "") or ""),
+            }
             component = existing_event.icalendar_component
             component["SUMMARY"] = str(event_payload.get("title") or "Untitled Event")
             component["DESCRIPTION"] = str(event_payload.get("description") or "")
@@ -145,14 +149,18 @@ class ExternalCalendarService:
             component["DTSTAMP"] = datetime.now(timezone.utc)
             component["SEQUENCE"] = int(component.get("SEQUENCE", 0)) + 1
             existing_event.save(increase_seqno=False)
-            return {"action": "updated", "uid": normalized_uid}
+            return {"action": "updated", "uid": normalized_uid, "destination_calendar": destination_calendar}
 
         target_calendar = calendars[0]
+        destination_calendar = {
+            "name": str(getattr(target_calendar, "name", "") or getattr(target_calendar, "url", "Apple calendar")),
+            "url": str(getattr(target_calendar, "url", "") or ""),
+        }
         target_calendar.save_event(
             ical=self._build_icloud_event(normalized_uid, event_payload).to_ical().decode("utf-8"),
             no_overwrite=True,
         )
-        return {"action": "created", "uid": normalized_uid}
+        return {"action": "created", "uid": normalized_uid, "destination_calendar": destination_calendar}
 
     def delete_icloud_event(self, url, username, password, uid):
         """Delete an iCloud event by UID; a missing event is an idempotent success."""

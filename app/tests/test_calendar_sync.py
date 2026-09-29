@@ -243,7 +243,11 @@ def test_publish_single_event_to_selected_account_creates_missing_link(mock_goog
 @patch("app.services.event_actions.ensure_valid_token", return_value="APPLE_CREDENTIALS")
 @patch(
     "app.services.external_calendar_service.ExternalCalendarService.publish_icloud_event",
-    return_value={"action": "created", "uid": "apple-published@example.test"},
+    return_value={
+        "action": "created",
+        "uid": "apple-published@example.test",
+        "destination_calendar": {"name": "Family", "url": "https://caldav.icloud.com/calendars/family/"},
+    },
 )
 def test_publish_to_apple_account_works_when_background_sync_is_disabled(
     mock_apple_publish, _mock_token, client, auth_headers, db
@@ -283,6 +287,10 @@ def test_publish_to_apple_account_works_when_background_sync_is_disabled(
     assert payload["created"] == 1
     assert payload["failed"] == 0
     assert payload["affected_accounts"] == ["apple:publisher@icloud.com"]
+    assert payload["account_results"][0]["destination_calendar"] == {
+        "name": "Family",
+        "url": "https://caldav.icloud.com/calendars/family/",
+    }
     db.refresh(event)
     assert event.external_ids["apple:publisher@icloud.com"] == "apple-published@example.test"
     mock_apple_publish.assert_called_once()

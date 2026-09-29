@@ -365,6 +365,8 @@ def test_fetch_apple_calendar_events_without_credentials():
 
 def test_publish_icloud_event_creates_an_escaped_vevent(service, monkeypatch):
     calendar = MagicMock()
+    calendar.name = "Family"
+    calendar.url = "https://caldav.icloud.com/calendars/family/"
     calendar.event_by_uid.side_effect = Exception("event not found")
     monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
 
@@ -382,7 +384,14 @@ def test_publish_icloud_event_creates_an_escaped_vevent(service, monkeypatch):
         lookup_existing=False,
     )
 
-    assert result == {"action": "created", "uid": "publish-uid@example.test"}
+    assert result == {
+        "action": "created",
+        "uid": "publish-uid@example.test",
+        "destination_calendar": {
+            "name": "Family",
+            "url": "https://caldav.icloud.com/calendars/family/",
+        },
+    }
     calendar.event_by_uid.assert_not_called()
     calendar.save_event.assert_called_once()
     from icalendar import Calendar
@@ -407,6 +416,8 @@ def test_publish_icloud_event_updates_by_uid_and_preserves_recurrence(service, m
     existing.icalendar_component = component
     calendar = MagicMock()
     calendar.event_by_uid.return_value = existing
+    calendar.name = "Family"
+    calendar.url = "https://caldav.icloud.com/calendars/family/"
     monkeypatch.setattr(ecs, "caldav", make_caldav(calendars=[calendar]))
 
     result = service.publish_icloud_event(
@@ -422,7 +433,14 @@ def test_publish_icloud_event_updates_by_uid_and_preserves_recurrence(service, m
         "series@example.test",
     )
 
-    assert result == {"action": "updated", "uid": "series@example.test"}
+    assert result == {
+        "action": "updated",
+        "uid": "series@example.test",
+        "destination_calendar": {
+            "name": "Family",
+            "url": "https://caldav.icloud.com/calendars/family/",
+        },
+    }
     assert str(component.get("SUMMARY")) == "Updated title"
     assert component.get("RRULE")["FREQ"] == "weekly"
     assert component.get("RRULE")["COUNT"] == 4

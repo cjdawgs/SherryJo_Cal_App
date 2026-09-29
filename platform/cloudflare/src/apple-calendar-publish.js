@@ -119,6 +119,12 @@ function writableCalendars(calendars) {
     return calendars.filter((calendar) => !Array.isArray(calendar.components) || calendar.components.includes("VEVENT"));
 }
 
+function calendarDestination(calendar) {
+    const url = String(calendar?.url || "").trim();
+    const name = typeof calendar?.displayName === "string" ? calendar.displayName.trim() : "";
+    return { name: name || url || "Apple calendar", url };
+}
+
 export async function publishAppleCalendarEvent({
     account,
     event,
@@ -136,7 +142,7 @@ export async function publishAppleCalendarEvent({
             const calendarObject = { ...existing.object, data: updateVeventData(existing.object.data, event) };
             const response = await client.updateCalendarObject({ calendarObject });
             if (!response?.ok) throw new Error(`CalDAV update returned status ${response?.status || "unknown"}`);
-            return { action: "updated", uid };
+            return { action: "updated", uid, destinationCalendar: calendarDestination(existing.calendar) };
         }
 
         const calendar = writableCalendars(calendars)[0];
@@ -147,7 +153,7 @@ export async function publishAppleCalendarEvent({
             iCalString: createVcalendarData(uid, event),
         });
         if (!response?.ok) throw new Error(`CalDAV create returned status ${response?.status || "unknown"}`);
-        return { action: "created", uid };
+        return { action: "created", uid, destinationCalendar: calendarDestination(calendar) };
     } catch (error) {
         throw appleFailure(error);
     }
