@@ -223,6 +223,16 @@ def test_admin_tv_health_snapshot_identifies_connection_drop_signatures():
     assert "<th>Connection diagnosis</th>" in admin_html
 
 
+def test_admin_tv_live_status_uses_user_email_instead_of_numeric_id():
+    root = Path(__file__).resolve().parents[2]
+    text = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+
+    assert 'apiRequest("/admin/users", { method: "GET" })' in text
+    assert '_liveStatusEmailByUser.get(String(rows[0]?.user_id ?? ""))' in text
+    assert "<strong>User email:</strong>" in text
+    assert '"Email unavailable"' in text
+
+
 def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     text = _tv_js_text()
     assert "const POLL_MS = 600000;" in text

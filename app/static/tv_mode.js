@@ -344,6 +344,7 @@ let _liveStatusPanelLoaded = false;
 // device_id -> array of diagnostic rows (most-recent first), cached after the
 // last Load/Refresh click so switching the device dropdown never re-fetches.
 let _liveStatusRowsByDevice = new Map();
+let _liveStatusEmailByUser = new Map();
 // A device that has not phoned home within this window is treated as OFFLINE.
 // Heartbeats are sent at most every 15 minutes, so two missed cycles plus
 // margin is a safe "truly gone quiet" signal rather than a transient blip.
@@ -725,7 +726,7 @@ function _renderLiveStatusCard(deviceId) {
   const state = _computeLiveStatus(rows);
   const fix = _liveStatusFixList(state);
   const shortId = deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`;
-  const userId = rows[0]?.user_id ?? "—";
+  const userEmail = _liveStatusEmailByUser.get(String(rows[0]?.user_id ?? "")) || "Email unavailable";
   const deviceLabel = _deviceIdentityLabel(rows[0]?.device_ua);
 
   tvLiveStatusCard.innerHTML = `
@@ -734,7 +735,7 @@ function _renderLiveStatusCard(deviceId) {
       <span class="tv-status-label status-${state.status}">${_escapeHtml(state.label)}</span>
     </div>
     <div class="tv-status-fields">
-      <div><strong>User:</strong> ${_escapeHtml(String(userId))}</div>
+      <div><strong>User email:</strong> ${_escapeHtml(userEmail)}</div>
       <div><strong>Device ID:</strong> <span style="font-family:monospace;">${_escapeHtml(shortId)}</span></div>
       <div><strong>Device type:</strong> ${_escapeHtml(deviceLabel)}</div>
       <div><strong>Last seen:</strong> ${state.minutesSinceSeen === null ? "no data" : `${_fmtDiagTime(rows[0]?.ts_server)} (${state.minutesSinceSeen}m ago)`}</div>
@@ -751,11 +752,21 @@ function _renderLiveStatusCard(deviceId) {
 async function loadTvLiveStatus() {
   if (!tvLiveStatusSelect || !tvLiveStatusCard) return;
   try {
-    const data = await apiRequest("/tv/diag?scope=all&hours=168", { method: "GET" });
+    const [data, usersResponse] = await Promise.all([
+      apiRequest("/tv/diag?scope=all&hours=168", { method: "GET" }),
+      apiRequest("/admin/users", { method: "GET" }),
+    ]);
     if (!data || !Array.isArray(data.entries)) {
       if (tvLiveStatusCount) tvLiveStatusCount.textContent = "error loading";
       return;
     }
+
+    const userRows = usersResponse?.ok ? await usersResponse.json() : [];
+    _liveStatusEmailByUser = new Map(
+      (Array.isArray(userRows) ? userRows : [])
+        .filter((user) => user?.id != null && user?.email)
+        .map((user) => [String(user.id), String(user.email)])
+    );
 
     const byDevice = new Map();
     for (const entry of data.entries) {
@@ -776,8 +787,8 @@ async function loadTvLiveStatus() {
     const previouslySelected = tvLiveStatusSelect.value;
     const options = Array.from(byDevice.entries()).map(([deviceId, rows]) => {
       const shortId = deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`;
-      const userId = rows[0]?.user_id ?? "—";
-      return { deviceId, label: `User ${userId} · ${shortId} · ${_deviceIdentityLabel(rows[0]?.device_ua)}` };
+      const userEmail = _liveStatusEmailByUser.get(String(rows[0]?.user_id ?? "")) || "Email unavailable";
+      return { deviceId, label: `${userEmail} · ${shortId} · ${_deviceIdentityLabel(rows[0]?.device_ua)}` };
     });
 
     tvLiveStatusSelect.innerHTML = options
@@ -1035,6 +1046,7 @@ if (tvLiveStatusClearBtn) {
     if (tvLiveStatusCount) tvLiveStatusCount.textContent = "cleared";
     if (tvLiveStatusSelect) tvLiveStatusSelect.innerHTML = '<option value="">No devices loaded yet</option>';
     _liveStatusRowsByDevice = new Map();
+    _liveStatusEmailByUser = new Map();
   });
 }
 
