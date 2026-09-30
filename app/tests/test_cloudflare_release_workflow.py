@@ -8,16 +8,19 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
+def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
     workflow = yaml.load(
         (ROOT / ".github" / "workflows" / "cloudflare-release.yml").read_text(encoding="utf-8"),
         Loader=yaml.BaseLoader,
     )
 
-    assert set(workflow["on"]) == {"workflow_dispatch"}
+    # Push to main is the primary trigger; workflow_dispatch remains only for
+    # an on-demand manual re-run against a chosen set of URLs.
+    assert set(workflow["on"]) == {"push", "workflow_dispatch"}
+    assert workflow["on"]["push"]["branches"] == ["main"]
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    assert inputs["render_deployment_ready"]["default"] == "false"
-    assert inputs["promote_production"]["default"] == "false"
+    assert "render_deployment_ready" not in inputs
+    assert "promote_production" not in inputs
     assert inputs["production_url"]["default"] == "https://sherryjo-cal-app.realty-cal.workers.dev"
     assert inputs["canary_url"]["default"] == "https://sherryjo-cal-app-canary.realty-cal.workers.dev"
 
@@ -43,7 +46,9 @@ def test_cloudflare_release_is_manual_and_promotion_is_smoke_gated():
     }
 
     promotion = jobs["promote-root-worker"]
-    assert "inputs.promote_production" in promotion["if"]
+    # No manual approval input gates promotion; the only gate is that both
+    # canary smoke jobs (below) must succeed first.
+    assert "if" not in promotion
     assert set(promotion["needs"]) == {
         "smoke-unauthenticated-canary",
         "smoke-authenticated-canary",
@@ -108,8 +113,12 @@ def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
         step for step in jobs["smoke-authenticated-production"]["steps"]
         if step.get("name") == "Run reversible production smoke"
     )
-    assert 'inputs.canary_url' in canary_smoke["run"]
-    assert 'inputs.production_url' in production_smoke["run"]
+    # URLs are resolved through env vars (with an inputs.* || vars.* || literal
+    # fallback chain) so the same steps work on both push and workflow_dispatch.
+    assert "inputs.canary_url" in canary_smoke["env"]["CANARY_URL"]
+    assert "inputs.production_url" in production_smoke["env"]["PRODUCTION_URL"]
+    assert '"$CANARY_URL"' in canary_smoke["run"]
+    assert '"$PRODUCTION_URL"' in production_smoke["run"]
     assert "--allow-remote" in canary_smoke["run"]
     assert "--allow-remote" in production_smoke["run"]
 
