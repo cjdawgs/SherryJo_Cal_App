@@ -19,7 +19,7 @@ D1 is not a drop-in replacement for Supabase PostgreSQL. The application current
 | Authentication | HS256 JWT, Google OAuth, Microsoft OAuth, encrypted provider tokens | Secret or callback drift would sign users out or break OAuth |
 | Real time | FastAPI WebSocket endpoint plus in-process APScheduler | Requires stateful coordination and scheduled execution outside request Workers |
 | Operations | Render service exists, but repository previously lacked a Render blueprint | Dashboard-only configuration can drift |
-| CI/CD | Python tests existed; Azure deployment workflow is legacy | No unified Cloudflare/Render readiness gate previously existed |
+| CI/CD | Python tests existed; the legacy Azure deployment workflow was removed 2026-09-30 | Cloudflare Release now runs automatically on every push to `main`, gated only by automated verify/smoke tests |
 
 Security debt includes symmetric JWT key distribution, query-string WebSocket tokens, runtime schema mutation, and an application-owner database connection that bypasses RLS. These are migration work items, not phase-zero changes. On 2026-08-02, the owner accepted the residual risk of continuing without rotating a Supabase credential previously exposed in a tracked task file. The value was removed from the current tree, but revocation and historical removal are not asserted; the credential must not be copied to Cloudflare, and this exception does not waive JWT, ticket, RLS, least-privilege-role, or production approval gates.
 
@@ -119,4 +119,4 @@ Before a non-proxy mode is deployed, live PostgreSQL RLS tests must pass, the ow
 - Supabase remains available from both platforms and is the only writer during early phases.
 - OAuth providers permit both the current Render callbacks and future Cloudflare-domain callbacks during canary.
 - Cloudflare secrets are configured with `wrangler secret put`; no production secret belongs in Git.
-- Azure workflow removal is a separate decision after confirming it is unused.
+- The legacy Azure Web App deployment workflow was confirmed unused and removed on 2026-09-30 (`.github/workflows/main_sherryjo-app.yml`).

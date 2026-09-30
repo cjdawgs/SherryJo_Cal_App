@@ -79,7 +79,7 @@ Use my Synergy SQL standard:
 
 - Leading commas in SELECT
 - JOINs on a single line
-- WHERE clause always begins with:
+- WHERE clause always begins with:                                                                    
 WHERE 1=1
 - AND conditions on a new indented line
 - OR conditions grouped and indented

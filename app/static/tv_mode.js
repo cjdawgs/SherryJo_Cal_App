@@ -330,10 +330,24 @@ const repairDiagCount = document.getElementById("tvRepairDiagCount");
 const repairDiagSummary = document.getElementById("tvRepairDiagSummary");
 const repairDiagWindow = document.getElementById("tvRepairDiagWindow");
 const repairDiagPanel = document.querySelector(".tv-repair-panel");
+const tvLiveStatusLoadBtn = document.getElementById("tvLiveStatusLoadBtn");
+const tvLiveStatusClearBtn = document.getElementById("tvLiveStatusClearBtn");
+const tvLiveStatusCount = document.getElementById("tvLiveStatusCount");
+const tvLiveStatusSelect = document.getElementById("tvLiveStatusSelect");
+const tvLiveStatusCard = document.getElementById("tvLiveStatusCard");
+const tvLiveStatusPanel = document.getElementById("tvLiveStatusPanel");
 let _diagAutoHandle = null;
 let _stalePanelLoaded = false;
 let _repairPanelLoaded = false;
 let _healthPanelLoaded = false;
+let _liveStatusPanelLoaded = false;
+// device_id -> array of diagnostic rows (most-recent first), cached after the
+// last Load/Refresh click so switching the device dropdown never re-fetches.
+let _liveStatusRowsByDevice = new Map();
+// A device that has not phoned home within this window is treated as OFFLINE.
+// Heartbeats are sent at most every 15 minutes, so two missed cycles plus
+// margin is a safe "truly gone quiet" signal rather than a transient blip.
+const LIVE_STATUS_OFFLINE_MINUTES = 35;
 const _tvHealthFailureEvents = new Set([
   "tv_fetch_timeout",
   "tv_fetch_network_error",
@@ -603,6 +617,181 @@ async function loadTvHealth() {
   }
 }
 
+// ─────────────────────────────────────────────────
+// TV LIVE STATUS & UPTIME  (green/yellow/red current-state monitor)
+// ─────────────────────────────────────────────────
+
+// Best-effort device identification from the captured User-Agent string.
+// This is display-only labeling, not a security control.
+function _deviceIdentityLabel(ua) {
+  const value = String(ua || "");
+  if (/silk/i.test(value)) return "Amazon Fire TV (Silk browser)";
+  if (/apple\s*tv|tvos/i.test(value)) return "Apple TV";
+  if (/android/i.test(value)) return "Android device";
+  if (/crkey|chromecast/i.test(value)) return "Chromecast";
+  return value ? "Unknown device" : "Unknown device (no User-Agent captured)";
+}
+
+function _fmtDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  const totalMinutes = Math.floor(ms / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const parts = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes || !parts.length) parts.push(`${minutes}m`);
+  return parts.join(" ");
+}
+
+// Derives the current green/yellow/red state for one device from its
+// diagnostic rows (most-recent first). This mirrors the FireTV Health
+// Snapshot severity logic above, but reports "right now" status plus
+// continuous uptime instead of a historical table.
+function _computeLiveStatus(rows) {
+  const nowMs = Date.now();
+  const lastSeenMs = _toTsMs(rows[0]?.ts_server) || null;
+  const lastHeartbeat = rows.find((row) => String(row?.event || "") === "heartbeat");
+  const lastFailure = rows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
+  const lastSessionStart = rows.find((row) => String(row?.event || "") === "session_start");
+  const hidden = _deriveHiddenStatus(rows);
+
+  const minutesSinceSeen = Number.isFinite(lastSeenMs) ? Math.floor((nowMs - lastSeenMs) / 60000) : null;
+  const isOffline = minutesSinceSeen === null || minutesSinceSeen >= LIVE_STATUS_OFFLINE_MINUTES;
+
+  let status = "green";
+  let label = "ONLINE";
+  if (isOffline) {
+    status = "red";
+    label = "OFFLINE";
+  } else if (lastFailure || hidden.warn) {
+    status = "yellow";
+    label = "WARNING";
+  }
+
+  const sessionStartMs = _toTsMs(lastSessionStart?.ts_server) || null;
+  const uptimeMs = status !== "red" && Number.isFinite(sessionStartMs) ? nowMs - sessionStartMs : null;
+
+  return {
+    status,
+    label,
+    lastSeenMs,
+    minutesSinceSeen,
+    lastHeartbeat,
+    lastFailure,
+    hidden,
+    sessionStartMs,
+    uptimeMs,
+    connectionDiagnosis: _connectionDiagnosis(rows),
+  };
+}
+
+// Problem-resolution guidance shown under the status card. Kept data-driven
+// (not hardcoded per device) so any device the admin selects gets relevant
+// next steps instead of a static, one-size-fits-all message.
+function _liveStatusFixList(state) {
+  if (state.status === "green") {
+    return { ok: true, title: "No action needed", items: ["Device is checking in normally. No troubleshooting steps required."] };
+  }
+
+  const items = [];
+  if (state.status === "red") {
+    items.push("Confirm the TV/FireStick has power and the app is on-screen (not asleep or on the Fire OS home screen).");
+    items.push("Run the one-time FireStick sleep fix ADB commands in the card to the right — Fire OS can force sleep even while this app is open.");
+    items.push("Check Wi-Fi/network on the device; a dropped connection stops all heartbeats and event syncs.");
+    items.push("If the TV was recently unpaired or shows a 401 loop, check the TV Re-pair Risk Log below and re-pair from the TV screen.");
+  } else if (state.status === "yellow") {
+    if (state.hidden.warn) {
+      const hiddenMinutes = Number.isFinite(state.hidden.hiddenDurationMinutes) ? state.hidden.hiddenDurationMinutes : 0;
+      items.push(`Screen has been hidden/backgrounded for ${hiddenMinutes}m — check HDMI-CEC and screensaver settings on the TV.`);
+    }
+    if (state.lastFailure) {
+      items.push(`Last network/token failure: ${_escapeHtml(_eventTag(state.lastFailure.event))}. ${state.connectionDiagnosis}`);
+    }
+    items.push("Device is still checking in, so this is a soft warning — reload the TV dashboard if the picture looks frozen or blank.");
+  }
+  return { ok: false, title: "Suggested fix steps", items };
+}
+
+function _renderLiveStatusCard(deviceId) {
+  if (!tvLiveStatusCard) return;
+  const rows = _liveStatusRowsByDevice.get(deviceId);
+  if (!rows || !rows.length) {
+    tvLiveStatusCard.innerHTML = "No diagnostic rows found for the selected device.";
+    return;
+  }
+
+  const state = _computeLiveStatus(rows);
+  const fix = _liveStatusFixList(state);
+  const shortId = deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`;
+  const userId = rows[0]?.user_id ?? "—";
+  const deviceLabel = _deviceIdentityLabel(rows[0]?.device_ua);
+
+  tvLiveStatusCard.innerHTML = `
+    <div class="tv-status-headline">
+      <span class="tv-status-dot status-${state.status}"></span>
+      <span class="tv-status-label status-${state.status}">${_escapeHtml(state.label)}</span>
+    </div>
+    <div class="tv-status-fields">
+      <div><strong>User:</strong> ${_escapeHtml(String(userId))}</div>
+      <div><strong>Device ID:</strong> <span style="font-family:monospace;">${_escapeHtml(shortId)}</span></div>
+      <div><strong>Device type:</strong> ${_escapeHtml(deviceLabel)}</div>
+      <div><strong>Last seen:</strong> ${state.minutesSinceSeen === null ? "no data" : `${_fmtDiagTime(rows[0]?.ts_server)} (${state.minutesSinceSeen}m ago)`}</div>
+      <div><strong>Last heartbeat:</strong> ${state.lastHeartbeat ? _fmtDiagTime(state.lastHeartbeat.ts_server) : "none in window"}</div>
+      <div><strong>Current uptime:</strong> ${state.uptimeMs != null ? _fmtDuration(state.uptimeMs) : "unknown (offline or no session_start seen)"}</div>
+    </div>
+    <div class="tv-status-fix-box${fix.ok ? " is-ok" : ""}">
+      <h4>${_escapeHtml(fix.title)}</h4>
+      <ul>${fix.items.map((item) => `<li>${item}</li>`).join("")}</ul>
+    </div>
+  `;
+}
+
+async function loadTvLiveStatus() {
+  if (!tvLiveStatusSelect || !tvLiveStatusCard) return;
+  try {
+    const data = await apiRequest("/tv/diag?scope=all&hours=168", { method: "GET" });
+    if (!data || !Array.isArray(data.entries)) {
+      if (tvLiveStatusCount) tvLiveStatusCount.textContent = "error loading";
+      return;
+    }
+
+    const byDevice = new Map();
+    for (const entry of data.entries) {
+      const deviceId = String(entry?.device_id || "unknown");
+      if (!byDevice.has(deviceId)) byDevice.set(deviceId, []);
+      byDevice.get(deviceId).push(entry);
+    }
+    _liveStatusRowsByDevice = byDevice;
+
+    if (tvLiveStatusCount) tvLiveStatusCount.textContent = `${byDevice.size} device(s) in the last 7 days`;
+
+    if (!byDevice.size) {
+      tvLiveStatusSelect.innerHTML = '<option value="">No devices found</option>';
+      tvLiveStatusCard.innerHTML = "No devices found in the last 7 days.";
+      return;
+    }
+
+    const previouslySelected = tvLiveStatusSelect.value;
+    const options = Array.from(byDevice.entries()).map(([deviceId, rows]) => {
+      const shortId = deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`;
+      const userId = rows[0]?.user_id ?? "—";
+      return { deviceId, label: `User ${userId} · ${shortId} · ${_deviceIdentityLabel(rows[0]?.device_ua)}` };
+    });
+
+    tvLiveStatusSelect.innerHTML = options
+      .map((opt) => `<option value="${_escapeHtml(opt.deviceId)}">${_escapeHtml(opt.label)}</option>`)
+      .join("");
+
+    const stillValid = options.some((opt) => opt.deviceId === previouslySelected);
+    tvLiveStatusSelect.value = stillValid ? previouslySelected : options[0].deviceId;
+    _renderLiveStatusCard(tvLiveStatusSelect.value);
+  } catch (err) {
+    if (tvLiveStatusCount) tvLiveStatusCount.textContent = `Error: ${err.message}`;
+  }
+}
+
 async function loadPublishDiag() {
   if (!publishDiagBody) return;
   try {
@@ -831,6 +1020,46 @@ if (tvHealthPanel) {
       loadTvHealth();
     }
   });
+}
+
+if (tvLiveStatusLoadBtn) {
+  tvLiveStatusLoadBtn.addEventListener("click", () => {
+    _liveStatusPanelLoaded = true;
+    loadTvLiveStatus();
+  });
+}
+
+if (tvLiveStatusClearBtn) {
+  tvLiveStatusClearBtn.addEventListener("click", () => {
+    if (tvLiveStatusCard) tvLiveStatusCard.innerHTML = "Cleared view (server log unchanged).";
+    if (tvLiveStatusCount) tvLiveStatusCount.textContent = "cleared";
+    if (tvLiveStatusSelect) tvLiveStatusSelect.innerHTML = '<option value="">No devices loaded yet</option>';
+    _liveStatusRowsByDevice = new Map();
+  });
+}
+
+if (tvLiveStatusSelect) {
+  tvLiveStatusSelect.addEventListener("change", () => {
+    if (tvLiveStatusSelect.value) _renderLiveStatusCard(tvLiveStatusSelect.value);
+  });
+}
+
+if (tvLiveStatusPanel) {
+  tvLiveStatusPanel.addEventListener("toggle", () => {
+    if (tvLiveStatusPanel.open && !_liveStatusPanelLoaded) {
+      _liveStatusPanelLoaded = true;
+      loadTvLiveStatus();
+    }
+  });
+
+  // Unlike the other diagnostics subsections, this panel ships open by
+  // default so status is visible without an extra click. The browser
+  // "toggle" event is not guaranteed to fire for markup that is already
+  // open at parse time, so trigger the first load explicitly.
+  if (tvLiveStatusPanel.open && !_liveStatusPanelLoaded) {
+    _liveStatusPanelLoaded = true;
+    loadTvLiveStatus();
+  }
 }
 
 if (publishDiagLoadBtn) {

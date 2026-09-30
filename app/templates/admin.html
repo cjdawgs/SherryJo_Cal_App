@@ -320,6 +320,50 @@
       padding: 0;
     }
 
+    /* TV Live Status & Uptime monitor (green=online, yellow=warning, red=offline) */
+    .tv-live-status-panel { margin-top: 10px; }
+    .tv-status-card {
+      margin: 10px 0 0;
+      padding: 14px 16px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(0, 0, 0, 0.18);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .tv-status-headline {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 10px;
+    }
+    .tv-status-dot {
+      display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+      flex-shrink: 0; box-shadow: 0 0 6px currentColor;
+    }
+    .tv-status-dot.status-green  { background: #2ecc71; color: #2ecc71; }
+    .tv-status-dot.status-yellow { background: #f1c40f; color: #f1c40f; }
+    .tv-status-dot.status-red    { background: #ff453a; color: #ff453a; }
+    .tv-status-label { font-size: 15px; font-weight: 700; }
+    .tv-status-label.status-green  { color: #2ecc71; }
+    .tv-status-label.status-yellow { color: #f1c40f; }
+    .tv-status-label.status-red    { color: #ff453a; }
+    .tv-status-fields {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 4px 18px; margin-bottom: 10px;
+    }
+    .tv-status-fields div strong { opacity: 0.65; font-weight: 600; }
+    .tv-status-fix-box {
+      margin-top: 10px; padding: 10px 12px;
+      border-radius: 8px; border: 1px solid rgba(255, 180, 60, 0.3);
+      background: rgba(255, 180, 60, 0.08);
+    }
+    .tv-status-fix-box.is-ok {
+      border-color: rgba(46, 204, 113, 0.3);
+      background: rgba(46, 204, 113, 0.08);
+    }
+    .tv-status-fix-box h4 { margin: 0 0 6px; font-size: 12px; }
+    .tv-status-fix-box ul { margin: 0 0 0 16px; padding: 0; }
+    .tv-status-fix-box li { margin: 3px 0; }
+
     .publish-diagnostics-panel {
       color: #17324d;
     }
@@ -821,6 +865,27 @@
                 <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
               </table>
             </div>
+
+            <details class="overview-subsection tv-live-status-panel" id="tvLiveStatusPanel" open>
+              <summary>&#x1F4E1; Device Status &amp; Uptime</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Live online/offline status for a selected device, using the same diagnostics feed as the log above.
+                  Green means the device checked in recently with no active problem. Yellow flags a warning that
+                  usually still resolves itself. Red means the device has gone quiet or hit a hard failure.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvLiveStatusCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+                  <label for="tvLiveStatusSelect" style="font-size:11px;opacity:0.75;">Device</label>
+                  <select id="tvLiveStatusSelect" style="font-size:11px;min-width:220px;">
+                    <option value="">No devices loaded yet</option>
+                  </select>
+                  <button id="tvLiveStatusLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvLiveStatusClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div id="tvLiveStatusCard" class="tv-status-card">No device status loaded yet. Click Load / Refresh.</div>
+              </div>
+            </details>
 
             <details class="overview-subsection tv-health-panel">
               <summary>FireTV Health Snapshot</summary>

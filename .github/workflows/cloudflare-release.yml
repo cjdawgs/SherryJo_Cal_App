@@ -1,18 +1,17 @@
 name: Cloudflare Release
 
+# Fully automated release pipeline: every push to main runs verify -> deploy
+# canary -> canary smoke tests -> auto-promote to the production root Worker
+# -> production smoke tests. There is no manual approval step; a failing
+# job at any stage blocks everything after it (automated tests are the gate).
+# workflow_dispatch remains available for an on-demand re-run against a
+# specific set of URLs (for example, re-checking after a monitor alert).
 on:
+    push:
+        branches:
+            - main
     workflow_dispatch:
         inputs:
-            render_deployment_ready:
-                description: Confirm Render has deployed this exact commit before canary release
-                required: true
-                default: false
-                type: boolean
-            promote_production:
-                description: Promote the smoke-tested build to the root Worker
-                required: true
-                default: false
-                type: boolean
             render_url:
                 description: Direct Render origin URL
                 required: true
@@ -38,7 +37,6 @@ concurrency:
 
 jobs:
     verify:
-        if: ${{ inputs.render_deployment_ready }}
         runs-on: ubuntu-latest
         services:
             postgres:
@@ -125,29 +123,36 @@ jobs:
 
             - name: Wait for canary static asset propagation
               env:
-                  RENDER_URL: ${{ inputs.render_url }}
-                  CANARY_URL: ${{ inputs.canary_url }}
+                  RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+                  CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
+              # 12 attempts * 15s = 3 minutes. This is the automated stand-in for the
+              # human "render_deployment_ready" checkbox this pipeline used to require:
+              # since nobody retries it by hand anymore, give Render's free-tier build
+              # and deploy real headroom before declaring propagation failed.
               run: |
-                  for attempt in {1..7}; do
+                  for attempt in {1..12}; do
                       if render_hash="$(curl --fail --silent --show-error "${RENDER_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
                           && canary_hash="$(curl --fail --silent --show-error "${CANARY_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
                           && [[ "$render_hash" == "$canary_hash" ]]; then
                           echo "Canary admin.js matches Render (sha256: $render_hash)."
                           exit 0
                       fi
-                      echo "Canary admin.js has not converged (attempt $attempt/7); retrying."
-                      if [[ "$attempt" -lt 7 ]]; then
-                          sleep 10
+                      echo "Canary admin.js has not converged (attempt $attempt/12); retrying."
+                      if [[ "$attempt" -lt 12 ]]; then
+                          sleep 15
                       fi
                   done
-                  echo "::error::Canary admin.js did not match Render after 60 seconds."
+                  echo "::error::Canary admin.js did not match Render after 3 minutes."
                   exit 1
 
             - name: Run canary parity smoke
+              env:
+                  RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+                  CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
               run: >-
                   python deployment/shadow_parity.py
-                  --render-url "${{ inputs.render_url }}"
-                  --cloudflare-url "${{ inputs.canary_url }}"
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$CANARY_URL"
                   --json-output canary-parity-report.json
 
             - name: Upload canary parity report
@@ -180,12 +185,14 @@ jobs:
               env:
                   SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
                   SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+                  RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+                  CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
               run: >-
                   python deployment/authenticated_smoke.py
                   --allow-remote
                   --cloudflare-scheduler-stopped
-                  --render-url "${{ inputs.render_url }}"
-                  --cloudflare-url "${{ inputs.canary_url }}"
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$CANARY_URL"
                   --json-output canary-authenticated-report.json
 
             - name: Upload canary authenticated report
@@ -198,7 +205,6 @@ jobs:
                   retention-days: 14
 
     promote-root-worker:
-        if: ${{ inputs.promote_production }}
         needs:
             - smoke-unauthenticated-canary
             - smoke-authenticated-canary
@@ -218,7 +224,6 @@ jobs:
               run: npm ci --prefix platform/cloudflare && npm --prefix platform/cloudflare run deploy
 
     smoke-unauthenticated-production:
-        if: ${{ inputs.promote_production }}
         needs: promote-root-worker
         runs-on: ubuntu-latest
         steps:
@@ -232,10 +237,13 @@ jobs:
               run: python -m pip install websockets==16.1
 
             - name: Run production parity smoke
+              env:
+                  RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+                  PRODUCTION_URL: ${{ inputs.production_url || vars.SHERRYJO_CLOUDFLARE_PRODUCTION_URL || 'https://sherryjo-cal-app.realty-cal.workers.dev' }}
               run: >-
                   python deployment/shadow_parity.py
-                  --render-url "${{ inputs.render_url }}"
-                  --cloudflare-url "${{ inputs.production_url }}"
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$PRODUCTION_URL"
                   --native-worker
                   --json-output production-parity-report.json
 
@@ -249,7 +257,6 @@ jobs:
                   retention-days: 14
 
     smoke-authenticated-production:
-        if: ${{ inputs.promote_production }}
         needs: promote-root-worker
         runs-on: ubuntu-latest
         environment: cloudflare-smoke
@@ -270,11 +277,13 @@ jobs:
               env:
                   SHERRYJO_SMOKE_EMAIL: ${{ secrets.SHERRYJO_SMOKE_EMAIL }}
                   SHERRYJO_SMOKE_PASSWORD: ${{ secrets.SHERRYJO_SMOKE_PASSWORD }}
+                  RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
+                  PRODUCTION_URL: ${{ inputs.production_url || vars.SHERRYJO_CLOUDFLARE_PRODUCTION_URL || 'https://sherryjo-cal-app.realty-cal.workers.dev' }}
               run: >-
                   python deployment/authenticated_smoke.py
                   --allow-remote
-                  --render-url "${{ inputs.render_url }}"
-                  --cloudflare-url "${{ inputs.production_url }}"
+                  --render-url "$RENDER_URL"
+                  --cloudflare-url "$PRODUCTION_URL"
                   --json-output production-authenticated-report.json
 
             - name: Upload production authenticated report
