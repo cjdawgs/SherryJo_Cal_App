@@ -345,10 +345,8 @@ let _liveStatusPanelLoaded = false;
 // last Load/Refresh click so switching the device dropdown never re-fetches.
 let _liveStatusRowsByDevice = new Map();
 let _liveStatusEmailByUser = new Map();
-// A device that has not phoned home within this window is treated as OFFLINE.
-// Heartbeats are sent at most every 15 minutes, so two missed cycles plus
-// margin is a safe "truly gone quiet" signal rather than a transient blip.
-const LIVE_STATUS_OFFLINE_MINUTES = 35;
+const LIVE_STATUS_PRESENCE_STALE_MINUTES = 35;
+const LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75;
 const _tvHealthFailureEvents = new Set([
   "tv_fetch_timeout",
   "tv_fetch_network_error",
@@ -386,6 +384,12 @@ function _toTsMs(value) {
   if (!value) return null;
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
+}
+
+function _latestTvCheckIn(rows) {
+  return rows
+    .filter((row) => ["device_presence", "heartbeat"].includes(String(row?.event || "")))
+    .sort((a, b) => (_toTsMs(b.ts_server) || 0) - (_toTsMs(a.ts_server) || 0))[0] || null;
 }
 
 function _fmtMinutesSince(ms) {
@@ -446,11 +450,14 @@ function _deriveHiddenStatus(rows) {
 }
 
 function _buildHealthBadge(row) {
-  if (row.lastFailure) {
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f1111;color:#ffd9d9;border:1px solid #a23737;font-size:10px;font-weight:700;letter-spacing:0.2px;">RED · failure seen</span>';
+  if (row.hasAuthFailure) {
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f1111;color:#ffd9d9;border:1px solid #a23737;font-size:10px;font-weight:700;letter-spacing:0.2px;">RED · auth error</span>';
   }
-  if (row.hidden.warn) {
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f3e11;color:#ffe6bf;border:1px solid #b67a1f;font-size:10px;font-weight:700;letter-spacing:0.2px;">YELLOW · hidden warning</span>';
+  if (row.isStale) {
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f3e11;color:#ffe6bf;border:1px solid #b67a1f;font-size:10px;font-weight:700;letter-spacing:0.2px;">YELLOW · status unknown</span>';
+  }
+  if (row.failureAfterCheckIn || row.hidden.warn) {
+    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f3e11;color:#ffe6bf;border:1px solid #b67a1f;font-size:10px;font-weight:700;letter-spacing:0.2px;">YELLOW · check required</span>';
   }
   return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#124a2b;color:#d5ffe8;border:1px solid #2f8f5a;font-size:10px;font-weight:700;letter-spacing:0.2px;">GREEN · healthy</span>';
 }
@@ -462,7 +469,7 @@ function _connectionDiagnosis(rows) {
   let restartDiagnosis = "";
   if (latestSession) {
     const sessionIndex = rows.indexOf(latestSession);
-    const previousHeartbeat = rows.slice(sessionIndex + 1).find((row) => String(row?.event || "") === "heartbeat");
+    const previousHeartbeat = _latestTvCheckIn(rows.slice(sessionIndex + 1));
     const sessionMs = _toTsMs(latestSession.ts_server);
     const heartbeatMs = _toTsMs(previousHeartbeat?.ts_server);
     if (Number.isFinite(sessionMs) && Number.isFinite(heartbeatMs) && sessionMs - heartbeatMs >= 75 * 60 * 1000) {
@@ -558,22 +565,33 @@ async function loadTvHealth() {
     const rows = [];
     for (const [deviceId, deviceRows] of byDevice.entries()) {
       const lastHeartbeat = deviceRows.find((row) => String(row?.event || "") === "heartbeat");
+      const lastCheckIn = _latestTvCheckIn(deviceRows);
       const lastFailure = deviceRows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
       const hidden = _deriveHiddenStatus(deviceRows);
       const connectionDiagnosis = _connectionDiagnosis(deviceRows);
       const lastSeenMs = _toTsMs(deviceRows[0]?.ts_server) || 0;
 
-      const lastHeartbeatMs = _toTsMs(lastHeartbeat?.ts_server) || 0;
+      const lastHeartbeatMs = _toTsMs(lastCheckIn?.ts_server) || 0;
       const lastFailureMs = _toTsMs(lastFailure?.ts_server) || 0;
+      const checkInAgeMinutes = lastHeartbeatMs ? Math.floor((Date.now() - lastHeartbeatMs) / 60000) : null;
+      const checkInLimit = lastCheckIn?.event === "device_presence"
+        ? LIVE_STATUS_PRESENCE_STALE_MINUTES
+        : LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES;
+      const isStale = checkInAgeMinutes === null || checkInAgeMinutes >= checkInLimit;
+      const failureAfterCheckIn = Boolean(lastFailure && lastFailureMs > lastHeartbeatMs && Date.now() - lastFailureMs < LIVE_STATUS_PRESENCE_STALE_MINUTES * 60000);
+      const hasAuthFailure = Boolean(failureAfterCheckIn && ["token_invalid_401", "kiosk_token_invalid_401"].includes(String(lastFailure?.event || "")));
       const hiddenDurationMinutes = Number.isFinite(hidden.hiddenDurationMinutes) ? hidden.hiddenDurationMinutes : -1;
-      const severityRank = lastFailure ? 3 : hidden.warn ? 2 : 1;
+      const severityRank = hasAuthFailure ? 3 : isStale || failureAfterCheckIn || hidden.warn ? 2 : 1;
 
       rows.push({
         deviceId,
         shortId: deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`,
         lastSeenMs,
-        lastHeartbeat,
+        lastHeartbeat: lastCheckIn,
         lastHeartbeatMs,
+        isStale,
+        hasAuthFailure,
+        failureAfterCheckIn,
         hidden,
         connectionDiagnosis,
         hiddenDurationMinutes,
@@ -598,7 +616,7 @@ async function loadTvHealth() {
     tvHealthBody.innerHTML = rows.map((row) => {
       const hb = row.lastHeartbeat
         ? `${_fmtDiagTime(row.lastHeartbeat.ts_server)} (${_escapeHtml(String(row.lastHeartbeat.elapsed_min ?? "—"))}m)`
-        : "No heartbeat in window";
+        : "No check-in in window";
       const hiddenStyle = row.hidden.warn ? "color:#ff9500;font-weight:700;" : "";
       const failure = row.lastFailure
         ? `${_fmtDiagTime(row.lastFailure.ts_server)} · ${_escapeHtml(_eventTag(row.lastFailure.event))}`
@@ -652,35 +670,50 @@ function _fmtDuration(ms) {
 // continuous uptime instead of a historical table.
 function _computeLiveStatus(rows) {
   const nowMs = Date.now();
-  const lastSeenMs = _toTsMs(rows[0]?.ts_server) || null;
+  const lastCheckIn = _latestTvCheckIn(rows);
   const lastHeartbeat = rows.find((row) => String(row?.event || "") === "heartbeat");
   const lastFailure = rows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
   const lastSessionStart = rows.find((row) => String(row?.event || "") === "session_start");
   const hidden = _deriveHiddenStatus(rows);
 
-  const minutesSinceSeen = Number.isFinite(lastSeenMs) ? Math.floor((nowMs - lastSeenMs) / 60000) : null;
-  const isOffline = minutesSinceSeen === null || minutesSinceSeen >= LIVE_STATUS_OFFLINE_MINUTES;
+  const lastCheckInMs = _toTsMs(lastCheckIn?.ts_server);
+  const minutesSinceCheckIn = Number.isFinite(lastCheckInMs) ? Math.floor((nowMs - lastCheckInMs) / 60000) : null;
+  const checkInLimit = lastCheckIn?.event === "device_presence"
+    ? LIVE_STATUS_PRESENCE_STALE_MINUTES
+    : LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES;
+  const isStale = minutesSinceCheckIn === null || minutesSinceCheckIn >= checkInLimit;
+  const lastFailureMs = _toTsMs(lastFailure?.ts_server);
+  const failureAfterCheckIn = Number.isFinite(lastFailureMs)
+    && (!Number.isFinite(lastCheckInMs) || lastFailureMs > lastCheckInMs)
+    && nowMs - lastFailureMs < LIVE_STATUS_PRESENCE_STALE_MINUTES * 60000;
+  const hasAuthFailure = failureAfterCheckIn
+    && ["token_invalid_401", "kiosk_token_invalid_401"].includes(String(lastFailure?.event || ""));
 
   let status = "green";
   let label = "ONLINE";
-  if (isOffline) {
+  if (hasAuthFailure) {
     status = "red";
-    label = "OFFLINE";
-  } else if (lastFailure || hidden.warn) {
+    label = "AUTH ERROR";
+  } else if (isStale) {
+    status = "yellow";
+    label = "STATUS UNKNOWN";
+  } else if (failureAfterCheckIn || hidden.warn) {
     status = "yellow";
     label = "WARNING";
   }
 
   const sessionStartMs = _toTsMs(lastSessionStart?.ts_server) || null;
-  const uptimeMs = status !== "red" && Number.isFinite(sessionStartMs) ? nowMs - sessionStartMs : null;
+  const uptimeMs = !isStale && status !== "red" && Number.isFinite(sessionStartMs) ? nowMs - sessionStartMs : null;
 
   return {
     status,
     label,
-    lastSeenMs,
-    minutesSinceSeen,
+    isStale,
+    lastCheckIn,
+    minutesSinceCheckIn,
     lastHeartbeat,
     lastFailure,
+    failureAfterCheckIn,
     hidden,
     sessionStartMs,
     uptimeMs,
@@ -698,19 +731,23 @@ function _liveStatusFixList(state) {
 
   const items = [];
   if (state.status === "red") {
-    items.push("Confirm the TV/FireStick has power and the app is on-screen (not asleep or on the Fire OS home screen).");
-    items.push("Run the one-time FireStick sleep fix ADB commands in the card to the right — Fire OS can force sleep even while this app is open.");
-    items.push("Check Wi-Fi/network on the device; a dropped connection stops all heartbeats and event syncs.");
-    items.push("If the TV was recently unpaired or shows a 401 loop, check the TV Re-pair Risk Log below and re-pair from the TV screen.");
+    items.push("The TV dashboard recently reported an authentication error. Reload the dashboard, then check the TV Re-pair Risk Log if the error continues.");
   } else if (state.status === "yellow") {
+    if (state.isStale) {
+      items.push("No recent authenticated calendar check-in was recorded. This means status is unknown; old diagnostics alone do not prove the TV is offline.");
+      items.push("If the calendar is visible, reload the TV dashboard once to send a fresh check-in, then refresh this panel.");
+      items.push("If it is not visible, check TV power, Wi-Fi, and the FireStick sleep-fix steps in the card to the right.");
+    }
     if (state.hidden.warn) {
       const hiddenMinutes = Number.isFinite(state.hidden.hiddenDurationMinutes) ? state.hidden.hiddenDurationMinutes : 0;
       items.push(`Screen has been hidden/backgrounded for ${hiddenMinutes}m — check HDMI-CEC and screensaver settings on the TV.`);
     }
-    if (state.lastFailure) {
+    if (state.failureAfterCheckIn && state.lastFailure) {
       items.push(`Last network/token failure: ${_escapeHtml(_eventTag(state.lastFailure.event))}. ${state.connectionDiagnosis}`);
     }
-    items.push("Device is still checking in, so this is a soft warning — reload the TV dashboard if the picture looks frozen or blank.");
+    if (!state.isStale) {
+      items.push("The device is checking in, but a recent warning needs review. Reload the TV dashboard if the picture looks frozen or blank.");
+    }
   }
   return { ok: false, title: "Suggested fix steps", items };
 }
@@ -733,14 +770,15 @@ function _renderLiveStatusCard(deviceId) {
     <div class="tv-status-headline">
       <span class="tv-status-dot status-${state.status}"></span>
       <span class="tv-status-label status-${state.status}">${_escapeHtml(state.label)}</span>
+      ${state.uptimeMs != null ? `<span class="tv-uptime-badge">UP ${_escapeHtml(_fmtDuration(state.uptimeMs))}</span>` : ""}
     </div>
     <div class="tv-status-fields">
       <div><strong>User email:</strong> ${_escapeHtml(userEmail)}</div>
       <div><strong>Device ID:</strong> <span style="font-family:monospace;">${_escapeHtml(shortId)}</span></div>
       <div><strong>Device type:</strong> ${_escapeHtml(deviceLabel)}</div>
-      <div><strong>Last seen:</strong> ${state.minutesSinceSeen === null ? "no data" : `${_fmtDiagTime(rows[0]?.ts_server)} (${state.minutesSinceSeen}m ago)`}</div>
+      <div><strong>Last confirmed check-in:</strong> ${state.lastCheckIn ? `${_fmtDiagTime(state.lastCheckIn.ts_server)} (${state.minutesSinceCheckIn}m ago)` : "no check-in recorded"}</div>
       <div><strong>Last heartbeat:</strong> ${state.lastHeartbeat ? _fmtDiagTime(state.lastHeartbeat.ts_server) : "none in window"}</div>
-      <div><strong>Current uptime:</strong> ${state.uptimeMs != null ? _fmtDuration(state.uptimeMs) : "unknown (offline or no session_start seen)"}</div>
+      <div><strong>Current uptime:</strong> ${state.uptimeMs != null ? _fmtDuration(state.uptimeMs) : "unknown (no recent check-in or session_start)"}</div>
     </div>
     <div class="tv-status-fix-box${fix.ok ? " is-ok" : ""}">
       <h4>${_escapeHtml(fix.title)}</h4>

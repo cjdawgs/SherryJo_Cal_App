@@ -27,14 +27,17 @@ in response to a user.
   `SELECT count(*) FROM events` solely to feed a log line. Removed.
 - **TV telemetry.** The dashboard batches beacons (one request per 5 minutes
   instead of one per event, high-signal events still flush immediately), and the
-  heartbeat moved from 60 s to 15 min. Server-side, routine events are recorded
-  in memory but reach the table at most once per device per hour.
+  heartbeat moved from 60 s to 15 min. Routine events are persisted at most once
+  per device per hour; a separate authenticated `device_presence` check-in is
+  persisted at most once every 15 minutes after a successful calendar response.
 - **TV liveness.** Calendar payloads remain on a 10-minute poll. An empty startup
   gets one retry after 5 seconds, and a visible paired TV sends one small
   `/__edge/health` pulse every 5 minutes. The pulse is answered entirely by the
   Cloudflare Worker: it does not wake Render, query the database, write a
   diagnostic row, or create an application access log. That is 288 inexpensive
-  edge requests per continuously visible TV per day.
+  edge requests per continuously visible TV per day. Device status in Admin is
+  based on authenticated calendar-response check-ins; stale diagnostics are
+  shown as unknown rather than treated as proof that a TV is offline.
 - **Local sleep guard.** A 30-second browser-only watchdog checks the screen wake
   lock, animation loop, synthetic-input timer, media stream and Web Audio layer.
   It repairs inactive layers before the Fire OS inactivity window is reached.

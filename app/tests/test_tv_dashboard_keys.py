@@ -233,6 +233,25 @@ def test_admin_tv_live_status_uses_user_email_instead_of_numeric_id():
     assert '"Email unavailable"' in text
 
 
+def test_admin_tv_live_status_uses_confirmed_presence_and_never_infers_offline_from_stale_logs():
+    root = Path(__file__).resolve().parents[2]
+    admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+    admin_html = (root / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
+    dashboard_js = _tv_js_text()
+
+    assert "PRESENCE_BEACON_MIN_INTERVAL_MS = 15 * 60 * 1000" in dashboard_js
+    assert "log('device_presence', 'Authenticated calendar request succeeded')" in dashboard_js
+    assert "if (tvDiag) tvDiag.confirmOnline();" in dashboard_js
+    assert '["device_presence", "heartbeat"].includes(String(row?.event || ""))' in admin_js
+    assert "_latestTvCheckIn(rows)" in admin_js
+    assert 'label = "STATUS UNKNOWN"' in admin_js
+    assert 'label = "OFFLINE"' not in admin_js
+    assert "LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75" in admin_js
+    assert "YELLOW · status unknown" in admin_js
+    assert 'state.uptimeMs != null ? `<span class="tv-uptime-badge">UP ${_escapeHtml(_fmtDuration(state.uptimeMs))}</span>`' in admin_js
+    assert ".tv-uptime-badge" in admin_html
+
+
 def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     text = _tv_js_text()
     assert "const POLL_MS = 600000;" in text

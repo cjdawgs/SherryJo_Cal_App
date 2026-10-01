@@ -346,6 +346,14 @@
     .tv-status-label.status-green  { color: #2ecc71; }
     .tv-status-label.status-yellow { color: #f1c40f; }
     .tv-status-label.status-red    { color: #ff453a; }
+    .tv-uptime-badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 7px; border-radius: 999px;
+      border: 1px solid rgba(47, 143, 90, 0.38);
+      background: rgba(18, 74, 43, 0.12);
+      color: #17663b; font-size: 10px; font-weight: 700;
+      line-height: 1.4; white-space: nowrap;
+    }
     .tv-status-fields {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 4px 18px; margin-bottom: 10px;
@@ -907,7 +915,7 @@
                 </div>
                 <div style="overflow-x:auto;">
                   <table class="tv-diag-table" id="tvHealthTable">
-                    <thead><tr><th>Device</th><th>Status</th><th>Last heartbeat</th><th>Hidden-state warning</th><th>Last network/token failure</th><th>Connection diagnosis</th></tr></thead>
+                    <thead><tr><th>Device</th><th>Status</th><th>Last check-in</th><th>Hidden-state warning</th><th>Last network/token failure</th><th>Connection diagnosis</th></tr></thead>
                     <tbody id="tvHealthBody"><tr><td colspan="6" style="opacity:0.4;">No health snapshot loaded yet.</td></tr></tbody>
                   </table>
                 </div>

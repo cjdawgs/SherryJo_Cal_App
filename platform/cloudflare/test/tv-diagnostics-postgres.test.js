@@ -12,12 +12,13 @@ test("normalizes and batches diagnostic writes", async () => {
     const result = await executeTvDiagnosticsWrite(adapter(async (userId, sql, params) => {
         captured = { userId, sql, entries: JSON.parse(params[0]) };
         return { rows: [] };
-    }), { userId: 42, body: { entries: [{ event: " heartbeat ", details: "ok" }] }, userAgent: "Silk/1" });
-    assert.deepEqual(result, { ok: true, accepted: 1 });
+    }), { userId: 42, body: { entries: [{ event: " heartbeat ", details: "ok" }, { event: "device_presence" }] }, userAgent: "Silk/1" });
+    assert.deepEqual(result, { ok: true, accepted: 2 });
     assert.equal(captured.userId, 42);
     assert.match(captured.sql, /worker_record_tv_diagnostics/);
     assert.equal(captured.entries[0].event, "heartbeat");
     assert.equal(captured.entries[0].device_ua, "Silk/1");
+    assert.equal(captured.entries[1].event, "device_presence");
 });
 
 test("bounds diagnostic reads and maps database rows", async () => {

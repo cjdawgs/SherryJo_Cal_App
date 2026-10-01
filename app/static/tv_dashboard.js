@@ -518,11 +518,13 @@ tvDiag = (() => {
   // turns routine telemetry into the busiest endpoint in the app.
   // High-signal events flush immediately; the rest ride the next flush.
   const FLUSH_MS = 300000;
+  const PRESENCE_BEACON_MIN_INTERVAL_MS = 15 * 60 * 1000;
   const IMMEDIATE_EVENTS = new Set([
     'session_start', 'raf_gap', 'page_freeze', 'pagehide', 'beforeunload',
     'wake_lock_released',
   ]);
   let _pending = [];
+  let _lastPresenceBeaconAt = 0;
 
   function _elapsed() {
     if (!state.sessionStartAt) return '—';
@@ -554,6 +556,13 @@ tvDiag = (() => {
 
     // Beacon to server (fire-and-forget, keepalive survives page unload)
     _beacon(entry);
+  }
+
+  function confirmOnline() {
+    const now = Date.now();
+    if (now - _lastPresenceBeaconAt < PRESENCE_BEACON_MIN_INTERVAL_MS) return;
+    _lastPresenceBeaconAt = now;
+    log('device_presence', 'Authenticated calendar request succeeded');
   }
 
   function _renderDiagLine(entry) {
@@ -596,7 +605,7 @@ tvDiag = (() => {
 
   function getLog() { return [..._buf]; }
 
-  return { log, getLog, flush };
+  return { log, getLog, flush, confirmOnline };
 })();
 
 // Wire the RAF frame-gap callback now that tvDiag is ready
@@ -1948,6 +1957,7 @@ async function refreshEvents(force = false, options = {}) {
     recordServerVersion(res);
 
     if (res.status === 304) {
+      if (tvDiag) tvDiag.confirmOnline();
       state.lastEventsFetchAt = Date.now();
       state.autoRefreshBackoffUntil = 0;
       if (!state.days.length) {
@@ -1970,6 +1980,8 @@ async function refreshEvents(force = false, options = {}) {
       setSyncStatus(false, 'Sync Failed');
       return;
     }
+
+    if (tvDiag) tvDiag.confirmOnline();
 
     const data = await res.json().catch(() => ({}));
     recordServerVersion(res, data);

@@ -158,6 +158,7 @@ def _clear_routine_state():
 def test_signal_events_always_persist():
     assert tv_router._should_persist("raf_gap", "device-1") is True
     assert tv_router._should_persist("raf_gap", "device-1") is True
+    assert tv_router._should_persist("device_presence", "device-1") is True
 
 
 def test_routine_events_persist_once_per_interval():
