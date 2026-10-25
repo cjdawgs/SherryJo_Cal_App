@@ -86,6 +86,7 @@ const el = {
   hyperdriveSetupMessage: document.getElementById("hyperdriveSetupMessage"),
   databaseModeSelect: document.getElementById("databaseModeSelect"),
   databaseProfileSelect: document.getElementById("databaseProfileSelect"),
+  databaseProfileSaveBtn: document.getElementById("databaseProfileSaveBtn"),
   databaseProviderTitleInput: document.getElementById("databaseProviderTitleInput"),
   databaseHostInput: document.getElementById("databaseHostInput"),
   databasePortInput: document.getElementById("databasePortInput"),
@@ -97,10 +98,10 @@ const el = {
   cloudflareAccountIdInput: document.getElementById("cloudflareAccountIdInput"),
   hyperdriveConfigIdInput: document.getElementById("hyperdriveConfigIdInput"),
   cloudflareApiTokenInput: document.getElementById("cloudflareApiTokenInput"),
-  databaseFallbackToggle: document.getElementById("databaseFallbackToggle"),
   databaseConnectBtn: document.getElementById("databaseConnectBtn"),
   databaseTestBtn: document.getElementById("databaseTestBtn"),
   databaseSaveBtn: document.getElementById("databaseSaveBtn"),
+  databaseDisconnectBtn: document.getElementById("databaseDisconnectBtn"),
   databaseConfigStatus: document.getElementById("databaseConfigStatus"),
   databaseCopySourceSelect: document.getElementById("databaseCopySourceSelect"),
   databaseCopyTargetSelect: document.getElementById("databaseCopyTargetSelect"),
@@ -2061,7 +2062,11 @@ function bindEvents() {
   el.databaseConnectBtn?.addEventListener("click", connectPreferredDatabase);
   el.databaseTestBtn?.addEventListener("click", testDatabaseConfig);
   el.databaseSaveBtn?.addEventListener("click", saveDatabaseConfig);
+  el.databaseProfileSaveBtn?.addEventListener("click", saveDatabaseProfile);
+  el.databaseDisconnectBtn?.addEventListener("click", disconnectDatabase);
   el.databaseProfileSelect?.addEventListener("change", selectDatabaseProfile);
+  el.databaseProviderTitleInput?.addEventListener("input", updateDatabaseProfileSaveButtonState);
+  el.databaseModeSelect?.addEventListener("change", updateDatabaseProfileSaveButtonState);
   el.databaseCopyBtn?.addEventListener("click", copyCriticalDatabaseData);
   [el.cloudflareAccountIdInput, el.cloudflareApiTokenInput].forEach((input) => input?.addEventListener("input", updateHyperdriveButtonState));
   if (el.databaseConfigDetails) {
@@ -2070,13 +2075,18 @@ function bindEvents() {
   }
 }
 
-function populateDatabaseCopyProviders(profiles) {
-  [el.databaseCopySourceSelect, el.databaseCopyTargetSelect].forEach((select) => {
-    if (!select) return;
-    const placeholder = select === el.databaseCopySourceSelect ? "Source provider" : "Target provider";
-    select.replaceChildren(new Option(placeholder, ""));
-    profiles.forEach((profile) => select.add(new Option(profile.title, profile.title)));
-  });
+function populateDatabaseCopyProviders(profiles, activeSource) {
+  if (el.databaseCopySourceSelect) {
+    el.databaseCopySourceSelect.replaceChildren(new Option("Source provider", ""));
+    if (activeSource?.key) {
+      el.databaseCopySourceSelect.add(new Option(activeSource.title, activeSource.key));
+    }
+    profiles.forEach((profile) => el.databaseCopySourceSelect.add(new Option(profile.title, profile.title)));
+  }
+  if (el.databaseCopyTargetSelect) {
+    el.databaseCopyTargetSelect.replaceChildren(new Option("Target provider", ""));
+    profiles.forEach((profile) => el.databaseCopyTargetSelect.add(new Option(profile.title, profile.title)));
+  }
 }
 
 async function copyCriticalDatabaseData() {
@@ -2095,6 +2105,7 @@ async function copyCriticalDatabaseData() {
     body: JSON.stringify({ source_provider: source, target_provider: target }),
   });
   const data = res ? await res.json().catch(() => ({})) : {};
+  if (handleAdminForbidden(res, data)) return;
   const totals = Object.values(data.tables || {}).reduce((sum, item) => sum + Number(item.copied || 0), 0);
   const providerTotal = Number(data.tables?.oauth_accounts?.copied || 0);
   if (el.databaseCopyStatus) {
@@ -2113,11 +2124,28 @@ function selectDatabaseProfile() {
     databasePortInput: profile.database_port || "5432",
     databaseNameInput: profile.database_name,
     databaseUserInput: profile.database_user,
-    databasePasswordInput: profile.database_password,
     databaseSslModeSelect: profile.ssl_mode || "require",
-    databaseUrlInput: profile.database_url,
+    databasePasswordInput: "",
+    databaseUrlInput: "",
   };
   Object.entries(fields).forEach(([key, value]) => { if (el[key]) el[key].value = value || ""; });
+  if (el.databasePasswordInput) {
+    el.databasePasswordInput.placeholder = profile.has_saved_credentials
+      ? "Saved secret kept; enter only to replace"
+      : "Database password";
+  }
+  if (el.databaseConnectBtn && window.__databaseRuntime !== "cloudflare-worker") {
+    el.databaseConnectBtn.disabled = !profile.has_saved_credentials || window.__databaseRuntime === "managed-origin";
+    el.databaseConnectBtn.textContent = profile.has_saved_credentials ? "Connect saved provider" : "Enter credentials to connect";
+  }
+}
+
+function updateDatabaseProfileSaveButtonState() {
+  if (!el.databaseProfileSaveBtn) return;
+  const managedRuntime = ["cloudflare-worker", "managed-origin"].includes(window.__databaseRuntime);
+  const postgresMode = el.databaseModeSelect?.value !== "sqlite";
+  const hasTitle = Boolean(el.databaseProviderTitleInput?.value.trim());
+  el.databaseProfileSaveBtn.disabled = managedRuntime || !postgresMode || !hasTitle;
 }
 
 function databasePayload(mode, url) {
@@ -2134,7 +2162,7 @@ function databasePayload(mode, url) {
     hyperdrive_config_id: el.hyperdriveConfigIdInput?.value.trim() || null,
     cloudflare_api_token: el.cloudflareApiTokenInput?.value || null,
     ssl_mode: el.databaseSslModeSelect?.value || "require",
-    disable_sqlite_fallback: !(el.databaseFallbackToggle?.checked ?? true),
+    disable_sqlite_fallback: mode === "postgres",
   };
 }
 
@@ -2157,19 +2185,20 @@ async function connectPreferredDatabase() {
     await testDatabaseConfig({ mode: "postgres", url: "" });
     return;
   }
-  const preferredUrl = (window.__databasePreferredUrl || "").trim();
-  if (!preferredUrl) {
-    setStatus("No Supabase or Neon Postgres URL is configured yet.", true);
+  const providerTitle = String(el.databaseProviderTitleInput?.value || "").trim();
+  const selectedProfile = (window.__databaseProfiles || []).find((profile) => profile.title === providerTitle);
+  if (!providerTitle || !selectedProfile?.has_saved_credentials) {
+    const message = "Select a saved provider, or enter its credentials and choose Test Connection before saving it.";
+    setStatus(message, true);
     if (el.databaseConfigStatus) {
-      el.databaseConfigStatus.textContent = "No Supabase or Neon Postgres URL is configured yet.";
+      el.databaseConfigStatus.textContent = message;
       el.databaseConfigStatus.classList.add("error");
     }
     return;
   }
 
   if (el.databaseModeSelect) el.databaseModeSelect.value = "postgres";
-  if (el.databaseUrlInput) el.databaseUrlInput.value = preferredUrl;
-  await saveDatabaseConfig({ mode: "postgres", url: preferredUrl });
+  await saveDatabaseConfig({ mode: "postgres", url: "" });
 }
 
 async function loadDatabaseConfig() {
@@ -2196,9 +2225,6 @@ async function loadDatabaseConfig() {
   }
 
   const mode = (data.database_mode || "postgres").toLowerCase();
-  const fallback = Boolean(data.disable_sqlite_fallback === true || data.disable_sqlite_fallback === "true");
-  const preferredUrl = (data.preferred_postgres_url || "").trim();
-  const activeUrl = (data.database_url || "").trim();
   window.__databaseProfiles = data.profiles || [];
   if (data.runtime === "cloudflare-worker" && data.provider_label) {
     window.__databaseProfiles = [{
@@ -2211,7 +2237,7 @@ async function loadDatabaseConfig() {
       ssl_mode: "managed by Hyperdrive",
     }];
   }
-  populateDatabaseCopyProviders(window.__databaseProfiles);
+  populateDatabaseCopyProviders(window.__databaseProfiles, data.active_database_copy_source);
   if (el.databaseProfileSelect) {
     el.databaseProfileSelect.replaceChildren(new Option("New provider connection", ""));
     window.__databaseProfiles.forEach((profile) => el.databaseProfileSelect.add(new Option(profile.title, profile.title)));
@@ -2229,18 +2255,20 @@ async function loadDatabaseConfig() {
       el.databaseProviderTitleInput.classList.toggle("database-provider-inactive", !titleMatchesLiveProvider);
     }
   }
-  window.__databasePreferredUrl = preferredUrl;
+  window.__databaseActiveProviderTitle = data.active_provider_title || null;
+  window.__databaseMode = mode;
   window.__databaseRuntime = data.runtime || "origin";
   window.__hyperdriveEditAvailable = data.hyperdrive_edit_available === true;
   if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
-  if (el.databaseUrlInput) el.databaseUrlInput.value = activeUrl || preferredUrl || "";
-  if (el.databaseFallbackToggle) el.databaseFallbackToggle.checked = !fallback;
+  updateDatabaseProfileSaveButtonState();
   if (el.databaseConnectBtn) {
     const workerRuntime = data.runtime === "cloudflare-worker";
-    el.databaseConnectBtn.disabled = workerRuntime ? false : !preferredUrl;
+    const managedOrigin = data.runtime === "managed-origin";
+    const selectedProfile = (window.__databaseProfiles || []).find((profile) => profile.title === el.databaseProfileSelect?.value);
+    el.databaseConnectBtn.disabled = workerRuntime ? false : managedOrigin || !selectedProfile?.has_saved_credentials;
     el.databaseConnectBtn.textContent = workerRuntime
       ? "Test active Worker DB"
-      : preferredUrl ? "Connect Supabase / Neon" : "No Supabase / Neon URL";
+      : selectedProfile?.has_saved_credentials ? "Connect saved provider" : "Select a saved provider";
     if (workerRuntime) {
       if (el.databaseTestBtn) {
         el.databaseTestBtn.disabled = true;
@@ -2250,6 +2278,22 @@ async function loadDatabaseConfig() {
       if (el.databaseSaveBtn) {
         updateHyperdriveButtonState();
       }
+    }
+    if (el.databaseDisconnectBtn) {
+      const workerRuntime = data.runtime === "cloudflare-worker";
+      const managedOrigin = data.runtime === "managed-origin";
+      el.databaseDisconnectBtn.hidden = workerRuntime;
+      el.databaseDisconnectBtn.disabled = workerRuntime || managedOrigin || mode === "sqlite";
+      el.databaseDisconnectBtn.textContent = mode === "sqlite" ? "Using SQLite" : "Disconnect to SQLite";
+      el.databaseDisconnectBtn.title = managedOrigin
+        ? "The production host controls active database settings."
+        : "Switches this origin to SQLite without copying records.";
+    }
+    if (el.databaseProfileSaveBtn) {
+      const workerRuntime = data.runtime === "cloudflare-worker";
+      const managedOrigin = data.runtime === "managed-origin";
+      el.databaseProfileSaveBtn.hidden = workerRuntime;
+      el.databaseProfileSaveBtn.disabled = workerRuntime || managedOrigin || mode === "sqlite" || !el.databaseProviderTitleInput?.value.trim();
     }
   }
   if (el.hyperdriveSetupBanner && data.runtime === "cloudflare-worker") {
@@ -2266,16 +2310,36 @@ async function loadDatabaseConfig() {
       ? `LIVE and connected: ${provider}`
       : `NOT LIVE: ${provider} is not connected`;
   }
+  if (el.hyperdriveLiveBadge && data.runtime !== "cloudflare-worker") {
+    const live = Boolean(data.live_database_confirmed);
+    const provider = data.provider_label || data.summary?.label || "Database";
+    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
+    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
+    if (el.hyperdriveLiveBadgeText) {
+      el.hyperdriveLiveBadgeText.textContent = live
+        ? `LIVE and connected: ${provider}`
+        : `NOT CONNECTED: ${provider} is not reachable`;
+    }
+  }
   if (el.databaseConfigStatus) {
-    const statusText = data.message
+    const statusText = data.configuration_managed_by_host
+      ? "This hosted origin uses provider-managed secrets. Update the database in the hosting provider; the Cloudflare Worker can be managed through Hyperdrive."
+      : data.message
       ? (data.live_database_confirmed ? "Live database check complete." : [data.message, ...(data.next_steps || []).map((step) => `Next: ${step}`)].join(" "))
       : data.is_connected_to_supabase
-        ? "Supabase Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
+        ? "Supabase Postgres is active; strict Postgres mode is enabled."
         : data.is_connected_to_neon
-          ? "Neon Postgres is active. Auto Allow is still on so SQLite remains a safe fallback."
-          : "Auto Allow is enabled by default so SQLite can be used as a safe fallback.";
+          ? "Neon Postgres is active; strict Postgres mode is enabled."
+          : data.connection_message || "Database connection status is available above.";
     el.databaseConfigStatus.textContent = statusText;
     el.databaseConfigStatus.classList.toggle("error", data.hyperdrive_configured === false);
+  }
+  if (data.configuration_managed_by_host) {
+    if (el.databaseSaveBtn) {
+      el.databaseSaveBtn.disabled = true;
+      el.databaseSaveBtn.title = "Use host-managed environment settings for this production origin.";
+    }
+    if (el.databaseTestBtn) el.databaseTestBtn.disabled = false;
   }
   if (el.databaseCopyBtn && data.copy_supported === false) {
     el.databaseCopyBtn.disabled = true;
@@ -2333,6 +2397,13 @@ async function testDatabaseConfig(options = {}) {
 async function saveDatabaseConfig(options = {}) {
   const mode = options.mode || el.databaseModeSelect?.value || "postgres";
   const url = (options.url ?? el.databaseUrlInput?.value ?? "").trim();
+  const providerTitle = String(el.databaseProviderTitleInput?.value || "").trim();
+  if (window.__databaseRuntime !== "cloudflare-worker") {
+    const confirmed = window.confirm(
+      `Switch the active database to ${mode === "sqlite" ? "SQLite" : (providerTitle || "the selected PostgreSQL provider")}? This does not copy records. Save the profile, initialize its schema, and copy data first if you need to keep your current users and calendar data.`
+    );
+    if (!confirmed) return;
+  }
   const payload = databasePayload(mode, url);
   const updateHyperdrive = window.__databaseRuntime === "cloudflare-worker";
 
@@ -2367,10 +2438,95 @@ async function saveDatabaseConfig(options = {}) {
   }
   if (el.databaseConfigStatus) {
     el.databaseConfigStatus.textContent = data.saved?.provider_title
-      ? `${data.saved.provider_title} saved as the active provider. Restart the app to fully apply the runtime engine.`
+      ? `${data.saved.provider_title} saved as the active provider. The current connection was switched.`
       : data.message || "Database settings saved. Restart the app to fully apply the runtime engine.";
     el.databaseConfigStatus.classList.remove("error");
   }
+  if (el.databasePasswordInput) el.databasePasswordInput.value = "";
+  if (el.databaseUrlInput) el.databaseUrlInput.value = "";
+  await loadDatabaseConfig();
+}
+
+async function saveDatabaseProfile() {
+  const mode = el.databaseModeSelect?.value || "postgres";
+  if (mode !== "postgres") {
+    setStatus("Saved provider profiles currently support PostgreSQL only.", true);
+    return;
+  }
+  const payload = databasePayload(mode, (el.databaseUrlInput?.value || "").trim());
+  if (el.databaseProfileSaveBtn) {
+    el.databaseProfileSaveBtn.disabled = true;
+    el.databaseProfileSaveBtn.textContent = "Initializing schema...";
+  }
+
+  const res = await apiRequest("/admin/system/database-config/profile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (handleAdminForbidden(res, data)) return;
+  if (!res || !res.ok) {
+    const message = data.detail || "Unable to save the provider profile.";
+    setStatus(message, true);
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = message;
+      el.databaseConfigStatus.classList.add("error");
+    }
+    if (el.databaseProfileSaveBtn) el.databaseProfileSaveBtn.textContent = "Save Profile Only";
+    updateDatabaseProfileSaveButtonState();
+    return;
+  }
+
+  if (el.databaseConfigStatus) {
+    el.databaseConfigStatus.textContent = data.message || "Provider profile saved; active database unchanged.";
+    el.databaseConfigStatus.classList.remove("error");
+  }
+  if (el.databasePasswordInput) el.databasePasswordInput.value = "";
+  if (el.databaseUrlInput) el.databaseUrlInput.value = "";
+  await loadDatabaseConfig();
+  if (data.saved?.title && el.databaseProfileSelect) {
+    el.databaseProfileSelect.value = data.saved.title;
+    selectDatabaseProfile();
+    if (el.databaseCopyTargetSelect) el.databaseCopyTargetSelect.value = data.saved.title;
+  }
+  if (el.databaseProfileSaveBtn) el.databaseProfileSaveBtn.textContent = "Save Profile Only";
+  updateDatabaseProfileSaveButtonState();
+}
+
+async function disconnectDatabase() {
+  if (window.__databaseRuntime === "cloudflare-worker") {
+    setStatus("Cloudflare Workers require Hyperdrive and cannot disconnect to SQLite.", true);
+    return;
+  }
+  const confirmed = window.confirm(
+    "Switch this app origin to SQLite? This does not copy PostgreSQL data. Make sure SQLite already has an admin account before continuing."
+  );
+  if (!confirmed) return;
+
+  if (el.databaseDisconnectBtn) {
+    el.databaseDisconnectBtn.disabled = true;
+    el.databaseDisconnectBtn.textContent = "Disconnecting...";
+  }
+  const res = await apiRequest("/admin/system/database-config/disconnect", { method: "POST" });
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (!res || !res.ok) {
+    const message = data.detail || "Unable to switch the app to SQLite.";
+    setStatus(message, true);
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = message;
+      el.databaseConfigStatus.classList.add("error");
+    }
+    if (el.databaseDisconnectBtn) {
+      el.databaseDisconnectBtn.disabled = false;
+      el.databaseDisconnectBtn.textContent = "Disconnect to SQLite";
+    }
+    return;
+  }
+
+  setStatus(data.message || "PostgreSQL disconnected; SQLite is now active.");
+  if (el.databasePasswordInput) el.databasePasswordInput.value = "";
+  if (el.databaseUrlInput) el.databaseUrlInput.value = "";
   await loadDatabaseConfig();
 }
 

@@ -744,7 +744,7 @@
               </ol>
               <a class="ghost-btn" href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Open Cloudflare Dashboard</a>
             </div>
-            <p class="database-field-help">App admin authorization lets you use this panel. Neon or Supabase credentials below authenticate the database connection; they are separate from the SherryJo admin password.</p>
+            <p class="database-field-help">App admin authorization lets you use this panel. Database credentials authenticate the provider and are separate from your SherryJo admin password. Saved passwords and full URLs stay on the server; saved profiles show only non-secret connection details.</p>
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
                 <span style="font-size:12px;opacity:0.75;min-width:72px;">Mode</span>
@@ -775,14 +775,14 @@
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
               <input id="databaseUserInput" type="text" placeholder="Neon username" aria-label="Database username" autocomplete="username" style="flex:1;min-width:0;">
-              <input id="databasePasswordInput" type="password" placeholder="Neon password" aria-label="Database password" autocomplete="current-password" style="flex:1;min-width:0;">
+              <input id="databasePasswordInput" type="password" placeholder="Database password" aria-label="Database password" autocomplete="new-password" style="flex:1;min-width:0;">
               <select id="databaseSslModeSelect" style="flex:1;min-width:120px;">
                 <option value="require">SSL required (Neon recommended)</option>
                 <option value="off">SSL off (local only)</option>
               </select>
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
-              <input id="databaseUrlInput" type="text" placeholder="Optional full Neon connection string; use this OR the fields above" aria-label="Full PostgreSQL connection string" autocomplete="off" style="flex:1;min-width:0;">
+              <input id="databaseUrlInput" type="password" placeholder="Optional full PostgreSQL connection string; use this OR the fields above" aria-label="Full PostgreSQL connection string" autocomplete="new-password" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
               <input id="cloudflareAccountIdInput" type="text" placeholder="Cloudflare account ID" aria-label="Cloudflare account ID" autocomplete="off" style="flex:1;min-width:0;">
@@ -791,32 +791,28 @@
             <div class="git-confirm-row" style="margin-top:10px;">
               <input id="cloudflareApiTokenInput" type="password" placeholder="Cloudflare API token for this update only" aria-label="Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
             </div>
-            <div class="git-confirm-row" style="margin-top:10px;">
-              <label style="display:flex;align-items:center;gap:8px;font-size:12px;opacity:0.8;">
-               <input id="databaseFallbackToggle" type="checkbox" checked>
-               <span>Auto Allow (fallback to SQLite if Postgres fails)</span>
-              </label>
-            </div>
             <div class="deployment-sync-actions" style="margin-top:12px;">
               <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect Supabase / Neon</button>
               <button id="databaseTestBtn" class="ghost-btn" type="button">Test Neon connection</button>
-              <button id="databaseSaveBtn" type="button">Save Database</button>
+              <button id="databaseProfileSaveBtn" class="ghost-btn" type="button" disabled>Save Profile Only</button>
+              <button id="databaseSaveBtn" type="button">Save &amp; Connect</button>
+              <button id="databaseDisconnectBtn" class="ghost-btn" type="button">Disconnect to SQLite</button>
             </div>
-            <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Enter a full Neon connection string or complete the fields, then select Test Neon connection. Nothing is saved until the test succeeds.</p>
+            <p id="databaseConfigStatus" class="muted-line" style="margin-top:8px;">Enter a full PostgreSQL connection string or complete the fields, then select Test Connection. Nothing is saved until the test succeeds.</p>
             <div class="database-copy-panel">
               <h3>Copy critical application data</h3>
-              <p class="muted-line">Copies users, events, tasks, notes, date-sticky notes, tag colors, and encrypted OAuth provider credentials. Existing records in the destination are preserved. Both runtimes must use the same TOKEN_ENCRYPTION_KEY.</p>
+              <p class="muted-line">Save a new profile first to initialize its tables without switching away from the active database. Then copy users, events, tasks, notes, date-sticky notes, tag colors, and encrypted OAuth provider credentials before connecting to it. Existing destination records are preserved; both runtimes must use the same TOKEN_ENCRYPTION_KEY.</p>
               <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
                 <select id="databaseCopySourceSelect" aria-label="Copy source provider" style="flex:1;min-width:0;"><option value="">Source provider</option></select>
                 <select id="databaseCopyTargetSelect" aria-label="Copy target provider" style="flex:1;min-width:0;"><option value="">Target provider</option></select>
                 <button id="databaseCopyBtn" class="ghost-btn" type="button">Copy critical data</button>
               </div>
-              <p id="databaseCopyStatus" class="muted-line" style="margin-top:8px;">Save and test both PostgreSQL providers before copying.</p>
+              <p id="databaseCopyStatus" class="muted-line" style="margin-top:8px;">Choose the active database as the source, then choose a saved PostgreSQL profile as the target.</p>
             </div>
           </div>
           <div>
             <h3>Live test notes</h3>
-            <p>Use Neon for a live test database, then select Postgres mode and save. The app validates the connection before writing the setting to the local .env file and updating the runtime.</p>
+            <p>Use Neon or Supabase for a live test database. The local origin validates before saving credentials to the repository-root .env file and switching its runtime connection. Hosted origins use provider-managed environment secrets; the Cloudflare Worker uses Hyperdrive.</p>
             <ul style="margin:10px 0 0 18px; padding:0; font-size:12px; line-height:1.6; opacity:0.8;">
               <li>SQLite is best for quick local testing.</li>
               <li>Neon/Postgres is recommended for production-like live validation.</li>

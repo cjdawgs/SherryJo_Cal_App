@@ -111,6 +111,14 @@ Recommended presets:
 
 This ensures staging/prod never silently run against SQLite when Postgres is unreachable.
 
+## Admin Database Runtime Control
+
+The Admin page's Database Runtime Control panel can test and save a local SQLite or PostgreSQL connection. For a local origin, credentials are saved in the repository-root `.env` file with owner-only file permissions, while the API returns only masked connection metadata. Selecting a saved profile reuses its server-side credentials; its password and full connection URL are never sent back to the browser.
+
+To prepare a new PostgreSQL database without locking yourself out of the current one, use **Test Connection**, then **Save Profile Only**. This initializes missing application tables but does not switch the active database. Copy the required data from the active source into that saved target, then use **Save & Connect**. **Disconnect to SQLite** switches the local origin to `SQLITE_PATH` (or `./app.db`) and does not copy PostgreSQL records; confirm the target has an admin account before switching. Saved PostgreSQL profiles remain available for reconnecting.
+
+Hosted origins must use their hosting provider's environment secrets and cannot save database settings into an ephemeral `.env` file. The Cloudflare Worker uses its configured Hyperdrive binding; its Admin panel can test that live connection and may update Hyperdrive only when Cloudflare API editing is configured. A Worker cannot switch to SQLite.
+
 ## VS Code Run Profiles (Explicit DB Mode)
 
 Use Run and Debug to choose DB mode every time you launch locally.
