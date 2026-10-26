@@ -1325,6 +1325,140 @@ def admin_tv_stale_refresh_summary(
     }
 
 
+@router.get("/system/tv-connection-gaps-summary")
+def admin_tv_connection_gaps_summary(
+    hours: int = 168,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    bounded_hours = max(1, min(int(hours or 168), 24 * 14))
+    bounded_limit = max(1, min(int(limit or 100), 200))
+    now_utc = datetime.now(timezone.utc)
+    window_start = now_utc - timedelta(hours=bounded_hours)
+
+    try:
+        retention_days = int(os.getenv("TV_DIAG_RETENTION_DAYS", "14"))
+    except ValueError:
+        retention_days = 14
+    history_start = now_utc - timedelta(days=max(1, min(retention_days, 365)))
+
+    checkin_rows = (
+        db.query(TVDiagLog, User.email)
+        .outerjoin(User, User.id == TVDiagLog.user_id)
+        .filter(
+            TVDiagLog.event.in_(("device_presence", "heartbeat")),
+            TVDiagLog.device_id.isnot(None),
+            TVDiagLog.ts_server >= history_start,
+        )
+        .order_by(TVDiagLog.ts_server.asc())
+        .all()
+    )
+    failure_events = (
+        "tv_fetch_timeout",
+        "tv_fetch_network_error",
+        "token_invalid_401",
+        "kiosk_token_invalid_401",
+        "token_storage_removed",
+        "storage_token_removed",
+        "user_unpair_requested",
+        "user_logout_requested",
+    )
+    failure_rows = (
+        db.query(TVDiagLog)
+        .filter(
+            TVDiagLog.event.in_(failure_events),
+            TVDiagLog.device_id.isnot(None),
+            TVDiagLog.ts_server >= history_start,
+        )
+        .order_by(TVDiagLog.ts_server.asc())
+        .all()
+    )
+
+    def as_utc(value: datetime) -> datetime:
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+    grouped_checkins: dict[tuple[int | None, str], list[tuple[TVDiagLog, str | None]]] = {}
+    for row, user_email in checkin_rows:
+        key = (row.user_id, str(row.device_id))
+        grouped_checkins.setdefault(key, []).append((row, user_email))
+
+    grouped_failures: dict[tuple[int | None, str], list[TVDiagLog]] = {}
+    for row in failure_rows:
+        key = (row.user_id, str(row.device_id))
+        grouped_failures.setdefault(key, []).append(row)
+
+    gaps = []
+    for key, rows in grouped_checkins.items():
+        device_failures = grouped_failures.get(key, [])
+
+        def append_gap(previous_pair, resumed_at: datetime | None, threshold_minutes: int, source_label: str) -> None:
+            previous, user_email = previous_pair
+            previous_at = as_utc(previous.ts_server)
+            end_at = as_utc(resumed_at) if resumed_at else now_utc
+            gap_minutes = max(0, int((end_at - previous_at).total_seconds() // 60))
+            if gap_minutes < threshold_minutes:
+                return
+
+            matching_failures = [
+                failure for failure in device_failures
+                if previous_at < as_utc(failure.ts_server) <= end_at
+            ]
+            last_failure = matching_failures[-1] if matching_failures else None
+            evidence = (
+                f"{last_failure.event}: {last_failure.details or 'no details'}"
+                if last_failure
+                else f"No failure beacon received; inferred from missing {source_label}s."
+            )
+            gaps.append({
+                "user_id": previous.user_id,
+                "user_email": user_email,
+                "device_id": previous.device_id,
+                "device_ua": previous.device_ua,
+                "last_checkin_at": previous_at.isoformat(),
+                "resumed_at": end_at.isoformat() if resumed_at else None,
+                "gap_minutes": gap_minutes,
+                "status": "recovered" if resumed_at else "ongoing",
+                "checkin_source": previous.event,
+                "threshold_minutes": threshold_minutes,
+                "evidence": evidence,
+            })
+
+        for previous_pair, resumed_pair in zip(rows, rows[1:]):
+            resumed_at = as_utc(resumed_pair[0].ts_server)
+            threshold_minutes = 45 if previous_pair[0].event == "device_presence" else 150
+            source_label = "authenticated calendar check-in" if previous_pair[0].event == "device_presence" else "legacy heartbeat"
+            if resumed_at >= window_start:
+                append_gap(previous_pair, resumed_pair[0].ts_server, threshold_minutes, source_label)
+
+        if rows:
+            threshold_minutes = 45 if rows[-1][0].event == "device_presence" else 150
+            source_label = "authenticated calendar check-in" if rows[-1][0].event == "device_presence" else "legacy heartbeat"
+            latest_at = as_utc(rows[-1][0].ts_server)
+            if latest_at < now_utc - timedelta(minutes=threshold_minutes):
+                append_gap(rows[-1], None, threshold_minutes, source_label)
+
+    gaps.sort(key=lambda row: row["resumed_at"] or row["last_checkin_at"], reverse=True)
+    recent_rows = gaps[:bounded_limit]
+    return {
+        "checked_at": now_utc.isoformat(),
+        "window": {"hours": bounded_hours, "start": window_start.isoformat(), "end": now_utc.isoformat()},
+        "thresholds_minutes": {"device_presence": 45, "legacy_heartbeat": 150},
+        "counts": {
+            "connection_gaps": len(gaps),
+            "recovered_gaps": sum(1 for row in gaps if row["status"] == "recovered"),
+            "ongoing_gaps": sum(1 for row in gaps if row["status"] == "ongoing"),
+            "unique_devices": len({row["device_id"] for row in gaps}),
+        },
+        "meaningful_points": [
+            "A gap is inferred from missing successful device check-ins; it does not identify the exact outage start or prove the cause.",
+            "A timeout or authentication event is included only if the TV successfully delivered that diagnostic during the gap.",
+            "Legacy clients use a longer threshold because routine heartbeats are persisted hourly.",
+        ],
+        "recent_rows": recent_rows,
+    }
+
+
 @router.get("/system/overview")
 def admin_system_overview(
     request: Request,

@@ -28,6 +28,40 @@ test("redacts credentials from the managed table browser", async () => {
     assert.deepEqual(body.redacted_columns, ["access_token"]);
 });
 
+test("reports inferred TV connection gaps and delivered failure evidence", async () => {
+    let calls = 0;
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql) => {
+                calls += 1;
+                if (calls === 1) return { rows: [{ allowed: true }] };
+                assert.match(sql, /tv_diag_log/);
+                return {
+                    rows: [
+                        { user_id: 7, user_email: "owner@example.test", device_id: "firetv-1", device_ua: "Silk", event: "heartbeat", ts_server: new Date(Date.now() - 6 * 60 * 60 * 1000), visibility: "visible" },
+                        { user_id: 7, user_email: "owner@example.test", device_id: "firetv-1", device_ua: "Silk", event: "device_presence", ts_server: new Date(Date.now() - 4 * 60 * 60 * 1000), visibility: "visible" },
+                        { user_id: 7, user_email: "owner@example.test", device_id: "firetv-1", device_ua: "Silk", event: "tv_fetch_timeout", details: "GET /tv/events timed out", ts_server: new Date(Date.now() - 3 * 60 * 60 * 1000), visibility: "visible" },
+                        { user_id: 7, user_email: "owner@example.test", device_id: "firetv-1", device_ua: "Silk", event: "device_presence", ts_server: new Date(Date.now() - 60 * 60 * 1000), visibility: "visible" },
+                    ]
+                };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/tv-connection-gaps-summary?hours=168"),
+        {},
+        adapter,
+        7,
+    );
+    assert.equal(result.status, 200);
+    const body = await result.json();
+    const gap = body.recent_rows.find((row) => row.status === "recovered");
+    assert.equal(gap.user_email, "owner@example.test");
+    assert.equal(gap.gap_minutes, 180);
+    assert.match(gap.evidence, /tv_fetch_timeout/);
+    assert.equal(gap.checkin_source, "device_presence");
+});
+
 test("overview reports synced when the deployed Worker commit matches GitHub's latest", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response(JSON.stringify({ sha: "9cfb04d26497c55fc6933e634c91e5965d8171d8" }), { status: 200 });

@@ -330,6 +330,13 @@ const repairDiagCount = document.getElementById("tvRepairDiagCount");
 const repairDiagSummary = document.getElementById("tvRepairDiagSummary");
 const repairDiagWindow = document.getElementById("tvRepairDiagWindow");
 const repairDiagPanel = document.querySelector(".tv-repair-panel");
+const connectionGapPanel = document.getElementById("tvConnectionGapPanel");
+const connectionGapCount = document.getElementById("tvConnectionGapCount");
+const connectionGapWindow = document.getElementById("tvConnectionGapWindow");
+const connectionGapLoadBtn = document.getElementById("tvConnectionGapLoadBtn");
+const connectionGapClearBtn = document.getElementById("tvConnectionGapClearBtn");
+const connectionGapSummary = document.getElementById("tvConnectionGapSummary");
+const connectionGapBody = document.getElementById("tvConnectionGapBody");
 const tvLiveStatusLoadBtn = document.getElementById("tvLiveStatusLoadBtn");
 const tvLiveStatusClearBtn = document.getElementById("tvLiveStatusClearBtn");
 const tvLiveStatusCount = document.getElementById("tvLiveStatusCount");
@@ -339,6 +346,7 @@ const tvLiveStatusPanel = document.getElementById("tvLiveStatusPanel");
 let _diagAutoHandle = null;
 let _stalePanelLoaded = false;
 let _repairPanelLoaded = false;
+let _connectionGapPanelLoaded = false;
 let _healthPanelLoaded = false;
 let _liveStatusPanelLoaded = false;
 // device_id -> array of diagnostic rows (most-recent first), cached after the
@@ -1015,6 +1023,64 @@ async function loadTvStaleDiag() {
   }
 }
 
+function _fmtGapDateTime(value) {
+  if (!value) return "Still missing check-ins";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "—";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+async function loadTvConnectionGapDiag() {
+  if (!connectionGapBody) return;
+  const hours = Number(connectionGapWindow?.value || 168);
+  try {
+    const params = new URLSearchParams({ hours: String(hours), limit: "100" });
+    const data = await apiRequest(`/admin/system/tv-connection-gaps-summary?${params.toString()}`, { method: "GET" });
+    if (!data || !Array.isArray(data.recent_rows)) {
+      if (connectionGapCount) connectionGapCount.textContent = "error loading";
+      if (connectionGapSummary) connectionGapSummary.textContent = "Unable to load connection gap history.";
+      return;
+    }
+
+    const rows = data.recent_rows;
+    const counts = data.counts || {};
+    if (connectionGapCount) {
+      connectionGapCount.textContent = `${counts.connection_gaps ?? rows.length} possible gap(s) in last ${hours}h`;
+    }
+    if (connectionGapSummary) {
+      const points = Array.isArray(data.meaningful_points) ? data.meaningful_points : [];
+      connectionGapSummary.innerHTML = `
+        <div><strong>Recovered gaps:</strong> ${counts.recovered_gaps ?? 0} &middot; <strong>Ongoing gaps:</strong> ${counts.ongoing_gaps ?? 0} &middot; <strong>Devices:</strong> ${counts.unique_devices ?? 0}</div>
+        <div><strong>Detection thresholds:</strong> ${data.thresholds_minutes?.device_presence ?? 45}m for current check-ins; ${data.thresholds_minutes?.legacy_heartbeat ?? 150}m for legacy heartbeat-only clients.</div>
+        <ul>${points.map((point) => `<li>${_escapeHtml(point)}</li>`).join("")}</ul>
+      `;
+    }
+
+    if (!rows.length) {
+      connectionGapBody.innerHTML = '<tr><td colspan="7" style="opacity:0.4;">No check-in gaps exceeded the detection threshold in this window.</td></tr>';
+      return;
+    }
+
+    connectionGapBody.innerHTML = rows.map((row) => {
+      const shortId = row.device_id ? String(row.device_id).slice(-8) : "unknown";
+      const statusLabel = row.status === "ongoing" ? "ONGOING" : "RECOVERED";
+      return `
+      <tr>
+        <td><span class="tv-gap-status is-${_escapeHtml(row.status)}">${statusLabel}</span></td>
+        <td>${_escapeHtml(_fmtGapDateTime(row.last_checkin_at))}</td>
+        <td>${_escapeHtml(_fmtGapDateTime(row.resumed_at))}</td>
+        <td>${_escapeHtml(row.user_email || "Email unavailable")}</td>
+        <td><span title="${_escapeHtml(row.device_ua || "")}" style="font-family:monospace;">…${_escapeHtml(shortId)}</span></td>
+        <td>${_escapeHtml(_fmtDuration(Number(row.gap_minutes || 0) * 60000))}</td>
+        <td>${_escapeHtml(row.evidence || "No failure evidence recorded")}</td>
+      </tr>`;
+    }).join("");
+  } catch (err) {
+    if (connectionGapCount) connectionGapCount.textContent = `Error: ${err.message}`;
+    if (connectionGapSummary) connectionGapSummary.textContent = "Error loading connection gap history.";
+  }
+}
+
 if (diagLoadBtn) {
   diagLoadBtn.addEventListener("click", loadTvDiag);
 }
@@ -1128,6 +1194,40 @@ if (staleDiagLoadBtn) {
     _stalePanelLoaded = true;
     loadTvStaleDiag();
   });
+}
+
+if (connectionGapLoadBtn) {
+  connectionGapLoadBtn.addEventListener("click", () => {
+    _connectionGapPanelLoaded = true;
+    loadTvConnectionGapDiag();
+  });
+}
+
+if (connectionGapClearBtn) {
+  connectionGapClearBtn.addEventListener("click", () => {
+    if (connectionGapCount) connectionGapCount.textContent = "cleared";
+    if (connectionGapSummary) connectionGapSummary.textContent = "Cleared view (diagnostics unchanged).";
+    if (connectionGapBody) connectionGapBody.innerHTML = '<tr><td colspan="7" style="opacity:0.4;">Cleared view (server history unchanged).</td></tr>';
+  });
+}
+
+if (connectionGapWindow) {
+  connectionGapWindow.addEventListener("change", () => {
+    if (_connectionGapPanelLoaded) loadTvConnectionGapDiag();
+  });
+}
+
+if (connectionGapPanel) {
+  connectionGapPanel.addEventListener("toggle", () => {
+    if (connectionGapPanel.open && !_connectionGapPanelLoaded) {
+      _connectionGapPanelLoaded = true;
+      loadTvConnectionGapDiag();
+    }
+  });
+  if (connectionGapPanel.open && !_connectionGapPanelLoaded) {
+    _connectionGapPanelLoaded = true;
+    loadTvConnectionGapDiag();
+  }
 }
 
 if (staleDiagClearBtn) {

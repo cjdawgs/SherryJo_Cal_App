@@ -250,6 +250,20 @@ def test_admin_tv_live_status_uses_confirmed_presence_and_never_infers_offline_f
     assert "YELLOW · status unknown" in admin_js
     assert 'state.uptimeMs != null ? `<span class="tv-uptime-badge">UP ${_escapeHtml(_fmtDuration(state.uptimeMs))}</span>`' in admin_js
     assert ".tv-uptime-badge" in admin_html
+    assert "Yellow means status is" in admin_html
+    assert "Red means a recent authentication error was reported." in admin_html
+
+
+def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
+    root = Path(__file__).resolve().parents[2]
+    admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+    admin_html = (root / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert 'id="tvConnectionGapPanel" open' in admin_html
+    assert "tv-connection-gaps-summary" in admin_js
+    assert "last_checkin_at" in admin_js
+    assert "resumed_at" in admin_js
+    assert 'row.evidence || "No failure evidence recorded"' in admin_js
 
 
 def test_tv_dashboard_recovers_refresh_after_fireos_suspension():

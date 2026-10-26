@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from cryptography.fernet import Fernet
@@ -616,6 +616,39 @@ def test_admin_tv_stale_refresh_summary_reports_recent_fallbacks(client, db):
     assert reasons.get("backend_refresh_failure") == 1
     assert reasons.get("backend_refresh_failure_no_snapshot") == 1
     assert len(payload["recent_rows"]) == 2
+
+
+def test_admin_tv_connection_gap_summary_reports_recovery_and_failure_evidence(client, db):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    now_utc = datetime.now(timezone.utc)
+    first_checkin = now_utc - timedelta(hours=4)
+    resumed_checkin = now_utc - timedelta(hours=1)
+
+    db.add_all([
+        TVDiagLog(user_id=admin["id"], device_id="firetv-a", event="heartbeat", ts_server=now_utc - timedelta(hours=6)),
+        TVDiagLog(user_id=admin["id"], device_id="firetv-a", event="device_presence", ts_server=first_checkin),
+        TVDiagLog(user_id=admin["id"], device_id="firetv-a", event="tv_fetch_timeout", details="GET /tv/events timed out", ts_server=first_checkin + timedelta(minutes=20)),
+        TVDiagLog(user_id=admin["id"], device_id="firetv-a", event="device_presence", ts_server=resumed_checkin),
+        TVDiagLog(user_id=admin["id"], device_id="firetv-a", event="device_presence", ts_server=now_utc - timedelta(minutes=20)),
+        TVDiagLog(user_id=admin["id"], device_id="legacy-tv", event="heartbeat", ts_server=now_utc - timedelta(hours=4)),
+        TVDiagLog(user_id=admin["id"], device_id="legacy-tv", event="heartbeat", ts_server=now_utc - timedelta(hours=1)),
+    ])
+    db.commit()
+
+    res = client.get("/admin/system/tv-connection-gaps-summary?hours=168", headers=headers)
+    assert res.status_code == 200
+
+    payload = res.json()
+    assert payload["counts"]["connection_gaps"] == 2
+    rows = {row["device_id"]: row for row in payload["recent_rows"]}
+    assert rows["firetv-a"]["status"] == "recovered"
+    assert rows["firetv-a"]["gap_minutes"] == 180
+    assert rows["firetv-a"]["user_email"] == admin["email"]
+    assert "tv_fetch_timeout" in rows["firetv-a"]["evidence"]
+    assert rows["firetv-a"]["checkin_source"] == "device_presence"
+    assert rows["legacy-tv"]["checkin_source"] == "heartbeat"
+    assert rows["legacy-tv"]["threshold_minutes"] == 150
 
 
 def test_admin_table_rows_requires_admin_role(client):

@@ -304,6 +304,12 @@
     .tv-stale-panel {
       margin-top: 10px;
     }
+    .tv-gap-status {
+      display: inline-block; padding: 2px 7px; border-radius: 999px;
+      font-size: 10px; font-weight: 700; white-space: nowrap;
+    }
+    .tv-gap-status.is-recovered { background: #e8f5ec; color: #17663b; border: 1px solid #b7d7c0; }
+    .tv-gap-status.is-ongoing { background: #fff5df; color: #8a5a00; border: 1px solid #e8c778; }
 
     .tv-stale-summary {
       margin: 8px 0;
@@ -875,8 +881,8 @@
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
                   Live online/offline status for a selected device, using the same diagnostics feed as the log above.
-                  Green means the device checked in recently with no active problem. Yellow flags a warning that
-                  usually still resolves itself. Red means the device has gone quiet or hit a hard failure.
+                  Green means a recent authenticated calendar check-in with no active problem. Yellow means status is
+                  stale or needs review, not necessarily offline. Red means a recent authentication error was reported.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvLiveStatusCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
@@ -913,6 +919,35 @@
                   <table class="tv-diag-table" id="tvHealthTable">
                     <thead><tr><th>Device</th><th>Status</th><th>Last check-in</th><th>Hidden-state warning</th><th>Last network/token failure</th><th>Connection diagnosis</th></tr></thead>
                     <tbody id="tvHealthBody"><tr><td colspan="6" style="opacity:0.4;">No health snapshot loaded yet.</td></tr></tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
+
+            <details class="overview-subsection tv-stale-panel" id="tvConnectionGapPanel" open>
+              <summary>TV Connection Gap &amp; Recovery Log</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Infers a possible outage when a device stops sending successful calendar check-ins and later resumes.
+                  It shows the last check-in, recovery time, and any error beacon received; a device cannot report the cause while fully disconnected.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvConnectionGapCount" style="font-size:11px;opacity:0.55;">loading check-in history</span>
+                  <label for="tvConnectionGapWindow" style="font-size:11px;opacity:0.75;">Window</label>
+                  <select id="tvConnectionGapWindow" style="font-size:11px;min-width:110px;">
+                    <option value="24">Last 24h</option>
+                    <option value="72">Last 72h</option>
+                    <option value="168" selected>Last 7d</option>
+                    <option value="336">Last 14d</option>
+                  </select>
+                  <button id="tvConnectionGapLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvConnectionGapClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div id="tvConnectionGapSummary" class="tv-stale-summary">Loading connection gap history...</div>
+                <div style="overflow-x:auto;">
+                  <table class="tv-diag-table" id="tvConnectionGapTable">
+                    <thead><tr><th>Status</th><th>Last check-in</th><th>Resumed</th><th>User</th><th>Device</th><th>Gap</th><th>Evidence</th></tr></thead>
+                    <tbody id="tvConnectionGapBody"><tr><td colspan="7" style="opacity:0.4;">Loading check-in history...</td></tr></tbody>
                   </table>
                 </div>
               </div>

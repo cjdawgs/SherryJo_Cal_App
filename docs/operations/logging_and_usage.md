@@ -37,7 +37,10 @@ in response to a user.
   diagnostic row, or create an application access log. That is 288 inexpensive
   edge requests per continuously visible TV per day. Device status in Admin is
   based on authenticated calendar-response check-ins; stale diagnostics are
-  shown as unknown rather than treated as proof that a TV is offline.
+  shown as unknown rather than treated as proof that a TV is offline. The
+  Connection Gap & Recovery Log compares persisted device check-ins and reports
+  recovered or ongoing gaps; it can correlate delivered timeout/auth events but
+  cannot establish a precise outage start or cause while the TV is disconnected.
 - **Local sleep guard.** A 30-second browser-only watchdog checks the screen wake
   lock, animation loop, synthetic-input timer, media stream and Web Audio layer.
   It repairs inactive layers before the Fire OS inactivity window is reached.

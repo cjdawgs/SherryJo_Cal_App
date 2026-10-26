@@ -319,6 +319,95 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
         if (historical) return { checked_at: new Date().toISOString(), window: { start: start.toISOString(), end: end.toISOString(), start_date: url.searchParams.get("start_date"), end_date: url.searchParams.get("end_date") }, counts: { sync_failures: failures.length, publish_failure_rows: diagnostics.length, distinct_publish_failure_reasons: 0, total_publish_diagnostics: diagnostics.length }, meaningful_points: ["Report uses persisted diagnostics."], sync_failure_accounts: failures, publish_failure_reasons: [], publish_failures: diagnostics.slice(0, 25), recent_error_messages: [...new Set(failures.map((item) => item.last_error).filter(Boolean))].slice(0, 10) };
         return { checked_at: new Date().toISOString(), window: { label: "today_utc", start: start.toISOString(), end: end.toISOString() }, has_failures: Boolean(failures.length || diagnostics.length), summary_lines: failures.length || diagnostics.length ? ["Persisted failures were recorded today."] : ["No sync or publish failures were recorded for this user today."], counts: { decrypt_warning_accounts: 0, sync_failures_today: failures.length, publish_failures_today: diagnostics.length, publish_diagnostics_today: diagnostics.length }, decrypt_warning_accounts: [], sync_failure_accounts: failures, publish_failures: diagnostics };
     }
+    if (action === "tv-connection-gaps-summary") {
+        const hours = Math.min(336, Math.max(1, Number(url.searchParams.get("hours")) || 168));
+        const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit")) || 100));
+        const retentionDays = Math.min(365, Math.max(1, Number(env.TV_DIAG_RETENTION_DAYS) || 14));
+        const failureEvents = ["tv_fetch_timeout", "tv_fetch_network_error", "token_invalid_401", "kiosk_token_invalid_401", "token_storage_removed", "storage_token_removed", "user_unpair_requested", "user_logout_requested"];
+        const rows = (await client.query(`
+            SELECT d.ts_server, d.user_id, u.email AS user_email, d.device_id, d.device_ua,
+                   d.event, d.details, d.visibility
+            FROM public.tv_diag_log d
+            LEFT JOIN public.users u ON u.id = d.user_id
+            WHERE d.event = ANY($1::text[])
+              AND d.device_id IS NOT NULL
+              AND d.ts_server >= now() - make_interval(days => $2)
+            ORDER BY d.ts_server ASC
+        `, [["device_presence", "heartbeat", ...failureEvents], retentionDays])).rows;
+        const now = new Date();
+        const windowStart = now.getTime() - hours * 60 * 60 * 1000;
+        const grouped = new Map();
+        for (const row of rows) {
+            const key = `${row.user_id}:${row.device_id}`;
+            const group = grouped.get(key) || { checkins: [], failures: [], userId: row.user_id, userEmail: row.user_email, deviceId: row.device_id, userAgent: row.device_ua };
+            if (["device_presence", "heartbeat"].includes(row.event)) group.checkins.push(row);
+            else group.failures.push(row);
+            grouped.set(key, group);
+        }
+
+        const gaps = [];
+        const addGap = (group, threshold, previous, resumed) => {
+            const previousAt = new Date(previous.ts_server);
+            const endAt = resumed ? new Date(resumed.ts_server) : now;
+            const minutes = Math.max(0, Math.floor((endAt.getTime() - previousAt.getTime()) / 60000));
+            if (minutes < threshold) return;
+            const failure = group.failures.filter((entry) => {
+                const eventAt = new Date(entry.ts_server).getTime();
+                return eventAt > previousAt.getTime() && eventAt <= endAt.getTime();
+            }).at(-1);
+            gaps.push({
+                user_id: group.userId,
+                user_email: group.userEmail || "",
+                device_id: group.deviceId,
+                device_ua: group.userAgent || "",
+                last_checkin_at: previousAt.toISOString(),
+                resumed_at: resumed ? endAt.toISOString() : null,
+                gap_minutes: minutes,
+                status: resumed ? "recovered" : "ongoing",
+                checkin_source: previous.event,
+                threshold_minutes: threshold,
+                evidence: failure ? `${failure.event}: ${failure.details || "no details"}` : `No failure beacon received; inferred from missing ${previous.event === "device_presence" ? "authenticated calendar check-ins" : "legacy heartbeats"}.`,
+            });
+        };
+
+        for (const group of grouped.values()) {
+            if (!group.checkins.length) continue;
+            for (let index = 1; index < group.checkins.length; index += 1) {
+                const previous = group.checkins[index - 1];
+                const resumed = group.checkins[index];
+                const threshold = previous.event === "device_presence" ? 45 : 150;
+                const gapMinutes = (new Date(resumed.ts_server).getTime() - new Date(previous.ts_server).getTime()) / 60000;
+                if (new Date(resumed.ts_server).getTime() >= windowStart && gapMinutes >= threshold) {
+                    addGap(group, threshold, previous, resumed);
+                }
+            }
+            const latest = group.checkins[group.checkins.length - 1];
+            const threshold = latest.event === "device_presence" ? 45 : 150;
+            if (now.getTime() - new Date(latest.ts_server).getTime() >= threshold * 60000) {
+                addGap(group, threshold, latest, null);
+            }
+        }
+
+        gaps.sort((a, b) => new Date(b.resumed_at || b.last_checkin_at) - new Date(a.resumed_at || a.last_checkin_at));
+        const recentRows = gaps.slice(0, limit);
+        return {
+            checked_at: now.toISOString(),
+            window: { hours },
+            thresholds_minutes: { device_presence: 45, legacy_heartbeat: 150 },
+            counts: {
+                connection_gaps: gaps.length,
+                recovered_gaps: gaps.filter((row) => row.status === "recovered").length,
+                ongoing_gaps: gaps.filter((row) => row.status === "ongoing").length,
+                unique_devices: new Set(gaps.map((row) => row.device_id)).size,
+            },
+            meaningful_points: [
+                "A gap is inferred from missing successful device check-ins; it does not identify the exact outage start or prove the cause.",
+                "A timeout or authentication event is included only if the TV successfully delivered that diagnostic during the gap.",
+                "Legacy clients use a longer threshold because routine heartbeats are persisted hourly.",
+            ],
+            recent_rows: recentRows,
+        };
+    }
     if (action === "tv-stale-refresh-summary") { const hours = Math.min(336, Math.max(1, Number(url.searchParams.get("hours")) || 24)); const rows = (await client.query("SELECT ts_server,user_id,device_id,details reason,elapsed_min,visibility FROM tv_diag_log WHERE event='stale_snapshot_used' AND ts_server >= now()-make_interval(hours=>$1) ORDER BY ts_server DESC LIMIT 200", [hours])).rows; return { checked_at: new Date().toISOString(), window: { hours }, counts: { stale_snapshot_events: rows.length, unique_users: new Set(rows.map(r => r.user_id).filter(Boolean)).size, unique_devices: new Set(rows.map(r => r.device_id).filter(Boolean)).size }, reason_counts: [], meaningful_points: ["Stale snapshots preserved visible TV events during refresh failures."], recent_rows: rows }; }
     return { error: "Unsupported admin system operation", status: 404 };
 }
