@@ -26,13 +26,21 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
 
     jobs = workflow["jobs"]
     setup_python_steps = [
-        step["uses"]
+        step
         for job_config in jobs.values()
         for step in job_config.get("steps", [])
         if str(step.get("uses", "")).startswith("actions/setup-python@")
     ]
     assert setup_python_steps
-    assert set(setup_python_steps) == {"actions/setup-python@v6"}
+    assert {step["uses"] for step in setup_python_steps} == {"actions/setup-python@v6"}
+    assert {step["with"]["python-version"] for step in setup_python_steps} == {"3.14"}
+    setup_node_steps = [
+        step
+        for job_config in jobs.values()
+        for step in job_config.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/setup-node@")
+    ]
+    assert {step["uses"] for step in setup_node_steps} == {"actions/setup-node@v7"}
 
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
@@ -178,6 +186,7 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
         if str(step.get("uses", "")).startswith("actions/setup-python@")
     )
     assert setup_python_step["uses"] == "actions/setup-python@v6"
+    assert setup_python_step["with"]["python-version"] == "3.14"
 
     monitor_step = next(
         step for step in job["steps"]
@@ -213,4 +222,28 @@ def test_stage_c_observation_uses_proxy_canary_and_current_python_action():
     )
 
     assert setup_python_step["uses"] == "actions/setup-python@v6"
+    assert setup_python_step["with"]["python-version"] == "3.14"
     assert "--native-worker" not in parity_step["run"]
+
+
+def test_python_test_workflow_pins_supported_runtime_and_current_node_action():
+    workflow = yaml.load(
+        (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    setup_python_steps = [
+        step
+        for job_config in workflow["jobs"].values()
+        for step in job_config.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    ]
+    setup_node_steps = [
+        step
+        for job_config in workflow["jobs"].values()
+        for step in job_config.get("steps", [])
+        if str(step.get("uses", "")).startswith("actions/setup-node@")
+    ]
+
+    assert setup_python_steps
+    assert {step["with"]["python-version"] for step in setup_python_steps} == {"3.14"}
+    assert {step["uses"] for step in setup_node_steps} == {"actions/setup-node@v7"}
