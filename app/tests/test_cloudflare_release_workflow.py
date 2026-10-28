@@ -163,14 +163,14 @@ def test_canary_monitor_is_scheduled_but_default_disabled_and_secret_free():
     workflow = yaml.load(monitor_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
 
     assert set(workflow["on"]) == {"schedule", "workflow_dispatch"}
-    assert workflow["on"]["schedule"] == [{"cron": "17 6 * * *"}]
+    assert workflow["on"]["schedule"] == [{"cron": "17 * * * *"}]
     inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     assert inputs["canary_url"]["default"] == "https://sherryjo-cal-app-canary.realty-cal.workers.dev"
     job = workflow["jobs"]["parity"]
-    gate_expr = str(job.get("if", "")).strip()
-    if gate_expr:
-        assert "workflow_dispatch" in gate_expr
-        assert "CLOUDFLARE_CANARY_MONITOR_ENABLED" in gate_expr
+    assert job["if"] == (
+        "${{ github.event_name == 'workflow_dispatch' || "
+        "vars.CLOUDFLARE_CANARY_MONITOR_ENABLED == 'true' }}"
+    )
     assert "secrets." not in monitor_path.read_text(encoding="utf-8")
 
     setup_python_step = next(

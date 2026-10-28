@@ -22,6 +22,7 @@ DEFAULT_RENDER_URL = "https://sherryjo-cal-app.onrender.com"
 DEFAULT_CLOUDFLARE_URL = "https://sherryjo-cal-app.realty-cal.workers.dev"
 USER_AGENT = "curl/8.10.1 SherryJo-shadow-parity/1.0"
 REQUEST_ATTEMPTS = 3
+REQUEST_TIMEOUT = 45
 RETRYABLE_ERRNOS = {104, 110, 113}
 RENDER_WARMUP_ATTEMPTS = 4
 RENDER_WARMUP_TIMEOUT = 60
@@ -123,52 +124,64 @@ def _request(opener, origin: str, case: HttpCase) -> HttpResult:
     )
     for attempt in range(REQUEST_ATTEMPTS):
         try:
-            response = opener.open(request, timeout=45)
-            break
-        except urllib.error.HTTPError as error:
-            response = error
-            break
-        except urllib.error.URLError as error:
-            reason = error.reason
+            try:
+                response = opener.open(request, timeout=REQUEST_TIMEOUT)
+            except urllib.error.HTTPError as error:
+                response = error
+
+            with response:
+                body = response.read()
+                return HttpResult(
+                    status=response.status,
+                    content_type=response.headers.get("content-type"),
+                    location=response.headers.get("location"),
+                    set_cookie=tuple(response.headers.get_all("set-cookie") or ()),
+                    edge_marker=response.headers.get("x-sherryjo-edge"),
+                    body=body,
+                )
+        except (urllib.error.URLError, OSError) as error:
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
             retryable = isinstance(reason, TimeoutError)
             retryable = retryable or isinstance(reason, OSError) and reason.errno in RETRYABLE_ERRNOS
             retryable = retryable or isinstance(reason, ssl.SSLError)
-            if not retryable or attempt == REQUEST_ATTEMPTS - 1:
+            if not retryable:
+                raise
+            if attempt == REQUEST_ATTEMPTS - 1:
+                if isinstance(reason, TimeoutError):
+                    raise TimeoutError(
+                        f"{case.name} ({case.method} {case.path}) at "
+                        f"{urlsplit(origin).netloc} timed out after "
+                        f"{REQUEST_ATTEMPTS} attempts: {reason}"
+                    ) from error
                 raise
             time.sleep(2 ** attempt)
 
-    with response:
-        body = response.read()
-        return HttpResult(
-            status=response.status,
-            content_type=response.headers.get("content-type"),
-            location=response.headers.get("location"),
-            set_cookie=tuple(response.headers.get_all("set-cookie") or ()),
-            edge_marker=response.headers.get("x-sherryjo-edge"),
-            body=body,
-        )
-
 
 def _warm_up_render(render_url: str) -> None:
-    # Render's free tier sleeps after inactivity; a cold start can take well
-    # over the per-check request timeout, so wake it up first and swallow
-    # any failures here rather than letting them abort the whole report.
     request = urllib.request.Request(
         f"{render_url}/health",
         headers={"Accept": "*/*", "User-Agent": USER_AGENT},
         method="GET",
     )
+    last_error: Exception | None = None
     for attempt in range(RENDER_WARMUP_ATTEMPTS):
         try:
             with urllib.request.urlopen(request, timeout=RENDER_WARMUP_TIMEOUT) as response:
                 response.read()
             return
-        except urllib.error.HTTPError:
-            return
-        except Exception:
-            if attempt == RENDER_WARMUP_ATTEMPTS - 1:
+        except urllib.error.HTTPError as error:
+            if error.code < 500:
                 return
+            last_error = error
+        except (urllib.error.URLError, OSError) as error:
+            last_error = error
+        if attempt < RENDER_WARMUP_ATTEMPTS - 1:
             time.sleep(2 ** attempt)
+
+    raise TimeoutError(
+        f"Render /health did not become ready after {RENDER_WARMUP_ATTEMPTS} "
+        f"attempts: {last_error}"
+    ) from last_error
 
 
 def _normalize_location(location: str | None, origins: Iterable[str]) -> str | None:
@@ -275,8 +288,21 @@ def run_http_parity(render_url: str, cloudflare_url: str, *, native_worker: bool
     origins = (render_url, cloudflare_url)
 
     for case in _cases(cloudflare_url):
-        render = _request(opener, render_url, case)
-        cloudflare = _request(opener, cloudflare_url, case)
+        try:
+            render = _request(opener, render_url, case)
+            cloudflare = _request(opener, cloudflare_url, case)
+        except (urllib.error.URLError, OSError) as error:
+            message = f"{case.name}: transport: {type(error).__name__}: {error}"
+            failures.append(message)
+            rows.append(
+                {
+                    "case": case.name,
+                    "passed": False,
+                    "failed_checks": ["transport"],
+                    "transport_error": f"{type(error).__name__}: {error}",
+                }
+            )
+            break
         checks = _native_worker_checks(case, cloudflare, origins) if native_worker else None
         if checks is None:
             checks = {
@@ -425,22 +451,33 @@ def main() -> int:
     cloudflare_url = args.cloudflare_url.rstrip("/")
     rows: list[dict] = []
     failures: list[str] = []
-    _warm_up_render(render_url)
     try:
+        _warm_up_render(render_url)
         rows, failures = run_http_parity(render_url, cloudflare_url, native_worker=args.native_worker)
-        edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
-        rows.append(edge_health_row)
-        failures.extend(edge_health_failures)
-        native_row, native_failures = run_worker_native_status(render_url, cloudflare_url)
-        rows.append(native_row)
-        failures.extend(native_failures)
-        websocket_row, websocket_failures = asyncio.run(
-            run_websocket_parity(render_url, cloudflare_url)
-        )
-        rows.append(websocket_row)
-        failures.extend(websocket_failures)
+        if not any("transport" in row.get("failed_checks", []) for row in rows):
+            edge_health_row, edge_health_failures = run_worker_edge_health(render_url, cloudflare_url)
+            rows.append(edge_health_row)
+            failures.extend(edge_health_failures)
+            native_row, native_failures = run_worker_native_status(render_url, cloudflare_url)
+            rows.append(native_row)
+            failures.extend(native_failures)
+            websocket_row, websocket_failures = asyncio.run(
+                run_websocket_parity(render_url, cloudflare_url)
+            )
+            rows.append(websocket_row)
+            failures.extend(websocket_failures)
     except Exception as error:
-        failures.append(f"transport: {type(error).__name__}: {error}")
+        message = f"transport: {type(error).__name__}: {error}"
+        failures.append(message)
+        if not rows:
+            rows.append(
+                {
+                    "case": "transport",
+                    "passed": False,
+                    "failed_checks": ["transport"],
+                    "transport_error": f"{type(error).__name__}: {error}",
+                }
+            )
 
     report = {
         "render_url": render_url,

@@ -119,3 +119,103 @@ def test_http_request_retries_transient_connection_reset(monkeypatch):
 
     assert result.status == 200
     assert calls == 2
+
+
+def test_http_request_retries_timeout_while_reading_response(monkeypatch):
+    class FakeResponse:
+        status = 200
+        headers = Message()
+
+        def __init__(self, *, timed_out):
+            self.timed_out = timed_out
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            if self.timed_out:
+                raise TimeoutError("read timed out")
+            return b"ok"
+
+    calls = 0
+
+    def open_request(_request, timeout):
+        nonlocal calls
+        calls += 1
+        return FakeResponse(timed_out=calls == 1)
+
+    class FakeOpener:
+        open = staticmethod(open_request)
+
+    monkeypatch.setattr(shadow_parity.time, "sleep", lambda _seconds: None)
+    result = shadow_parity._request(
+        FakeOpener(),
+        "https://edge.example.com",
+        shadow_parity.HttpCase("health_get", "GET", "/health"),
+    )
+
+    assert result.body == b"ok"
+    assert calls == 2
+
+
+def test_http_parity_keeps_completed_rows_when_a_later_request_times_out(monkeypatch):
+    calls = 0
+
+    def request(_opener, _origin, _case):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise TimeoutError("read timed out")
+        return _result(200)
+
+    monkeypatch.setattr(shadow_parity, "_request", request)
+
+    rows, failures = shadow_parity.run_http_parity(
+        "https://render.example.com",
+        "https://edge.example.com",
+    )
+
+    assert rows[0]["case"] == "health_get"
+    assert rows[1]["case"] == "health_head"
+    assert rows[1]["failed_checks"] == ["transport"]
+    assert any(
+        failure.startswith("health_head: transport: TimeoutError")
+        for failure in failures
+    )
+
+
+def test_render_warmup_retries_server_errors(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"ok"}'
+
+    calls = 0
+
+    def open_url(_request, timeout):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise urllib.error.HTTPError(
+                "https://render.example.com/health",
+                503,
+                "Service Unavailable",
+                Message(),
+                None,
+            )
+        return FakeResponse()
+
+    monkeypatch.setattr(shadow_parity.urllib.request, "urlopen", open_url)
+    monkeypatch.setattr(shadow_parity.time, "sleep", lambda _seconds: None)
+
+    shadow_parity._warm_up_render("https://render.example.com")
+
+    assert calls == 2
