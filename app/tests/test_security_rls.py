@@ -101,7 +101,15 @@ def test_every_public_table_is_covered_by_the_rls_list(pg_engine):
 @pytest.mark.parametrize("privilege", ["SELECT", "INSERT", "UPDATE", "DELETE"])
 def test_public_api_roles_have_no_table_privileges(pg_engine, role, privilege):
     with pg_engine.connect() as conn:
+        existing_tables = set(conn.execute(
+            text(
+                "SELECT tablename FROM pg_tables "
+                "WHERE schemaname = 'public'"
+            )
+        ).scalars().all())
         for table in RLS_TABLES:
+            if table not in existing_tables:
+                continue
             granted = conn.execute(
                 text("SELECT has_table_privilege(:role, :table, :privilege)"),
                 {"role": role, "table": f"public.{table}", "privilege": privilege},

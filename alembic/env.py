@@ -1,5 +1,6 @@
 # alembic/env.py
 
+import os
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
@@ -20,7 +21,7 @@ from app.models import User, Event, Task, Note, DateStickyNote, EventTagColorSet
 config = context.config
 
 # ✅ Dynamically set DB URL (overrides alembic.ini)
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", os.getenv("ALEMBIC_DATABASE_URL") or DATABASE_URL)
 
 # Logging config
 if config.config_file_name is not None:

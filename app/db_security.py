@@ -27,6 +27,8 @@ RLS_TABLES = (
     "sync_efficiency_daily_rollups",
     "sync_operation_ledger",
     "tv_diag_log",
+    "worker_tv_pairing_codes",
+    "tv_user_state",
     "app_runtime_secrets",
     "websocket_tickets",
     "worker_write_receipts",

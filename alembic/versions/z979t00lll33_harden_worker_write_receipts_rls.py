@@ -21,7 +21,19 @@ def _is_postgres() -> bool:
 def upgrade_statements() -> tuple[str, ...]:
     return (
         "ALTER TABLE public.worker_write_receipts ENABLE ROW LEVEL SECURITY",
-        "REVOKE ALL ON TABLE public.worker_write_receipts FROM anon, authenticated",
+        """
+        DO $$
+        DECLARE
+            role_name text;
+        BEGIN
+            FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+                IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+                    EXECUTE 'REVOKE ALL ON TABLE public.worker_write_receipts FROM '
+                        || quote_ident(role_name);
+                END IF;
+            END LOOP;
+        END $$
+        """,
     )
 
 
