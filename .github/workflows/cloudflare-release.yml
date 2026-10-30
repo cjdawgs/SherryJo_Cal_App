@@ -80,15 +80,15 @@ jobs:
                   pip install -r requirements.txt
                   pip install pytest
 
-                        - name: Create isolated migration validation database
-                            run: |
-                                    python -c 'import psycopg2; connection = psycopg2.connect("dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432"); connection.autocommit = True; connection.cursor().execute("CREATE DATABASE sherryjo_migration_test"); connection.close()'
+            - name: Create isolated migration validation database
+              run: |
+                  python -c 'import psycopg2; connection = psycopg2.connect("dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432"); connection.autocommit = True; connection.cursor().execute("CREATE DATABASE sherryjo_migration_test"); connection.close()'
 
-                        - name: Apply Alembic migrations to PostgreSQL test database
-                            env:
-                                    DATABASE_URL: sqlite://
-                                    ALEMBIC_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_migration_test
-                            run: alembic upgrade head
+            - name: Apply Alembic migrations to PostgreSQL test database
+              env:
+                  DATABASE_URL: sqlite://
+                  ALEMBIC_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_migration_test
+              run: alembic upgrade head
 
             - name: Run Python suite
               run: pytest app/tests -q
