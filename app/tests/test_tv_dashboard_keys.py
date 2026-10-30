@@ -233,7 +233,7 @@ def test_admin_tv_live_status_uses_user_email_instead_of_numeric_id():
     assert '"Email unavailable"' in text
 
 
-def test_admin_tv_live_status_uses_confirmed_presence_and_never_infers_offline_from_stale_logs():
+def test_admin_tv_live_status_requires_offline_evidence_and_shows_reported_duration():
     root = Path(__file__).resolve().parents[2]
     admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
     admin_html = (root / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
@@ -245,13 +245,24 @@ def test_admin_tv_live_status_uses_confirmed_presence_and_never_infers_offline_f
     assert '["device_presence", "heartbeat"].includes(String(row?.event || ""))' in admin_js
     assert "_latestTvCheckIn(rows)" in admin_js
     assert 'label = "STATUS UNKNOWN"' in admin_js
-    assert 'label = "OFFLINE"' not in admin_js
+    assert 'const _tvOfflineEvents = new Set(["user_unpair_requested", "user_logout_requested"])' in admin_js
+    assert "else if (confirmedOffline)" in admin_js
+    assert 'label = "OFFLINE"' in admin_js
     assert "LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75" in admin_js
     assert "YELLOW · status unknown" in admin_js
-    assert 'state.uptimeMs != null ? `<span class="tv-uptime-badge">UP ${_escapeHtml(_fmtDuration(state.uptimeMs))}</span>`' in admin_js
+    assert "lastHeartbeat?.elapsed_min" in admin_js
+    assert "Last Reported Online" in admin_js
+    assert '<strong>Time online:</strong>' in admin_js
+    assert 'state.displayedUptimeMs != null ? `<span class="tv-uptime-badge">' in admin_js
     assert ".tv-uptime-badge" in admin_html
-    assert "Yellow means status is" in admin_html
-    assert "Red means a recent authentication error was reported." in admin_html
+    assert '.tv-status-card[data-status="green"]' in admin_html
+    assert '.tv-status-card[data-status="yellow"]' in admin_html
+    assert '.tv-status-card[data-status="red"]' in admin_html
+    assert "background: #ffffff;" in admin_html
+    assert "yellow means the status is stale or uncertain" in admin_html
+    assert "red requires a reported logout, unpair, or authentication error" in admin_html
+    assert 'id="tvRemoteSyncBtn"' in admin_html
+    assert "selected device&rsquo;s account" in admin_html
 
 
 def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
@@ -259,7 +270,19 @@ def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
     admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
     admin_html = (root / "app" / "templates" / "admin.html").read_text(encoding="utf-8")
 
-    assert 'id="tvConnectionGapPanel" open' in admin_html
+    assert 'id="tvConnectionGapPanel"' in admin_html
+    assert 'id="tvConnectionGapPanel" open' not in admin_html
+    assert 'id="tvLiveStatusPanel" open' not in admin_html
+    assert 'class="overview-subsection tv-health-panel">' in admin_html
+    assert admin_html.count('class="overview-subsection tv-stale-panel"') == 2
+    assert 'class="overview-subsection tv-repair-panel">' in admin_html
+    assert "class=\"overview-subsection tv-diag-panel\"" in admin_html
+    assert "Heartbeats show the page was running when logged" in admin_html
+    assert "Summarizes each device&rsquo;s latest check-in" in admin_html
+    assert "Infers long gaps between successful check-ins" in admin_html
+    assert "kept its last-known events after a temporary refresh error" in admin_html
+    assert "token-invalid, token-removed, and user-unpair events" in admin_html
+    assert "request remains queued until its dashboard is visible" in admin_html
     assert "tv-connection-gaps-summary" in admin_js
     assert "last_checkin_at" in admin_js
     assert "resumed_at" in admin_js
@@ -270,6 +293,7 @@ def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     text = _tv_js_text()
     assert "const POLL_MS = 600000;" in text
     assert "const STARTUP_REFRESH_RETRY_MS = 5000;" in text
+    assert "const REMOTE_REFRESH_POLL_MS = 30000;" in text
     assert "const CONNECTION_KEEPALIVE_MS = 300000;" in text
     assert "deltaMs >= POLL_MS" in text
     assert "window.addEventListener('online'" in text
@@ -282,6 +306,10 @@ def test_tv_dashboard_recovers_refresh_after_fireos_suspension():
     assert "if (!state.token || document.hidden || state.connectionKeepaliveInFlight) return;" in text
     assert "state.connectionKeepaliveInFlight = false;" in text
     assert "clearInterval(state.connectionKeepaliveHandle)" in text
+    assert "async function pollRemoteRefreshRequest()" in text
+    assert "syncTvCalendar({ source: 'remote', requestedAt })" in text
+    assert "if (data.remoteRefreshDeviceId !== TV_DEVICE_ID) return;" in text
+    assert "remote_calendar_sync_received" in text
 
 
 def test_tv_dashboard_retains_persistent_pairing_across_transient_401():

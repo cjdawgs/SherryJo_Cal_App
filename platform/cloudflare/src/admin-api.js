@@ -174,6 +174,34 @@ async function fetchGithubLatestCommit(repo, branch) {
 
 async function systemRoute(client, request, parts, url, env, body = {}) {
     const action = parts[2];
+    if (action === "tv-refresh-request") {
+        if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
+        const deviceId = String(body.device_id || "").trim();
+        if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
+        const device = await client.query(
+            "SELECT user_id FROM public.tv_diag_log WHERE device_id=$1 AND user_id IS NOT NULL ORDER BY ts_server DESC LIMIT 1",
+            [deviceId],
+        );
+        const userId = device.rows[0]?.user_id;
+        if (userId == null) return { error: "No account is associated with this TV device", status: 404 };
+        const updated = await client.query(`
+            INSERT INTO public.tv_user_state (user_id, remote_refresh_requested_at, remote_refresh_device_id)
+            VALUES ($1, now(), $2)
+            ON CONFLICT (user_id) DO UPDATE SET
+                remote_refresh_requested_at = now(),
+                remote_refresh_device_id = EXCLUDED.remote_refresh_device_id,
+                updated_at = now()
+            RETURNING remote_refresh_requested_at, remote_refresh_device_id
+        `, [userId, deviceId]);
+        return {
+            success: true,
+            device_id: deviceId,
+            user_id: userId,
+            requested_at: new Date(updated.rows[0].remote_refresh_requested_at).toISOString(),
+            requested_device_id: updated.rows[0].remote_refresh_device_id,
+            message: "Refresh request queued for the TV account.",
+        };
+    }
     if (action === "database-config") {
         const hyperdriveConfigured = Boolean(env.HYPERDRIVE_RLS_NO_CACHE?.connectionString);
         // Hyperdrive's connectionString is a proxy address, not the origin host, so the

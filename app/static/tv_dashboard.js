@@ -6,6 +6,8 @@ const TOKEN_KEY = 'tv_token';
 const POLL_MS = 600000;
 const TV_FETCH_TIMEOUT_MS = 12000;
 const STARTUP_REFRESH_RETRY_MS = 5000;
+const REMOTE_REFRESH_POLL_MS = 30000;
+const REMOTE_REFRESH_HANDLED_KEY = 'tv_remote_refresh_handled_v1';
 const CONNECTION_KEEPALIVE_MS = 300000;
 const LOCAL_GUARD_WATCHDOG_MS = 30000;
 const LOCAL_GUARD_DIAG_COOLDOWN_MS = 60 * 60 * 1000;
@@ -386,6 +388,9 @@ const state = {
   lastLocalGuardDiagAt: 0,
   clockHandle: null,
   heartbeatHandle: null,
+  remoteRefreshPollHandle: null,
+  remoteRefreshRequestedAt: null,
+  remoteRefreshHandledAt: null,
   autoPairRetryHandle: null,
   sessionStartAt: null,        // set by startPolling()
   sleepGuardEnabled: true,     // read from /tv/state
@@ -1466,6 +1471,7 @@ function startPolling() {
   }, STARTUP_REFRESH_RETRY_MS);
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.connectionKeepaliveHandle = setInterval(pulseTvConnection, CONNECTION_KEEPALIVE_MS);
+  state.remoteRefreshPollHandle = setInterval(pollRemoteRefreshRequest, REMOTE_REFRESH_POLL_MS);
   state.localGuardWatchdogHandle = setInterval(maintainLocalTvGuard, LOCAL_GUARD_WATCHDOG_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   // Heartbeat confirms the guard is alive between visible events. Every 15 min
@@ -1507,6 +1513,7 @@ function stopAll() {
   if (state.localGuardWatchdogHandle) clearInterval(state.localGuardWatchdogHandle);
   if (state.clockHandle) clearInterval(state.clockHandle);
   if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
+  if (state.remoteRefreshPollHandle) clearInterval(state.remoteRefreshPollHandle);
   stopAutoPairRetryLoop();
   state.pollHandle = null;
   state.startupRefreshRetryHandle = null;
@@ -1515,6 +1522,7 @@ function stopAll() {
   state.localGuardRepairInFlight = false;
   state.clockHandle = null;
   state.heartbeatHandle = null;
+  state.remoteRefreshPollHandle = null;
   state.hiddenSinceMs = null;
   state.hiddenWatchdogLogged = false;
   clearRemoteHoldState();
@@ -1874,6 +1882,12 @@ async function fetchTvState() {
   // Sleep guard settings (default to guard enabled, no timeout)
   state.sleepGuardEnabled = data.sleepGuardEnabled !== undefined ? data.sleepGuardEnabled : true;
   state.sleepGuardTimeoutMinutes = Math.max(0, Number(data.sleepGuardTimeoutMinutes || 0));
+  state.remoteRefreshRequestedAt = data.remoteRefreshRequestedAt || null;
+  try {
+    state.remoteRefreshHandledAt = localStorage.getItem(REMOTE_REFRESH_HANDLED_KEY) || null;
+  } catch {
+    state.remoteRefreshHandledAt = null;
+  }
   if (state.sleepGuardEnabled !== false && state.sleepGuardTimeoutMinutes > 0 && !ENFORCE_SLEEP_TIMEOUTS) {
     const receivedTimeout = state.sleepGuardTimeoutMinutes;
     state.sleepGuardTimeoutMinutes = 0;
@@ -1885,6 +1899,31 @@ async function fetchTvState() {
     const patched = await patchTvState({ selectedDate: fallbackDate }, { recordHistory: false });
     state.selectedDate = (patched && patched.selectedDate) || fallbackDate;
   }
+}
+
+async function pollRemoteRefreshRequest() {
+  if (!state.token || document.hidden || state.syncInProgress) return;
+  const res = await authFetch('/tv/state', {
+    cache: 'no-store',
+    suppressNetworkHint: true,
+  });
+  if (!res || !res.ok) return;
+
+  const data = await res.json().catch(() => ({}));
+  const requestedAt = data.remoteRefreshRequestedAt || null;
+  if (data.remoteRefreshDeviceId !== TV_DEVICE_ID) return;
+  if (!requestedAt || requestedAt === state.remoteRefreshHandledAt) return;
+  const requestedMs = Date.parse(requestedAt);
+  const handledMs = Date.parse(state.remoteRefreshHandledAt || '');
+  if (Number.isFinite(requestedMs) && Number.isFinite(handledMs) && requestedMs <= handledMs) return;
+
+  state.remoteRefreshRequestedAt = requestedAt;
+  state.remoteRefreshHandledAt = requestedAt;
+  try {
+    localStorage.setItem(REMOTE_REFRESH_HANDLED_KEY, requestedAt);
+  } catch { }
+  if (tvDiag) tvDiag.log('remote_calendar_sync_received', `requested_at=${requestedAt}`);
+  await syncTvCalendar({ source: 'remote', requestedAt });
 }
 
 async function refreshEvents(force = false, options = {}) {
@@ -3242,8 +3281,12 @@ function runSidebarAction(index) {
   if (items[index]) items[index].action();
 }
 
-async function syncTvCalendar() {
+async function syncTvCalendar(options = {}) {
   if (state.syncInProgress) return;
+  const isRemoteRequest = options.source === 'remote';
+  if (isRemoteRequest && tvDiag) {
+    tvDiag.log('remote_calendar_sync_started', `requested_at=${options.requestedAt || 'unknown'}`);
+  }
   state.syncInProgress = true;
   state.syncVisualStartedAt = Date.now();
   applySyncVisualState();
@@ -3264,9 +3307,13 @@ async function syncTvCalendar() {
 
     state.lastEventsEtag = '';
     await refreshEvents(true, { showSync: true });
+    if (isRemoteRequest && tvDiag) {
+      tvDiag.log('remote_calendar_provider_sync_succeeded', 'Provider sync returned; forced TV event refresh requested');
+    }
   } catch (err) {
     const message = err && err.message ? err.message : 'Calendar sync failed';
     if (tvDiag) tvDiag.log('tv_calendar_sync_failed', message);
+    if (isRemoteRequest && tvDiag) tvDiag.log('remote_calendar_sync_failed', message);
     setSyncStatus(false, 'Sync Failed - showing last known data');
     renderFooterHint(`Sync issue: ${message}`);
   } finally {

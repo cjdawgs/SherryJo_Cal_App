@@ -5,7 +5,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 from app.config import settings
-from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, TVDiagLog, User
+from app.models import DateStickyNote, Event, Note, OAuthAccount, Task, TVDiagLog, TVUserState, User
 from app.utils.crypto import reset_cipher_cache, unseal
 from app.utils.runtime_token_key_store import load_persisted_token_encryption_key
 
@@ -572,6 +572,40 @@ def test_admin_current_user_failure_history_rejects_large_range(client):
         headers=headers,
     )
     assert res.status_code == 422
+
+
+def test_admin_tv_refresh_request_updates_shared_state_for_selected_device(client, db):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    device_id = "firetv-refresh-target"
+    db.add(TVDiagLog(
+        user_id=admin["id"],
+        device_id=device_id,
+        event="heartbeat",
+        ts_server=datetime.now(timezone.utc),
+    ))
+    db.commit()
+
+    response = client.post(
+        "/admin/system/tv-refresh-request",
+        headers=headers,
+        json={"device_id": device_id},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["success"] is True
+    assert payload["device_id"] == device_id
+    assert payload["user_id"] == admin["id"]
+    assert payload["requested_at"]
+    assert payload["requested_device_id"] == device_id
+    state = db.get(TVUserState, admin["id"])
+    assert state.remote_refresh_requested_at is not None
+    assert state.remote_refresh_device_id == device_id
+    state_response = client.get("/tv/state", headers=headers)
+    assert state_response.status_code == 200
+    assert state_response.json()["remoteRefreshRequestedAt"]
+    assert state_response.json()["remoteRefreshDeviceId"] == device_id
 
 
 def test_admin_tv_stale_refresh_summary_reports_recent_fallbacks(client, db):

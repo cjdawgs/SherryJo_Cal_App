@@ -384,6 +384,27 @@ class TVDiagLog(Base):
     guard_timeout = Column(Integer, nullable=True)
 
 
+class TVUserState(Base):
+    """Shared TV settings and remote refresh request marker."""
+
+    __tablename__ = "tv_user_state"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    selected_date = Column(Date, nullable=True)
+    current_view = Column(String, nullable=False, default="day")
+    focused_event_id = Column(Integer, nullable=True)
+    sleep_guard_enabled = Column(Boolean, nullable=False, default=True)
+    sleep_guard_timeout_minutes = Column(Integer, nullable=False, default=0)
+    remote_refresh_requested_at = Column(DateTime(timezone=True), nullable=True)
+    remote_refresh_device_id = Column(String(64), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class SyncEfficiencyDailyRollup(Base):
     """Daily rollup snapshots for sync efficiency and provider-cache metrics."""
 

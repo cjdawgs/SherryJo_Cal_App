@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, User
+from app.models import DateStickyNote, Event, OAuthAccount, Roles, TVDiagLog, TVUserState, User
 from app.security import create_persistent_token, create_token
 from app.services.calendar_service import CalendarService
 from app.services.tv_pairing_service import pairing_store, tv_state_store
@@ -312,6 +312,8 @@ class TVStateResponse(BaseModel):
     currentUserRole: Optional[str] = None
     sleepGuardEnabled: bool = True
     sleepGuardTimeoutMinutes: int = 0
+    remoteRefreshRequestedAt: Optional[str] = None
+    remoteRefreshDeviceId: Optional[str] = None
 
 
 class TVStatePatch(BaseModel):
@@ -1183,6 +1185,7 @@ def auto_pair_tv(
 @router.get("/state", response_model=TVStateResponse)
 def get_tv_state(
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Returns the current TV state for the authenticated user.
@@ -1191,6 +1194,13 @@ def get_tv_state(
     Logs: (read-only, no special log needed)
     """
     state = tv_state_store.get(current_user.id)
+    shared_state = db.get(TVUserState, current_user.id)
+    remote_refresh_requested_at = (
+        shared_state.remote_refresh_requested_at.isoformat()
+        if shared_state and shared_state.remote_refresh_requested_at
+        else None
+    )
+    remote_refresh_device_id = shared_state.remote_refresh_device_id if shared_state else None
     if state is None:
         # Return empty state — do NOT inject today()
         return TVStateResponse(
@@ -1201,6 +1211,8 @@ def get_tv_state(
             currentUserRole=current_user.role,
             sleepGuardEnabled=True,
             sleepGuardTimeoutMinutes=0,
+            remoteRefreshRequestedAt=remote_refresh_requested_at,
+            remoteRefreshDeviceId=remote_refresh_device_id,
         )
     return TVStateResponse(
         selectedDate=state.get("selectedDate"),
@@ -1210,6 +1222,8 @@ def get_tv_state(
         currentUserRole=current_user.role,
         sleepGuardEnabled=state.get("sleepGuardEnabled", True),
         sleepGuardTimeoutMinutes=state.get("sleepGuardTimeoutMinutes", 0),
+        remoteRefreshRequestedAt=remote_refresh_requested_at,
+        remoteRefreshDeviceId=remote_refresh_device_id,
     )
 
 
@@ -1217,6 +1231,7 @@ def get_tv_state(
 def patch_tv_state(
     body: TVStatePatch,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Apple TV (or web UI) patches the shared TV state.
@@ -1226,6 +1241,13 @@ def patch_tv_state(
     """
     patch = body.model_dump(exclude_none=True)
     updated = tv_state_store.set(current_user.id, patch)
+    shared_state = db.get(TVUserState, current_user.id)
+    remote_refresh_requested_at = (
+        shared_state.remote_refresh_requested_at.isoformat()
+        if shared_state and shared_state.remote_refresh_requested_at
+        else None
+    )
+    remote_refresh_device_id = shared_state.remote_refresh_device_id if shared_state else None
     if patch:
         _tv_events_snapshot_cache.pop(current_user.id, None)
 
@@ -1237,6 +1259,8 @@ def patch_tv_state(
         currentUserRole=current_user.role,
         sleepGuardEnabled=updated.get("sleepGuardEnabled", True),
         sleepGuardTimeoutMinutes=updated.get("sleepGuardTimeoutMinutes", 0),
+        remoteRefreshRequestedAt=remote_refresh_requested_at,
+        remoteRefreshDeviceId=remote_refresh_device_id,
     )
 
 

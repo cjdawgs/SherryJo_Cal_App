@@ -332,10 +332,23 @@
       margin: 10px 0 0;
       padding: 14px 16px;
       border-radius: 10px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(0, 0, 0, 0.18);
+      border: 2px solid #c7d6e4;
+      background: #ffffff;
+      color: #162a3d;
       font-size: 12px;
       line-height: 1.55;
+    }
+    .tv-status-card[data-status="green"] {
+      border-color: #2f8f5a;
+      box-shadow: inset 4px 0 #2f8f5a;
+    }
+    .tv-status-card[data-status="yellow"] {
+      border-color: #b77900;
+      box-shadow: inset 4px 0 #b77900;
+    }
+    .tv-status-card[data-status="red"] {
+      border-color: #c62828;
+      box-shadow: inset 4px 0 #c62828;
     }
     .tv-status-headline {
       display: flex; align-items: center; gap: 10px;
@@ -349,15 +362,15 @@
     .tv-status-dot.status-yellow { background: #f1c40f; color: #f1c40f; }
     .tv-status-dot.status-red    { background: #ff453a; color: #ff453a; }
     .tv-status-label { font-size: 15px; font-weight: 700; }
-    .tv-status-label.status-green  { color: #2ecc71; }
-    .tv-status-label.status-yellow { color: #f1c40f; }
-    .tv-status-label.status-red    { color: #ff453a; }
+    .tv-status-label.status-green  { color: #17663b; }
+    .tv-status-label.status-yellow { color: #8a5a00; }
+    .tv-status-label.status-red    { color: #b42318; }
     .tv-uptime-badge {
       display: inline-flex; align-items: center;
       padding: 2px 7px; border-radius: 999px;
-      border: 1px solid rgba(47, 143, 90, 0.38);
-      background: rgba(18, 74, 43, 0.12);
-      color: #17663b; font-size: 10px; font-weight: 700;
+      border: 1px solid #b7d7c0;
+      background: #edf9f0;
+      color: #17663b; font-size: 11px; font-weight: 700;
       line-height: 1.4; white-space: nowrap;
     }
     .tv-status-fields {
@@ -860,8 +873,13 @@
 
           <!-- ── Live diagnostics log ───────────────────────────── -->
           <div>
+            <details class="overview-subsection tv-diag-panel">
+              <summary>Live Diagnostics Log</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Recent TV lifecycle and sync events reported by the device. Heartbeats show the page was running when logged; they do not prove calendar data is current.
+                </p>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-              <strong style="font-size:13px;">Live Diagnostics Log</strong>
               <span id="tvDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
               <button id="tvDiagLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
               <button id="tvDiagClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
@@ -875,14 +893,14 @@
                 <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
               </table>
             </div>
+              </div>
+            </details>
 
-            <details class="overview-subsection tv-live-status-panel" id="tvLiveStatusPanel" open>
+            <details class="overview-subsection tv-live-status-panel" id="tvLiveStatusPanel">
               <summary>&#x1F4E1; Device Status &amp; Uptime</summary>
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Live online/offline status for a selected device, using the same diagnostics feed as the log above.
-                  Green means a recent authenticated calendar check-in with no active problem. Yellow means status is
-                  stale or needs review, not necessarily offline. Red means a recent authentication error was reported.
+                  Green means a recent healthy check-in; yellow means the status is stale or uncertain; red requires a reported logout, unpair, or authentication error. Missing check-ins alone do not prove the TV is offline.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvLiveStatusCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
@@ -893,6 +911,13 @@
                   <button id="tvLiveStatusLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
                   <button id="tvLiveStatusClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
                 </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <button id="tvRemoteSyncBtn" class="ghost-btn" type="button">Request Calendar Sync</button>
+                  <span id="tvRemoteSyncStatus" role="status" aria-live="polite" style="font-size:11px;opacity:0.75;"></span>
+                </div>
+                <p style="font-size:11px;opacity:0.65;margin:0 0 8px;line-height:1.45;">
+                  Queues the TV&rsquo;s normal provider sync and event refresh for the selected device&rsquo;s account. If it is offline, the request remains queued until its dashboard is visible; check Live Diagnostics for receipt and errors.
+                </p>
                 <div id="tvLiveStatusCard" class="tv-status-card">No device status loaded yet. Click Load / Refresh.</div>
               </div>
             </details>
@@ -901,7 +926,7 @@
               <summary>FireTV Health Snapshot</summary>
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Per-device status plus connection-drop diagnosis. Repeated fetch timeouts can reveal the old uncancelled-request failure that exhausted Silk&rsquo;s connection pool.
+                  Summarizes each device&rsquo;s latest check-in, visibility, and network or token failures to help distinguish an app/data-fetch problem from a powered-down TV.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvHealthCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
@@ -924,12 +949,11 @@
               </div>
             </details>
 
-            <details class="overview-subsection tv-stale-panel" id="tvConnectionGapPanel" open>
+            <details class="overview-subsection tv-stale-panel" id="tvConnectionGapPanel">
               <summary>TV Connection Gap &amp; Recovery Log</summary>
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Infers a possible outage when a device stops sending successful calendar check-ins and later resumes.
-                  It shows the last check-in, recovery time, and any error beacon received; a device cannot report the cause while fully disconnected.
+                  Infers long gaps between successful check-ins and shows whether a device later recovered. A missing check-in cannot identify the cause while the TV is unreachable.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvConnectionGapCount" style="font-size:11px;opacity:0.55;">loading check-in history</span>
@@ -957,7 +981,7 @@
               <summary>TV Refresh Safety (Stale Snapshot Fallback)</summary>
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  This tracks when the TV board deliberately kept the last known events instead of clearing the screen during transient refresh problems.
+                  Shows when the TV kept its last-known events after a temporary refresh error rather than blanking the screen; correlate reasons with the Live Diagnostics Log.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvStaleDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
@@ -978,7 +1002,7 @@
               <summary>TV Re-pair Risk Log</summary>
               <div class="overview-subsection-body">
                 <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Tracks known scenarios that can force re-pairing or invalidate TV auth session state.
+                  Lists recent token-invalid, token-removed, and user-unpair events that may require pairing again. An empty log means no matching event was recorded in the selected window.
                 </p>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <span id="tvRepairDiagCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>

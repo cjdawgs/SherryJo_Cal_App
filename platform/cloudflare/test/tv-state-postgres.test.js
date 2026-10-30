@@ -21,13 +21,28 @@ test("returns empty state without injecting today's date", async () => {
     const adapter = adapterWith([[{
         selected_date: null, current_view: "day", focused_event_id: null,
         email: "tv@example.com", role: "staff", sleep_guard_enabled: true,
-        sleep_guard_timeout_minutes: 0,
+        sleep_guard_timeout_minutes: 0, remote_refresh_requested_at: null,
+        remote_refresh_device_id: null,
     }]]);
     assert.deepEqual(await executeTvStateRead(adapter, 42), {
         selectedDate: null, currentView: "day", focusedEventId: null,
         currentUserEmail: "tv@example.com", currentUserRole: "staff",
         sleepGuardEnabled: true, sleepGuardTimeoutMinutes: 0,
+        remoteRefreshRequestedAt: null, remoteRefreshDeviceId: null,
     });
+});
+
+test("returns the persisted remote refresh request timestamp", async () => {
+    const requestedAt = new Date("2026-10-30T12:34:56.000Z");
+    const adapter = adapterWith([[{
+        selected_date: "2026-10-30", current_view: "day", focused_event_id: null,
+        email: "tv@example.com", role: "staff", sleep_guard_enabled: true,
+        sleep_guard_timeout_minutes: 0, remote_refresh_requested_at: requestedAt,
+        remote_refresh_device_id: "firetv-1",
+    }]]);
+    const state = await executeTvStateRead(adapter, 42);
+    assert.equal(state.remoteRefreshRequestedAt, requestedAt.toISOString());
+    assert.equal(state.remoteRefreshDeviceId, "firetv-1");
 });
 
 test("writes only supplied state fields and enforces never-timeout by default", async () => {

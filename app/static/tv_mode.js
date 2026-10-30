@@ -343,6 +343,8 @@ const tvLiveStatusCount = document.getElementById("tvLiveStatusCount");
 const tvLiveStatusSelect = document.getElementById("tvLiveStatusSelect");
 const tvLiveStatusCard = document.getElementById("tvLiveStatusCard");
 const tvLiveStatusPanel = document.getElementById("tvLiveStatusPanel");
+const tvRemoteSyncBtn = document.getElementById("tvRemoteSyncBtn");
+const tvRemoteSyncStatus = document.getElementById("tvRemoteSyncStatus");
 let _diagAutoHandle = null;
 let _stalePanelLoaded = false;
 let _repairPanelLoaded = false;
@@ -361,6 +363,7 @@ const _tvHealthFailureEvents = new Set([
   "token_invalid_401",
   "kiosk_token_invalid_401",
 ]);
+const _tvOfflineEvents = new Set(["user_unpair_requested", "user_logout_requested"]);
 
 function _fmtDiagTime(isoStr) {
   if (!isoStr) return "—";
@@ -681,6 +684,7 @@ function _computeLiveStatus(rows) {
   const lastCheckIn = _latestTvCheckIn(rows);
   const lastHeartbeat = rows.find((row) => String(row?.event || "") === "heartbeat");
   const lastFailure = rows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
+  const lastOfflineEvent = rows.find((row) => _tvOfflineEvents.has(String(row?.event || "")));
   const lastSessionStart = rows.find((row) => String(row?.event || "") === "session_start");
   const hidden = _deriveHiddenStatus(rows);
 
@@ -696,12 +700,20 @@ function _computeLiveStatus(rows) {
     && nowMs - lastFailureMs < LIVE_STATUS_PRESENCE_STALE_MINUTES * 60000;
   const hasAuthFailure = failureAfterCheckIn
     && ["token_invalid_401", "kiosk_token_invalid_401"].includes(String(lastFailure?.event || ""));
+  const lastOfflineMs = _toTsMs(lastOfflineEvent?.ts_server);
+  const sessionStartMs = _toTsMs(lastSessionStart?.ts_server) || null;
+  const confirmedOffline = Number.isFinite(lastOfflineMs)
+    && (!Number.isFinite(lastCheckInMs) || lastOfflineMs > lastCheckInMs)
+    && (!Number.isFinite(sessionStartMs) || lastOfflineMs > sessionStartMs);
 
   let status = "green";
   let label = "ONLINE";
   if (hasAuthFailure) {
     status = "red";
     label = "AUTH ERROR";
+  } else if (confirmedOffline) {
+    status = "red";
+    label = "OFFLINE";
   } else if (isStale) {
     status = "yellow";
     label = "STATUS UNKNOWN";
@@ -710,13 +722,18 @@ function _computeLiveStatus(rows) {
     label = "WARNING";
   }
 
-  const sessionStartMs = _toTsMs(lastSessionStart?.ts_server) || null;
   const uptimeMs = !isStale && status !== "red" && Number.isFinite(sessionStartMs) ? nowMs - sessionStartMs : null;
+  const heartbeatElapsedMinutes = Number(lastHeartbeat?.elapsed_min);
+  const heartbeatElapsedMs = lastHeartbeat?.elapsed_min != null && Number.isFinite(heartbeatElapsedMinutes)
+    ? Math.max(0, heartbeatElapsedMinutes) * 60000
+    : null;
+  const lastReportedUptimeMs = heartbeatElapsedMs;
 
   return {
     status,
     label,
     isStale,
+    confirmedOffline,
     lastCheckIn,
     minutesSinceCheckIn,
     lastHeartbeat,
@@ -725,6 +742,8 @@ function _computeLiveStatus(rows) {
     hidden,
     sessionStartMs,
     uptimeMs,
+    lastReportedUptimeMs,
+    displayedUptimeMs: uptimeMs ?? lastReportedUptimeMs,
     connectionDiagnosis: _connectionDiagnosis(rows),
   };
 }
@@ -739,7 +758,9 @@ function _liveStatusFixList(state) {
 
   const items = [];
   if (state.status === "red") {
-    items.push("The TV dashboard recently reported an authentication error. Reload the dashboard, then check the TV Re-pair Risk Log if the error continues.");
+    items.push(state.confirmedOffline
+      ? "The TV reported a logout or unpair. Reopen TV Mode on the device and pair it again."
+      : "The TV dashboard recently reported an authentication error. Reload the dashboard, then check the TV Re-pair Risk Log if the error continues.");
   } else if (state.status === "yellow") {
     if (state.isStale) {
       items.push("No recent authenticated calendar check-in was recorded. This means status is unknown; old diagnostics alone do not prove the TV is offline.");
@@ -764,6 +785,7 @@ function _renderLiveStatusCard(deviceId) {
   if (!tvLiveStatusCard) return;
   const rows = _liveStatusRowsByDevice.get(deviceId);
   if (!rows || !rows.length) {
+    delete tvLiveStatusCard.dataset.status;
     tvLiveStatusCard.innerHTML = "No diagnostic rows found for the selected device.";
     return;
   }
@@ -773,12 +795,13 @@ function _renderLiveStatusCard(deviceId) {
   const shortId = deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`;
   const userEmail = _liveStatusEmailByUser.get(String(rows[0]?.user_id ?? "")) || "Email unavailable";
   const deviceLabel = _deviceIdentityLabel(rows[0]?.device_ua);
+  tvLiveStatusCard.dataset.status = state.status;
 
   tvLiveStatusCard.innerHTML = `
     <div class="tv-status-headline">
       <span class="tv-status-dot status-${state.status}"></span>
       <span class="tv-status-label status-${state.status}">${_escapeHtml(state.label)}</span>
-      ${state.uptimeMs != null ? `<span class="tv-uptime-badge">UP ${_escapeHtml(_fmtDuration(state.uptimeMs))}</span>` : ""}
+      ${state.displayedUptimeMs != null ? `<span class="tv-uptime-badge">${state.uptimeMs != null ? "Time Online" : "Last Reported Online"} ${_escapeHtml(_fmtDuration(state.displayedUptimeMs))}</span>` : ""}
     </div>
     <div class="tv-status-fields">
       <div><strong>User email:</strong> ${_escapeHtml(userEmail)}</div>
@@ -786,7 +809,7 @@ function _renderLiveStatusCard(deviceId) {
       <div><strong>Device type:</strong> ${_escapeHtml(deviceLabel)}</div>
       <div><strong>Last confirmed check-in:</strong> ${state.lastCheckIn ? `${_fmtDiagTime(state.lastCheckIn.ts_server)} (${state.minutesSinceCheckIn}m ago)` : "no check-in recorded"}</div>
       <div><strong>Last heartbeat:</strong> ${state.lastHeartbeat ? _fmtDiagTime(state.lastHeartbeat.ts_server) : "none in window"}</div>
-      <div><strong>Current uptime:</strong> ${state.uptimeMs != null ? _fmtDuration(state.uptimeMs) : "unknown (no recent check-in or session_start)"}</div>
+      <div><strong>Time online:</strong> ${state.uptimeMs != null ? _fmtDuration(state.uptimeMs) : state.lastReportedUptimeMs != null ? `${_fmtDuration(state.lastReportedUptimeMs)} (last heartbeat report)` : "unknown (no recent session duration)"}</div>
     </div>
     <div class="tv-status-fix-box${fix.ok ? " is-ok" : ""}">
       <h4>${_escapeHtml(fix.title)}</h4>
@@ -826,6 +849,7 @@ async function loadTvLiveStatus() {
 
     if (!byDevice.size) {
       tvLiveStatusSelect.innerHTML = '<option value="">No devices found</option>';
+      delete tvLiveStatusCard.dataset.status;
       tvLiveStatusCard.innerHTML = "No devices found in the last 7 days.";
       return;
     }
@@ -846,6 +870,33 @@ async function loadTvLiveStatus() {
     _renderLiveStatusCard(tvLiveStatusSelect.value);
   } catch (err) {
     if (tvLiveStatusCount) tvLiveStatusCount.textContent = `Error: ${err.message}`;
+  }
+}
+
+async function requestRemoteTvSync() {
+  const deviceId = String(tvLiveStatusSelect?.value || "").trim();
+  if (!deviceId || deviceId === "unknown") {
+    if (tvRemoteSyncStatus) tvRemoteSyncStatus.textContent = "Select a known TV device first.";
+    return;
+  }
+
+  if (tvRemoteSyncBtn) tvRemoteSyncBtn.disabled = true;
+  if (tvRemoteSyncStatus) tvRemoteSyncStatus.textContent = "Queueing sync request...";
+  try {
+    const result = await apiRequest("/admin/system/tv-refresh-request", {
+      method: "POST",
+      body: { device_id: deviceId },
+    });
+    if (!result?.ok || !result.success) {
+      throw new Error(result?.detail || result?.message || `Request failed (${result?.status || "unknown"})`);
+    }
+    if (tvRemoteSyncStatus) {
+      tvRemoteSyncStatus.textContent = "Request queued. The TV must receive it; check Live Diagnostics for confirmation.";
+    }
+  } catch (err) {
+    if (tvRemoteSyncStatus) tvRemoteSyncStatus.textContent = `Unable to queue sync: ${err.message || "request failed"}`;
+  } finally {
+    if (tvRemoteSyncBtn) tvRemoteSyncBtn.disabled = false;
   }
 }
 
@@ -1144,8 +1195,13 @@ if (tvLiveStatusLoadBtn) {
   });
 }
 
+if (tvRemoteSyncBtn) {
+  tvRemoteSyncBtn.addEventListener("click", requestRemoteTvSync);
+}
+
 if (tvLiveStatusClearBtn) {
   tvLiveStatusClearBtn.addEventListener("click", () => {
+    if (tvLiveStatusCard) delete tvLiveStatusCard.dataset.status;
     if (tvLiveStatusCard) tvLiveStatusCard.innerHTML = "Cleared view (server log unchanged).";
     if (tvLiveStatusCount) tvLiveStatusCount.textContent = "cleared";
     if (tvLiveStatusSelect) tvLiveStatusSelect.innerHTML = '<option value="">No devices loaded yet</option>';
@@ -1168,10 +1224,7 @@ if (tvLiveStatusPanel) {
     }
   });
 
-  // Unlike the other diagnostics subsections, this panel ships open by
-  // default so status is visible without an extra click. The browser
-  // "toggle" event is not guaranteed to fire for markup that is already
-  // open at parse time, so trigger the first load explicitly.
+  // Load status the first time its collapsed section is opened.
   if (tvLiveStatusPanel.open && !_liveStatusPanelLoaded) {
     _liveStatusPanelLoaded = true;
     loadTvLiveStatus();

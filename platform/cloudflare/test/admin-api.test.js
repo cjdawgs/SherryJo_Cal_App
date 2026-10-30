@@ -62,6 +62,44 @@ test("reports inferred TV connection gaps and delivered failure evidence", async
     assert.equal(gap.checkin_source, "device_presence");
 });
 
+test("queues a remote TV refresh for the selected device account", async () => {
+    let calls = 0;
+    const requestedAt = new Date();
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql, params) => {
+                calls += 1;
+                if (calls === 1) return { rows: [{ allowed: true }] };
+                if (calls === 2) {
+                    assert.match(sql, /FROM public\.tv_diag_log/);
+                    assert.deepEqual(params, ["firetv-1"]);
+                    return { rows: [{ user_id: 7 }] };
+                }
+                assert.match(sql, /INSERT INTO public\.tv_user_state/);
+                assert.deepEqual(params, [7, "firetv-1"]);
+                return { rows: [{ remote_refresh_requested_at: requestedAt, remote_refresh_device_id: "firetv-1" }] };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/tv-refresh-request", {
+            method: "POST",
+            body: JSON.stringify({ device_id: "firetv-1" }),
+            headers: { "Content-Type": "application/json" },
+        }),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    const body = await result.json();
+    assert.equal(body.success, true);
+    assert.equal(body.device_id, "firetv-1");
+    assert.equal(body.user_id, 7);
+    assert.equal(body.requested_at, requestedAt.toISOString());
+    assert.equal(body.requested_device_id, "firetv-1");
+});
+
 test("overview reports synced when the deployed Worker commit matches GitHub's latest", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response(JSON.stringify({ sha: "9cfb04d26497c55fc6933e634c91e5965d8171d8" }), { status: 200 });

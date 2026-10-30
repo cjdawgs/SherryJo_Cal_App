@@ -6,7 +6,9 @@ const TV_STATE_READ_SQL = `
         users.email,
         users.role,
         COALESCE(state.sleep_guard_enabled, true) AS sleep_guard_enabled,
-        COALESCE(state.sleep_guard_timeout_minutes, 0) AS sleep_guard_timeout_minutes
+        COALESCE(state.sleep_guard_timeout_minutes, 0) AS sleep_guard_timeout_minutes,
+        state.remote_refresh_requested_at,
+        state.remote_refresh_device_id
     FROM public.users
     LEFT JOIN public.tv_user_state AS state ON state.user_id = users.id
     WHERE users.id = public.worker_app_user_id()
@@ -28,10 +30,11 @@ const TV_STATE_WRITE_SQL = `
         sleep_guard_timeout_minutes = CASE WHEN $10 THEN $5 ELSE tv_user_state.sleep_guard_timeout_minutes END,
         updated_at = now()
     RETURNING to_char(selected_date, 'YYYY-MM-DD') AS selected_date, current_view,
-        focused_event_id, sleep_guard_enabled, sleep_guard_timeout_minutes
+        focused_event_id, sleep_guard_enabled, sleep_guard_timeout_minutes,
+        remote_refresh_requested_at, remote_refresh_device_id
 `;
 
-export class TvStateUserNotFoundError extends Error {}
+export class TvStateUserNotFoundError extends Error { }
 
 function stateView(row) {
     return {
@@ -42,6 +45,10 @@ function stateView(row) {
         currentUserRole: row.role || null,
         sleepGuardEnabled: row.sleep_guard_enabled !== false,
         sleepGuardTimeoutMinutes: Number(row.sleep_guard_timeout_minutes || 0),
+        remoteRefreshRequestedAt: row.remote_refresh_requested_at
+            ? new Date(row.remote_refresh_requested_at).toISOString()
+            : null,
+        remoteRefreshDeviceId: row.remote_refresh_device_id || null,
     };
 }
 

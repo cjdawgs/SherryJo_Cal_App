@@ -21,7 +21,7 @@ import app.database as database_module
 from app.database import Base, DATABASE_URL, engine, get_db
 from app.config import is_production_environment, is_trusted_edge_request, mask_database_url, settings
 from app.deps import require_admin
-from app.models import OAuthAccount, TVDiagLog, User
+from app.models import OAuthAccount, TVDiagLog, TVUserState, User
 from app.security import verify_password
 from app.services.asset_urls import asset_url
 from app.utils.crypto import TokenEncryptionError, reset_cipher_cache, unseal
@@ -66,6 +66,10 @@ class RuntimeTokenEncryptionKeyUpdate(BaseModel):
 
 class GitCommitPushRequest(BaseModel):
     password: str
+
+
+class TVRefreshRequest(BaseModel):
+    device_id: str
 
 
 class DatabaseRuntimeConfigUpdate(BaseModel):
@@ -1322,6 +1326,51 @@ def admin_tv_stale_refresh_summary(
             "Use Live Diagnostics Log above to correlate exact lifecycle events around each stale snapshot fallback.",
         ],
         "recent_rows": recent_rows,
+    }
+
+
+@router.post("/system/tv-refresh-request")
+def admin_tv_refresh_request(
+    payload: TVRefreshRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    device_id = payload.device_id.strip()
+    if not device_id or device_id == "unknown":
+        raise HTTPException(status_code=422, detail="A known TV device must be selected")
+
+    device = (
+        db.query(TVDiagLog)
+        .filter(TVDiagLog.device_id == device_id, TVDiagLog.user_id.isnot(None))
+        .order_by(TVDiagLog.ts_server.desc())
+        .first()
+    )
+    if device is None:
+        raise HTTPException(status_code=404, detail="No account is associated with this TV device")
+
+    requested_at = datetime.now(timezone.utc)
+    shared_state = db.get(TVUserState, device.user_id)
+    if shared_state is None:
+        shared_state = TVUserState(user_id=device.user_id)
+        db.add(shared_state)
+    shared_state.remote_refresh_requested_at = requested_at
+    shared_state.remote_refresh_device_id = device_id
+    shared_state.updated_at = requested_at
+    db.commit()
+    logger.info(
+        "ADMIN_TV_REFRESH_REQUEST admin_user_id=%s target_user_id=%s device_id=%s requested_at=%s",
+        admin_user.id,
+        device.user_id,
+        device_id,
+        requested_at.isoformat(),
+    )
+    return {
+        "success": True,
+        "device_id": device_id,
+        "user_id": device.user_id,
+        "requested_at": requested_at.isoformat(),
+        "requested_device_id": device_id,
+        "message": "Refresh request queued for the TV account.",
     }
 
 
