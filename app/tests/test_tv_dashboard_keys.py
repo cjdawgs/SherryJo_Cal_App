@@ -424,3 +424,24 @@ def test_tv_dashboard_clears_hold_state_on_lifecycle_interruptions():
     for token in required_tokens:
         assert token in text
     assert text.count("clearRemoteHoldState();") >= 4
+
+
+def test_tv_remote_refresh_reports_device_acknowledgment_and_heartbeat_separately():
+    root = Path(__file__).resolve().parents[2]
+    admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+    dashboard_js = _tv_js_text()
+
+    assert '"/tv/diag?scope=all&hours=24"' in admin_js
+    assert '"remote_calendar_sync_received"' in admin_js
+    assert '"remote_calendar_sync_started"' in admin_js
+    assert '"remote_calendar_sync_completed"' in admin_js
+    assert '"remote_calendar_sync_failed"' in admin_js
+    assert '"device_presence", "heartbeat"' in admin_js
+    assert "Fire TV dashboard is active" in admin_js
+    assert "'remote_calendar_sync_received', 'remote_calendar_sync_started'" in dashboard_js
+
+
+def test_tv_version_update_reload_bypasses_cached_document():
+    text = _tv_js_text()
+    assert "reloadUrl.searchParams.set('tvv', serverVersion)" in text
+    assert "window.location.replace(reloadUrl.toString())" in text

@@ -366,6 +366,7 @@ const state = {
   eventsRequestInFlight: false,
   eventsRefreshQueued: false,
   queuedRefreshForce: false,
+  eventsRefreshWaiters: [],
   lastEventsFetchAt: 0,
   lastEventsEtag: '',
   lastDataSignature: '',
@@ -526,7 +527,8 @@ tvDiag = (() => {
   const PRESENCE_BEACON_MIN_INTERVAL_MS = 15 * 60 * 1000;
   const IMMEDIATE_EVENTS = new Set([
     'session_start', 'raf_gap', 'page_freeze', 'pagehide', 'beforeunload',
-    'wake_lock_released',
+    'wake_lock_released', 'remote_calendar_sync_received', 'remote_calendar_sync_started',
+    'remote_calendar_sync_completed', 'remote_calendar_sync_failed',
   ]);
   let _pending = [];
   let _lastPresenceBeaconAt = 0;
@@ -809,7 +811,9 @@ function scheduleUpdateReload(nextVersion) {
 
   if (state.updateReloadTimer) clearTimeout(state.updateReloadTimer);
   state.updateReloadTimer = setTimeout(() => {
-    window.location.reload();
+    const reloadUrl = new URL(window.location.href);
+    reloadUrl.searchParams.set('tvv', serverVersion);
+    window.location.replace(reloadUrl.toString());
   }, UPDATE_RELOAD_DELAY_MS);
 }
 
@@ -1926,6 +1930,10 @@ async function pollRemoteRefreshRequest() {
   await syncTvCalendar({ source: 'remote', requestedAt });
 }
 
+function countCurrentTvEvents() {
+  return state.days.reduce((total, day) => total + (Array.isArray(day?.events) ? day.events.length : 0), 0);
+}
+
 async function refreshEvents(force = false, options = {}) {
   const manualSync = Boolean(options && options.showSync);
   const stateOverride = options && options.stateOverride ? options.stateOverride : null;
@@ -1934,22 +1942,22 @@ async function refreshEvents(force = false, options = {}) {
   const requestSelectedDate = String((stateOverride && stateOverride.selectedDate) || state.selectedDate || '');
   const requestCurrentView = String((stateOverride && stateOverride.currentView) || state.currentView || 'day');
   if (document.hidden && !force) {
-    return;
+    return { ok: false, message: 'TV dashboard is not visible' };
   }
 
   const nowMs = Date.now();
   if (automatedRefresh && state.autoRefreshBackoffUntil && nowMs < state.autoRefreshBackoffUntil) {
-    return;
+    return { ok: false, message: 'Automatic refresh is waiting for its retry window' };
   }
   if (!force && state.lastEventsFetchAt && (nowMs - state.lastEventsFetchAt) < POLL_MS) {
-    return;
+    return { ok: true, eventCount: countCurrentTvEvents(), unchanged: true };
   }
 
   if (state.eventsRequestInFlight) {
     state.eventsRefreshQueued = true;
     // Only preserve forced follow-up fetches for explicit user sync or state-change refreshes.
     state.queuedRefreshForce = state.queuedRefreshForce || highPriorityRefresh;
-    return;
+    return new Promise((resolve) => state.eventsRefreshWaiters.push(resolve));
   }
 
   state.eventsRequestInFlight = true;
@@ -1957,26 +1965,26 @@ async function refreshEvents(force = false, options = {}) {
   state.syncVisualStartedAt = Date.now();
   applySyncVisualState();
   renderFooterHint();
-  const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
-  const eventsUrl = buildEventsRequestUrl(stateOverride);
-  let res = await authFetch(eventsUrl, {
-    cache: 'no-store',
-    timeoutMs: TV_FETCH_TIMEOUT_MS,
-    headers: eventsRequestHeaders,
-    suppressNetworkHint: true,
-  });
-
-  if (manualSync && !res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
-    if (tvDiag) tvDiag.log('tv_events_timeout_retry', `retrying /tv/events after timeout (${state.lastAuthFetchError.message})`);
-    res = await authFetch(eventsUrl, {
+  try {
+    const eventsRequestHeaders = state.lastEventsEtag ? { 'If-None-Match': state.lastEventsEtag } : {};
+    const eventsUrl = buildEventsRequestUrl(stateOverride);
+    let res = await authFetch(eventsUrl, {
       cache: 'no-store',
-      timeoutMs: TV_FETCH_TIMEOUT_MS + 5000,
+      timeoutMs: TV_FETCH_TIMEOUT_MS,
       headers: eventsRequestHeaders,
       suppressNetworkHint: true,
     });
-  }
 
-  try {
+    if (manualSync && !res && state.lastAuthFetchError && state.lastAuthFetchError.isTimeout) {
+      if (tvDiag) tvDiag.log('tv_events_timeout_retry', `retrying /tv/events after timeout (${state.lastAuthFetchError.message})`);
+      res = await authFetch(eventsUrl, {
+        cache: 'no-store',
+        timeoutMs: TV_FETCH_TIMEOUT_MS + 5000,
+        headers: eventsRequestHeaders,
+        suppressNetworkHint: true,
+      });
+    }
+
     if (!res) {
       state.lastEventsFetchAt = Date.now();
       if (automatedRefresh) state.autoRefreshBackoffUntil = Date.now() + AUTO_REFRESH_FAILURE_BACKOFF_MS;
@@ -1990,7 +1998,7 @@ async function refreshEvents(force = false, options = {}) {
       }
       renderFooterHint(`Network issue: ${networkMessage}`);
       if (!state.days.length) render();
-      return;
+      return { ok: false, message: networkMessage };
     }
 
     recordServerVersion(res);
@@ -2004,7 +2012,7 @@ async function refreshEvents(force = false, options = {}) {
         if (hydrated) render();
       }
       setSyncStatus(true, 'Sync Succeed - No changes detected');
-      return;
+      return { ok: true, eventCount: countCurrentTvEvents(), unchanged: true, staleData: false };
     }
 
     const responseEtag = res.headers.get('ETag');
@@ -2017,12 +2025,24 @@ async function refreshEvents(force = false, options = {}) {
       if (automatedRefresh) state.autoRefreshBackoffUntil = Date.now() + AUTO_REFRESH_FAILURE_BACKOFF_MS;
       renderFooterHint(`Data sync issue: /tv/events returned ${res.status}`);
       setSyncStatus(false, 'Sync Failed');
-      return;
+      return { ok: false, message: `/tv/events returned ${res.status}` };
     }
 
     if (tvDiag) tvDiag.confirmOnline();
 
-    const data = await res.json().catch(() => ({}));
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      renderFooterHint('Data sync issue: /tv/events returned an unreadable payload');
+      setSyncStatus(false, 'Sync Failed');
+      return { ok: false, message: 'The TV received an unreadable event payload' };
+    }
+    if (!data || !Array.isArray(data.days)) {
+      renderFooterHint('Data sync issue: /tv/events returned an invalid payload');
+      setSyncStatus(false, 'Sync Failed');
+      return { ok: false, message: 'The TV received an invalid event payload' };
+    }
     recordServerVersion(res, data);
     state.lastEventsFetchAt = Date.now();
     state.autoRefreshBackoffUntil = 0;
@@ -2047,7 +2067,7 @@ async function refreshEvents(force = false, options = {}) {
             `requested=${requestCurrentView}:${requestSelectedDate} active=${state.currentView}:${state.selectedDate}`,
           );
         }
-        return;
+        return { ok: false, message: 'TV date or view changed during refresh' };
       }
     }
 
@@ -2145,6 +2165,13 @@ async function refreshEvents(force = false, options = {}) {
     } else {
       setSyncStatus(true, 'Sync Succeed - No data in current view window');
     }
+    return {
+      ok: !staleData,
+      eventCount,
+      stickyCount,
+      staleData,
+      message: staleData ? String(data.staleReason || 'TV kept its last-known events') : '',
+    };
   } finally {
     state.eventsRequestInFlight = false;
     if (state.syncInProgress) {
@@ -2161,7 +2188,13 @@ async function refreshEvents(force = false, options = {}) {
       const queuedForce = state.queuedRefreshForce;
       state.eventsRefreshQueued = false;
       state.queuedRefreshForce = false;
-      refreshEvents(queuedForce);
+      const waiters = state.eventsRefreshWaiters.splice(0);
+      if (waiters.length) {
+        const queuedResult = await refreshEvents(queuedForce);
+        waiters.forEach((resolve) => resolve(queuedResult));
+      } else {
+        refreshEvents(queuedForce);
+      }
     }
   }
 }
@@ -3306,14 +3339,24 @@ async function syncTvCalendar(options = {}) {
     }
 
     state.lastEventsEtag = '';
-    await refreshEvents(true, { showSync: true });
-    if (isRemoteRequest && tvDiag) {
-      tvDiag.log('remote_calendar_provider_sync_succeeded', 'Provider sync returned; forced TV event refresh requested');
+    const refreshResult = await refreshEvents(true, { showSync: true });
+    if (isRemoteRequest) {
+      if (!refreshResult?.ok) {
+        throw new Error(refreshResult?.message || 'The TV did not receive a fresh event payload');
+      }
+      if (tvDiag) {
+        tvDiag.log(
+          'remote_calendar_sync_completed',
+          `requested_at=${options.requestedAt || 'unknown'} events=${Number(refreshResult.eventCount || 0)} stale=false`,
+        );
+      }
     }
   } catch (err) {
     const message = err && err.message ? err.message : 'Calendar sync failed';
     if (tvDiag) tvDiag.log('tv_calendar_sync_failed', message);
-    if (isRemoteRequest && tvDiag) tvDiag.log('remote_calendar_sync_failed', message);
+    if (isRemoteRequest && tvDiag) {
+      tvDiag.log('remote_calendar_sync_failed', `requested_at=${options.requestedAt || 'unknown'} error=${message}`);
+    }
     setSyncStatus(false, 'Sync Failed - showing last known data');
     renderFooterHint(`Sync issue: ${message}`);
   } finally {

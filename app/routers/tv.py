@@ -21,6 +21,7 @@ import os
 import json
 import hashlib
 import ipaddress
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -74,6 +75,41 @@ def _get_tv_app_version() -> str:
         or os.getenv("SOURCE_VERSION")
         or _TV_BUILD_FALLBACK
     )
+
+
+def _is_missing_remote_refresh_columns_error(exc: SQLAlchemyError) -> bool:
+    original = getattr(exc, "orig", None)
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    message = str(original or exc)
+    names_remote_refresh_column = re.search(
+        r"remote_refresh_(requested_at|device_id)",
+        message,
+        flags=re.IGNORECASE,
+    )
+    return bool(names_remote_refresh_column and (
+        sqlstate == "42703" or "no such column" in message.lower()
+    ))
+
+
+def _get_remote_refresh_request(db: Session, user_id: int) -> tuple[Optional[str], Optional[str]]:
+    try:
+        shared_state = db.get(TVUserState, user_id)
+    except SQLAlchemyError as exc:
+        if not _is_missing_remote_refresh_columns_error(exc):
+            raise
+        db.rollback()
+        logger.warning(
+            "TV_STATE legacy schema lacks remote-refresh columns; returning state without a pending remote request"
+        )
+        return None, None
+
+    requested_at = (
+        shared_state.remote_refresh_requested_at.isoformat()
+        if shared_state and shared_state.remote_refresh_requested_at
+        else None
+    )
+    device_id = shared_state.remote_refresh_device_id if shared_state else None
+    return requested_at, device_id
 
 
 def _is_private_or_loopback_host(host: Optional[str]) -> bool:
@@ -1194,13 +1230,7 @@ def get_tv_state(
     Logs: (read-only, no special log needed)
     """
     state = tv_state_store.get(current_user.id)
-    shared_state = db.get(TVUserState, current_user.id)
-    remote_refresh_requested_at = (
-        shared_state.remote_refresh_requested_at.isoformat()
-        if shared_state and shared_state.remote_refresh_requested_at
-        else None
-    )
-    remote_refresh_device_id = shared_state.remote_refresh_device_id if shared_state else None
+    remote_refresh_requested_at, remote_refresh_device_id = _get_remote_refresh_request(db, current_user.id)
     if state is None:
         # Return empty state — do NOT inject today()
         return TVStateResponse(
@@ -1241,13 +1271,7 @@ def patch_tv_state(
     """
     patch = body.model_dump(exclude_none=True)
     updated = tv_state_store.set(current_user.id, patch)
-    shared_state = db.get(TVUserState, current_user.id)
-    remote_refresh_requested_at = (
-        shared_state.remote_refresh_requested_at.isoformat()
-        if shared_state and shared_state.remote_refresh_requested_at
-        else None
-    )
-    remote_refresh_device_id = shared_state.remote_refresh_device_id if shared_state else None
+    remote_refresh_requested_at, remote_refresh_device_id = _get_remote_refresh_request(db, current_user.id)
     if patch:
         _tv_events_snapshot_cache.pop(current_user.id, None)
 

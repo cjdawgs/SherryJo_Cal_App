@@ -14,6 +14,20 @@ const TV_STATE_READ_SQL = `
     WHERE users.id = public.worker_app_user_id()
 `;
 
+const TV_STATE_READ_LEGACY_SQL = `
+    SELECT
+        to_char(state.selected_date, 'YYYY-MM-DD') AS selected_date,
+        COALESCE(state.current_view, 'day') AS current_view,
+        state.focused_event_id,
+        users.email,
+        users.role,
+        COALESCE(state.sleep_guard_enabled, true) AS sleep_guard_enabled,
+        COALESCE(state.sleep_guard_timeout_minutes, 0) AS sleep_guard_timeout_minutes
+    FROM public.users
+    LEFT JOIN public.tv_user_state AS state ON state.user_id = users.id
+    WHERE users.id = public.worker_app_user_id()
+`;
+
 const TV_STATE_WRITE_SQL = `
     INSERT INTO public.tv_user_state (
         user_id, selected_date, current_view, focused_event_id,
@@ -29,12 +43,14 @@ const TV_STATE_WRITE_SQL = `
         sleep_guard_enabled = CASE WHEN $9 THEN $4 ELSE tv_user_state.sleep_guard_enabled END,
         sleep_guard_timeout_minutes = CASE WHEN $10 THEN $5 ELSE tv_user_state.sleep_guard_timeout_minutes END,
         updated_at = now()
-    RETURNING to_char(selected_date, 'YYYY-MM-DD') AS selected_date, current_view,
-        focused_event_id, sleep_guard_enabled, sleep_guard_timeout_minutes,
-        remote_refresh_requested_at, remote_refresh_device_id
 `;
 
 export class TvStateUserNotFoundError extends Error { }
+
+function isMissingRemoteRefreshColumns(error) {
+    return error?.code === "42703"
+        && /remote_refresh_(requested_at|device_id)/i.test(String(error.message || ""));
+}
 
 function stateView(row) {
     return {
@@ -74,17 +90,22 @@ function normalizePatch(body, allowSleepTimeout) {
 }
 
 export async function executeTvStateRead(adapter, userId) {
-    const result = await adapter.runWithIdentity(userId, (client) => client.query(TV_STATE_READ_SQL));
+    let result;
+    try {
+        result = await adapter.runWithIdentity(userId, (client) => client.query(TV_STATE_READ_SQL));
+    } catch (error) {
+        if (!isMissingRemoteRefreshColumns(error)) throw error;
+        result = await adapter.runWithIdentity(userId, (client) => client.query(TV_STATE_READ_LEGACY_SQL));
+    }
     if (!result.rows.length) throw new TvStateUserNotFoundError("User not found");
     return stateView(result.rows[0]);
 }
 
 export async function executeTvStateWrite(adapter, { userId, body, allowSleepTimeout = false }) {
     const patch = normalizePatch(body, allowSleepTimeout);
-    const result = await adapter.runWithIdentity(userId, (client) => client.query(
+    await adapter.runWithIdentity(userId, (client) => client.query(
         TV_STATE_WRITE_SQL,
         [...patch.values, ...patch.present],
     ));
-    const current = await executeTvStateRead(adapter, userId);
-    return { ...current, ...stateView(result.rows[0]), currentUserEmail: current.currentUserEmail, currentUserRole: current.currentUserRole };
+    return executeTvStateRead(adapter, userId);
 }

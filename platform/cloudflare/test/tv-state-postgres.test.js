@@ -45,6 +45,37 @@ test("returns the persisted remote refresh request timestamp", async () => {
     assert.equal(state.remoteRefreshDeviceId, "firetv-1");
 });
 
+test("falls back to legacy state columns when remote-refresh columns are unavailable", async () => {
+    const calls = [];
+    const adapter = {
+        async runWithIdentity(userId, operation) {
+            return operation({
+                async query(sql) {
+                    calls.push(sql);
+                    if (sql.includes("remote_refresh_requested_at")) {
+                        throw Object.assign(new Error('column "state.remote_refresh_requested_at" does not exist'), { code: "42703" });
+                    }
+                    return { rows: [{
+                        selected_date: "2026-10-30", current_view: "week", focused_event_id: null,
+                        email: "tv@example.com", role: "staff", sleep_guard_enabled: true,
+                        sleep_guard_timeout_minutes: 0,
+                    }] };
+                },
+            });
+        },
+    };
+
+    assert.deepEqual(await executeTvStateRead(adapter, 42), {
+        selectedDate: "2026-10-30", currentView: "week", focusedEventId: null,
+        currentUserEmail: "tv@example.com", currentUserRole: "staff",
+        sleepGuardEnabled: true, sleepGuardTimeoutMinutes: 0,
+        remoteRefreshRequestedAt: null, remoteRefreshDeviceId: null,
+    });
+    assert.equal(calls.length, 2);
+    assert.match(calls[1], /COALESCE\(state\.sleep_guard_enabled, true\)/);
+    assert.doesNotMatch(calls[1], /remote_refresh_(requested_at|device_id)/);
+});
+
 test("writes only supplied state fields and enforces never-timeout by default", async () => {
     const state = {
         selected_date: "2026-08-16", current_view: "week", focused_event_id: null,

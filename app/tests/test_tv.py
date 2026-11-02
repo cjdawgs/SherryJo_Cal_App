@@ -64,6 +64,29 @@ def _register_and_login(client) -> dict:
 # PAIRING SERVICE UNIT TESTS
 # ─────────────────────────────────────────────────
 
+def test_tv_state_legacy_refresh_column_fallback_is_narrow():
+    from sqlalchemy.exc import OperationalError
+
+    from app.routers.tv import _get_remote_refresh_request
+
+    class LegacySchemaDb:
+        rolled_back = False
+
+        def get(self, model, user_id):
+            raise OperationalError(
+                "SELECT ...",
+                {},
+                Exception("no such column: tv_user_state.remote_refresh_requested_at"),
+            )
+
+        def rollback(self):
+            self.rolled_back = True
+
+    db = LegacySchemaDb()
+    assert _get_remote_refresh_request(db, 42) == (None, None)
+    assert db.rolled_back is True
+
+
 class TestPairingStore:
     def test_generate_code_format(self):
         from app.services.tv_pairing_service import _PairingStore, PAIRING_CODE_ALPHABET

@@ -762,13 +762,108 @@ async function requestRemoteTvSync() {
     if (!result?.ok || !result.success) {
       throw new Error(result?.detail || result?.message || `Request failed (${result?.status || "unknown"})`);
     }
-    if (tvRemoteSyncStatus) {
-      tvRemoteSyncStatus.textContent = "Request queued. The TV must receive it; check Live Diagnostics for confirmation.";
+    const requestedAt = String(result.requested_at || "");
+    if (!requestedAt) {
+      throw new Error("The server queued the request but did not return its request timestamp.");
     }
+    await waitForRemoteTvSync(deviceId, requestedAt);
   } catch (err) {
     if (tvRemoteSyncStatus) tvRemoteSyncStatus.textContent = `Unable to queue sync: ${err.message || "request failed"}`;
   } finally {
     if (tvRemoteSyncBtn) tvRemoteSyncBtn.disabled = false;
+  }
+}
+
+async function waitForRemoteTvSync(deviceId, requestedAt) {
+  const deadline = Date.now() + 120000;
+  const pollIntervalMs = 3000;
+  let lastStatusError = "";
+  let lastDeviceActivity = null;
+  const lifecycleStages = [
+    ["remote_calendar_sync_completed", "completed"],
+    ["remote_calendar_sync_failed", "failed"],
+    ["remote_calendar_sync_started", "syncing"],
+    ["remote_calendar_sync_received", "received"],
+  ];
+
+  while (Date.now() < deadline) {
+    try {
+      const data = await apiRequest("/tv/diag?scope=all&hours=24", { method: "GET" });
+      if (!data || !Array.isArray(data.entries)) {
+        throw new Error("Diagnostics response did not contain entries.");
+      }
+      const deviceEntries = data.entries.filter((entry) => String(entry?.device_id || "") === deviceId);
+      const matchingEntries = deviceEntries.filter((entry) => String(entry?.details || "").includes(requestedAt));
+      const matchingStage = lifecycleStages
+        .map(([event, stage]) => ({
+          stage,
+          entry: matchingEntries.find((item) => String(item?.event || "") === event),
+        }))
+        .find((item) => item.entry);
+      const lastActivity = deviceEntries.find((entry) => (
+        ["device_presence", "heartbeat"].includes(String(entry?.event || ""))
+      ));
+      if (lastActivity) lastDeviceActivity = lastActivity;
+
+      if (matchingStage) {
+        const detail = String(matchingStage.entry.details || "");
+        if (matchingStage.stage === "completed") {
+          if (tvRemoteSyncStatus) {
+            const eventCount = detail.match(/\bevents=(\d+)\b/)?.[1];
+            tvRemoteSyncStatus.textContent = `Completed — TV refreshed successfully${eventCount ? ` (${eventCount} events)` : ""}.`;
+          }
+          return;
+        }
+        if (matchingStage.stage === "failed") {
+          const error = detail.match(/\berror=(.*)$/)?.[1];
+          if (tvRemoteSyncStatus) {
+            tvRemoteSyncStatus.textContent = `TV sync failed${error ? `: ${error}` : "."}`;
+          }
+          return;
+        }
+        if (tvRemoteSyncStatus) {
+          tvRemoteSyncStatus.textContent = matchingStage.stage === "syncing"
+            ? "TV received the request and is syncing its calendar..."
+            : "TV received the sync request; waiting for calendar sync to start...";
+        }
+      } else if (tvRemoteSyncStatus) {
+        const activityAt = lastActivity ? _toTsMs(lastActivity.ts_server) : NaN;
+        const activityAgeMinutes = Number.isFinite(activityAt)
+          ? Math.max(0, Math.floor((Date.now() - activityAt) / 60000))
+          : null;
+        const activityIsRecent = activityAgeMinutes !== null && (
+          (lastActivity.event === "device_presence" && activityAgeMinutes < LIVE_STATUS_PRESENCE_STALE_MINUTES)
+          || (lastActivity.event === "heartbeat" && activityAgeMinutes < LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES)
+        );
+        tvRemoteSyncStatus.textContent = activityIsRecent
+          ? `Request queued; Fire TV dashboard is active (${lastActivity.event === "device_presence" ? "authenticated calendar check-in" : "heartbeat"} ${activityAgeMinutes}m ago), but it has not acknowledged this sync yet.`
+          : "Request queued; no recent Fire TV check-in confirms that the dashboard is awake and connected.";
+      }
+      lastStatusError = "";
+    } catch (err) {
+      lastStatusError = err?.message || "Diagnostics request failed";
+      if (tvRemoteSyncStatus) {
+        tvRemoteSyncStatus.textContent = `Request queued; unable to check status: ${lastStatusError}`;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  if (tvRemoteSyncStatus) {
+    const qualifier = lastStatusError ? ` Status checks also failed: ${lastStatusError}` : "";
+    const activityAt = lastDeviceActivity ? _toTsMs(lastDeviceActivity.ts_server) : NaN;
+    const activityAgeMinutes = Number.isFinite(activityAt)
+      ? Math.max(0, Math.floor((Date.now() - activityAt) / 60000))
+      : null;
+    const activityIsRecent = activityAgeMinutes !== null && (
+      (lastDeviceActivity.event === "device_presence" && activityAgeMinutes < LIVE_STATUS_PRESENCE_STALE_MINUTES)
+      || (lastDeviceActivity.event === "heartbeat" && activityAgeMinutes < LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES)
+    );
+    const activitySummary = activityIsRecent
+      ? ` Fire TV ${lastDeviceActivity.event === "device_presence" ? "authenticated calendar check-in" : "heartbeat"} was ${activityAgeMinutes}m ago, but it did not acknowledge this sync.`
+      : " No recent Fire TV heartbeat or authenticated check-in confirms that the dashboard is awake and connected.";
+    tvRemoteSyncStatus.textContent = `No sync acknowledgment received within 2 minutes.${activitySummary}${qualifier}`;
   }
 }
 
