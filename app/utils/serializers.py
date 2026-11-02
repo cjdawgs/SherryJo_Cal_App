@@ -110,15 +110,41 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
 
     token_value = str(getattr(account, "access_token", "") or "").strip()
     refresh_value = str(getattr(account, "refresh_token", "") or "").strip()
+    last_error = str(getattr(account, "last_error", "") or "").strip().lower()
+    google_reauth_message = None
+    google_reauth_steps = None
+    normalized_provider = str(getattr(account, "provider", "") or "").strip().lower()
+    if normalized_provider in {"google", "gmail"}:
+        if "invalid_grant" in last_error or "refresh token was revoked" in last_error:
+            google_reauth_message = (
+                "Google rejected this refresh token (invalid_grant). Reconnect once. "
+                "If it expires again about 7 days later, the Google OAuth consent screen is likely still in Testing. "
+                "Set its publishing status to In production in Google Cloud Console."
+            )
+            google_reauth_steps = [
+                "Reconnect this Google account once.",
+                "In Google Cloud Console, open Google Auth Platform > Audience and set Publishing status to In production.",
+                "If the app must remain in Testing, expect external-user refresh tokens to expire after about 7 days.",
+            ]
+        elif "refresh token is missing" in last_error:
+            google_reauth_message = (
+                "Google did not provide a refresh token, so this connection cannot renew access automatically. "
+                "Reconnect with consent. If this repeats after about 7 days, set the OAuth consent screen to In production."
+            )
+            google_reauth_steps = [
+                "Reconnect this Google account and complete consent.",
+                "In Google Cloud Console, set Google Auth Platform Publishing status to In production.",
+            ]
 
     if token_value == "__REAUTH_REQUIRED__":
         return {
             "code": "token_expired_or_invalid",
-            "message": "Connection expired or token is invalid. Reconnect this account.",
+            "message": google_reauth_message or "Connection expired or token is invalid. Reconnect this account.",
             "requires_admin": False,
             "user_remediable": True,
             "recommended_action": "reconnect",
             "recommended_label": "Reconnect",
+            **({"resolution_steps": google_reauth_steps} if google_reauth_steps else {}),
         }
 
     if not token_value and not refresh_value:
@@ -144,7 +170,6 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
             "recommended_label": "Reconnect",
         }
 
-    last_error = str(getattr(account, "last_error", "") or "").strip().lower()
     if getattr(account, "status", "ok") == "error":
         if any(flag in last_error for flag in ("erroraccessdenied", "access is denied", "insufficient privileges", "forbidden", "authorization_requestdenied")):
             return {
@@ -163,12 +188,12 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
         if any(flag in last_error for flag in ("expired", "invalid", "revoked", "invalid_grant", "reauth", "no valid token")):
             return {
                 "code": "token_expired_or_invalid",
-                "message": "Connection expired or token is invalid. Reconnect this account.",
+                "message": google_reauth_message or "Connection expired or token is invalid. Reconnect this account.",
                 "requires_admin": False,
                 "user_remediable": True,
                 "recommended_action": "reconnect",
                 "recommended_label": "Reconnect",
-                "resolution_steps": [
+                "resolution_steps": google_reauth_steps or [
                     "Click Reconnect for this account.",
                     "Complete provider sign-in and consent.",
                     "Run Publish again for the event.",

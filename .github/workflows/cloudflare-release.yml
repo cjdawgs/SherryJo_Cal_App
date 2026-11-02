@@ -143,8 +143,9 @@ jobs:
                   for attempt in {1..12}; do
                       if render_hash="$(curl --fail --silent --show-error "${RENDER_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
                           && canary_hash="$(curl --fail --silent --show-error "${CANARY_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
+                          && python -c 'import json,sys,urllib.request; schema=json.load(urllib.request.urlopen(sys.argv[1],timeout=10)); assert schema.get("status")=="ok", schema; assert "tv_user_state" in schema.get("required_tables",[]), schema; assert not schema.get("missing_columns"), schema' "${RENDER_URL%/}/health/schema?refresh=true" \
                           && [[ "$render_hash" == "$canary_hash" ]]; then
-                          echo "Canary admin.js matches Render (sha256: $render_hash)."
+                          echo "Canary assets match Render and TV state schema is ready (sha256: $render_hash)."
                           exit 0
                       fi
                       echo "Canary admin.js has not converged (attempt $attempt/12); retrying."

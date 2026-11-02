@@ -20,6 +20,7 @@ def test_schema_health_endpoint_returns_expected_shape(client):
     assert data["status"] in {"ok", "warning", "error"}
     assert isinstance(data.get("required_tables"), list)
     assert isinstance(data.get("missing_tables"), list)
+    assert isinstance(data.get("missing_columns"), list)
     assert "checked_at" in data
 
 
@@ -34,6 +35,28 @@ def test_evaluate_schema_health_warns_on_missing_tables(monkeypatch):
 
     assert data["status"] == "warning"
     assert "date_sticky_notes" in data["missing_tables"]
+
+
+def test_evaluate_schema_health_warns_on_missing_tv_refresh_columns(monkeypatch):
+    class FakeInspector:
+        def get_table_names(self):
+            return [*main.REQUIRED_TABLES]
+
+        def get_columns(self, table_name):
+            if table_name == "tv_user_state":
+                return [{"name": "user_id"}, {"name": "selected_date"}]
+            return []
+
+    monkeypatch.setattr(main, "inspect", lambda _engine: FakeInspector())
+
+    data = main.evaluate_schema_health()
+
+    assert data["status"] == "warning"
+    assert data["missing_tables"] == []
+    assert data["missing_columns"] == [
+        "tv_user_state.remote_refresh_device_id",
+        "tv_user_state.remote_refresh_requested_at",
+    ]
 
 
 def test_date_sticky_list_route_graceful_when_model_query_fails(client, auth_headers, monkeypatch):

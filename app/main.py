@@ -56,6 +56,13 @@ REQUIRED_TABLES = {
     "date_sticky_notes",
     "event_tag_color_settings",
     "sync_efficiency_daily_rollups",
+    "tv_user_state",
+}
+REQUIRED_COLUMNS = {
+    "tv_user_state": {
+        "remote_refresh_requested_at",
+        "remote_refresh_device_id",
+    },
 }
 
 
@@ -65,19 +72,32 @@ def evaluate_schema_health(db_engine=engine):
         inspector = inspect(db_engine)
         existing_tables = set(inspector.get_table_names())
         missing_tables = sorted(REQUIRED_TABLES - existing_tables)
+        missing_columns = sorted(
+            f"{table}.{column}"
+            for table, required_columns in REQUIRED_COLUMNS.items()
+            if table in existing_tables
+            for column in required_columns - {
+                item["name"] for item in inspector.get_columns(table)
+            }
+        )
 
-        if missing_tables:
+        if missing_tables or missing_columns:
             message = (
-                "Missing required tables. Run database migrations before handling sticky/date routes "
-                "(for example: alembic upgrade head)."
+                "Database schema is missing required tables or columns. Run database migrations "
+                "before handling application requests (for example: alembic upgrade head)."
             )
-            logger.warning(f"⚠️ [SCHEMA CHECK] Missing tables: {missing_tables}")
+            logger.warning(
+                "⚠️ [SCHEMA CHECK] Missing tables: %s; missing columns: %s",
+                missing_tables,
+                missing_columns,
+            )
             logger.warning("⚠️ [SCHEMA CHECK] Migration warning: %s", message)
             return {
                 "status": "warning",
                 "checked_at": checked_at,
                 "required_tables": sorted(REQUIRED_TABLES),
                 "missing_tables": missing_tables,
+                "missing_columns": missing_columns,
                 "message": message,
             }
 
@@ -87,6 +107,7 @@ def evaluate_schema_health(db_engine=engine):
             "checked_at": checked_at,
             "required_tables": sorted(REQUIRED_TABLES),
             "missing_tables": [],
+            "missing_columns": [],
             "message": "Schema check passed",
         }
 
@@ -97,6 +118,7 @@ def evaluate_schema_health(db_engine=engine):
             "checked_at": checked_at,
             "required_tables": sorted(REQUIRED_TABLES),
             "missing_tables": [],
+            "missing_columns": [],
             "message": f"Schema check failed: {str(e)}",
         }
 
@@ -232,6 +254,30 @@ if engine.url.drivername.startswith("postgresql"):
             logger.info("✅ PostgreSQL date_sticky_notes schema upgrade complete.")
         else:
             logger.info("✅ PostgreSQL date_sticky_notes.sticky_notes present.")
+
+    if "tv_user_state" in inspector.get_table_names():
+        tv_state_columns = {col["name"] for col in inspector.get_columns("tv_user_state")}
+        missing_tv_state_columns = {
+            "remote_refresh_requested_at": "TIMESTAMPTZ",
+            "remote_refresh_device_id": "VARCHAR(64)",
+        }
+        missing_tv_state_columns = {
+            name: sql_type
+            for name, sql_type in missing_tv_state_columns.items()
+            if name not in tv_state_columns
+        }
+        if missing_tv_state_columns:
+            logger.warning(
+                "[SCHEMA PATCH] tv_user_state is missing columns %s; applying additive repair.",
+                sorted(missing_tv_state_columns),
+            )
+            with engine.connect() as conn:
+                for name, sql_type in missing_tv_state_columns.items():
+                    conn.execute(text(
+                        f"ALTER TABLE public.tv_user_state ADD COLUMN IF NOT EXISTS {name} {sql_type}"
+                    ))
+                conn.commit()
+            logger.info("[SCHEMA PATCH] tv_user_state refresh columns are available.")
 
 # ✅ Ensure local SQLite schema is up to date for optional columns
 if engine.url.drivername.startswith("sqlite"):

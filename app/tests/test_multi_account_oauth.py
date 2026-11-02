@@ -230,7 +230,11 @@ def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_conne
     assert account.access_token == "__REAUTH_REQUIRED__"
     assert account.status == "error"
     assert resolve_account_status(account) == "error"
-    assert account_summary(account)["token_issue"]["recommended_action"] == "reconnect"
+    token_issue = account_summary(account)["token_issue"]
+    assert token_issue["recommended_action"] == "reconnect"
+    assert "invalid_grant" in token_issue["message"]
+    assert "7 days" in token_issue["message"]
+    assert any("Publishing status to In production" in step for step in token_issue["resolution_steps"])
     assert "invalid_grant" in (account.last_error or "").lower()
     assert account.account_email == "needs-reconnect@gmail.com"
     assert account.refresh_token == "refresh_token_123"

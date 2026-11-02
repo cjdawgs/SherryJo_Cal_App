@@ -1582,6 +1582,7 @@ export default {
                 method: request.method,
                 path: incomingUrl.pathname,
                 errorType: error instanceof Error ? error.name : "UnknownError",
+                errorCode: typeof error?.code === "string" ? error.code : null,
             }));
             return jsonResponse(
                 {

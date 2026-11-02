@@ -56,6 +56,28 @@ function hasRefreshableExpiredToken(row, accessToken) {
 }
 
 function tokenIssue(row, accessToken, decryptError) {
+    const lastError = String(row.last_error || "").toLowerCase();
+    const googleProvider = provider(row.provider) === "google";
+    const googleInvalidGrant = googleProvider
+        && (lastError.includes("invalid_grant") || lastError.includes("refresh token was revoked"));
+    const googleMissingRefreshToken = googleProvider && lastError.includes("refresh token is missing");
+    const googleMessage = googleInvalidGrant
+        ? "Google rejected this refresh token (invalid_grant). Reconnect once. If it expires again about 7 days later, the Google OAuth consent screen is likely still in Testing. Set its publishing status to In production in Google Cloud Console."
+        : googleMissingRefreshToken
+            ? "Google did not provide a refresh token, so this connection cannot renew access automatically. Reconnect with consent. If this repeats after about 7 days, set the OAuth consent screen to In production."
+            : null;
+    const googleSteps = googleInvalidGrant
+        ? [
+            "Reconnect this Google account once.",
+            "In Google Cloud Console, open Google Auth Platform > Audience and set Publishing status to In production.",
+            "If the app must remain in Testing, expect external-user refresh tokens to expire after about 7 days.",
+        ]
+        : googleMissingRefreshToken
+            ? [
+                "Reconnect this Google account and complete consent.",
+                "In Google Cloud Console, set Google Auth Platform Publishing status to In production.",
+            ]
+            : null;
     if (decryptError) {
         return {
             ...issue("app_key_error", "Saved credentials cannot be read because of an app encryption-key issue.", "open_accounts", "Open Accounts"),
@@ -66,7 +88,7 @@ function tokenIssue(row, accessToken, decryptError) {
         if (provider(row.provider) === "apple") {
             return issue("apple_credentials_invalid", "Apple CalDAV credentials were rejected. Reconnect with a valid app password.", "reconnect", "Reconnect");
         }
-        return issue("token_expired_or_invalid", "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect");
+        return issue("token_expired_or_invalid", googleMessage || "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect", googleSteps ? { resolution_steps: googleSteps } : {});
     }
     if (!accessToken && !row.refresh_token) {
         return issue("token_never_connected", "No credential has been saved for this account yet. Connect this account to create one.", "open_accounts", "Open Accounts");
@@ -75,7 +97,6 @@ function tokenIssue(row, accessToken, decryptError) {
         && !hasRefreshableExpiredToken(row, accessToken)) {
         return issue("token_expired_or_invalid", "Token is expired. Reconnect this account.", "reconnect", "Reconnect");
     }
-    const lastError = String(row.last_error || "").toLowerCase();
     if (row.status === "error" && !hasRefreshableExpiredToken(row, accessToken)) {
         if (provider(row.provider) === "apple") {
             const appleAuthFailure = ["401", "403", "unauthorized", "forbidden", "credentials", "authorization"].some((flag) => lastError.includes(flag));
@@ -84,7 +105,7 @@ function tokenIssue(row, accessToken, decryptError) {
                 : issue("apple_sync_error", "Apple CalDAV sync failed. Retry sync from Account Manager.", "retry_sync", "Retry Sync");
         }
         if (["expired", "invalid", "revoked", "invalid_grant", "reauth", "no valid token"].some((flag) => lastError.includes(flag))) {
-            return issue("token_expired_or_invalid", "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect");
+            return issue("token_expired_or_invalid", googleMessage || "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect", googleSteps ? { resolution_steps: googleSteps } : {});
         }
         return issue("sync_error", "Sync failed for this account. Retry sync from Account Manager.", "retry_sync", "Retry Sync");
     }

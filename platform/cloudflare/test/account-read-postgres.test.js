@@ -33,6 +33,19 @@ test("does not mark refreshable expired Google credentials as disconnected", asy
     assert.equal(accounts[0].token_issue.code, "none");
 });
 
+test("explains weekly Google invalid_grant reconnects as OAuth Testing-mode expiry", async () => {
+    const accounts = await executeAccountRead(adapterFor([{
+        id: 6, provider: "google", account_email: "google@example.com", access_token: "__REAUTH_REQUIRED__",
+        refresh_token: "refresh-token", token_expires_at: "2020-01-01T00:00:00Z", sync_enabled: true,
+        sync_frequency_minutes: 5, sync_range_days: 30, is_primary: true, status: "error",
+        last_error: "Google refresh token was revoked or invalid_grant; reconnect this account.",
+    }]), { userId: 42, tokenEncryptionKey: "unused" });
+
+    assert.equal(accounts[0].token_issue.code, "token_expired_or_invalid");
+    assert.match(accounts[0].token_issue.message, /7 days/);
+    assert.ok(accounts[0].token_issue.resolution_steps.some((step) => /Publishing status to In production/.test(step)));
+});
+
 test("does not apply OAuth expiry semantics to Apple CalDAV accounts", async () => {
     const accounts = await executeAccountRead(adapterFor([{
         id: 5, provider: "apple", account_email: "apple@example.com", access_token: "https://caldav.icloud.com",

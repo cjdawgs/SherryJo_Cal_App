@@ -10,6 +10,9 @@ def test_schema_patch_statements_cover_current_event_columns():
         "ALTER TABLE events ADD COLUMN recurrence JSON",
         "ALTER TABLE date_sticky_notes ADD COLUMN IF NOT EXISTS sticky_notes JSONB",
         "ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        "ALTER TABLE public.tv_user_state ADD COLUMN IF NOT EXISTS",
+        "remote_refresh_requested_at",
+        "remote_refresh_device_id",
         # Incremental sync token — must exist as an unconditional patch
         "ALTER TABLE oauth_accounts ADD COLUMN IF NOT EXISTS sync_token JSONB",
     ]
