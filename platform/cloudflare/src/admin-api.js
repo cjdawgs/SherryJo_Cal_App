@@ -178,30 +178,18 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
         if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
         const deviceId = String(body.device_id || "").trim();
         if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
-        const device = await client.query(`
-            SELECT diagnostic.user_id
-            FROM public.worker_read_tv_diagnostics('all', 720, 'all') AS diagnostic
-            WHERE diagnostic.device_id = $1 AND diagnostic.user_id IS NOT NULL
-            ORDER BY diagnostic.ts_server DESC
-            LIMIT 1
-        `, [deviceId]);
-        const userId = device.rows[0]?.user_id;
-        if (userId == null) return { error: "No account is associated with this TV device", status: 404 };
-        const updated = await client.query(`
-            INSERT INTO public.tv_user_state (user_id, remote_refresh_requested_at, remote_refresh_device_id)
-            VALUES ($1, now(), $2)
-            ON CONFLICT (user_id) DO UPDATE SET
-                remote_refresh_requested_at = now(),
-                remote_refresh_device_id = EXCLUDED.remote_refresh_device_id,
-                updated_at = now()
-            RETURNING remote_refresh_requested_at, remote_refresh_device_id
-        `, [userId, deviceId]);
+        const refreshResult = await client.query(
+            "SELECT * FROM public.worker_request_tv_refresh($1)",
+            [deviceId],
+        );
+        const queued = refreshResult.rows[0];
+        if (!queued) return { error: "No account is associated with this TV device", status: 404 };
         return {
             success: true,
             device_id: deviceId,
-            user_id: userId,
-            requested_at: new Date(updated.rows[0].remote_refresh_requested_at).toISOString(),
-            requested_device_id: updated.rows[0].remote_refresh_device_id,
+            user_id: queued.target_user_id,
+            requested_at: new Date(queued.requested_at).toISOString(),
+            requested_device_id: queued.target_device_id,
             message: "Refresh request queued for the TV account.",
         };
     }
@@ -474,6 +462,27 @@ export async function handleAdminApi(request, env, adapter, userId) {
         return response(result);
     } catch (error) {
         const duplicate = error?.code === "23505";
-        return response({ detail: duplicate ? "A record with those unique fields already exists" : "Admin operation failed" }, duplicate ? 409 : 500);
+        const errorCode = typeof error?.code === "string" && /^[0-9A-Z]{5}$/.test(error.code)
+            ? error.code
+            : null;
+        console.error(JSON.stringify({
+            event: "admin_api_operation_failed",
+            method: request.method,
+            route: parts.slice(1).join("/"),
+            errorType: error instanceof Error ? error.name : "UnknownError",
+            errorCode,
+        }));
+        if (duplicate) return response({ detail: "A record with those unique fields already exists" }, 409);
+
+        const missingSchema = ["42P01", "42703", "42883"].includes(errorCode);
+        const permissionDenied = errorCode === "42501";
+        const detail = missingSchema
+            ? `Worker database schema is missing a required object (SQLSTATE ${errorCode}). Apply the latest Alembic migrations to the database configured in Hyperdrive.`
+            : permissionDenied
+                ? `Worker database denied this operation (SQLSTATE ${errorCode}). Verify the admin identity and TV-state RLS policy.`
+                : errorCode
+                    ? `Admin operation failed (database error ${errorCode}).`
+                    : "Admin operation failed";
+        return response({ detail, ...(errorCode ? { error_code: errorCode } : {}) }, 500);
     }
 }

@@ -71,14 +71,11 @@ test("queues a remote TV refresh for the selected device account", async () => {
                 calls += 1;
                 if (calls === 1) return { rows: [{ allowed: true }] };
                 if (calls === 2) {
-                    assert.match(sql, /worker_read_tv_diagnostics\('all', 720, 'all'\)/);
-                    assert.doesNotMatch(sql, /FROM public\.tv_diag_log/);
+                    assert.match(sql, /public\.worker_request_tv_refresh\(\$1\)/);
                     assert.deepEqual(params, ["firetv-1"]);
-                    return { rows: [{ user_id: 7 }] };
+                    return { rows: [{ target_user_id: 7, requested_at: requestedAt, target_device_id: "firetv-1" }] };
                 }
-                assert.match(sql, /INSERT INTO public\.tv_user_state/);
-                assert.deepEqual(params, [7, "firetv-1"]);
-                return { rows: [{ remote_refresh_requested_at: requestedAt, remote_refresh_device_id: "firetv-1" }] };
+                throw new Error(`Unexpected query: ${sql}`);
             },
         }),
     };
@@ -99,6 +96,44 @@ test("queues a remote TV refresh for the selected device account", async () => {
     assert.equal(body.user_id, 7);
     assert.equal(body.requested_at, requestedAt.toISOString());
     assert.equal(body.requested_device_id, "firetv-1");
+});
+
+test("reports a sanitized migration hint for missing Worker database schema", async () => {
+    let calls = 0;
+    const originalConsoleError = console.error;
+    let diagnostic;
+    console.error = (message) => { diagnostic = JSON.parse(message); };
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => {
+                calls += 1;
+                if (calls === 1) return { rows: [{ allowed: true }] };
+                throw Object.assign(new Error("private SQL and row values"), { code: "42703" });
+            },
+        }),
+    };
+
+    try {
+        const result = await handleAdminApi(
+            new Request("https://calendar.test/admin/system/tv-refresh-request", {
+                method: "POST",
+                body: JSON.stringify({ device_id: "firetv-1" }),
+                headers: { "Content-Type": "application/json" },
+            }),
+            {},
+            adapter,
+            1,
+        );
+        assert.equal(result.status, 500);
+        const body = await result.json();
+        assert.equal(body.error_code, "42703");
+        assert.match(body.detail, /Alembic migrations/);
+        assert.doesNotMatch(body.detail, /private SQL|row values/);
+        assert.equal(diagnostic.errorCode, "42703");
+        assert.equal(diagnostic.route, "system/tv-refresh-request");
+    } finally {
+        console.error = originalConsoleError;
+    }
 });
 
 test("overview reports synced when the deployed Worker commit matches GitHub's latest", async () => {
