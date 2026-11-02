@@ -44,7 +44,15 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
 
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
-    assert jobs["deploy-canary"]["needs"] == "verify"
+    assert set(jobs["deploy-canary"]["needs"]) == {"verify", "migrate-supabase"}
+    assert jobs["migrate-supabase"]["needs"] == "verify"
+    assert jobs["migrate-supabase"]["env"]["ALEMBIC_DATABASE_URL"] == "${{ secrets.ALEMBIC_DATABASE_URL }}"
+    migration_step = next(
+        step for step in jobs["migrate-supabase"]["steps"]
+        if step.get("name") == "Apply Supabase migrations"
+    )
+    assert migration_step["if"] == "${{ env.ALEMBIC_DATABASE_URL != '' }}"
+    assert "alembic upgrade head" in migration_step["run"]
     assert jobs["deploy-canary"]["environment"] == "cloudflare-canary"
     assert jobs["smoke-unauthenticated-canary"]["needs"] == "deploy-canary"
     assert jobs["smoke-authenticated-canary"]["needs"] == "deploy-canary"
