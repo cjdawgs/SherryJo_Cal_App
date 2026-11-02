@@ -240,6 +240,28 @@ def test_google_invalid_grant_marks_account_for_reconnect_without_deleting_conne
     assert account.refresh_token == "refresh_token_123"
 
 
+def test_google_generic_reauth_error_explains_testing_mode_expiry(db: Session, multi_account_user: User):
+    account = OAuthAccount(
+        user_id=multi_account_user.id,
+        provider="google",
+        account_email="generic-reconnect@gmail.com",
+        access_token="__REAUTH_REQUIRED__",
+        refresh_token="refresh_token_123",
+        token_expires_at=datetime.now(timezone.utc),
+        status="error",
+        last_error="Provider authorization failed (401)",
+        sync_enabled=True,
+    )
+    db.add(account)
+    db.commit()
+
+    token_issue = account_summary(account)["token_issue"]
+
+    assert token_issue["recommended_action"] == "reconnect"
+    assert "7 days" in token_issue["message"]
+    assert any("Publishing status to In production" in step for step in token_issue["resolution_steps"])
+
+
 def test_google_missing_refresh_token_marks_account_for_reconnect_without_deleting_connection(db: Session, multi_account_user: User):
     account = OAuthAccount(
         user_id=multi_account_user.id,

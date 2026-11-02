@@ -135,6 +135,17 @@ def _classify_token_issue(account: "OAuthAccount", decrypt_error: bool, credenti
                 "Reconnect this Google account and complete consent.",
                 "In Google Cloud Console, set Google Auth Platform Publishing status to In production.",
             ]
+        else:
+            google_reauth_message = (
+                "Google rejected this account's saved authorization. Reconnect once. "
+                "If this happens again after about 7 days, the OAuth consent screen is likely still in Testing; "
+                "set its publishing status to In production in Google Cloud Console."
+            )
+            google_reauth_steps = [
+                "Reconnect this Google account once.",
+                "In Google Cloud Console, open Google Auth Platform > Audience and set Publishing status to In production.",
+                "If the app must remain in Testing, expect external-user refresh tokens to expire after about 7 days.",
+            ]
 
     if token_value == "__REAUTH_REQUIRED__":
         return {

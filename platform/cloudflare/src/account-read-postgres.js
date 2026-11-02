@@ -78,6 +78,16 @@ function tokenIssue(row, accessToken, decryptError) {
                 "In Google Cloud Console, set Google Auth Platform Publishing status to In production.",
             ]
             : null;
+    const googleReauthFallback = googleProvider
+        ? "Google rejected this account's saved authorization. Reconnect once. If this happens again after about 7 days, the OAuth consent screen is likely still in Testing; set its publishing status to In production in Google Cloud Console."
+        : null;
+    const googleReauthFallbackSteps = googleProvider
+        ? [
+            "Reconnect this Google account once.",
+            "In Google Cloud Console, open Google Auth Platform > Audience and set Publishing status to In production.",
+            "If the app must remain in Testing, expect external-user refresh tokens to expire after about 7 days.",
+        ]
+        : null;
     if (decryptError) {
         return {
             ...issue("app_key_error", "Saved credentials cannot be read because of an app encryption-key issue.", "open_accounts", "Open Accounts"),
@@ -88,7 +98,7 @@ function tokenIssue(row, accessToken, decryptError) {
         if (provider(row.provider) === "apple") {
             return issue("apple_credentials_invalid", "Apple CalDAV credentials were rejected. Reconnect with a valid app password.", "reconnect", "Reconnect");
         }
-        return issue("token_expired_or_invalid", googleMessage || "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect", googleSteps ? { resolution_steps: googleSteps } : {});
+        return issue("token_expired_or_invalid", googleMessage || googleReauthFallback || "Connection expired or token is invalid. Reconnect this account.", "reconnect", "Reconnect", googleSteps || googleReauthFallbackSteps ? { resolution_steps: googleSteps || googleReauthFallbackSteps } : {});
     }
     if (!accessToken && !row.refresh_token) {
         return issue("token_never_connected", "No credential has been saved for this account yet. Connect this account to create one.", "open_accounts", "Open Accounts");
