@@ -812,6 +812,7 @@ test("proxy fails closed when the origin points back to the Worker", async () =>
         method: "GET",
         path: "/unmigrated",
         errorType: "Error",
+        errorCode: null,
     });
 });
 
