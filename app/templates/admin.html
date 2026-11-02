@@ -350,6 +350,9 @@
       border-color: #c62828;
       box-shadow: inset 4px 0 #c62828;
     }
+    #tvVerifyConnectionStatus[data-status="green"] { color: #17663b; font-weight: 700; }
+    #tvVerifyConnectionStatus[data-status="yellow"] { color: #8a5a00; font-weight: 700; }
+    #tvVerifyConnectionStatus[data-status="red"] { color: #b42318; font-weight: 700; }
     .tv-status-headline {
       display: flex; align-items: center; gap: 10px;
       margin-bottom: 10px;
@@ -889,11 +892,16 @@
                   <button id="tvLiveStatusClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
                 </div>
                 <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <button id="tvVerifyConnectionBtn" class="ghost-btn" type="button">Verify Connection</button>
+                  <span id="tvVerifyConnectionStatus" role="status" aria-live="polite" style="font-size:11px;opacity:0.8;">A live response is required to mark a device connected.</span>
+                  <span id="tvVerifyOnlineTimer" style="font-size:11px;font-weight:600;opacity:0.85;">No live session verified</span>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
                   <button id="tvRemoteSyncBtn" class="ghost-btn" type="button">Request Calendar Sync</button>
                   <span id="tvRemoteSyncStatus" role="status" aria-live="polite" style="font-size:11px;opacity:0.75;"></span>
                 </div>
                 <p style="font-size:11px;opacity:0.65;margin:0 0 8px;line-height:1.45;">
-                  Sends a device-specific provider sync and event refresh. The TV must be awake and its dashboard open. Status distinguishes Fire TV heartbeat from request receipt, sync progress, completion, and failure.
+                  Verify Connection sends a one-time challenge. The TV must be awake and its dashboard open. Only a matching Fire TV response turns the status green. The timer starts from the session timestamp returned by that live response. Request Calendar Sync remains a separate provider-sync action.
                 </p>
                 <div id="tvLiveStatusCard" class="tv-status-card">No device status loaded yet. Click Load / Refresh.</div>
               </div>

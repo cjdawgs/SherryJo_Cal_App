@@ -8,6 +8,9 @@ const TV_FETCH_TIMEOUT_MS = 12000;
 const STARTUP_REFRESH_RETRY_MS = 5000;
 const REMOTE_REFRESH_POLL_MS = 30000;
 const REMOTE_REFRESH_HANDLED_KEY = 'tv_remote_refresh_handled_v1';
+const REMOTE_REFRESH_DIAG_HANDLED_KEY = 'tv_remote_refresh_diag_handled_v1';
+const DEVICE_VERIFICATION_POLL_MS = 10000;
+const DEVICE_VERIFICATION_HANDLED_KEY = 'tv_device_verification_handled_v1';
 const CONNECTION_KEEPALIVE_MS = 300000;
 const LOCAL_GUARD_WATCHDOG_MS = 30000;
 const LOCAL_GUARD_DIAG_COOLDOWN_MS = 60 * 60 * 1000;
@@ -390,8 +393,11 @@ const state = {
   clockHandle: null,
   heartbeatHandle: null,
   remoteRefreshPollHandle: null,
+  deviceVerificationPollHandle: null,
   remoteRefreshRequestedAt: null,
   remoteRefreshHandledAt: null,
+  remoteRefreshDiagHandledId: null,
+  deviceVerificationHandledId: null,
   autoPairRetryHandle: null,
   sessionStartAt: null,        // set by startPolling()
   sleepGuardEnabled: true,     // read from /tv/state
@@ -528,7 +534,7 @@ tvDiag = (() => {
   const IMMEDIATE_EVENTS = new Set([
     'session_start', 'raf_gap', 'page_freeze', 'pagehide', 'beforeunload',
     'wake_lock_released', 'remote_calendar_sync_received', 'remote_calendar_sync_started',
-    'remote_calendar_sync_completed', 'remote_calendar_sync_failed',
+    'remote_calendar_sync_completed', 'remote_calendar_sync_failed', 'device_verification_ack',
   ]);
   let _pending = [];
   let _lastPresenceBeaconAt = 0;
@@ -1476,6 +1482,7 @@ function startPolling() {
   state.pollHandle = setInterval(refreshEvents, POLL_MS);
   state.connectionKeepaliveHandle = setInterval(pulseTvConnection, CONNECTION_KEEPALIVE_MS);
   state.remoteRefreshPollHandle = setInterval(pollRemoteRefreshRequest, REMOTE_REFRESH_POLL_MS);
+  state.deviceVerificationPollHandle = setInterval(pollDeviceVerificationRequest, DEVICE_VERIFICATION_POLL_MS);
   state.localGuardWatchdogHandle = setInterval(maintainLocalTvGuard, LOCAL_GUARD_WATCHDOG_MS);
   state.clockHandle = setInterval(tickClock, 1000);
   // Heartbeat confirms the guard is alive between visible events. Every 15 min
@@ -1518,6 +1525,7 @@ function stopAll() {
   if (state.clockHandle) clearInterval(state.clockHandle);
   if (state.heartbeatHandle) clearInterval(state.heartbeatHandle);
   if (state.remoteRefreshPollHandle) clearInterval(state.remoteRefreshPollHandle);
+  if (state.deviceVerificationPollHandle) clearInterval(state.deviceVerificationPollHandle);
   stopAutoPairRetryLoop();
   state.pollHandle = null;
   state.startupRefreshRetryHandle = null;
@@ -1527,6 +1535,7 @@ function stopAll() {
   state.clockHandle = null;
   state.heartbeatHandle = null;
   state.remoteRefreshPollHandle = null;
+  state.deviceVerificationPollHandle = null;
   state.hiddenSinceMs = null;
   state.hiddenWatchdogLogged = false;
   clearRemoteHoldState();
@@ -1928,6 +1937,79 @@ async function pollRemoteRefreshRequest() {
   } catch { }
   if (tvDiag) tvDiag.log('remote_calendar_sync_received', `requested_at=${requestedAt}`);
   await syncTvCalendar({ source: 'remote', requestedAt });
+}
+
+async function pollDeviceVerificationRequest() {
+  if (!state.token || document.hidden) return;
+  const res = await authFetch('/tv/diag?hours=1', {
+    cache: 'no-store',
+    suppressNetworkHint: true,
+  });
+  if (!res || !res.ok) return;
+
+  const data = await res.json().catch(() => ({}));
+  if (!Array.isArray(data.entries)) return;
+  let handledRequestId = state.deviceVerificationHandledId || '';
+  try {
+    handledRequestId = handledRequestId || localStorage.getItem(DEVICE_VERIFICATION_HANDLED_KEY) || '';
+  } catch {
+    // Keep the in-memory request ID if local storage is unavailable.
+  }
+  const request = data.entries.find((entry) => {
+    if (entry?.event !== 'device_verification_requested' || entry?.device_id !== TV_DEVICE_ID) return false;
+    const requestId = String(entry.details || '').match(/\brequest_id=([0-9a-f-]{36})\b/i)?.[1] || '';
+    return requestId && requestId !== handledRequestId;
+  });
+  if (request) {
+    const requestId = String(request.details || '').match(/\brequest_id=([0-9a-f-]{36})\b/i)?.[1] || '';
+    if (requestId) {
+      state.deviceVerificationHandledId = requestId;
+      try {
+        localStorage.setItem(DEVICE_VERIFICATION_HANDLED_KEY, requestId);
+      } catch { }
+      const sessionStartedAt = new Date(state.sessionStartAt || Date.now()).toISOString();
+      const eventCount = countCurrentTvEvents();
+      if (tvDiag) {
+        tvDiag.log(
+          'device_verification_ack',
+          `request_id=${requestId} session_started_at=${sessionStartedAt} event_count=${eventCount}`,
+        );
+        tvDiag.flush();
+      }
+    }
+  }
+
+  if (state.syncInProgress) return;
+  let handledRemoteRequestId = state.remoteRefreshDiagHandledId || '';
+  try {
+    handledRemoteRequestId = handledRemoteRequestId || localStorage.getItem(REMOTE_REFRESH_DIAG_HANDLED_KEY) || '';
+  } catch {
+    // Keep the in-memory request ID if local storage is unavailable.
+  }
+  const remoteRequest = data.entries.find((entry) => {
+    if (entry?.event !== 'remote_calendar_sync_requested' || entry?.device_id !== TV_DEVICE_ID) return false;
+    const requestId = String(entry.details || '').match(/\brequest_id=([0-9a-f-]{36})\b/i)?.[1] || '';
+    return requestId && requestId !== handledRemoteRequestId;
+  });
+  if (!remoteRequest) return;
+
+  const remoteDetails = String(remoteRequest.details || '');
+  const requestIdMatch = remoteDetails.match(/\brequest_id=([0-9a-f-]{36})\b/i);
+  const requestedAtMatch = remoteDetails.match(/\brequested_at=([^\s]+)/);
+  if (!requestIdMatch || !requestedAtMatch) return;
+  const remoteRequestId = requestIdMatch[1];
+  const requestedAt = requestedAtMatch[1];
+  state.remoteRefreshDiagHandledId = remoteRequestId;
+  try {
+    localStorage.setItem(REMOTE_REFRESH_DIAG_HANDLED_KEY, remoteRequestId);
+  } catch { }
+  if (tvDiag) {
+    tvDiag.log(
+      'remote_calendar_sync_received',
+      `requested_at=${requestedAt} request_id=${remoteRequestId}`,
+    );
+  }
+  await syncTvCalendar({ source: 'remote', requestedAt, requestId: remoteRequestId });
 }
 
 function countCurrentTvEvents() {
@@ -3318,7 +3400,10 @@ async function syncTvCalendar(options = {}) {
   if (state.syncInProgress) return;
   const isRemoteRequest = options.source === 'remote';
   if (isRemoteRequest && tvDiag) {
-    tvDiag.log('remote_calendar_sync_started', `requested_at=${options.requestedAt || 'unknown'}`);
+    tvDiag.log(
+      'remote_calendar_sync_started',
+      `requested_at=${options.requestedAt || 'unknown'} request_id=${options.requestId || 'legacy'}`,
+    );
   }
   state.syncInProgress = true;
   state.syncVisualStartedAt = Date.now();
@@ -3347,7 +3432,7 @@ async function syncTvCalendar(options = {}) {
       if (tvDiag) {
         tvDiag.log(
           'remote_calendar_sync_completed',
-          `requested_at=${options.requestedAt || 'unknown'} events=${Number(refreshResult.eventCount || 0)} stale=false`,
+          `requested_at=${options.requestedAt || 'unknown'} request_id=${options.requestId || 'legacy'} events=${Number(refreshResult.eventCount || 0)} stale=false`,
         );
       }
     }
@@ -3355,7 +3440,10 @@ async function syncTvCalendar(options = {}) {
     const message = err && err.message ? err.message : 'Calendar sync failed';
     if (tvDiag) tvDiag.log('tv_calendar_sync_failed', message);
     if (isRemoteRequest && tvDiag) {
-      tvDiag.log('remote_calendar_sync_failed', `requested_at=${options.requestedAt || 'unknown'} error=${message}`);
+      tvDiag.log(
+        'remote_calendar_sync_failed',
+        `requested_at=${options.requestedAt || 'unknown'} request_id=${options.requestId || 'legacy'} error=${message}`,
+      );
     }
     setSyncStatus(false, 'Sync Failed - showing last known data');
     renderFooterHint(`Sync issue: ${message}`);

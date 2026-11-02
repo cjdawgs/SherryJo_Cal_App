@@ -3,6 +3,7 @@ import re
 import json
 import logging
 import subprocess
+import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -1335,42 +1336,144 @@ def admin_tv_refresh_request(
     db: Session = Depends(get_db),
     admin_user: User = Depends(require_admin),
 ):
-    device_id = payload.device_id.strip()
-    if not device_id or device_id == "unknown":
-        raise HTTPException(status_code=422, detail="A known TV device must be selected")
-
-    device = (
-        db.query(TVDiagLog)
-        .filter(TVDiagLog.device_id == device_id, TVDiagLog.user_id.isnot(None))
-        .order_by(TVDiagLog.ts_server.desc())
-        .first()
-    )
-    if device is None:
-        raise HTTPException(status_code=404, detail="No account is associated with this TV device")
-
+    device_id, device = _get_tv_device_for_admin_request(payload.device_id, db)
+    request_id = str(uuid.uuid4())
     requested_at = datetime.now(timezone.utc)
-    shared_state = db.get(TVUserState, device.user_id)
-    if shared_state is None:
-        shared_state = TVUserState(user_id=device.user_id)
-        db.add(shared_state)
-    shared_state.remote_refresh_requested_at = requested_at
-    shared_state.remote_refresh_device_id = device_id
-    shared_state.updated_at = requested_at
-    db.commit()
+    _queue_tv_device_diagnostic(
+        db,
+        device,
+        device_id,
+        "remote_calendar_sync_requested",
+        f"request_id={request_id} requested_at={requested_at.isoformat()}",
+        requested_at,
+    )
     logger.info(
-        "ADMIN_TV_REFRESH_REQUEST admin_user_id=%s target_user_id=%s device_id=%s requested_at=%s",
+        "ADMIN_TV_REFRESH_REQUEST admin_user_id=%s target_user_id=%s device_id=%s request_id=%s requested_at=%s",
         admin_user.id,
         device.user_id,
         device_id,
+        request_id,
         requested_at.isoformat(),
     )
     return {
         "success": True,
         "device_id": device_id,
         "user_id": device.user_id,
+        "request_id": request_id,
         "requested_at": requested_at.isoformat(),
         "requested_device_id": device_id,
-        "message": "Refresh request queued for the TV account.",
+        "message": "Calendar sync request queued for the selected TV.",
+    }
+
+
+def _get_tv_device_for_admin_request(device_id: str, db: Session) -> tuple[str, TVDiagLog]:
+    normalized_device_id = device_id.strip()
+    if not normalized_device_id or normalized_device_id == "unknown":
+        raise HTTPException(status_code=422, detail="A known TV device must be selected")
+    device = (
+        db.query(TVDiagLog)
+        .filter(TVDiagLog.device_id == normalized_device_id, TVDiagLog.user_id.isnot(None))
+        .order_by(TVDiagLog.ts_server.desc())
+        .first()
+    )
+    if device is None:
+        raise HTTPException(status_code=404, detail="No account is associated with this TV device")
+    return normalized_device_id, device
+
+
+def _queue_tv_device_diagnostic(
+    db: Session,
+    device: TVDiagLog,
+    device_id: str,
+    event: str,
+    details: str,
+    requested_at: datetime,
+) -> None:
+    db.add(TVDiagLog(
+        user_id=device.user_id,
+        device_id=device_id,
+        event=event,
+        details=details,
+        ts_server=requested_at,
+    ))
+    db.commit()
+
+
+@router.post("/system/tv-verification-request")
+def admin_tv_verification_request(
+    payload: TVRefreshRequest,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    device_id, device = _get_tv_device_for_admin_request(payload.device_id, db)
+    request_id = str(uuid.uuid4())
+    requested_at = datetime.now(timezone.utc)
+    _queue_tv_device_diagnostic(
+        db,
+        device,
+        device_id,
+        "device_verification_requested",
+        f"request_id={request_id}",
+        requested_at,
+    )
+    logger.info(
+        "ADMIN_TV_VERIFICATION_REQUEST admin_user_id=%s target_user_id=%s device_id=%s request_id=%s",
+        admin_user.id,
+        device.user_id,
+        device_id,
+        request_id,
+    )
+    return {
+        "success": True,
+        "device_id": device_id,
+        "user_id": device.user_id,
+        "request_id": request_id,
+        "requested_at": requested_at.isoformat(),
+    }
+
+
+@router.get("/system/tv-verification-status")
+def admin_tv_verification_status(
+    device_id: str,
+    request_id: str,
+    db: Session = Depends(get_db),
+    _admin_user: User = Depends(require_admin),
+):
+    try:
+        normalized_request_id = str(uuid.UUID(request_id))
+    except (ValueError, AttributeError) as exc:
+        raise HTTPException(status_code=422, detail="request_id must be a UUID") from exc
+    normalized_device_id = device_id.strip()
+    if not normalized_device_id or normalized_device_id == "unknown":
+        raise HTTPException(status_code=422, detail="A known TV device must be selected")
+
+    acknowledgement = (
+        db.query(TVDiagLog)
+        .filter(
+            TVDiagLog.device_id == normalized_device_id,
+            TVDiagLog.event == "device_verification_ack",
+            TVDiagLog.details.contains(f"request_id={normalized_request_id}"),
+        )
+        .order_by(TVDiagLog.ts_server.desc())
+        .first()
+    )
+    if acknowledgement is None:
+        return {
+            "acknowledged": False,
+            "device_id": normalized_device_id,
+            "request_id": normalized_request_id,
+        }
+
+    details = acknowledgement.details or ""
+    session_match = re.search(r"(?:^|\s)session_started_at=([^\s]+)", details)
+    event_count_match = re.search(r"(?:^|\s)event_count=(\d+)", details)
+    return {
+        "acknowledged": True,
+        "device_id": normalized_device_id,
+        "request_id": normalized_request_id,
+        "session_started_at": session_match.group(1) if session_match else None,
+        "event_count": int(event_count_match.group(1)) if event_count_match else None,
+        "acknowledged_at": acknowledgement.ts_server.isoformat() if acknowledgement.ts_server else None,
     }
 
 

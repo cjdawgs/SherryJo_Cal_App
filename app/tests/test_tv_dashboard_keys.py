@@ -263,8 +263,11 @@ def test_admin_tv_live_status_requires_offline_evidence_and_shows_reported_durat
     assert "background: #ffffff;" in admin_html
     assert "yellow means status is stale or uncertain" in admin_html
     assert "red requires a reported logout, unpair, or authentication error" in admin_html
+    assert 'id="tvVerifyConnectionBtn"' in admin_html
+    assert 'id="tvVerifyOnlineTimer"' in admin_html
+    assert "Only a matching Fire TV response turns the status green" in admin_html
     assert 'id="tvRemoteSyncBtn"' in admin_html
-    assert "device-specific provider sync and event refresh" in admin_html
+    assert "Request Calendar Sync remains a separate provider-sync action" in admin_html
 
 
 def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
@@ -439,6 +442,24 @@ def test_tv_remote_refresh_reports_device_acknowledgment_and_heartbeat_separatel
     assert '"device_presence", "heartbeat"' in admin_js
     assert "Fire TV dashboard is active" in admin_js
     assert "'remote_calendar_sync_received', 'remote_calendar_sync_started'" in dashboard_js
+    assert "remote_calendar_sync_requested" in dashboard_js
+    assert "await syncTvCalendar({ source: 'remote', requestedAt, requestId: remoteRequestId })" in dashboard_js
+
+
+def test_tv_connection_verification_is_device_scoped_and_includes_session_metrics():
+    root = Path(__file__).resolve().parents[2]
+    admin_js = (root / "app" / "static" / "tv_mode.js").read_text(encoding="utf-8")
+    dashboard_js = _tv_js_text()
+
+    assert '"/admin/system/tv-verification-request"' in admin_js
+    assert "admin/system/tv-verification-status?" in admin_js
+    assert "Date.now() + 30000" in admin_js
+    assert 'dataset.status = "green"' in admin_js
+    assert "updateVerifiedSessionTimer(status.session_started_at)" in admin_js
+    assert "const DEVICE_VERIFICATION_POLL_MS = 10000;" in dashboard_js
+    assert "entry?.device_id !== TV_DEVICE_ID" in dashboard_js
+    assert "'device_verification_ack'" in dashboard_js
+    assert "session_started_at=${sessionStartedAt} event_count=${eventCount}" in dashboard_js
 
 
 def test_tv_version_update_reload_bypasses_cached_document():

@@ -62,20 +62,24 @@ test("reports inferred TV connection gaps and delivered failure evidence", async
     assert.equal(gap.checkin_source, "device_presence");
 });
 
-test("queues a remote TV refresh for the selected device account", async () => {
-    let calls = 0;
-    const requestedAt = new Date();
+test("queues a remote TV calendar sync through device diagnostics", async () => {
+    let queries = 0;
+    let queuedRequest;
     const adapter = {
-        runWithIdentity: async (_userId, operation) => operation({
+        runWithIdentity: async (userId, operation) => operation({
             query: async (sql, params) => {
-                calls += 1;
-                if (calls === 1) return { rows: [{ allowed: true }] };
-                if (calls === 2) {
-                    assert.match(sql, /public\.worker_request_tv_refresh\(\$1\)/);
+                queries += 1;
+                if (queries === 1) return { rows: [{ allowed: true }] };
+                if (queries === 2) {
+                    assert.equal(userId, 1);
+                    assert.match(sql, /FROM public\.tv_diag_log/);
                     assert.deepEqual(params, ["firetv-1"]);
-                    return { rows: [{ target_user_id: 7, requested_at: requestedAt, target_device_id: "firetv-1" }] };
+                    return { rows: [{ user_id: 7 }] };
                 }
-                throw new Error(`Unexpected query: ${sql}`);
+                assert.equal(userId, 7);
+                assert.match(sql, /worker_record_tv_diagnostics/);
+                queuedRequest = JSON.parse(params[0])[0];
+                return { rows: [{ worker_record_tv_diagnostics: 1 }] };
             },
         }),
     };
@@ -94,8 +98,91 @@ test("queues a remote TV refresh for the selected device account", async () => {
     assert.equal(body.success, true);
     assert.equal(body.device_id, "firetv-1");
     assert.equal(body.user_id, 7);
-    assert.equal(body.requested_at, requestedAt.toISOString());
+    assert.match(body.request_id, /^[0-9a-f-]{36}$/i);
+    assert.ok(Number.isFinite(Date.parse(body.requested_at)));
     assert.equal(body.requested_device_id, "firetv-1");
+    assert.equal(queuedRequest.event, "remote_calendar_sync_requested");
+    assert.equal(queuedRequest.device_id, "firetv-1");
+    assert.match(queuedRequest.details, new RegExp(`request_id=${body.request_id}`));
+    assert.match(queuedRequest.details, new RegExp(`requested_at=${body.requested_at}`));
+});
+
+test("queues a one-time TV verification challenge under the selected device account", async () => {
+    let queries = 0;
+    let targetRequest;
+    const adapter = {
+        runWithIdentity: async (userId, operation) => operation({
+            query: async (sql, params) => {
+                queries += 1;
+                if (queries === 1) return { rows: [{ allowed: true }] };
+                if (queries === 2) {
+                    assert.equal(userId, 1);
+                    assert.match(sql, /FROM public\.tv_diag_log/);
+                    assert.deepEqual(params, ["firetv-verify-1"]);
+                    return { rows: [{ user_id: 7 }] };
+                }
+                assert.equal(userId, 7);
+                assert.match(sql, /worker_record_tv_diagnostics/);
+                targetRequest = JSON.parse(params[0])[0];
+                return { rows: [{ worker_record_tv_diagnostics: 1 }] };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/tv-verification-request", {
+            method: "POST",
+            body: JSON.stringify({ device_id: "firetv-verify-1" }),
+            headers: { "Content-Type": "application/json" },
+        }),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    const body = await result.json();
+    assert.equal(body.success, true);
+    assert.equal(body.device_id, "firetv-verify-1");
+    assert.equal(body.user_id, 7);
+    assert.match(body.request_id, /^[0-9a-f-]{36}$/i);
+    assert.equal(targetRequest.event, "device_verification_requested");
+    assert.equal(targetRequest.device_id, "firetv-verify-1");
+    assert.equal(targetRequest.details, `request_id=${body.request_id}`);
+});
+
+test("returns only an acknowledgment matching the verification request and device", async () => {
+    let queries = 0;
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql, params) => {
+                queries += 1;
+                if (queries === 1) return { rows: [{ allowed: true }] };
+                assert.match(sql, /device_verification_ack/);
+                assert.deepEqual(params, [
+                    "firetv-verify-1",
+                    "%request_id=123e4567-e89b-42d3-a456-426614174000%",
+                ]);
+                return { rows: [{
+                    ts_server: new Date("2026-11-02T20:00:00.000Z"),
+                    details: "request_id=123e4567-e89b-42d3-a456-426614174000 session_started_at=2026-11-02T19:50:00.000Z event_count=4",
+                }] };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/tv-verification-status?device_id=firetv-verify-1&request_id=123e4567-e89b-42d3-a456-426614174000"),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), {
+        acknowledged: true,
+        device_id: "firetv-verify-1",
+        request_id: "123e4567-e89b-42d3-a456-426614174000",
+        session_started_at: "2026-11-02T19:50:00.000Z",
+        event_count: 4,
+        acknowledged_at: "2026-11-02T20:00:00.000Z",
+    });
 });
 
 test("reports a sanitized migration hint for missing Worker database schema", async () => {

@@ -337,6 +337,9 @@ const tvLiveStatusCount = document.getElementById("tvLiveStatusCount");
 const tvLiveStatusSelect = document.getElementById("tvLiveStatusSelect");
 const tvLiveStatusCard = document.getElementById("tvLiveStatusCard");
 const tvLiveStatusPanel = document.getElementById("tvLiveStatusPanel");
+const tvVerifyConnectionBtn = document.getElementById("tvVerifyConnectionBtn");
+const tvVerifyConnectionStatus = document.getElementById("tvVerifyConnectionStatus");
+const tvVerifyOnlineTimer = document.getElementById("tvVerifyOnlineTimer");
 const tvRemoteSyncBtn = document.getElementById("tvRemoteSyncBtn");
 const tvRemoteSyncStatus = document.getElementById("tvRemoteSyncStatus");
 let _diagAutoHandle = null;
@@ -348,6 +351,7 @@ let _liveStatusPanelLoaded = false;
 // last Load/Refresh click so switching the device dropdown never re-fetches.
 let _liveStatusRowsByDevice = new Map();
 let _liveStatusEmailByUser = new Map();
+let _tvVerifyTimerHandle = null;
 const LIVE_STATUS_PRESENCE_STALE_MINUTES = 35;
 const LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75;
 const LIVE_STATUS_DIAGNOSTIC_WINDOW_HOURS = 336;
@@ -774,6 +778,96 @@ async function requestRemoteTvSync() {
   }
 }
 
+function updateVerifiedSessionTimer(sessionStartedAt) {
+  if (_tvVerifyTimerHandle !== null) clearInterval(_tvVerifyTimerHandle);
+  const startedAtMs = Date.parse(String(sessionStartedAt || ""));
+  if (!Number.isFinite(startedAtMs) || !tvVerifyOnlineTimer) return;
+
+  const update = () => {
+    const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+    tvVerifyOnlineTimer.textContent = `Verified session online ${_fmtDuration(elapsedMs)}`;
+    tvVerifyOnlineTimer.title = `Fire TV session started ${_fmtDiagTime(sessionStartedAt)}`;
+  };
+  update();
+  _tvVerifyTimerHandle = setInterval(update, 1000);
+}
+
+async function verifyRemoteTvConnection() {
+  const deviceId = String(tvLiveStatusSelect?.value || "").trim();
+  if (!deviceId || deviceId === "unknown") {
+    if (tvVerifyConnectionStatus) tvVerifyConnectionStatus.textContent = "Select a known TV device first.";
+    return;
+  }
+
+  if (_tvVerifyTimerHandle !== null) {
+    clearInterval(_tvVerifyTimerHandle);
+    _tvVerifyTimerHandle = null;
+  }
+  if (tvVerifyConnectionBtn) tvVerifyConnectionBtn.disabled = true;
+  if (tvVerifyConnectionStatus) {
+    tvVerifyConnectionStatus.dataset.status = "yellow";
+    tvVerifyConnectionStatus.textContent = "Sending a verify request to the Fire TV...";
+  }
+  if (tvVerifyOnlineTimer) tvVerifyOnlineTimer.textContent = "Waiting for a live session timestamp";
+
+  try {
+    const queued = await apiRequest("/admin/system/tv-verification-request", {
+      method: "POST",
+      body: { device_id: deviceId },
+    });
+    if (!queued?.ok || !queued.success || !queued.request_id) {
+      throw new Error(queued?.detail || queued?.message || `Request failed (${queued?.status || "unknown"})`);
+    }
+
+    const deadline = Date.now() + 30000;
+    let lastStatusError = "";
+    while (Date.now() < deadline) {
+      const params = new URLSearchParams({ device_id: deviceId, request_id: queued.request_id });
+      const status = await apiRequest(`/admin/system/tv-verification-status?${params}`, { method: "GET" });
+      if (!status?.ok) {
+        lastStatusError = status?.detail || status?.message || `Status check failed (${status?.status || "unknown"})`;
+        if (tvVerifyConnectionStatus) {
+          tvVerifyConnectionStatus.textContent = `Verify request queued; retrying status check: ${lastStatusError}`;
+        }
+      } else {
+        lastStatusError = "";
+        if (status.acknowledged) {
+          if (status.device_id !== deviceId || status.request_id !== queued.request_id || !status.session_started_at) {
+            throw new Error("The TV acknowledgment did not match the selected device and request.");
+          }
+          if (String(tvLiveStatusSelect?.value || "").trim() !== deviceId) return;
+          if (tvVerifyConnectionStatus) {
+            tvVerifyConnectionStatus.dataset.status = "green";
+            tvVerifyConnectionStatus.textContent = `Verified live Fire TV response · ${status.event_count ?? 0} events in current view`;
+          }
+          updateVerifiedSessionTimer(status.session_started_at);
+          return;
+        }
+        if (tvVerifyConnectionStatus) {
+          tvVerifyConnectionStatus.textContent = "Waiting for the selected Fire TV to answer...";
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    if (tvVerifyConnectionStatus) {
+      tvVerifyConnectionStatus.dataset.status = "yellow";
+      tvVerifyConnectionStatus.textContent = lastStatusError
+        ? `No matching Fire TV response within 30 seconds; last status check failed: ${lastStatusError}`
+        : "No matching Fire TV response within 30 seconds. A past heartbeat does not confirm it is connected now.";
+    }
+    if (tvVerifyOnlineTimer) tvVerifyOnlineTimer.textContent = "No live session verified";
+  } catch (err) {
+    if (tvVerifyConnectionStatus) {
+      tvVerifyConnectionStatus.dataset.status = "red";
+      tvVerifyConnectionStatus.textContent = `Unable to verify Fire TV: ${err.message || "request failed"}`;
+    }
+    if (tvVerifyOnlineTimer) tvVerifyOnlineTimer.textContent = "No live session verified";
+  } finally {
+    if (tvVerifyConnectionBtn) tvVerifyConnectionBtn.disabled = false;
+  }
+}
+
 async function waitForRemoteTvSync(deviceId, requestedAt) {
   const deadline = Date.now() + 120000;
   const pollIntervalMs = 3000;
@@ -1137,6 +1231,10 @@ if (tvRemoteSyncBtn) {
   tvRemoteSyncBtn.addEventListener("click", requestRemoteTvSync);
 }
 
+if (tvVerifyConnectionBtn) {
+  tvVerifyConnectionBtn.addEventListener("click", verifyRemoteTvConnection);
+}
+
 if (tvLiveStatusClearBtn) {
   tvLiveStatusClearBtn.addEventListener("click", () => {
     if (tvLiveStatusCard) delete tvLiveStatusCard.dataset.status;
@@ -1151,6 +1249,15 @@ if (tvLiveStatusClearBtn) {
 if (tvLiveStatusSelect) {
   tvLiveStatusSelect.addEventListener("change", () => {
     if (tvLiveStatusSelect.value) _renderLiveStatusCard(tvLiveStatusSelect.value);
+    if (tvVerifyConnectionStatus) {
+      delete tvVerifyConnectionStatus.dataset.status;
+      tvVerifyConnectionStatus.textContent = "Verify the selected device to confirm a live connection.";
+    }
+    if (tvVerifyOnlineTimer) tvVerifyOnlineTimer.textContent = "No live session verified for this selection";
+    if (_tvVerifyTimerHandle !== null) {
+      clearInterval(_tvVerifyTimerHandle);
+      _tvVerifyTimerHandle = null;
+    }
   });
 }
 

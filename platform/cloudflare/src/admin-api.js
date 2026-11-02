@@ -172,25 +172,112 @@ async function fetchGithubLatestCommit(repo, branch) {
     }
 }
 
-async function systemRoute(client, request, parts, url, env, body = {}) {
+function parseTvVerificationDetails(details) {
+    return Object.fromEntries(
+        Array.from(
+            String(details || "").matchAll(/(?:^|\s)([a-z_]+)=([^\s]+)/g),
+            (match) => [match[1], match[2]],
+        ),
+    );
+}
+
+async function findTvDeviceOwner(client, deviceId) {
+    const result = await client.query(
+        "SELECT user_id FROM public.tv_diag_log WHERE device_id = $1 AND user_id IS NOT NULL ORDER BY ts_server DESC LIMIT 1",
+        [deviceId],
+    );
+    return result.rows[0] || null;
+}
+
+async function queueTvDeviceDiagnostic(adapter, { userId, deviceId, event, details, requestedAt }) {
+    await adapter.runWithIdentity(userId, (targetClient) => targetClient.query(
+        "SELECT public.worker_record_tv_diagnostics($1::jsonb)",
+        [JSON.stringify([{
+            event,
+            details,
+            ts: requestedAt.toISOString(),
+            device_id: deviceId,
+        }])],
+    ));
+}
+
+async function systemRoute(client, request, parts, url, env, body = {}, adapter) {
     const action = parts[2];
     if (action === "tv-refresh-request") {
         if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
         const deviceId = String(body.device_id || "").trim();
         if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
-        const refreshResult = await client.query(
-            "SELECT * FROM public.worker_request_tv_refresh($1)",
-            [deviceId],
-        );
-        const queued = refreshResult.rows[0];
-        if (!queued) return { error: "No account is associated with this TV device", status: 404 };
+        const device = await findTvDeviceOwner(client, deviceId);
+        if (!device) return { error: "No account is associated with this TV device", status: 404 };
+        const requestId = crypto.randomUUID();
+        const requestedAt = new Date();
+        await queueTvDeviceDiagnostic(adapter, {
+            userId: device.user_id,
+            deviceId,
+            event: "remote_calendar_sync_requested",
+            details: `request_id=${requestId} requested_at=${requestedAt.toISOString()}`,
+            requestedAt,
+        });
         return {
             success: true,
             device_id: deviceId,
-            user_id: queued.target_user_id,
-            requested_at: new Date(queued.requested_at).toISOString(),
-            requested_device_id: queued.target_device_id,
-            message: "Refresh request queued for the TV account.",
+            user_id: device.user_id,
+            request_id: requestId,
+            requested_at: requestedAt.toISOString(),
+            requested_device_id: deviceId,
+            message: "Calendar sync request queued for the selected TV.",
+        };
+    }
+    if (action === "tv-verification-request") {
+        if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
+        const deviceId = String(body.device_id || "").trim();
+        if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
+        const device = await findTvDeviceOwner(client, deviceId);
+        if (!device) return { error: "No account is associated with this TV device", status: 404 };
+        const requestId = crypto.randomUUID();
+        const requestedAt = new Date();
+        await queueTvDeviceDiagnostic(adapter, {
+            userId: device.user_id,
+            deviceId,
+            event: "device_verification_requested",
+            details: `request_id=${requestId}`,
+            requestedAt,
+        });
+        return {
+            success: true,
+            device_id: deviceId,
+            user_id: device.user_id,
+            request_id: requestId,
+            requested_at: requestedAt.toISOString(),
+        };
+    }
+    if (action === "tv-verification-status") {
+        if (request.method !== "GET") return { error: "Method not allowed", status: 405 };
+        const deviceId = String(url.searchParams.get("device_id") || "").trim();
+        const requestId = String(url.searchParams.get("request_id") || "").trim().toLowerCase();
+        if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(requestId)) {
+            return { error: "request_id must be a UUID", status: 422 };
+        }
+        const acknowledgementResult = await client.query(
+            "SELECT ts_server, details FROM public.tv_diag_log WHERE device_id = $1 AND event = 'device_verification_ack' AND details LIKE $2 ORDER BY ts_server DESC LIMIT 1",
+            [deviceId, `%request_id=${requestId}%`],
+        );
+        const acknowledgement = acknowledgementResult.rows[0];
+        if (!acknowledgement) {
+            return { acknowledged: false, device_id: deviceId, request_id: requestId };
+        }
+        const details = parseTvVerificationDetails(acknowledgement.details);
+        const acknowledgedAt = acknowledgement.ts_server instanceof Date
+            ? acknowledgement.ts_server.toISOString()
+            : String(acknowledgement.ts_server || "");
+        return {
+            acknowledged: true,
+            device_id: deviceId,
+            request_id: requestId,
+            session_started_at: details.session_started_at || null,
+            event_count: /^\d+$/.test(details.event_count || "") ? Number(details.event_count) : null,
+            acknowledged_at: acknowledgedAt || null,
         };
     }
     if (action === "database-config") {
@@ -454,7 +541,7 @@ export async function handleAdminApi(request, env, adapter, userId) {
             if (!admin.rows[0]?.allowed) return { error: "Admin only", status: 403 };
             if (parts[1] === "users") return usersRoute(client, request, parts, body);
             if (parts[1] === "providers") return providersRoute(client, request, parts, body);
-            if (parts[1] === "system") return systemRoute(client, request, parts, url, env, body);
+            if (parts[1] === "system") return systemRoute(client, request, parts, url, env, body, adapter);
             if (parts[1] === "maintenance") return maintenanceRoute(client, request, parts);
             return { error: "Admin route not found", status: 404 };
         });

@@ -574,7 +574,7 @@ def test_admin_current_user_failure_history_rejects_large_range(client):
     assert res.status_code == 422
 
 
-def test_admin_tv_refresh_request_updates_shared_state_for_selected_device(client, db):
+def test_admin_tv_refresh_request_queues_device_specific_diagnostic_request(client, db):
     admin = _register_user(client, role="admin")
     headers = _login_headers(client, admin["email"], admin["password"])
     device_id = "firetv-refresh-target"
@@ -597,15 +597,80 @@ def test_admin_tv_refresh_request_updates_shared_state_for_selected_device(clien
     assert payload["success"] is True
     assert payload["device_id"] == device_id
     assert payload["user_id"] == admin["id"]
+    assert uuid.UUID(payload["request_id"])
     assert payload["requested_at"]
     assert payload["requested_device_id"] == device_id
-    state = db.get(TVUserState, admin["id"])
-    assert state.remote_refresh_requested_at is not None
-    assert state.remote_refresh_device_id == device_id
-    state_response = client.get("/tv/state", headers=headers)
-    assert state_response.status_code == 200
-    assert state_response.json()["remoteRefreshRequestedAt"]
-    assert state_response.json()["remoteRefreshDeviceId"] == device_id
+    queued_request = db.query(TVDiagLog).filter_by(
+        user_id=admin["id"],
+        device_id=device_id,
+        event="remote_calendar_sync_requested",
+    ).one()
+    assert payload["request_id"] in queued_request.details
+    assert payload["requested_at"] in queued_request.details
+
+
+def test_admin_tv_verification_requires_matching_device_acknowledgment(client, db):
+    admin = _register_user(client, role="admin")
+    headers = _login_headers(client, admin["email"], admin["password"])
+    tv_user = _register_user(client, role="staff")
+    device_id = "firetv-verification-target"
+    db.add(TVDiagLog(
+        user_id=tv_user["id"],
+        device_id=device_id,
+        event="heartbeat",
+        ts_server=datetime.now(timezone.utc),
+    ))
+    db.commit()
+
+    queued = client.post(
+        "/admin/system/tv-verification-request",
+        headers=headers,
+        json={"device_id": device_id},
+    )
+    assert queued.status_code == 200
+    request = queued.json()
+    assert request["success"] is True
+    assert request["device_id"] == device_id
+    assert request["user_id"] == tv_user["id"]
+    assert uuid.UUID(request["request_id"])
+    request_row = db.query(TVDiagLog).filter_by(
+        user_id=tv_user["id"],
+        device_id=device_id,
+        event="device_verification_requested",
+    ).one()
+    assert request["request_id"] in request_row.details
+
+    status_url = "/admin/system/tv-verification-status"
+    params = {"device_id": device_id, "request_id": request["request_id"]}
+    waiting = client.get(status_url, headers=headers, params=params)
+    assert waiting.status_code == 200
+    assert waiting.json()["acknowledged"] is False
+
+    session_started_at = datetime.now(timezone.utc).isoformat()
+    db.add(TVDiagLog(
+        user_id=tv_user["id"],
+        device_id="another-firetv",
+        event="device_verification_ack",
+        details=f"request_id={request['request_id']} session_started_at={session_started_at} event_count=4",
+        ts_server=datetime.now(timezone.utc),
+    ))
+    db.add(TVDiagLog(
+        user_id=tv_user["id"],
+        device_id=device_id,
+        event="device_verification_ack",
+        details=f"request_id={request['request_id']} session_started_at={session_started_at} event_count=4",
+        ts_server=datetime.now(timezone.utc),
+    ))
+    db.commit()
+    verified = client.get(status_url, headers=headers, params=params)
+    assert verified.status_code == 200
+    verification = verified.json()
+    assert verification["acknowledged"] is True
+    assert verification["device_id"] == device_id
+    assert verification["request_id"] == request["request_id"]
+    assert verification["session_started_at"] == session_started_at
+    assert verification["event_count"] == 4
+    assert verification["acknowledged_at"]
 
 
 def test_admin_tv_stale_refresh_summary_reports_recent_fallbacks(client, db):
