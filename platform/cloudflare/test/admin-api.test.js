@@ -71,7 +71,8 @@ test("queues a remote TV refresh for the selected device account", async () => {
                 calls += 1;
                 if (calls === 1) return { rows: [{ allowed: true }] };
                 if (calls === 2) {
-                    assert.match(sql, /FROM public\.tv_diag_log/);
+                    assert.match(sql, /worker_read_tv_diagnostics\('all', 720, 'all'\)/);
+                    assert.doesNotMatch(sql, /FROM public\.tv_diag_log/);
                     assert.deepEqual(params, ["firetv-1"]);
                     return { rows: [{ user_id: 7 }] };
                 }

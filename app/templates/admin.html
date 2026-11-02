@@ -873,6 +873,38 @@
 
           <!-- ── Live diagnostics log ───────────────────────────── -->
           <div>
+            <details class="overview-subsection tv-live-status-panel" id="tvLiveStatusPanel" open>
+              <summary>&#x1F4E1; Device Status &amp; Remote Recovery</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Green means a recent authenticated calendar check-in; yellow means status is stale or uncertain; red requires a reported logout, unpair, or authentication error. Page heartbeats alone do not prove calendar requests are succeeding.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <span id="tvLiveStatusCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
+                  <label for="tvLiveStatusSelect" style="font-size:11px;opacity:0.75;">Device</label>
+                  <select id="tvLiveStatusSelect" style="font-size:11px;min-width:220px;">
+                    <option value="">No devices loaded yet</option>
+                  </select>
+                  <button id="tvLiveStatusLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
+                  <button id="tvLiveStatusClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
+                </div>
+                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
+                  <button id="tvRemoteSyncBtn" class="ghost-btn" type="button">Request Calendar Sync</button>
+                  <span id="tvRemoteSyncStatus" role="status" aria-live="polite" style="font-size:11px;opacity:0.75;"></span>
+                </div>
+                <p style="font-size:11px;opacity:0.65;margin:0 0 8px;line-height:1.45;">
+                  Sends a device-specific provider sync and event refresh. The TV must be awake and its dashboard open; after sending, check Diagnostics &amp; History for received, completed, or failed status.
+                </p>
+                <div id="tvLiveStatusCard" class="tv-status-card">No device status loaded yet. Click Load / Refresh.</div>
+              </div>
+            </details>
+
+            <details class="overview-subsection tv-diagnostics-group" id="tvDiagnosticsGroup">
+              <summary>Diagnostics &amp; History</summary>
+              <div class="overview-subsection-body">
+                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
+                  Expand a log only when investigating a sync, connection gap, stale display, or re-pair issue. Historical heartbeats are not proof that calendar data is current.
+                </p>
             <details class="overview-subsection tv-diag-panel">
               <summary>Live Diagnostics Log</summary>
               <div class="overview-subsection-body">
@@ -893,59 +925,6 @@
                 <tbody id="tvDiagBody"><tr><td colspan="7" style="opacity:0.4;">No data loaded yet.</td></tr></tbody>
               </table>
             </div>
-              </div>
-            </details>
-
-            <details class="overview-subsection tv-live-status-panel" id="tvLiveStatusPanel">
-              <summary>&#x1F4E1; Device Status &amp; Uptime</summary>
-              <div class="overview-subsection-body">
-                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Green means a recent healthy check-in; yellow means the status is stale or uncertain; red requires a reported logout, unpair, or authentication error. Missing check-ins alone do not prove the TV is offline.
-                </p>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                  <span id="tvLiveStatusCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
-                  <label for="tvLiveStatusSelect" style="font-size:11px;opacity:0.75;">Device</label>
-                  <select id="tvLiveStatusSelect" style="font-size:11px;min-width:220px;">
-                    <option value="">No devices loaded yet</option>
-                  </select>
-                  <button id="tvLiveStatusLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
-                  <button id="tvLiveStatusClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
-                </div>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                  <button id="tvRemoteSyncBtn" class="ghost-btn" type="button">Request Calendar Sync</button>
-                  <span id="tvRemoteSyncStatus" role="status" aria-live="polite" style="font-size:11px;opacity:0.75;"></span>
-                </div>
-                <p style="font-size:11px;opacity:0.65;margin:0 0 8px;line-height:1.45;">
-                  Queues the TV&rsquo;s normal provider sync and event refresh for the selected device&rsquo;s account. If it is offline, the request remains queued until its dashboard is visible; check Live Diagnostics for receipt and errors.
-                </p>
-                <div id="tvLiveStatusCard" class="tv-status-card">No device status loaded yet. Click Load / Refresh.</div>
-              </div>
-            </details>
-
-            <details class="overview-subsection tv-health-panel">
-              <summary>FireTV Health Snapshot</summary>
-              <div class="overview-subsection-body">
-                <p style="font-size:12px;opacity:0.75;margin:0 0 8px;line-height:1.5;">
-                  Summarizes each device&rsquo;s latest check-in, visibility, and network or token failures to help distinguish an app/data-fetch problem from a powered-down TV.
-                </p>
-                <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-                  <span id="tvHealthCount" style="font-size:11px;opacity:0.55;">click Load to fetch</span>
-                  <label for="tvHealthSort" style="font-size:11px;opacity:0.75;">Sort</label>
-                  <select id="tvHealthSort" style="font-size:11px;min-width:170px;">
-                    <option value="severity" selected>Severity (red/yellow/green)</option>
-                    <option value="recent-heartbeat">Most recent heartbeat</option>
-                    <option value="hidden-duration">Highest hidden duration</option>
-                    <option value="recent-failure">Most recent failure</option>
-                  </select>
-                  <button id="tvHealthLoadBtn" class="ghost-btn" type="button" style="font-size:11px;">Load / Refresh</button>
-                  <button id="tvHealthClearBtn" class="ghost-btn" type="button" style="font-size:11px;">Clear view</button>
-                </div>
-                <div style="overflow-x:auto;">
-                  <table class="tv-diag-table" id="tvHealthTable">
-                    <thead><tr><th>Device</th><th>Status</th><th>Last check-in</th><th>Hidden-state warning</th><th>Last network/token failure</th><th>Connection diagnosis</th></tr></thead>
-                    <tbody id="tvHealthBody"><tr><td colspan="6" style="opacity:0.4;">No health snapshot loaded yet.</td></tr></tbody>
-                  </table>
-                </div>
               </div>
             </details>
 
@@ -1024,6 +1003,9 @@
                     <tbody id="tvRepairDiagBody"><tr><td colspan="5" style="opacity:0.4;">No re-pair risk rows loaded yet.</td></tr></tbody>
                   </table>
                 </div>
+              </div>
+            </details>
+
               </div>
             </details>
 

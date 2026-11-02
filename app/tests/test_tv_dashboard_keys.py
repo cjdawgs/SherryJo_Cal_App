@@ -220,7 +220,8 @@ def test_admin_tv_health_snapshot_identifies_connection_drop_signatures():
     assert "fetch-timeout=abort" in admin_js
     assert "Older clients left timed-out fetches running" in admin_js
     assert "Session restarted after" in admin_js
-    assert "<th>Connection diagnosis</th>" in admin_html
+    assert "_connectionDiagnosis(rows)" in admin_js
+    assert "FireTV Health Snapshot" not in admin_html
 
 
 def test_admin_tv_live_status_uses_user_email_instead_of_numeric_id():
@@ -249,7 +250,6 @@ def test_admin_tv_live_status_requires_offline_evidence_and_shows_reported_durat
     assert "else if (confirmedOffline)" in admin_js
     assert 'label = "OFFLINE"' in admin_js
     assert "LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75" in admin_js
-    assert "YELLOW · status unknown" in admin_js
     assert "lastHeartbeat?.elapsed_min" in admin_js
     assert "Last Reported Online" in admin_js
     assert '<strong>Time online:</strong>' in admin_js
@@ -259,10 +259,10 @@ def test_admin_tv_live_status_requires_offline_evidence_and_shows_reported_durat
     assert '.tv-status-card[data-status="yellow"]' in admin_html
     assert '.tv-status-card[data-status="red"]' in admin_html
     assert "background: #ffffff;" in admin_html
-    assert "yellow means the status is stale or uncertain" in admin_html
+    assert "yellow means status is stale or uncertain" in admin_html
     assert "red requires a reported logout, unpair, or authentication error" in admin_html
     assert 'id="tvRemoteSyncBtn"' in admin_html
-    assert "selected device&rsquo;s account" in admin_html
+    assert "device-specific provider sync and event refresh" in admin_html
 
 
 def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
@@ -272,17 +272,18 @@ def test_admin_tv_monitor_exposes_connection_gap_recovery_log():
 
     assert 'id="tvConnectionGapPanel"' in admin_html
     assert 'id="tvConnectionGapPanel" open' not in admin_html
-    assert 'id="tvLiveStatusPanel" open' not in admin_html
-    assert 'class="overview-subsection tv-health-panel">' in admin_html
+    assert 'id="tvLiveStatusPanel" open' in admin_html
+    assert 'id="tvDiagnosticsGroup"' in admin_html
+    assert '<summary>Diagnostics &amp; History</summary>' in admin_html
+    assert 'class="overview-subsection tv-health-panel">' not in admin_html
     assert admin_html.count('class="overview-subsection tv-stale-panel"') == 2
     assert 'class="overview-subsection tv-repair-panel">' in admin_html
     assert "class=\"overview-subsection tv-diag-panel\"" in admin_html
     assert "Heartbeats show the page was running when logged" in admin_html
-    assert "Summarizes each device&rsquo;s latest check-in" in admin_html
     assert "Infers long gaps between successful check-ins" in admin_html
     assert "kept its last-known events after a temporary refresh error" in admin_html
     assert "token-invalid, token-removed, and user-unpair events" in admin_html
-    assert "request remains queued until its dashboard is visible" in admin_html
+    assert "The TV must be awake and its dashboard open" in admin_html
     assert "tv-connection-gaps-summary" in admin_js
     assert "last_checkin_at" in admin_js
     assert "resumed_at" in admin_js

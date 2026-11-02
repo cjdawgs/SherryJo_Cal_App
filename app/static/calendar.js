@@ -3509,6 +3509,24 @@ window.syncNow = syncNow;
 /**************************************************************
  * ✅ PUBLISH NOW — push local canonical events to all provider accounts
  **************************************************************/
+function getToolbarPublishTargetKeys() {
+  const publishableProviders = new Set(["google", "microsoft", "apple"]);
+  const accounts = Array.isArray(window.connectedCalendarAccounts)
+    ? window.connectedCalendarAccounts
+    : [];
+
+  return [...new Set(accounts.map((account) => {
+    const provider = normalizeProvider(account?.provider || "");
+    const email = String(account?.account_email || "").toLowerCase().trim();
+    return publishableProviders.has(provider) && email ? `${provider}:${email}` : "";
+  }).filter(Boolean))];
+}
+
+function buildToolbarPublishTargets(eventIds) {
+  const targetKeys = getToolbarPublishTargetKeys();
+  return Object.fromEntries(eventIds.map((eventId) => [String(eventId), targetKeys]));
+}
+
 async function publishNow(options = {}) {
   const requestedKeys = Array.isArray(options.changeKeys) ? new Set(options.changeKeys.map(String)) : null;
   const pendingChanges = getPendingPublishChanges();
@@ -3553,7 +3571,11 @@ async function publishNow(options = {}) {
     const res = await apiFetch("/calendar/publish", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ event_ids: modifiedIds, deleted_events: deletedEvents }),
+      body: JSON.stringify({
+        event_ids: modifiedIds,
+        deleted_events: deletedEvents,
+        publish_targets: buildToolbarPublishTargets(modifiedIds),
+      }),
     });
     if (!res) return;
 

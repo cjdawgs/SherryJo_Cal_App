@@ -178,10 +178,13 @@ async function systemRoute(client, request, parts, url, env, body = {}) {
         if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
         const deviceId = String(body.device_id || "").trim();
         if (!deviceId || deviceId === "unknown") return { error: "A known TV device must be selected", status: 422 };
-        const device = await client.query(
-            "SELECT user_id FROM public.tv_diag_log WHERE device_id=$1 AND user_id IS NOT NULL ORDER BY ts_server DESC LIMIT 1",
-            [deviceId],
-        );
+        const device = await client.query(`
+            SELECT diagnostic.user_id
+            FROM public.worker_read_tv_diagnostics('all', 720, 'all') AS diagnostic
+            WHERE diagnostic.device_id = $1 AND diagnostic.user_id IS NOT NULL
+            ORDER BY diagnostic.ts_server DESC
+            LIMIT 1
+        `, [deviceId]);
         const userId = device.rows[0]?.user_id;
         if (userId == null) return { error: "No account is associated with this TV device", status: 404 };
         const updated = await client.query(`

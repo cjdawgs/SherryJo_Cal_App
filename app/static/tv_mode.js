@@ -306,12 +306,6 @@ const diagClearBtn = document.getElementById("tvDiagClearBtn");
 const diagAutoRefresh = document.getElementById("tvDiagAutoRefresh");
 const diagBody = document.getElementById("tvDiagBody");
 const diagCount = document.getElementById("tvDiagCount");
-const tvHealthLoadBtn = document.getElementById("tvHealthLoadBtn");
-const tvHealthClearBtn = document.getElementById("tvHealthClearBtn");
-const tvHealthCount = document.getElementById("tvHealthCount");
-const tvHealthBody = document.getElementById("tvHealthBody");
-const tvHealthPanel = document.querySelector(".tv-health-panel");
-const tvHealthSort = document.getElementById("tvHealthSort");
 const publishDiagLoadBtn = document.getElementById("publishDiagLoadBtn");
 const publishDiagClearBtn = document.getElementById("publishDiagClearBtn");
 const publishDiagBody = document.getElementById("publishDiagBody");
@@ -349,7 +343,6 @@ let _diagAutoHandle = null;
 let _stalePanelLoaded = false;
 let _repairPanelLoaded = false;
 let _connectionGapPanelLoaded = false;
-let _healthPanelLoaded = false;
 let _liveStatusPanelLoaded = false;
 // device_id -> array of diagnostic rows (most-recent first), cached after the
 // last Load/Refresh click so switching the device dropdown never re-fetches.
@@ -460,19 +453,6 @@ function _deriveHiddenStatus(rows) {
   };
 }
 
-function _buildHealthBadge(row) {
-  if (row.hasAuthFailure) {
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f1111;color:#ffd9d9;border:1px solid #a23737;font-size:10px;font-weight:700;letter-spacing:0.2px;">RED · auth error</span>';
-  }
-  if (row.isStale) {
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f3e11;color:#ffe6bf;border:1px solid #b67a1f;font-size:10px;font-weight:700;letter-spacing:0.2px;">YELLOW · status unknown</span>';
-  }
-  if (row.failureAfterCheckIn || row.hidden.warn) {
-    return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#5f3e11;color:#ffe6bf;border:1px solid #b67a1f;font-size:10px;font-weight:700;letter-spacing:0.2px;">YELLOW · check required</span>';
-  }
-  return '<span style="display:inline-block;padding:2px 8px;border-radius:999px;background:#124a2b;color:#d5ffe8;border:1px solid #2f8f5a;font-size:10px;font-weight:700;letter-spacing:0.2px;">GREEN · healthy</span>';
-}
-
 function _connectionDiagnosis(rows) {
   const timeoutCount = rows.filter((row) => String(row?.event || "") === "tv_fetch_timeout").length;
   const latestSession = rows.find((row) => String(row?.event || "") === "session_start");
@@ -500,23 +480,6 @@ function _connectionDiagnosis(rows) {
   if (restartDiagnosis) return restartDiagnosis;
   if (latestSession && !hasAbortFix) return "Client abort-fix marker not seen yet; refresh TV dashboard and check this snapshot again.";
   return "No connection-drop signature in the available diagnostics.";
-}
-
-function _sortHealthRows(rows) {
-  const mode = String(tvHealthSort?.value || "severity");
-  if (mode === "recent-heartbeat") {
-    rows.sort((a, b) => b.lastHeartbeatMs - a.lastHeartbeatMs || b.lastSeenMs - a.lastSeenMs);
-    return;
-  }
-  if (mode === "hidden-duration") {
-    rows.sort((a, b) => b.hiddenDurationMinutes - a.hiddenDurationMinutes || b.lastSeenMs - a.lastSeenMs);
-    return;
-  }
-  if (mode === "recent-failure") {
-    rows.sort((a, b) => b.lastFailureMs - a.lastFailureMs || b.lastSeenMs - a.lastSeenMs);
-    return;
-  }
-  rows.sort((a, b) => b.severityRank - a.severityRank || b.lastSeenMs - a.lastSeenMs);
 }
 
 async function loadTvDiag() {
@@ -552,98 +515,6 @@ async function loadTvDiag() {
     }).join('');
   } catch (err) {
     if (diagCount) diagCount.textContent = `Error: ${err.message}`;
-  }
-}
-
-async function loadTvHealth() {
-  if (!tvHealthBody) return;
-  try {
-    const params = new URLSearchParams({ scope: "all", hours: "168" });
-    const data = await apiRequest(`/tv/diag?${params.toString()}`, { method: "GET" });
-    if (!data || !Array.isArray(data.entries)) {
-      if (tvHealthCount) tvHealthCount.textContent = "error loading";
-      return;
-    }
-
-    const entries = data.entries;
-    const byDevice = new Map();
-    for (const entry of entries) {
-      const deviceId = String(entry?.device_id || "unknown");
-      if (!byDevice.has(deviceId)) byDevice.set(deviceId, []);
-      byDevice.get(deviceId).push(entry);
-    }
-
-    const rows = [];
-    for (const [deviceId, deviceRows] of byDevice.entries()) {
-      const lastHeartbeat = deviceRows.find((row) => String(row?.event || "") === "heartbeat");
-      const lastCheckIn = _latestTvCheckIn(deviceRows);
-      const lastFailure = deviceRows.find((row) => _tvHealthFailureEvents.has(String(row?.event || "")));
-      const hidden = _deriveHiddenStatus(deviceRows);
-      const connectionDiagnosis = _connectionDiagnosis(deviceRows);
-      const lastSeenMs = _toTsMs(deviceRows[0]?.ts_server) || 0;
-
-      const lastHeartbeatMs = _toTsMs(lastCheckIn?.ts_server) || 0;
-      const lastFailureMs = _toTsMs(lastFailure?.ts_server) || 0;
-      const checkInAgeMinutes = lastHeartbeatMs ? Math.floor((Date.now() - lastHeartbeatMs) / 60000) : null;
-      const checkInLimit = lastCheckIn?.event === "device_presence"
-        ? LIVE_STATUS_PRESENCE_STALE_MINUTES
-        : LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES;
-      const isStale = checkInAgeMinutes === null || checkInAgeMinutes >= checkInLimit;
-      const failureAfterCheckIn = Boolean(lastFailure && lastFailureMs > lastHeartbeatMs && Date.now() - lastFailureMs < LIVE_STATUS_PRESENCE_STALE_MINUTES * 60000);
-      const hasAuthFailure = Boolean(failureAfterCheckIn && ["token_invalid_401", "kiosk_token_invalid_401"].includes(String(lastFailure?.event || "")));
-      const hiddenDurationMinutes = Number.isFinite(hidden.hiddenDurationMinutes) ? hidden.hiddenDurationMinutes : -1;
-      const severityRank = hasAuthFailure ? 3 : isStale || failureAfterCheckIn || hidden.warn ? 2 : 1;
-
-      rows.push({
-        deviceId,
-        shortId: deviceId === "unknown" ? "unknown" : `…${deviceId.slice(-8)}`,
-        lastSeenMs,
-        lastHeartbeat: lastCheckIn,
-        lastHeartbeatMs,
-        isStale,
-        hasAuthFailure,
-        failureAfterCheckIn,
-        hidden,
-        connectionDiagnosis,
-        hiddenDurationMinutes,
-        lastFailure,
-        lastFailureMs,
-        severityRank,
-      });
-    }
-
-    _sortHealthRows(rows);
-
-    const hiddenWarnings = rows.filter((row) => row.hidden.warn).length;
-    if (tvHealthCount) {
-      tvHealthCount.textContent = `${rows.length} device(s) · ${hiddenWarnings} hidden warning(s)`;
-    }
-
-    if (!rows.length) {
-      tvHealthBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">No devices found in the last 7 days.</td></tr>';
-      return;
-    }
-
-    tvHealthBody.innerHTML = rows.map((row) => {
-      const hb = row.lastHeartbeat
-        ? `${_fmtDiagTime(row.lastHeartbeat.ts_server)} (${_escapeHtml(String(row.lastHeartbeat.elapsed_min ?? "—"))}m)`
-        : "No check-in in window";
-      const hiddenStyle = row.hidden.warn ? "color:#ff9500;font-weight:700;" : "";
-      const failure = row.lastFailure
-        ? `${_fmtDiagTime(row.lastFailure.ts_server)} · ${_escapeHtml(_eventTag(row.lastFailure.event))}`
-        : "None in window";
-      return `
-      <tr>
-        <td><span style="font-family:monospace;">${_escapeHtml(row.shortId)}</span></td>
-        <td>${_buildHealthBadge(row)}</td>
-        <td>${_escapeHtml(hb)}</td>
-        <td style="${hiddenStyle}">${_escapeHtml(row.hidden.label)}</td>
-        <td>${failure}</td>
-        <td>${_escapeHtml(row.connectionDiagnosis)}</td>
-      </tr>`;
-    }).join("");
-  } catch (err) {
-    if (tvHealthCount) tvHealthCount.textContent = `Error: ${err.message}`;
   }
 }
 
@@ -1155,35 +1026,6 @@ if (diagAutoRefresh) {
     } else {
       if (_diagAutoHandle) clearInterval(_diagAutoHandle);
       _diagAutoHandle = null;
-    }
-  });
-}
-
-if (tvHealthLoadBtn) {
-  tvHealthLoadBtn.addEventListener("click", () => {
-    _healthPanelLoaded = true;
-    loadTvHealth();
-  });
-}
-
-if (tvHealthClearBtn) {
-  tvHealthClearBtn.addEventListener("click", () => {
-    if (tvHealthBody) tvHealthBody.innerHTML = '<tr><td colspan="6" style="opacity:0.4;">Cleared view (server log unchanged).</td></tr>';
-    if (tvHealthCount) tvHealthCount.textContent = "cleared";
-  });
-}
-
-if (tvHealthSort) {
-  tvHealthSort.addEventListener("change", () => {
-    if (_healthPanelLoaded) loadTvHealth();
-  });
-}
-
-if (tvHealthPanel) {
-  tvHealthPanel.addEventListener("toggle", () => {
-    if (tvHealthPanel.open && !_healthPanelLoaded) {
-      _healthPanelLoaded = true;
-      loadTvHealth();
     }
   });
 }

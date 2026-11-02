@@ -4,6 +4,7 @@
 
 from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from fastapi.testclient import TestClient
 from app.main import app
 import jwt
@@ -13,6 +14,16 @@ from app.services.multi_account_oauth_service import resolve_account_status
 from app.utils.serializers import account_summary
 
 client = TestClient(app)
+
+
+def test_toolbar_publish_includes_all_connected_account_targets():
+    calendar_js = Path(__file__).resolve().parents[1] / "static" / "calendar.js"
+    source = calendar_js.read_text(encoding="utf-8")
+
+    assert 'function getToolbarPublishTargetKeys()' in source
+    assert 'function buildToolbarPublishTargets(eventIds)' in source
+    assert 'publish_targets: buildToolbarPublishTargets(modifiedIds)' in source
+    assert 'window.connectedCalendarAccounts' in source
 
 
 # ==================================================
