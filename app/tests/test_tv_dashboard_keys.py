@@ -253,6 +253,8 @@ def test_admin_tv_live_status_requires_offline_evidence_and_shows_reported_durat
     assert "lastHeartbeat?.elapsed_min" in admin_js
     assert "Last Reported Online" in admin_js
     assert '<strong>Time online:</strong>' in admin_js
+    assert "LIVE_STATUS_DIAGNOSTIC_WINDOW_HOURS = 336" in admin_js
+    assert "device(s) in the last 14 days" in admin_js
     assert 'state.displayedUptimeMs != null ? `<span class="tv-uptime-badge">' in admin_js
     assert ".tv-uptime-badge" in admin_html
     assert '.tv-status-card[data-status="green"]' in admin_html

@@ -350,6 +350,7 @@ let _liveStatusRowsByDevice = new Map();
 let _liveStatusEmailByUser = new Map();
 const LIVE_STATUS_PRESENCE_STALE_MINUTES = 35;
 const LIVE_STATUS_LEGACY_HEARTBEAT_MINUTES = 75;
+const LIVE_STATUS_DIAGNOSTIC_WINDOW_HOURS = 336;
 const _tvHealthFailureEvents = new Set([
   "tv_fetch_timeout",
   "tv_fetch_network_error",
@@ -693,7 +694,7 @@ async function loadTvLiveStatus() {
   if (!tvLiveStatusSelect || !tvLiveStatusCard) return;
   try {
     const [data, usersResponse] = await Promise.all([
-      apiRequest("/tv/diag?scope=all&hours=168", { method: "GET" }),
+      apiRequest(`/tv/diag?scope=all&hours=${LIVE_STATUS_DIAGNOSTIC_WINDOW_HOURS}`, { method: "GET" }),
       apiRequest("/admin/users", { method: "GET" }),
     ]);
     if (!data || !Array.isArray(data.entries)) {
@@ -716,12 +717,12 @@ async function loadTvLiveStatus() {
     }
     _liveStatusRowsByDevice = byDevice;
 
-    if (tvLiveStatusCount) tvLiveStatusCount.textContent = `${byDevice.size} device(s) in the last 7 days`;
+    if (tvLiveStatusCount) tvLiveStatusCount.textContent = `${byDevice.size} device(s) in the last 14 days`;
 
     if (!byDevice.size) {
       tvLiveStatusSelect.innerHTML = '<option value="">No devices found</option>';
       delete tvLiveStatusCard.dataset.status;
-      tvLiveStatusCard.innerHTML = "No devices found in the last 7 days.";
+      tvLiveStatusCard.innerHTML = "No devices found in the last 14 days.";
       return;
     }
 
