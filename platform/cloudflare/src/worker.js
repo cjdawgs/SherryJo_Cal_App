@@ -1234,7 +1234,8 @@ export default {
                 return await handleAdminApi(request, env, createHyperdriveCalendarReadAdapter(env), claims.user_id);
             }
             if (syncMode === "native" && request.method === "POST" && incomingUrl.pathname === "/calendar/sync") {
-                const claims = await authenticateWorkerRequest(request, env);
+                // The paired Fire TV holds a persistent token (no exp) and its Sync button calls this route.
+                const claims = await authenticateTvRequest(request, env);
                 const result = await runManualCalendarSync(
                     createHyperdriveCalendarReadAdapter(env), env, claims.user_id,
                     incomingUrl.searchParams.get("account"), incomingUrl.searchParams.get("dedup") !== "false",

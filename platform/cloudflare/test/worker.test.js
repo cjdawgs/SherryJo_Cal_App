@@ -888,3 +888,28 @@ test("calendar query matches FastAPI UTC parsing and invalid-bound fallback", ()
         /range_days must be an integer/,
     );
 });
+test("manual calendar sync accepts a persistent TV token but rejects a non-TV token without exp", async () => {
+    const { generateKeyPairSync, sign } = await import("node:crypto");
+    const pair = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const now = Math.floor(Date.now() / 1000);
+    const mint = (claims) => {
+        const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
+        const input = `${encode({ alg: "RS256", kid: "key-1", typ: "JWT" })}.${encode(claims)}`;
+        return `${input}.${sign("RSA-SHA256", Buffer.from(input), pair.privateKey).toString("base64url")}`;
+    };
+    const base = { sub: "42", user_id: 42, iss: "issuer", aud: "audience", iat: now, nbf: now, jti: "j" };
+    const env = {
+        CALENDAR_SYNC_MODE: "native",
+        JWT_PUBLIC_KEYS_JSON: JSON.stringify({ "key-1": pair.publicKey.export({ type: "spki", format: "pem" }) }),
+        JWT_ISSUER: "issuer",
+        JWT_AUDIENCE: "audience",
+    };
+    const sync = (token) => worker.fetch(new Request("https://calendar.example.com/calendar/sync?dedup=false", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+    }), env);
+
+    // Without a Hyperdrive binding the TV token passes auth and fails later, so it must not be a 401.
+    assert.notEqual((await sync(mint({ ...base, token_use: "tv" }))).status, 401);
+    assert.equal((await sync(mint(base))).status, 401);
+});
