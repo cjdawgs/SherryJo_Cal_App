@@ -433,6 +433,133 @@ function getHealthStatus(acc) {
   return `<span style="color:#64748b;">Unknown</span>`;
 }
 
+// Single rule for "this OAuth account needs the user to reconnect" (card button + Reconnect All).
+function isReconnectCandidate(acc) {
+  const provider = normalizeProvider(acc?.provider);
+  return acc?.status === "error"
+    && !Boolean(acc?.token_issue?.requires_admin)
+    && ["google", "microsoft", "apple"].includes(provider);
+}
+
+// ---------- Reconnect-all queue (survives the provider consent redirects) ----------
+const RECONNECT_QUEUE_KEY = "reconnectQueue";
+const RECONNECT_QUEUE_TTL_MS = 30 * 60 * 1000;
+let reconnectAdvanceTimer = null;
+
+function readReconnectQueue() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECONNECT_QUEUE_KEY) || "null");
+    if (!parsed || Date.now() - Number(parsed.createdAt || 0) > RECONNECT_QUEUE_TTL_MS) return null;
+    return { pending: parsed.pending || [], done: parsed.done || [], createdAt: parsed.createdAt };
+  } catch {
+    return null;
+  }
+}
+
+function writeReconnectQueue(queue) {
+  if (!queue) localStorage.removeItem(RECONNECT_QUEUE_KEY);
+  else localStorage.setItem(RECONNECT_QUEUE_KEY, JSON.stringify(queue));
+}
+
+// Confirms the saved login is still valid BEFORE leaving for the provider. api.js sends the user
+// to /login on a 401, which avoids the raw {"detail":"Invalid token"} page from an expired session.
+async function ensureSessionValid() {
+  const res = await api.get("/accounts/sync-status");
+  return Boolean(res);
+}
+
+function renderReconnectAllBar(accounts) {
+  const bar = document.getElementById("reconnectAllBar");
+  if (!bar) return;
+  const queue = readReconnectQueue();
+  if (queue && queue.pending.length) return; // the queue banner owns the bar while a run is active
+  const targets = (accounts || []).filter((acc) => isReconnectCandidate(acc) && normalizeProvider(acc.provider) !== "apple");
+  if (!targets.length) {
+    bar.innerHTML = "";
+    return;
+  }
+  bar.innerHTML = `<button id="reconnectAllBtn" class="providerBtn" title="Reconnects each account that needs it, one after another.">Reconnect all (${targets.length})</button>
+    <span style="margin-left:8px;font-size:12px;">Approve each provider screen; the next account opens automatically.</span>`;
+  document.getElementById("reconnectAllBtn").onclick = () => startReconnectAll(targets);
+}
+
+async function startReconnectAll(targets) {
+  if (!(await ensureSessionValid())) return;
+  const pending = targets.map((acc) => ({ provider: normalizeProvider(acc.provider), email: String(acc.account_email || "").trim().toLowerCase() }));
+  writeReconnectQueue({ pending, done: [], createdAt: Date.now() });
+  advanceReconnectQueue();
+}
+
+function advanceReconnectQueue() {
+  const queue = readReconnectQueue();
+  if (!queue || !queue.pending.length) return;
+  const next = queue.pending.shift();
+  writeReconnectQueue(queue);
+  markPendingCalendarSync(next.provider, next.email);
+  window.location.href = buildReconnectUrl(next.provider, next.email);
+}
+
+function cancelReconnectQueue() {
+  clearTimeout(reconnectAdvanceTimer);
+  writeReconnectQueue(null);
+  const bar = document.getElementById("reconnectAllBar");
+  if (bar) bar.innerHTML = "";
+  setGlobalMessage("Reconnect all cancelled.", "info");
+}
+
+// Runs the server-side sync (same endpoint on Render and the Worker) so the TV sees fresh events.
+async function syncReconnectedAccounts(done, accounts) {
+  let synced = 0;
+  for (const item of done) {
+    const match = accounts.find((acc) => normalizeAccountKey(acc.provider, acc.account_email) === normalizeAccountKey(item.provider, item.email));
+    if (!match?.id) continue;
+    try {
+      const res = await api.post(`/accounts/${match.id}/refresh-sync`, {});
+      if (res && res.ok !== false) synced += 1;
+    } catch (error) {
+      console.error("Post-reconnect sync failed", error);
+    }
+  }
+  return synced;
+}
+
+// Called once after each successful provider return.
+async function handleReconnectReturn(provider, email, accounts) {
+  const queue = readReconnectQueue() || { pending: [], done: [], createdAt: Date.now() };
+  queue.done.push({ provider: normalizeProvider(provider), email: String(email || "").trim().toLowerCase() });
+
+  if (queue.pending.length) {
+    writeReconnectQueue(queue);
+    const bar = document.getElementById("reconnectAllBar");
+    let seconds = 3;
+    const paint = () => {
+      if (bar) bar.innerHTML = `<span>Reconnected ${queue.done.length}. Next: <strong>${asciiText(queue.pending[0].email)}</strong> (${queue.pending.length} left) in ${seconds}s</span>
+        <button id="reconnectCancelBtn" style="margin-left:8px;">Cancel</button>`;
+      const cancel = document.getElementById("reconnectCancelBtn");
+      if (cancel) cancel.onclick = cancelReconnectQueue;
+    };
+    paint();
+    reconnectAdvanceTimer = setInterval(() => {
+      seconds -= 1;
+      if (seconds <= 0) {
+        clearInterval(reconnectAdvanceTimer);
+        advanceReconnectQueue();
+      } else paint();
+    }, 1000);
+    return;
+  }
+
+  writeReconnectQueue(null);
+  setGlobalMessage("Reconnected. Syncing your calendars now...", "info");
+  const synced = await syncReconnectedAccounts(queue.done, accounts);
+  setGlobalMessage(
+    synced ? `Reconnected ${queue.done.length} account${queue.done.length === 1 ? "" : "s"} and synced ${synced}. Your TV will show them on its next refresh.`
+      : `Reconnected ${queue.done.length} account${queue.done.length === 1 ? "" : "s"}. The background sync will update your calendar within a few minutes.`,
+    "success"
+  );
+  await loadAccounts();
+}
+
 function buildReconnectUrl(provider, email) {
   const token = localStorage.getItem("token") || "";
   if (!token) return "/accounts/ui";
@@ -611,6 +738,7 @@ async function retryAccount(id, button) {
 async function reconnectAccount(provider, email, button) {
   setButtonBusy(button, "Opening...");
   try {
+    if (!(await ensureSessionValid())) return;
     markPendingCalendarSync(provider, email);
     window.location.href = buildReconnectUrl(provider, email);
   } finally {
@@ -669,9 +797,7 @@ function renderProviderAccounts(provider, list) {
       ? "Checks both read access and publish/create access for this Microsoft calendar account."
       : "Runs an immediate sync health check for this account using saved credentials.";
 
-    const reconnectVisible = acc.status === "error"
-      && !Boolean(acc?.token_issue?.requires_admin)
-      && (normalizeProvider(acc.provider) === "google" || normalizeProvider(acc.provider) === "microsoft" || normalizeProvider(acc.provider) === "apple");
+    const reconnectVisible = isReconnectCandidate(acc);
     const issueMessage = String(acc?.token_issue?.message || "").trim();
     const issueCode = String(acc?.token_issue?.code || "").trim();
     const issueGuidance = buildIssueGuidance(acc);
@@ -784,6 +910,7 @@ async function loadAccounts() {
   renderProviderAccounts("google", groups.google);
   renderProviderAccounts("microsoft", groups.microsoft);
   renderProviderAccounts("apple", groups.apple);
+  renderReconnectAllBar(displayAccounts);
   focusRemediationTargetIfRequested();
 
   if (!accounts.length && syncAccounts.length) {
@@ -942,6 +1069,7 @@ function applyQueryState() {
       google_token_issue_failed: "Google connected, but Cloudflare could not issue a native session token. Ask an admin to verify JWT_PRIVATE_KEY, JWT_ACTIVE_KID, JWT_ISSUER, and JWT_AUDIENCE on the Worker.",
     };
     setGlobalMessage(known[oauthError] || oauthError.replace(/_/g, " "));
+    writeReconnectQueue(null); // a failed/mismatched consent must not keep auto-advancing
   }
 
   if (remedyProvider || remedyAccount) {
@@ -1037,6 +1165,7 @@ async function init() {
         console.error("Queued publish replay failed", error);
         setGlobalMessage(`${oauthResult.provider} reconnected, but queued publishes are still pending and will be retried.`, "error");
       }
+      if (!oauthResult.error) await handleReconnectReturn(oauthResult.provider, oauthResult.account, accounts);
     } else {
       setGlobalMessage(`${oauthResult.provider} OAuth completed, but ${oauthResult.account} is not visible in the current database account list. Check the active datasource and TOKEN_ENCRYPTION_KEY.`, "error");
     }
