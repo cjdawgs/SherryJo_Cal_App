@@ -164,3 +164,16 @@ def test_asymmetric_signing_configuration_fails_closed(monkeypatch):
 
     with pytest.raises(JWTError, match="requires both"):
         create_token(1)
+
+def test_oauth_login_helper_accepts_rs256_and_legacy_tokens(monkeypatch):
+    from app.utils.oauth_state import decode_user_token
+
+    private_key, public_key = _keypair()
+    _configure_asymmetric(monkeypatch, "key-1", private_key, {"key-1": public_key})
+
+    assert decode_user_token(create_token(42), "legacy-secret") == 42
+
+    import jwt as pyjwt
+
+    legacy = pyjwt.encode({"user_id": 7}, "legacy-secret", algorithm="HS256")
+    assert decode_user_token(legacy, "legacy-secret") == 7

@@ -4,6 +4,8 @@ from typing import Optional, Tuple
 
 import jwt
 
+from app.security import ASYMMETRIC_ALGORITHM, decode_asymmetric_token
+
 STATE_ALGORITHM = "HS256"
 
 
@@ -33,5 +35,13 @@ def decode_oauth_state(state: str, secret_key: str) -> Tuple[Optional[int], str]
 
 def decode_user_token(token: str, secret_key: str) -> Optional[int]:
     """Return the ``user_id`` embedded in an app JWT passed as a query param."""
+    # Worker-issued sessions are RS256 (verified against the public keyring);
+    # legacy Render sessions remain HS256.
+    try:
+        algorithm = jwt.get_unverified_header(token).get("alg")
+    except jwt.PyJWTError:
+        algorithm = None
+    if algorithm == ASYMMETRIC_ALGORITHM:
+        return decode_asymmetric_token(token).get("user_id")
     payload = jwt.decode(token, secret_key, algorithms=[STATE_ALGORITHM])
     return payload.get("user_id")
