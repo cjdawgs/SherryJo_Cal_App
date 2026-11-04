@@ -1686,6 +1686,10 @@ export function initFullCalendar() {
       const cal = window.calendar;
       const previousViewType = _prevViewType;
 
+      // Recount chip badges on EVERY range/view change (prev/next/today/Month/Week/Day),
+      // before any early return below; the counter reads cal.view.activeStart/End.
+      setTimeout(() => window.updateChipEventCounts?.(), 0);
+
       if (
         window.layoutMode === "mobile" &&
         previousViewType !== currentViewType &&

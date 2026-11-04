@@ -786,27 +786,53 @@ window.getCalendarEventAccountKey = getCalendarEventAccountKey;
 
 function computeCurrentViewEventCounts() {
   const cal = getCalendar();
-  if (!cal || typeof cal.getEvents !== "function") return {};
+  if (!cal || !cal.view) return {};
 
-  const view = cal.view;
-  const activeStart = view?.activeStart ? new Date(view.activeStart) : null;
-  const activeEnd = view?.activeEnd ? new Date(view.activeEnd) : null;
+  const activeStart = cal.view.activeStart ? new Date(cal.view.activeStart) : null;
+  const activeEnd = cal.view.activeEnd ? new Date(cal.view.activeEnd) : null;
+  const cache = Array.isArray(window.sessionEventCache) ? window.sessionEventCache : [];
 
-  const counts = {};
+  // Read the UNFILTERED cache (not cal.getEvents()) so counts ignore chip
+  // filters and the Dedupe toggle. Group copies of the same event instance
+  // (same backend id + start) and union their account keys, so each account
+  // is credited exactly once per event whether copies are merged or per-account.
+  const instances = new Map();
 
-  cal.getEvents().forEach((ev) => {
-    if (activeStart && activeEnd) {
-      const evStart = ev.start ? new Date(ev.start) : null;
-      const evEnd = ev.end ? new Date(ev.end) : evStart;
+  cache.forEach((ev) => {
+    if (!ev || !ev.start) return;
+    const evStart = new Date(ev.start);
+    const evEnd = ev.end ? new Date(ev.end) : evStart;
+    if (Number.isNaN(evStart.getTime())) return;
+    if (activeStart && activeEnd && (evEnd < activeStart || evStart >= activeEnd)) return;
 
-      if (!evStart) return;
-      if (evEnd < activeStart || evStart >= activeEnd) return;
+    const backendId = ev.extendedProps?.backendId ?? ev.id;
+    const groupKey = `${backendId}|${evStart.toISOString()}`;
+    let keys = instances.get(groupKey);
+    if (!keys) {
+      keys = new Set();
+      instances.set(groupKey, keys);
     }
 
-    const key = getCalendarEventAccountKey(ev);
-    if (!key) return;
+    const ownKey = getCalendarEventAccountKey(ev);
+    if (ownKey) keys.add(ownKey);
 
-    counts[key] = (counts[key] || 0) + 1;
+    const externalIds = {
+      ...(ev.external_ids || {}),
+      ...(ev.extendedProps?.external_ids || {}),
+    };
+    Object.keys(externalIds).forEach((externalKey) => {
+      if (!externalKey || !externalKey.includes(":")) return;
+      const [provider, email] = externalKey.split(":", 2);
+      const linkedKey = normalizeKey(provider, email);
+      if (linkedKey !== "local:local") keys.add(linkedKey);
+    });
+  });
+
+  const counts = {};
+  instances.forEach((keys) => {
+    keys.forEach((k) => {
+      counts[k] = (counts[k] || 0) + 1;
+    });
   });
 
   return counts;
