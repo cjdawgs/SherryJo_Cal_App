@@ -34,6 +34,8 @@ PUBLIC_PATHS = {
     "/auth/login",
     "/tv/dashboard",
     "/login",          # HTML shell; the API behind it is authenticated
+    "/privacy",        # static legal page required for the Google OAuth consent screen
+    "/terms",          # static legal page required for the Google OAuth consent screen
     "/calendar-ui",    # HTML shell; the API behind it is authenticated
     "/health/schema",  # liveness probe: table presence only, no data
     "/tv/kiosk",       # authenticates via a signed token in the query string
