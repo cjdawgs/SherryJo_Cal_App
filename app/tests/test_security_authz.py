@@ -34,6 +34,7 @@ PUBLIC_PATHS = {
     "/auth/login",
     "/tv/dashboard",
     "/login",          # HTML shell; the API behind it is authenticated
+    "/about",          # public app description required for the Google OAuth consent screen
     "/privacy",        # static legal page required for the Google OAuth consent screen
     "/terms",          # static legal page required for the Google OAuth consent screen
     "/calendar-ui",    # HTML shell; the API behind it is authenticated

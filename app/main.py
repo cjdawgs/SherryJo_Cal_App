@@ -606,6 +606,11 @@ def login_page(request: Request):
     )
 
 
+@app.get("/about", include_in_schema=False)
+def about_page(request: Request):
+    return templates.TemplateResponse(request, "about.html", {"request": request})
+
+
 @app.get("/privacy", include_in_schema=False)
 def privacy_page(request: Request):
     return templates.TemplateResponse(request, "privacy.html", {"request": request})

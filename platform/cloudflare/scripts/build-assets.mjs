@@ -30,6 +30,7 @@ const pageDefinitions = [
     },
     { template: "admin.html", output: "admin.html", imports: null },
     { template: "login.html", output: "login.html", imports: null },
+    { template: "about.html", output: "about.html", imports: null },
     { template: "privacy.html", output: "privacy.html", imports: null },
     { template: "terms.html", output: "terms.html", imports: null },
     { template: "tv.html", output: "tv.html", imports: null },

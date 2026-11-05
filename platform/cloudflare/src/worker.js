@@ -106,6 +106,7 @@ const NATIVE_PAGE_ASSETS = new Map([
     ["/", "/"],
     ["/calendar-ui", "/"],
     ["/login", "/login"],
+    ["/about", "/about"],
     ["/privacy", "/privacy"],
     ["/terms", "/terms"],
     // Assets binding uses html_handling=auto-trailing-slash: requesting the
