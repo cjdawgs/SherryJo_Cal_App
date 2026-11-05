@@ -72,3 +72,12 @@ test("NATIVE_PAGE_ASSETS maps extensionless routes to extensionless asset paths 
         }
     }
 });
+test("privacy and terms pages are mapped to built Worker assets", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const worker = await readFile(new URL("../src/worker.js", import.meta.url), "utf8");
+    const build = await readFile(new URL("../scripts/build-assets.mjs", import.meta.url), "utf8");
+    for (const page of ["privacy", "terms"]) {
+        assert.ok(worker.includes(`["/${page}", "/${page}"]`), `${page} route missing from NATIVE_PAGE_ASSETS`);
+        assert.ok(build.includes(`template: "${page}.html"`), `${page} missing from build-assets`);
+    }
+});

@@ -606,6 +606,16 @@ def login_page(request: Request):
     )
 
 
+@app.get("/privacy", include_in_schema=False)
+def privacy_page(request: Request):
+    return templates.TemplateResponse(request, "privacy.html", {"request": request})
+
+
+@app.get("/terms", include_in_schema=False)
+def terms_page(request: Request):
+    return templates.TemplateResponse(request, "terms.html", {"request": request})
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     return Response(status_code=204)
