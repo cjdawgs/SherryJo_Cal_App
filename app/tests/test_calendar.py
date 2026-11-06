@@ -220,7 +220,9 @@ def test_normalize_outlook_event_structure():
     assert result[0]["source"] == "outlook"
 
 
-@patch("app.services.calendar_service.GoogleCalendarService.fetch_events", return_value=[])
+@patch("app.services.calendar_service.GoogleCalendarService.fetch_events_v2", return_value={
+    "events": [], "cancelled_ids": [], "next_tokens": {}, "used_incremental": False,
+})
 @patch("app.services.calendar_service.ensure_valid_token", return_value="token")
 def test_fetch_all_events_clears_stale_account_error(mock_token, mock_fetch, db):
     service = CalendarService()
@@ -237,7 +239,7 @@ def test_fetch_all_events_clears_stale_account_error(mock_token, mock_fetch, db)
     account = OAuthAccount(
         user_id=user.id,
         provider="google",
-        account_email="sherrychip@gmail.com",
+        account_email="status-heal@example.test",
         access_token="token",
         refresh_token="refresh",
         sync_enabled=True,

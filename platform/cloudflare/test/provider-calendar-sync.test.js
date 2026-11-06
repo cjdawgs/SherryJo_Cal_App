@@ -86,6 +86,80 @@ test("fetches Google calendars, skips system calendars, and records cancellation
     assert.equal(result.events[0].provider, "google");
     assert.deepEqual(result.cancelledIds, ["g-2"]);
     assert.equal(result.syncToken.primary, "google-next");
+    assert.deepEqual(result.syncDiagnostics, { fullCalendars: 1, incrementalCalendars: 0, missingSyncTokens: 0 });
+});
+
+test("reports missing Google sync cursors and distinguishes subsequent incremental sync", async () => {
+    const fetchImpl = async (input) => {
+        const url = new URL(input);
+        if (url.pathname.endsWith("/calendarList")) return jsonResponse({ items: [{ id: "primary" }] });
+        if (url.searchParams.has("syncToken")) return jsonResponse({ items: [], nextSyncToken: "next" });
+        return jsonResponse({ items: [] });
+    };
+    const options = {
+        accessToken: "token",
+        start: new Date("2026-08-01T00:00:00Z"),
+        end: new Date("2026-09-01T00:00:00Z"),
+        fetchImpl,
+    };
+    const full = await fetchGoogleChanges({ ...options, account: { account_email: "agent@example.com", sync_token: {} } });
+    assert.deepEqual(full.syncDiagnostics, { fullCalendars: 1, incrementalCalendars: 0, missingSyncTokens: 1 });
+    const incremental = await fetchGoogleChanges({
+        ...options,
+        account: { account_email: "agent@example.com", sync_token: { primary: "previous" } },
+    });
+    assert.deepEqual(incremental.syncDiagnostics, { fullCalendars: 0, incrementalCalendars: 1, missingSyncTokens: 0 });
+});
+
+test("does not restore an expired Google cursor if the replacement baseline has no cursor", async () => {
+    const fetchImpl = async (input) => {
+        const url = new URL(input);
+        if (url.pathname.endsWith("/calendarList")) return jsonResponse({ items: [{ id: "primary" }] });
+        if (url.searchParams.has("syncToken")) return jsonResponse({ error: { message: "expired" } }, 410);
+        return jsonResponse({ items: [] });
+    };
+    const result = await fetchGoogleChanges({
+        account: { account_email: "agent@example.com", sync_token: { primary: "expired" } },
+        accessToken: "token",
+        start: new Date("2026-08-01T00:00:00Z"),
+        end: new Date("2026-09-01T00:00:00Z"),
+        fetchImpl,
+    });
+    assert.equal(result.incremental, false);
+    assert.equal(result.syncDiagnostics.missingSyncTokens, 1);
+    assert.equal(Object.hasOwn(result.syncToken, "primary"), false);
+});
+
+test("Google only permits full reconciliation for a nonempty all-full calendar snapshot", async () => {
+    const fetchForCalendars = (calendars) => async (input) => {
+        const url = new URL(input);
+        if (url.pathname.endsWith("/calendarList")) return jsonResponse({ items: calendars.map((id) => ({ id })) });
+        return jsonResponse({ items: [], nextSyncToken: "next" });
+    };
+    const options = {
+        accessToken: "token",
+        start: new Date("2026-08-01T00:00:00Z"),
+        end: new Date("2026-09-01T00:00:00Z"),
+    };
+    const empty = await fetchGoogleChanges({
+        ...options,
+        account: { account_email: "agent@example.com", sync_token: {} },
+        fetchImpl: fetchForCalendars([]),
+    });
+    assert.equal(empty.reconcileFullSnapshot, false);
+    const mixed = await fetchGoogleChanges({
+        ...options,
+        account: { account_email: "agent@example.com", sync_token: { primary: "previous" } },
+        fetchImpl: fetchForCalendars(["primary", "second"]),
+    });
+    assert.equal(mixed.incremental, true);
+    assert.equal(mixed.reconcileFullSnapshot, false);
+    const full = await fetchGoogleChanges({
+        ...options,
+        account: { account_email: "agent@example.com", sync_token: {} },
+        fetchImpl: fetchForCalendars(["primary"]),
+    });
+    assert.equal(full.reconcileFullSnapshot, true);
 });
 
 test("falls back from an expired Microsoft delta link and returns a new cursor", async () => {
@@ -117,6 +191,20 @@ test("falls back from an expired Microsoft delta link and returns a new cursor",
     assert.equal(result.events[0].start, "2026-08-18T10:00:00.000Z");
     assert.deepEqual(result.cancelledIds, ["m-2"]);
     assert.equal(result.syncToken.delta_link, "https://graph.microsoft.com/new-delta");
+});
+
+test("does not restore an expired Microsoft delta link when the baseline has no replacement", async () => {
+    const fetchImpl = async (input) => String(input) === "https://graph.microsoft.com/expired"
+        ? jsonResponse({ error: { message: "expired" } }, 410)
+        : jsonResponse({ value: [] });
+    const result = await fetchMicrosoftChanges({
+        account: { account_email: "agent@example.com", sync_token: { delta_link: "https://graph.microsoft.com/expired", _range_generation: "g1" } },
+        accessToken: "token", start: new Date("2026-08-01T00:00:00Z"),
+        end: new Date("2026-09-01T00:00:00Z"), fetchImpl,
+    });
+    assert.equal(result.incremental, false);
+    assert.equal(result.syncToken.delta_link, undefined);
+    assert.equal(result.syncToken._range_generation, "g1");
 });
 
 test("treats a Google quota 403 as a transient failure, not an authorization failure", async () => {

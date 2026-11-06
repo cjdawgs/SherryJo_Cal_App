@@ -141,7 +141,7 @@ async function serializeAccount(row, tokenEncryptionKey) {
         sync_enabled: Boolean(row.sync_enabled), status,
         last_sync: iso(row.last_sync), last_sync_success: iso(row.last_sync_success),
         last_sync_failure: iso(row.last_sync_failure), last_error: row.last_error || null,
-        sync_frequency_minutes: normalizedProvider === "apple" ? Math.max(240, frequency) : frequency,
+        sync_frequency_minutes: Math.max(240, frequency),
         sync_range_days: Number(row.sync_range_days || 30),
         last_manual_refresh_at: iso(row.last_manual_refresh_at),
         credential_state: {

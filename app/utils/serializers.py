@@ -19,9 +19,9 @@ def account_sync_summary(account: "OAuthAccount") -> dict:
 
     configured_frequency = max(1, int(getattr(account, "sync_frequency_minutes", 5) or 5))
     apple_floor = _apple_min_sync_minutes()
-    effective_frequency = configured_frequency
+    effective_frequency = max(240, configured_frequency)
     if normalize_provider(getattr(account, "provider", "")) == "apple":
-        effective_frequency = max(configured_frequency, apple_floor)
+        effective_frequency = max(effective_frequency, apple_floor)
 
     decrypt_error = False
     credential_warning = None

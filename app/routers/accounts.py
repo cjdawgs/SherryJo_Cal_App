@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from datetime import datetime, timezone, timedelta
 import os
+from uuid import uuid4
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import User, OAuthAccount, SyncEfficiencyDailyRollup
@@ -54,8 +55,8 @@ def _apple_min_sync_minutes() -> int:
 
 def _provider_sync_frequency_floor(provider: str | None) -> int:
     if normalize_provider(provider) == "apple":
-        return _apple_min_sync_minutes()
-    return 1
+        return max(240, _apple_min_sync_minutes())
+    return 240
 
 
 # ============================================================
@@ -215,7 +216,6 @@ def retry_account_sync(
     from app.services.multi_account_oauth_service import safe_commit
 
     account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
-
     service = CalendarService()
     retry_started_at = datetime.now(timezone.utc)
     target_key = f"{normalize_provider(account.provider)}:{(account.account_email or '').lower().strip()}"
@@ -525,6 +525,13 @@ def update_account_sync_settings(
     current_user: User = Depends(get_current_user)
 ):
     account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
+    account = (
+        db.query(OAuthAccount)
+        .filter(OAuthAccount.id == account_id, OAuthAccount.user_id == current_user.id)
+        .with_for_update()
+        .populate_existing()
+        .one()
+    )
 
     if payload.sync_frequency_minutes is not None:
         requested = max(1, min(int(payload.sync_frequency_minutes), 1440))
@@ -532,7 +539,10 @@ def update_account_sync_settings(
         account.sync_frequency_minutes = max(floor, requested)
 
     if payload.sync_range_days is not None:
-        account.sync_range_days = max(1, min(int(payload.sync_range_days), 3650))
+        range_days = max(1, min(int(payload.sync_range_days), 3650))
+        if range_days != account.sync_range_days:
+            account.sync_token = {"_range_generation": str(uuid4())}
+            account.sync_range_days = range_days
 
     if payload.sync_enabled is not None:
         account.sync_enabled = bool(payload.sync_enabled)
@@ -558,15 +568,26 @@ def refresh_account_sync(
 ):
     account = get_owned_or_404(db, OAuthAccount, account_id, current_user.id, "Account not found")
 
+    window_days = max(1, int(getattr(account, "sync_range_days", 30) or 30))
+    now = datetime.now(timezone.utc)
+    start_date = now - timedelta(days=window_days)
+    end_date = now + timedelta(days=window_days)
+
+    target_key = f"{normalize_provider(account.provider)}:{(account.account_email or '').lower().strip()}"
+    sync_result = calendar_service.sync_all(
+        db, current_user, start_date=start_date, end_date=end_date, account_key=target_key,
+    )
+    errors = [item for item in sync_result.get("account_sync_totals", []) if item.get("status") == "error"]
+    if errors:
+        return {
+            "success": False,
+            "message": errors[0].get("error") or "Manual refresh failed",
+            "account_id": account.id,
+            "sync_result": sync_result,
+        }
     account.last_manual_refresh_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(account)
-
-    window_days = max(1, int(getattr(account, "sync_range_days", 30) or 30))
-    end_date = datetime.now(timezone.utc)
-    start_date = end_date - timedelta(days=window_days)
-
-    sync_result = calendar_service.sync_all(db, current_user, start_date=start_date, end_date=end_date)
 
     return {
         "success": True,

@@ -16,6 +16,124 @@ from app.utils.serializers import account_summary
 client = TestClient(app)
 
 
+def test_sync_all_only_reconciles_successful_full_accounts_within_window(db, user_a, monkeypatch):
+    from app.services.calendar_service import CalendarService
+
+    user = db.query(User).filter(User.id == user_a[0]).one()
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    specs = [
+        ("google", "full@example.com", "stale", datetime(2026, 8, 5, tzinfo=timezone.utc)),
+        ("google", "full@example.com", "outside", datetime(2026, 9, 5, tzinfo=timezone.utc)),
+        ("google", "failed@example.com", "failed", datetime(2026, 8, 5, tzinfo=timezone.utc)),
+        ("microsoft", "incremental@example.com", "unchanged", datetime(2026, 8, 5, tzinfo=timezone.utc)),
+        ("microsoft", "incremental@example.com", "cancelled", datetime(2026, 9, 5, tzinfo=timezone.utc)),
+    ]
+    for provider, email, external_id, event_start in specs:
+        db.add(Event(
+            owner_id=user.id, title=external_id, source=provider, account_email=email,
+            externalId=f"{provider}:{email}:{external_id}",
+            start_time=event_start, end_time=event_start + timedelta(hours=1),
+        ))
+    db.commit()
+    service = CalendarService()
+    monkeypatch.setattr(service, "fetch_all_events", lambda *args, **kwargs: {
+        "events": [],
+        "account_sync_totals": [
+            {"provider": "google", "account_email": "full@example.com", "status": "ok"},
+            {"provider": "google", "account_email": "failed@example.com", "status": "error"},
+            {"provider": "microsoft", "account_email": "incremental@example.com", "status": "ok"},
+        ],
+        "incremental_account_keys": {"microsoft:incremental@example.com"},
+        "cancelled_external_ids": ["microsoft:incremental@example.com:cancelled"],
+        "reconciliation_window": (start, end),
+    })
+
+    result = service.sync_all(db, user, start_date=start, end_date=end, dedup_enabled=False)
+    remaining = {event.title for event in db.query(Event).filter(Event.owner_id == user.id).all()}
+    assert remaining == {"outside", "failed", "unchanged"}
+    assert result["deleted"] == 2
+
+
+def test_fetch_all_events_removes_invalidated_google_cursor(db, user_a, monkeypatch):
+    from app.services import calendar_service
+
+    user = db.query(User).filter(User.id == user_a[0]).one()
+    account = OAuthAccount(
+        user_id=user.id, provider="google", account_email="cursor@example.test",
+        access_token="access", refresh_token="refresh", sync_enabled=True,
+        is_service_provider=False, sync_token={"primary": "expired"},
+    )
+    db.add(account)
+    db.commit()
+    monkeypatch.setattr(calendar_service, "ensure_valid_token", lambda *_: "access")
+    monkeypatch.setattr(calendar_service, "_fetch_account_http", lambda config, *_: {
+        "acc_id": config["acc_id"], "provider": "google", "account_email": config["account_email"],
+        "events": [], "cancelled_ids": [], "new_sync_tokens": {"primary": None},
+        "used_incremental": True, "raw_count": 0, "error": None, "reauth_required": False,
+    })
+
+    calendar_service.CalendarService().fetch_all_events(db, user)
+    db.refresh(account)
+    assert account.sync_token == {}
+
+
+def test_range_change_during_fetch_does_not_restore_old_google_cursor(db, user_a, monkeypatch):
+    from app.services import calendar_service
+    from app.routers.accounts import AccountSyncSettingsUpdateRequest, update_account_sync_settings
+
+    user = db.query(User).filter(User.id == user_a[0]).one()
+    account = OAuthAccount(
+        user_id=user.id, provider="google", account_email="range@example.test",
+        access_token="access", refresh_token="refresh", sync_enabled=True,
+        is_service_provider=False, sync_range_days=30, sync_token={"primary": "old"},
+    )
+    db.add(account)
+    db.commit()
+    monkeypatch.setattr(calendar_service, "ensure_valid_token", lambda *_: "access")
+
+    def fetch(config, *_):
+        update_account_sync_settings(
+            account.id, AccountSyncSettingsUpdateRequest(sync_range_days=60), db, user,
+        )
+        return {
+            "acc_id": config["acc_id"], "provider": "google", "account_email": config["account_email"],
+            "events": [], "cancelled_ids": [], "new_sync_tokens": {"primary": "obsolete"},
+            "used_incremental": True, "raw_count": 0, "error": None, "reauth_required": False,
+        }
+
+    monkeypatch.setattr(calendar_service, "_fetch_account_http", fetch)
+    calendar_service.CalendarService().fetch_all_events(db, user)
+    db.refresh(account)
+    assert account.sync_range_days == 60
+    assert set(account.sync_token) == {"_range_generation"}
+
+
+def test_manual_account_refresh_only_syncs_selected_account_and_reports_failure(db, user_a, monkeypatch):
+    from app.routers import accounts
+
+    user = db.query(User).filter(User.id == user_a[0]).one()
+    account = OAuthAccount(
+        user_id=user.id, provider="google", account_email="manual@example.test",
+        access_token="access", sync_enabled=True, is_service_provider=False, sync_range_days=30,
+    )
+    db.add(account)
+    db.commit()
+    calls = []
+
+    def failed_sync(*args, **kwargs):
+        calls.append(kwargs)
+        return {"account_sync_totals": [{"status": "error", "error": "Provider unavailable"}]}
+
+    monkeypatch.setattr(accounts.calendar_service, "sync_all", failed_sync)
+    response = accounts.refresh_account_sync(account.id, db, user)
+    assert response["success"] is False
+    assert calls[0]["account_key"] == "google:manual@example.test"
+    assert calls[0]["end_date"] > calls[0]["start_date"]
+    db.refresh(account)
+    assert account.last_manual_refresh_at is None
+
+
 def test_toolbar_publish_includes_all_connected_account_targets():
     calendar_js = Path(__file__).resolve().parents[1] / "static" / "calendar.js"
     source = calendar_js.read_text(encoding="utf-8")
@@ -41,7 +159,7 @@ def get_test_token():
 @patch("app.services.calendar_service.GoogleCalendarService.refresh_token")
 @patch("app.services.calendar_service.GoogleCalendarService.fetch_events")
 @patch("app.services.calendar_service.GraphClient.get_events")
-def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
+def test_sync_events(mock_get_events, mock_fetch, mock_refresh, client, auth_headers):
     """
     ✅ Tests full sync pipeline:
     - external APIs mocked
@@ -55,7 +173,7 @@ def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
 
     response = client.post(
         "/calendar/sync",
-        headers={"Authorization": f"Bearer {get_test_token()}"}
+        headers=auth_headers
     )
 
     assert response.status_code == 200
@@ -78,7 +196,7 @@ def test_sync_events(mock_get_events, mock_fetch, mock_refresh):
 # ==================================================
 
 @patch("app.services.calendar_service.GraphClient.get_tasks")
-def test_unified_calendar(mock_get_tasks):
+def test_unified_calendar(mock_get_tasks, client, auth_headers):
     """
     ✅ Tests unified endpoint (read-only aggregation)
     """
@@ -87,7 +205,7 @@ def test_unified_calendar(mock_get_tasks):
 
     response = client.get(
         "/calendar/unified",
-        headers={"Authorization": f"Bearer {get_test_token()}"}
+        headers=auth_headers
     )
 
     assert response.status_code == 200

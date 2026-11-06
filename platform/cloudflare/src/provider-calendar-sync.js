@@ -208,6 +208,7 @@ export async function fetchGoogleChanges({ account, accessToken, start, end, fet
     const events = [];
     const cancelledIds = [];
     let usedIncremental = false;
+    const syncDiagnostics = { fullCalendars: 0, incrementalCalendars: 0, missingSyncTokens: 0 };
     const calendarIds = await listGoogleCalendars(accessToken, fetchImpl);
 
     for (const calendarId of calendarIds) {
@@ -221,14 +222,21 @@ export async function fetchGoogleChanges({ account, accessToken, start, end, fet
             fetchImpl,
         });
         usedIncremental ||= result.incremental;
+        if (result.incremental) syncDiagnostics.incrementalCalendars += 1;
+        else syncDiagnostics.fullCalendars += 1;
+        if (!result.nextSyncToken) syncDiagnostics.missingSyncTokens += 1;
         for (const item of result.events) {
             const normalized = googleEvent(item, account.account_email);
             if (normalized) events.push(normalized);
         }
         cancelledIds.push(...result.cancelledIds);
         if (result.nextSyncToken) nextSyncState[calendarId] = result.nextSyncToken;
+        else delete nextSyncState[calendarId];
     }
-    return { events, cancelledIds, syncToken: nextSyncState, incremental: usedIncremental };
+    return {
+        events, cancelledIds, syncToken: nextSyncState, incremental: usedIncremental, syncDiagnostics,
+        reconcileFullSnapshot: syncDiagnostics.fullCalendars > 0 && !usedIncremental,
+    };
 }
 
 function graphDateTime(value) {
@@ -296,7 +304,10 @@ export async function fetchMicrosoftChanges({ account, accessToken, start, end, 
         return {
             events,
             cancelledIds,
-            syncToken: payload["@odata.deltaLink"] ? { delta_link: payload["@odata.deltaLink"] } : { ...(account.sync_token || {}) },
+            syncToken: {
+                ...(account.sync_token?._range_generation ? { _range_generation: account.sync_token._range_generation } : {}),
+                ...(payload["@odata.deltaLink"] ? { delta_link: payload["@odata.deltaLink"] } : {}),
+            },
             incremental: Boolean(previousDeltaLink && !retriedFull),
         };
     }

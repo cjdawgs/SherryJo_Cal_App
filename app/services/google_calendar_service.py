@@ -91,7 +91,7 @@ class GoogleCalendarService:
         acct = str(account_email or "primary").lower().strip() or "primary"
         return f"{token_hash}:{acct}"
 
-    def _discover_calendar_ids(self, headers: dict, access_token: str, account_email: str | None) -> list[str]:
+    def _discover_calendar_ids(self, headers: dict, access_token: str, account_email: str | None, *, strict: bool = False) -> list[str]:
         """
         Centralized calendar discovery with TTL cache.
 
@@ -119,27 +119,37 @@ class GoogleCalendarService:
         self._CALENDAR_LIST_CACHE_METRICS["misses"] = int(self._CALENDAR_LIST_CACHE_METRICS.get("misses", 0)) + 1
 
         discovered_ids = list(base_ids)
+        discovery_succeeded = False
         try:
-            cl_resp = requests.get(
-                "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-                headers=headers,
-                timeout=self.REQUEST_TIMEOUT,
-            )
-            if cl_resp.status_code == 200:
-                for cal in cl_resp.json().get("items", []):
+            page_token = None
+            for _ in range(100):
+                kwargs = {"headers": headers, "timeout": self.REQUEST_TIMEOUT}
+                if page_token:
+                    kwargs["params"] = {"pageToken": page_token}
+                cl_resp = requests.get("https://www.googleapis.com/calendar/v3/users/me/calendarList", **kwargs)
+                if cl_resp.status_code != 200:
+                    raise RuntimeError(f"Google calendarList failed ({cl_resp.status_code})")
+                payload = cl_resp.json()
+                for cal in payload.get("items", []):
                     cid = (cal.get("id") or "").lower().strip()
                     if not cid or self._is_system_calendar(cid):
                         continue
                     if cid not in discovered_ids:
                         discovered_ids.append(cid)
-            else:
-                logger.warning("[SYNC] Google calendarList failed (%s)", cl_resp.status_code)
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    discovery_succeeded = True
+                    break
+            if not discovery_succeeded:
+                raise RuntimeError("Google calendarList pagination limit exceeded")
         except Exception as exc:
             logger.error("[SYNC] Google calendarList failed: %s", exc)
+            if strict:
+                raise RuntimeError("Google calendarList failed") from exc
 
         discovered_ids = [cid for cid in discovered_ids if not self._is_system_calendar(cid)]
 
-        if cache_enabled:
+        if cache_enabled and discovery_succeeded:
             ttl_seconds = self._calendar_list_cache_ttl_seconds()
             with self._CALENDAR_LIST_CACHE_LOCK:
                 self._CALENDAR_LIST_CACHE[cache_key] = {
@@ -409,6 +419,7 @@ class GoogleCalendarService:
             headers=headers,
             access_token=access_token,
             account_email=account_email,
+            strict=True,
         )
 
         # ── fetch each calendar (incremental when token available) ──────
@@ -446,14 +457,13 @@ class GoogleCalendarService:
                 while url:
                     resp = requests.get(url, headers=headers, params=params, timeout=self.REQUEST_TIMEOUT)
 
-                    if resp.status_code == 410:
+                    if resp.status_code == 410 and token_for_cal and attempt == 0:
                         # syncToken expired → retry as full fetch
                         need_retry = True
                         break
 
                     if resp.status_code != 200:
-                        logger.error(f"❌ Google events failed ({resp.status_code}): {cal_id}")
-                        break
+                        raise RuntimeError(f"Google events failed ({resp.status_code})")
 
                     data = resp.json()
                     items.extend(data.get("items", []))
@@ -462,7 +472,6 @@ class GoogleCalendarService:
                     if page_token:
                         params = dict(params)   # copy to avoid mutation
                         params["pageToken"] = page_token
-                        params.pop("syncToken", None)
                         url = f"https://www.googleapis.com/calendar/v3/calendars/{cal_id}/events"
                     else:
                         next_sync_token = data.get("nextSyncToken")
@@ -483,6 +492,8 @@ class GoogleCalendarService:
 
                 if next_sync_token:
                     next_tokens[cal_id] = next_sync_token
+                elif cal_id in sync_state:
+                    next_tokens[cal_id] = None
 
                 break  # done with this calendar
 

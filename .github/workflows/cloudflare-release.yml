@@ -124,9 +124,11 @@ jobs:
                   pip install -r requirements.txt
                   alembic upgrade head
 
-            - name: Skip Supabase migrations when secret is absent
+            - name: Fail when migration secret is absent
               if: ${{ env.ALEMBIC_DATABASE_URL == '' }}
-              run: echo "ALEMBIC_DATABASE_URL is not configured; no Supabase migration was needed."
+              run: |
+                  echo "::error::ALEMBIC_DATABASE_URL is required to apply database migrations before deployment."
+                  exit 1
 
     deploy-canary:
         needs:

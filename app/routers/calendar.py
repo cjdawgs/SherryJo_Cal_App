@@ -627,7 +627,7 @@ def sync_calendar(
             int(getattr(acc, "sync_range_days", 30) or 30)
             for acc in sync_accounts
         ]
-        window_days = max(1, min(max(configured_days) if configured_days else 30, 365))
+        window_days = max(1, min(max(configured_days) if configured_days else 30, 3650))
 
         now_utc = datetime.now(timezone.utc)
         start_date = now_utc - timedelta(days=window_days)

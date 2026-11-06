@@ -54,6 +54,34 @@ export const UPDATE_SYNC_EVENT_SQL = `
         updated_at = $5::timestamptz
     WHERE id = $1
 `;
+export const FIND_SYNC_EVENTS_SQL = `
+    SELECT id, "externalId" AS external_id
+    FROM public.events
+    WHERE owner_id = public.worker_app_user_id() AND "externalId" = ANY($1::text[])
+    FOR UPDATE
+`;
+export const UPDATE_SYNC_EVENTS_SQL = `
+    UPDATE public.events AS event
+    SET start_time = incoming.start_time,
+        end_time = incoming.end_time,
+        external_ids = (COALESCE(event.external_ids::jsonb, '{}'::jsonb) || incoming.external_ids)::json,
+        updated_at = $2::timestamptz
+    FROM jsonb_to_recordset($1::jsonb) AS incoming(
+        id integer, start_time timestamptz, end_time timestamptz, external_ids jsonb
+    )
+    WHERE event.id = incoming.id AND event.owner_id = public.worker_app_user_id()
+`;
+export const INSERT_SYNC_EVENTS_SQL = `
+    INSERT INTO public.events
+        (owner_id, title, start_time, end_time, source, "externalId", account_email,
+         color, color_enabled, external_ids, status, created_at, updated_at)
+    SELECT public.worker_app_user_id(), incoming.title, incoming.start_time, incoming.end_time,
+           $2, incoming.external_id, $3, $4, false, incoming.external_ids::json,
+           'synced', $5::timestamptz, $5::timestamptz
+    FROM jsonb_to_recordset($1::jsonb) AS incoming(
+        title text, start_time timestamptz, end_time timestamptz, external_id text, external_ids jsonb
+    )
+`;
 export const DELETE_SYNC_EVENT_NOTES_SQL = `
     DELETE FROM public.notes
     WHERE event_id IN (
@@ -77,13 +105,18 @@ export const FIND_STALE_SYNC_EVENT_IDS_SQL = `
       AND lower(source) = ANY($2::text[])
       AND source <> 'local'
       AND NOT ("externalId" = ANY($3::text[]))
+      AND start_time < $5::timestamptz
+      AND COALESCE(end_time, start_time) > $4::timestamptz
 `;
 export const COMPLETE_ACCOUNT_SYNC_SQL = `
     UPDATE public.oauth_accounts
     SET access_token = $2,
         refresh_token = COALESCE($3, refresh_token),
         token_expires_at = $4::timestamptz,
-        sync_token = $5::jsonb,
+        sync_token = CASE
+            WHEN (sync_token ->> '_range_generation') IS NOT DISTINCT FROM $7::text
+            THEN $5::json ELSE sync_token
+        END,
         last_sync = $6::timestamptz,
         last_sync_success = $6::timestamptz,
         last_sync_failure = NULL,
@@ -212,33 +245,64 @@ export class ScheduledSyncPostgresAdapter {
             await client.query(ACCOUNT_SYNC_LOCK_SQL, [account.user_id, account.id]);
             let created = 0;
             let updated = 0;
-            const incomingIds = [];
-            for (const event of providerResult.events) {
-                const canonicalExternalId = externalId(account, event.externalId);
-                incomingIds.push(canonicalExternalId);
-                const accountKey = `${account.provider}:${String(account.account_email).trim().toLowerCase()}`;
-                const linkedIds = JSON.stringify({ [accountKey]: event.externalId });
-                const existing = await client.query(FIND_SYNC_EVENT_SQL, [canonicalExternalId]);
-                if (existing.rows.length) {
-                    await client.query(UPDATE_SYNC_EVENT_SQL, [
-                        existing.rows[0].id, event.start, event.end, linkedIds, now.toISOString(),
-                    ]);
-                    updated += 1;
-                } else {
-                    await client.query(INSERT_SYNC_EVENT_SQL, [
-                        event.title, event.start, event.end, account.provider, canonicalExternalId,
-                        account.account_email, PROVIDER_COLORS[account.provider] || null, linkedIds, now.toISOString(),
-                    ]);
-                    created += 1;
+            const incomingIds = providerResult.events.map((event) => externalId(account, event.externalId));
+            const accountKey = `${account.provider}:${String(account.account_email).trim().toLowerCase()}`;
+            if (new Set(incomingIds).size !== incomingIds.length) {
+                // Preserve sequential handling when a provider returns the same event more than once.
+                for (const [index, event] of providerResult.events.entries()) {
+                    const linkedIds = JSON.stringify({ [accountKey]: event.externalId });
+                    const existing = await client.query(FIND_SYNC_EVENT_SQL, [incomingIds[index]]);
+                    if (existing.rows.length) {
+                        await client.query(UPDATE_SYNC_EVENT_SQL, [
+                            existing.rows[0].id, event.start, event.end, linkedIds, now.toISOString(),
+                        ]);
+                        updated += 1;
+                    } else {
+                        await client.query(INSERT_SYNC_EVENT_SQL, [
+                            event.title, event.start, event.end, account.provider, incomingIds[index],
+                            account.account_email, PROVIDER_COLORS[account.provider] || null, linkedIds, now.toISOString(),
+                        ]);
+                        created += 1;
+                    }
                 }
+            } else if (incomingIds.length) {
+                const existing = await client.query(FIND_SYNC_EVENTS_SQL, [incomingIds]);
+                const existingIds = new Map();
+                for (const row of existing.rows) {
+                    if (!existingIds.has(row.external_id)) existingIds.set(row.external_id, row.id);
+                }
+                const updates = [];
+                const inserts = [];
+                for (const [index, event] of providerResult.events.entries()) {
+                    const external_id = incomingIds[index];
+                    const values = {
+                        start_time: event.start,
+                        end_time: event.end,
+                        external_ids: { [accountKey]: event.externalId },
+                    };
+                    if (existingIds.has(external_id)) {
+                        updates.push({ ...values, id: existingIds.get(external_id) });
+                    } else {
+                        inserts.push({ ...values, title: event.title, external_id });
+                    }
+                }
+                if (updates.length) await client.query(UPDATE_SYNC_EVENTS_SQL, [JSON.stringify(updates), now.toISOString()]);
+                if (inserts.length) await client.query(INSERT_SYNC_EVENTS_SQL, [
+                    JSON.stringify(inserts), account.provider, account.account_email,
+                    PROVIDER_COLORS[account.provider] || null, now.toISOString(),
+                ]);
+                created = inserts.length;
+                updated = updates.length;
             }
 
             let deletedIds = providerResult.cancelledIds.map((id) => externalId(account, id));
-            if (!providerResult.incremental) {
+            if (!providerResult.incremental && providerResult.reconcileFullSnapshot !== false && providerResult.reconciliationWindow) {
                 const stale = await client.query(FIND_STALE_SYNC_EVENT_IDS_SQL, [
                     account.account_email,
                     providerAliases(account.provider),
                     incomingIds,
+                    providerResult.reconciliationWindow.start,
+                    providerResult.reconciliationWindow.end,
                 ]);
                 deletedIds = [...new Set([...deletedIds, ...stale.rows.map((row) => row.external_id)])];
             }
@@ -256,8 +320,13 @@ export class ScheduledSyncPostgresAdapter {
                 encryptedAccess,
                 encryptedRefresh,
                 tokenResult.expiresAt.toISOString(),
-                JSON.stringify(providerResult.syncToken || {}),
+                JSON.stringify({
+                    ...(providerResult.syncToken || {}),
+                    ...(account.sync_token?._range_generation
+                        ? { _range_generation: account.sync_token._range_generation } : {}),
+                }),
                 now.toISOString(),
+                account.sync_token?._range_generation || null,
             ]);
             const resultPayload = { created, updated, deleted: deletedIds.length };
             await client.query(FINISH_SYNC_OPERATION_SQL, [

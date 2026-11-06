@@ -54,6 +54,45 @@ in response to a user.
   table that grew without user action and nothing deleted from it.
 - **Sync scheduler.** One aggregated line per cycle instead of one per user, and
   the wakeup selects only users that own a sync-enabled account.
+- **Four-hour provider cadence.** Automatic sync uses UTC slots beginning at
+  00:00, 04:00, 08:00, 12:00, 16:00 and 20:00, with a 240-minute minimum for
+  Google, Microsoft and Apple. A one-minute tolerance prevents a few seconds
+  of startup jitter from missing the next slot; a delayed or manually refreshed
+  account may instead run on a later heartbeat. Configured intervals longer
+  than four hours are respected and run at the first qualifying slot. New
+  accounts and retries can run at a heartbeat outside a slot boundary.
+  The Worker retains its five-minute claim heartbeat so its bounded batches
+  drain over multiple invocations; that heartbeat does not itself imply a
+  provider sync. Render processes each due account independently. The former
+  per-user adaptive backoff no longer overrides account schedules. Manual
+  account refresh remains immediate and targets the selected account.
+  The Cloudflare release requires the `ALEMBIC_DATABASE_URL` Actions secret:
+  the migration must succeed before the Worker is deployed. The release
+  stops rather than deploying with an old claim function if it is missing.
+- **Range changes.** Changing an account's range clears its provider cursors
+  and assigns a new range generation. An in-flight sync cannot write a cursor
+  from the previous generation; the next scheduled or manual sync starts a
+  new baseline. Both schedulers honor configured ranges up to 3,650 days
+  on either side of the current time; larger windows can be costly.
+- **Cloudflare scheduled sync.** For events with distinct provider identifiers,
+  the Worker reads existing rows and writes event updates and inserts in batches
+  under the same owner-scoped transaction. This reduces Hyperdrive statements
+  even when a provider returns a large full sync. Duplicate identifiers retain
+  sequential processing. Google results in the `scheduled_calendar_sync` log
+  include `syncDiagnostics` counts for full and incremental calendars and
+  missing next sync tokens; they never contain token values. A high full-sync
+  count or missing token count warrants investigation and does not by itself
+  establish why Google returned that result. An expired Google cursor is not
+  retained if the replacement response has no cursor.
+- **Full-sync reconciliation.** Both runtimes limit stale-event deletion to
+  the fetched date window. FastAPI reconciles only accounts with successful
+  full responses, while the Worker skips Google stale reconciliation when
+  the account response combines full and incremental calendars or has no
+  eligible calendars. Explicit cancellations still apply outside the window.
+- **FastAPI Google sync.** Calendar discovery follows all pages; discovery or
+  event-fetch failures are reported as account errors rather than successful
+  empty snapshots. An expired cursor without a replacement is removed so the
+  next attempt starts with a full baseline.
 - **Browser console.** `console_quiet.js` no-ops `log`/`debug`/`info` unless
   `localStorage.debug === '1'`; `warn` and `error` are untouched.
 

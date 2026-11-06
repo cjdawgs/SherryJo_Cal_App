@@ -53,6 +53,12 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
     )
     assert migration_step["if"] == "${{ env.ALEMBIC_DATABASE_URL != '' }}"
     assert "alembic upgrade head" in migration_step["run"]
+    missing_migration_secret = next(
+        step for step in jobs["migrate-supabase"]["steps"]
+        if step.get("name") == "Fail when migration secret is absent"
+    )
+    assert missing_migration_secret["if"] == "${{ env.ALEMBIC_DATABASE_URL == '' }}"
+    assert "exit 1" in missing_migration_secret["run"]
     assert jobs["deploy-canary"]["environment"] == "cloudflare-canary"
     assert jobs["smoke-unauthenticated-canary"]["needs"] == "deploy-canary"
     assert jobs["smoke-authenticated-canary"]["needs"] == "deploy-canary"

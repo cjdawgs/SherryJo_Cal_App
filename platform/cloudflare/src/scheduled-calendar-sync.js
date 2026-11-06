@@ -59,7 +59,7 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
                 refreshed: false,
             }
             : await ensureProviderAccessToken(decrypted, env, fetchImpl, now);
-        const rangeDays = positiveInteger(account.sync_range_days, 30, 365);
+        const rangeDays = positiveInteger(account.sync_range_days, 30, 3650);
         const start = new Date(now.getTime() - rangeDays * 86400000);
         const end = new Date(now.getTime() + rangeDays * 86400000);
         let providerResult;
@@ -72,6 +72,7 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
         } else {
             throw new TypeError(`Unsupported scheduled sync provider: ${account.provider}`);
         }
+        providerResult.reconciliationWindow = { start: start.toISOString(), end: end.toISOString() };
         const result = await adapter.applyAccountSync(
             account,
             providerResult,
@@ -93,7 +94,11 @@ export async function syncClaimedAccount(account, env, dependencies, now) {
                 publishReplay = { status: "failed", errorMessage: String(error?.message || error).slice(0, 300) };
             }
         }
-        return { accountId: account.id, provider: account.provider, status: "succeeded", publishReplay, ...result };
+        return {
+            accountId: account.id, provider: account.provider, status: "succeeded", publishReplay,
+            ...(providerResult.syncDiagnostics ? { syncDiagnostics: providerResult.syncDiagnostics } : {}),
+            ...result,
+        };
     } catch (error) {
         const reauthRequired = error instanceof ProviderAuthorizationError;
         await adapter.failAccountSync(account, ledger.id, error, reauthRequired, ledger.attempt_count, now);

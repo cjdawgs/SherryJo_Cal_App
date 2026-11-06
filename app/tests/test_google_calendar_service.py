@@ -244,6 +244,34 @@ def test_fetch_events_v2_retries_full_fetch_when_sync_token_expired(mock_get, se
 
 
 @patch("app.services.google_calendar_service.requests.get")
+def test_fetch_events_v2_discards_stale_cursor_when_fallback_has_no_new_token(mock_get, service):
+    mock_get.side_effect = [
+        make_response(json_data={"items": []}),
+        make_response(status_code=410),
+        make_response(json_data={"items": []}),
+    ]
+
+    result = service.fetch_events_v2("token", sync_token_state={"primary": "stale"})
+
+    assert result["next_tokens"] == {"primary": None}
+
+
+@patch("app.services.google_calendar_service.requests.get")
+def test_fetch_events_v2_discovers_all_calendar_list_pages(mock_get, service):
+    mock_get.side_effect = [
+        make_response(json_data={"items": [], "nextPageToken": "next-page"}),
+        make_response(json_data={"items": [{"id": "second@example.com"}]}),
+        make_response(json_data={"items": []}),
+        make_response(json_data={"items": []}),
+    ]
+
+    service.fetch_events_v2("token")
+
+    assert mock_get.call_args_list[1].kwargs["params"] == {"pageToken": "next-page"}
+    assert "second@example.com/events" in mock_get.call_args_list[3].args[0]
+
+
+@patch("app.services.google_calendar_service.requests.get")
 def test_fetch_events_v2_follows_pagination(mock_get, service):
     mock_get.side_effect = [
         make_response(json_data={"items": []}),
@@ -258,26 +286,52 @@ def test_fetch_events_v2_follows_pagination(mock_get, service):
 
 
 @patch("app.services.google_calendar_service.requests.get")
-def test_fetch_events_v2_survives_calendar_list_exception(mock_get, service):
+def test_incremental_pagination_keeps_the_same_sync_token(mock_get, service):
+    mock_get.side_effect = [
+        make_response(json_data={"items": []}),
+        make_response(json_data={"items": [{"id": "changed"}], "nextPageToken": "page-2"}),
+        make_response(json_data={"items": [{"id": "deleted", "status": "cancelled"}], "nextSyncToken": "next"}),
+    ]
+
+    result = service.fetch_events_v2("token", sync_token_state={"primary": "previous"})
+
+    assert mock_get.call_args_list[2][1]["params"]["syncToken"] == "previous"
+    assert mock_get.call_args_list[2][1]["params"]["pageToken"] == "page-2"
+    assert result["cancelled_ids"] == ["deleted"]
+    assert result["next_tokens"] == {"primary": "next"}
+
+
+@patch("app.services.google_calendar_service.requests.get")
+def test_fetch_events_v2_reports_calendar_list_exception(mock_get, service):
     mock_get.side_effect = [
         Exception("network down"),
         make_response(json_data={"items": [{"id": "e1"}]}),
     ]
 
-    assert service.fetch_events_v2("token")["events"] == [{"id": "e1"}]
+    with pytest.raises(RuntimeError, match="calendarList"):
+        service.fetch_events_v2("token")
 
 
 @patch("app.services.google_calendar_service.requests.get")
-def test_fetch_events_v2_skips_failed_calendar(mock_get, service):
+def test_fetch_events_v2_reports_failed_calendar(mock_get, service):
     mock_get.side_effect = [
         make_response(json_data={"items": []}),
         make_response(status_code=500, text="boom"),
     ]
 
-    result = service.fetch_events_v2("token")
+    with pytest.raises(RuntimeError, match="Google events failed"):
+        service.fetch_events_v2("token")
 
-    assert result["events"] == []
-    assert result["next_tokens"] == {}
+
+@patch("app.services.google_calendar_service.requests.get")
+def test_fetch_events_v2_reports_second_expired_response(mock_get, service):
+    mock_get.side_effect = [
+        make_response(json_data={"items": []}),
+        make_response(status_code=410),
+        make_response(status_code=410),
+    ]
+    with pytest.raises(RuntimeError, match="Google events failed"):
+        service.fetch_events_v2("token", sync_token_state={"primary": "stale"})
 
 
 @patch("app.services.google_calendar_service.requests.get")

@@ -196,7 +196,6 @@ function renderSchedulerMetricsCard(scheduler = {}, rollupPayload = null) {
 
   const efficiency = scheduler?.efficiency || {};
   const cache = scheduler?.google_calendar_list_cache || {};
-  const backoff = scheduler?.adaptive_backoff_user || {};
 
   const cells = [
     { label: "Sync Changes", value: String(efficiency?.changes ?? 0) },
@@ -205,8 +204,6 @@ function renderSchedulerMetricsCard(scheduler = {}, rollupPayload = null) {
     { label: "No-Change Ratio", value: formatRatio(efficiency?.no_change_ratio) },
     { label: "Google Cache Hit Ratio", value: formatRatio(cache?.hit_ratio) },
     { label: "Google Cache Lookups", value: String(cache?.total_lookups ?? 0) },
-    { label: "Backoff Streak (You)", value: String(backoff?.no_change_streak ?? 0) },
-    { label: "Backoff Active (You)", value: backoff?.backoff_active ? "yes" : "no" },
   ];
 
   grid.innerHTML = cells
@@ -267,7 +264,7 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
       },
       {
         title: "Current preferences",
-        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 240} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
       },
       {
         title: "Scheduler health",
@@ -285,7 +282,7 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
       },
       {
         title: "Current preferences",
-        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 5} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
+        body: [`Range: ${chosen.sync_range_days || 30} days`, `Frequency: ${chosen.sync_frequency_minutes || 240} min`, `Enabled: ${chosen.sync_enabled ? "yes" : "no"}`].join(" | "),
       },
       {
         title: "Scheduler health",
@@ -298,14 +295,14 @@ function renderSyncDetailList(statusPayload = null, rollupPayload = null) {
     selectedAccounts.length > 1
       ? `Selected accounts: ${selectedAccounts.length}`
       : `Selected account: ${chosen.account_email || "Unknown"}`,
-    `Range ${chosen.sync_range_days || 30} days | Every ${chosen.sync_frequency_minutes || 5} min | ${schedulerActive ? `${schedulerLabel} scheduler active` : "scheduler idle"}`
+    `Range ${chosen.sync_range_days || 30} days | Minimum ${chosen.sync_frequency_minutes || 240} min | ${schedulerActive ? `${schedulerLabel} scheduler active` : "scheduler idle"}`
   );
   renderSchedulerMetricsCard(scheduler, rollupPayload);
 
   const rangeInput = document.getElementById("sync-range-days");
   const freqInput = document.getElementById("sync-frequency-minutes");
   if (rangeInput) rangeInput.value = String(chosen.sync_range_days || 30);
-  if (freqInput) freqInput.value = String(chosen.sync_frequency_minutes || 5);
+  if (freqInput) freqInput.value = String(chosen.sync_frequency_minutes || 240);
 }
 
 function getSelectedSyncAccounts() {
@@ -368,7 +365,7 @@ async function saveSyncSettings() {
 
   const payload = {
     sync_range_days: Number(rangeInput?.value || 30),
-    sync_frequency_minutes: Number(freqInput?.value || 5),
+    sync_frequency_minutes: Number(freqInput?.value || 240),
   };
 
   for (const accountId of selectedAccountIds) {
@@ -380,12 +377,12 @@ async function saveSyncSettings() {
 
     const data = await res.json();
     if (!res.ok) {
-      setGlobalMessage("Google may have connected, but the account list request did not complete. Check your session and retry.");
+      setGlobalMessage(data.message || data.detail || data.error || "Unable to save sync settings.");
       return;
     }
   }
 
-  setGlobalMessage(`Google may have connected, but the account list could not be loaded (HTTP ${res.status}). Sign in again if the session expired, then retry.`);
+  setGlobalMessage("Sync settings saved. Range changes apply on the next scheduled or manual sync.", "success");
   await refreshAllSyncStatus();
 }
 

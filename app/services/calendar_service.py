@@ -20,7 +20,7 @@ from app.services.graph_client import GraphClient
 
 from app.services.google_calendar_service import GoogleCalendarService
 
-from app.models import Event
+from app.models import Event, OAuthAccount
 
 from app.services.external_calendar_service import ExternalCalendarService
 
@@ -383,7 +383,7 @@ def _fetch_account_http(config: dict, start_date, end_date) -> dict:
 
             result["cancelled_ids"]    = cancelled
 
-            result["new_sync_tokens"]  = {"delta_link": new_delta_link} if new_delta_link else {}
+            result["new_sync_tokens"]  = {"delta_link": new_delta_link} if new_delta_link or delta_link else {}
 
             result["used_incremental"] = bool(delta_link)
 
@@ -1416,8 +1416,6 @@ class CalendarService:
 
                 log_error(f"[SYNC] No token: {email}")
 
-                acc.last_sync = sync_time
-
                 acc.last_sync_failure = sync_time
 
                 acc.last_error = "No valid token available"
@@ -1426,6 +1424,10 @@ class CalendarService:
 
                 safe_commit(db)
 
+                failed_accs.append({
+                    "provider": acc.provider, "account_email": email, "raw": 0, "in_range": 0,
+                    "status": "error", "error": "No valid token available",
+                })
                 continue
 
 
@@ -1468,11 +1470,13 @@ class CalendarService:
 
                 "account_status": {},
 
-                "account_sync_totals": [],
+                "account_sync_totals": failed_accs,
 
                 "cancelled_external_ids": [],
 
                 "incremental_account_keys": set(),
+
+                "reconciliation_window": (safe_start, safe_end),
 
             }
 
@@ -1538,7 +1542,7 @@ class CalendarService:
 
         ms_events:     list = []
 
-        account_sync_totals: list = []
+        account_sync_totals: list = list(failed_accs)
 
         cancelled_external_ids: list = []
 
@@ -1549,6 +1553,7 @@ class CalendarService:
         # Build acc lookup by id for DB writes
 
         acc_by_id = {acc.id: acc for acc in accounts}
+        config_by_id = {config["acc_id"]: config for config in configs}
 
 
 
@@ -1585,8 +1590,6 @@ class CalendarService:
                     if r.get("reauth_required"):
 
                         acc.access_token = "__REAUTH_REQUIRED__"
-
-                    acc.last_sync         = sync_time
 
                     acc.last_sync_failure = sync_time
 
@@ -1670,11 +1673,23 @@ class CalendarService:
 
                 # Store new incremental sync tokens back in DB
 
-                if r["new_sync_tokens"]:
+                acc = (
+                    db.query(OAuthAccount)
+                    .filter(OAuthAccount.id == acc.id, OAuthAccount.user_id == user.id)
+                    .with_for_update()
+                    .populate_existing()
+                    .one()
+                )
+                original_state = config_by_id[acc.id]["sync_token_state"]
+                same_range = (acc.sync_token or {}).get("_range_generation") == original_state.get("_range_generation")
+
+                if r["new_sync_tokens"] and same_range:
 
                     merged_tokens = dict(acc.sync_token or {})
 
                     merged_tokens.update(r["new_sync_tokens"])
+
+                    merged_tokens = {key: value for key, value in merged_tokens.items() if value is not None}
 
                     acc.sync_token = merged_tokens
 
@@ -1731,6 +1746,8 @@ class CalendarService:
             "cancelled_external_ids":    cancelled_external_ids,
 
             "incremental_account_keys":  incremental_account_keys,
+
+            "reconciliation_window":     (safe_start, safe_end),
 
         }
 
@@ -1977,6 +1994,7 @@ class CalendarService:
         account_sync_totals  = result.get("account_sync_totals", [])    if isinstance(result, dict) else []
         cancelled_eids       = result.get("cancelled_external_ids", []) if isinstance(result, dict) else []
         incremental_keys     = result.get("incremental_account_keys", set()) if isinstance(result, dict) else set()
+        reconciliation_window = result.get("reconciliation_window") if isinstance(result, dict) else None
         events               = result.get("events", [])                 if isinstance(result, dict) else []
 
         if not isinstance(events, list):
@@ -2032,6 +2050,11 @@ class CalendarService:
                 if f"{normalize_provider(getattr(ev, 'source', None) or '')}:{(getattr(ev, 'account_email', None) or '').lower().strip()}" == account_key
             ]
         incoming_ids = set(build_event_id(e) for e in events if e.get("external_id"))
+        full_account_keys = {
+            f"{normalize_provider(total['provider'])}:{(total.get('account_email') or '').lower().strip()}"
+            for total in account_sync_totals
+            if total.get("status") == "ok" and total.get("provider")
+        } - set(incremental_keys)
         deleted      = 0
 
         for ev in all_evs:
@@ -2040,12 +2063,14 @@ class CalendarService:
             if ev_src == "local":
                 continue
             ev_key = f"{normalize_provider(ev_src)}:{(getattr(ev, 'account_email', None) or '').lower().strip()}"
-            if ev_key in incremental_keys:
-                if ev_eid and ev_eid in cancelled_eids:
-                    db.delete(ev); deleted += 1
-            else:
-                if ev_eid and ev_eid not in incoming_ids:
-                    db.delete(ev); deleted += 1
+            if ev_key not in full_account_keys or not reconciliation_window:
+                continue
+            event_start = self._ensure_utc(ev.start_time) if ev.start_time else None
+            event_end = self._ensure_utc(ev.end_time or ev.start_time) if ev.start_time else None
+            window_start, window_end = reconciliation_window
+            if (ev_eid and ev_eid not in incoming_ids and ev_eid not in cancelled_eids
+                    and event_start and event_end and event_start < window_end and event_end > window_start):
+                db.delete(ev); deleted += 1
 
         for eid in cancelled_eids:
             ev = db.query(Event).filter(

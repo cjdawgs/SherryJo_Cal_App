@@ -26,14 +26,18 @@ export async function executeAccountSettingsUpdate(adapter, { userId, accountId,
         UPDATE public.oauth_accounts
         SET sync_frequency_minutes = CASE
                 WHEN $2::integer IS NULL THEN sync_frequency_minutes
-                WHEN lower(provider) = 'apple' THEN GREATEST($2, 240)
-                ELSE $2
+                ELSE GREATEST($2, 240)
+            END,
+            sync_token = CASE
+                WHEN $3::integer IS NOT NULL AND sync_range_days IS DISTINCT FROM $3
+                THEN json_build_object('_range_generation', $5::text)
+                ELSE sync_token
             END,
             sync_range_days = COALESCE($3::integer, sync_range_days),
             sync_enabled = COALESCE($4::boolean, sync_enabled)
         WHERE id = $1 AND user_id = public.worker_app_user_id()
         RETURNING id, provider, account_email, sync_enabled, sync_frequency_minutes, sync_range_days
-    `, [accountId, frequency, rangeDays, enabled]));
+    `, [accountId, frequency, rangeDays, enabled, crypto.randomUUID()]));
     return requireRow(result);
 }
 

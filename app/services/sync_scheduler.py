@@ -26,6 +26,7 @@ import os
 from sqlalchemy import func
 from app.database import SessionLocal
 from app.services.calendar_service import CalendarService
+from app.services.multi_account_oauth_service import normalize_provider
 from app.services.event_actions import EventActions, PUBLISH_DELETE_OPERATION_TYPE, PUBLISH_OPERATION_TYPE
 from app.services.sync_operation_ledger import (
     SYNC_ROLLUP_OPERATION_TYPE,
@@ -60,12 +61,6 @@ last_global_sync_error = None
 DEFAULT_SYNC_HEARTBEAT_MINUTES = 5
 DEFAULT_APPLE_MIN_SYNC_MINUTES = 240
 
-# In-memory adaptive throttling state.
-# Keys are user IDs so each user can independently back off when their calendar
-# repeatedly returns no changes.
-_no_change_streak_by_user: dict[int, int] = {}
-_next_due_override_by_user: dict[int, datetime] = {}
-
 # Rolling process-lifetime counters for sync efficiency tracking.
 _sync_efficiency_counters: dict[str, int] = {
     "changes": 0,
@@ -84,19 +79,6 @@ def _truthy_env(name: str, default: bool) -> bool:
     if raw is None:
         return default
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _adaptive_backoff_enabled() -> bool:
-    """Kill switch for adaptive no-change backoff."""
-    return _truthy_env("SYNC_ADAPTIVE_BACKOFF_ENABLED", True)
-
-
-def _adaptive_backoff_max_minutes() -> int:
-    """Upper bound for adaptive next-run delay when no changes are detected."""
-    try:
-        return max(5, int(os.getenv("SYNC_ADAPTIVE_BACKOFF_MAX_MINUTES", "60")))
-    except ValueError:
-        return 60
 
 
 def _scheduler_heartbeat_minutes() -> int:
@@ -160,7 +142,7 @@ def _effective_account_sync_minutes(account) -> int:
     has no upstream delta token and each poll is usually a full-window scan.
     """
     configured = int(getattr(account, "sync_frequency_minutes", 5) or 5)
-    configured = max(1, configured)
+    configured = max(240, configured)
 
     if _normalized_provider(account) == "apple":
         return max(configured, _apple_min_sync_minutes())
@@ -174,7 +156,7 @@ def _compute_sync_window_days(accounts) -> int:
         int(getattr(account, "sync_range_days", 30) or 30)
         for account in accounts
     ]
-    return max(1, min(max(configured_days) if configured_days else 30, 365))
+    return max(1, min(max(configured_days) if configured_days else 30, 3650))
 
 
 def _build_sync_window(window_days: int, now: datetime):
@@ -325,67 +307,35 @@ def _is_reauth_required(account):
     return (getattr(account, "access_token", "") or "").strip() == "__REAUTH_REQUIRED__"
 
 
-def _register_sync_outcome(user_id: int, accounts, had_changes: bool, now: datetime) -> None:
-    """
-    Update adaptive throttling state from the latest sync outcome.
-
-    Behavior:
-    - Changes detected: clear backoff immediately.
-    - No changes: exponentially back off up to SYNC_ADAPTIVE_BACKOFF_MAX_MINUTES.
-    """
-    if not _adaptive_backoff_enabled() or not accounts:
-        _no_change_streak_by_user.pop(user_id, None)
-        _next_due_override_by_user.pop(user_id, None)
-        _record_sync_efficiency(had_changes)
-        return
-
-    base_cadence = min(_effective_account_sync_minutes(a) for a in accounts)
-
-    if had_changes:
-        _no_change_streak_by_user[user_id] = 0
-        _next_due_override_by_user.pop(user_id, None)
-        _record_sync_efficiency(True)
-        return
-
-    streak = int(_no_change_streak_by_user.get(user_id, 0)) + 1
-    _no_change_streak_by_user[user_id] = streak
-
-    multiplier = 2 ** min(streak, 6)
-    backoff_minutes = base_cadence * multiplier
-    backoff_minutes = min(backoff_minutes, max(base_cadence, _adaptive_backoff_max_minutes()))
-
-    _next_due_override_by_user[user_id] = now + timedelta(minutes=backoff_minutes)
-    _record_sync_efficiency(False)
-    logger.debug(
-        "[SYNC] user=%s no-change streak=%s adaptive-backoff=%s min",
-        user_id,
-        streak,
-        backoff_minutes,
+def _is_account_sync_due(account, now):
+    marker = _latest_account_sync_marker(account)
+    if marker is None:
+        return True
+    slot = now.astimezone(timezone.utc).replace(
+        hour=(now.astimezone(timezone.utc).hour // 4) * 4, minute=0, second=0, microsecond=0,
     )
+    marker_slot = marker.astimezone(timezone.utc).replace(
+        hour=(marker.astimezone(timezone.utc).hour // 4) * 4, minute=0, second=0, microsecond=0,
+    )
+    cadence = _effective_account_sync_minutes(account)
+    if slot <= marker_slot:
+        return False
+    if cadence == 240:
+        return now >= marker + timedelta(minutes=239)
+    return slot >= marker + timedelta(minutes=cadence)
 
 
 def _is_user_sync_due(user_id: int, accounts, now):
     if not accounts:
         return False, None
-
-    cadence = min(_effective_account_sync_minutes(account) for account in accounts)
-
-    if _adaptive_backoff_enabled():
-        override_due = _next_due_override_by_user.get(user_id)
-        if override_due and now < override_due:
-            return False, cadence
-
-    latest_marker = max((_latest_account_sync_marker(account) for account in accounts), default=None)
-
-    if latest_marker is None:
-        return True, cadence
-
-    return now >= (latest_marker + timedelta(minutes=cadence)), cadence
+    return any(_is_account_sync_due(account, now) for account in accounts), min(
+        _effective_account_sync_minutes(account) for account in accounts
+    )
 
 
 def _sync_operation_key(user_id: int, accounts) -> str:
     """Deterministic per-user operation key that remains stable across retries."""
-    latest_marker = max((_latest_account_sync_marker(account) for account in accounts), default=None)
+    latest_marker = max((marker for account in accounts if (marker := _latest_account_sync_marker(account)) is not None), default=None)
     anchor = "bootstrap"
     if latest_marker is not None:
         anchor = str(int(latest_marker.astimezone(timezone.utc).timestamp()))
@@ -507,7 +457,6 @@ def run_event_sync():
             return
 
         for user in users:
-            operation_id = None
             try:
                 user_accounts = db.query(OAuthAccount).filter(
                     OAuthAccount.user_id == user.id,
@@ -519,78 +468,59 @@ def run_event_sync():
                     if not _is_reauth_required(account) and _render_provider_allowed(account.provider)
                 ]
 
-                now_for_user = datetime.now(timezone.utc)
-                due, cadence = _is_user_sync_due(user.id, user_accounts, now_for_user)
-                if not due:
-                    skipped += 1
-                    logger.debug("[SYNC] user=%s skipped, cadence %s min not due", user.id, cadence)
-                    continue
+                for account in user_accounts:
+                    operation_id = None
+                    try:
+                        now_for_user = datetime.now(timezone.utc)
+                        cadence = _effective_account_sync_minutes(account)
+                        if not _is_account_sync_due(account, now_for_user):
+                            skipped += 1
+                            continue
 
-                operation_key = _sync_operation_key(user.id, user_accounts)
-                if is_operation_dead_letter(db, operation_key=operation_key):
-                    skipped += 1
-                    logger.warning("[SYNC] user=%s skipped: dead-letter operation key", user.id)
-                    continue
+                        marker = _latest_account_sync_marker(account)
+                        anchor = str(int(marker.timestamp())) if marker else "bootstrap"
+                        operation_key = f"scheduler-sync:account:{account.id}:anchor:{anchor}"
+                        if is_operation_dead_letter(db, operation_key=operation_key):
+                            skipped += 1
+                            logger.warning("[SYNC] user=%s account=%s skipped: dead-letter operation key", user.id, account.id)
+                            continue
 
-                operation_id = begin_sync_operation(
-                    db,
-                    operation_key=operation_key,
-                    owner_user_id=user.id,
-                    request_payload={
-                        "cadence_minutes": cadence,
-                    },
-                )
-
-                # Keep scheduler behavior aligned with manual sync: use per-account
-                # sync_range_days rather than CalendarService default range.
-                window_days = _compute_sync_window_days(user_accounts)
-                start_date, end_date = _build_sync_window(window_days, now_for_user)
-
-                # ✅ THIS IS THE FIX (was sync_events before)
-                if verbose:
-                    result = calendar_service.sync_all(
-                        db,
-                        user,
-                        start_date=start_date,
-                        end_date=end_date,
-                    )
-                    logger.info("[SYNC] user=%s %s", user.id, result)
-                else:
-                    # Quiet mode: suppress noisy provider sync print spam.
-                    with redirect_stdout(io.StringIO()):
-                        result = calendar_service.sync_all(
-                            db,
-                            user,
-                            start_date=start_date,
-                            end_date=end_date,
+                        operation_id = begin_sync_operation(
+                            db, operation_key=operation_key, owner_user_id=user.id,
+                            request_payload={"cadence_minutes": cadence, "account_id": account.id},
                         )
+                        window_days = _compute_sync_window_days([account])
+                        start_date, end_date = _build_sync_window(window_days, now_for_user)
+                        account_key = f"{normalize_provider(account.provider)}:{(account.account_email or '').lower().strip()}"
+                        if verbose:
+                            result = calendar_service.sync_all(
+                                db, user, start_date=start_date, end_date=end_date, account_key=account_key,
+                            )
+                            logger.info("[SYNC] user=%s %s", user.id, result)
+                        else:
+                            with redirect_stdout(io.StringIO()):
+                                result = calendar_service.sync_all(
+                                    db, user, start_date=start_date, end_date=end_date, account_key=account_key,
+                                )
 
-                _register_sync_outcome(
-                    user_id=user.id,
-                    accounts=user_accounts,
-                    had_changes=_sync_result_has_changes(result),
-                    now=datetime.now(timezone.utc),
-                )
-
-                complete_sync_operation(
-                    db,
-                    operation_id=operation_id,
-                    status="succeeded",
-                    result_payload={
-                        "window_days": window_days,
-                        "had_changes": _sync_result_has_changes(result),
-                    },
-                )
-                synced += 1
+                        errors = [item for item in result.get("account_sync_totals", []) if item.get("status") == "error"]
+                        if errors:
+                            raise RuntimeError(errors[0].get("error") or "Provider sync failed")
+                        _record_sync_efficiency(_sync_result_has_changes(result))
+                        complete_sync_operation(
+                            db, operation_id=operation_id, status="succeeded",
+                            result_payload={"window_days": window_days, "had_changes": _sync_result_has_changes(result)},
+                        )
+                        synced += 1
+                    except Exception as account_error:
+                        complete_sync_operation(
+                            db, operation_id=operation_id, status="failed", error=account_error,
+                            max_attempts=_sync_operation_max_attempts(),
+                        )
+                        failed += 1
+                        logger.error("[SYNC] user=%s account=%s FAILED: %s", user.id, account.id, account_error)
 
             except Exception as user_error:
-                complete_sync_operation(
-                    db,
-                    operation_id=operation_id,
-                    status="failed",
-                    error=user_error,
-                    max_attempts=_sync_operation_max_attempts(),
-                )
                 failed += 1
                 logger.error("[SYNC] user=%s FAILED: %s", user.id, user_error)
 
@@ -796,21 +726,20 @@ def get_scheduler_health(user_id: int | None = None):
     calendar_cache_metrics = GoogleCalendarService.get_calendar_list_cache_metrics()
 
     adaptive_summary = {
-        "enabled": _adaptive_backoff_enabled(),
-        "max_minutes": _adaptive_backoff_max_minutes(),
-        "tracked_users": len(_no_change_streak_by_user),
-        "users_in_backoff": len(_next_due_override_by_user),
+        "enabled": False,
+        "max_minutes": None,
+        "tracked_users": 0,
+        "users_in_backoff": 0,
         "last_rollup_persisted_at": last_rollup_persisted_at.isoformat() if last_rollup_persisted_at else None,
     }
 
     adaptive_user = None
     if user_id is not None:
-        next_due = _next_due_override_by_user.get(user_id)
         adaptive_user = {
             "user_id": user_id,
-            "no_change_streak": int(_no_change_streak_by_user.get(user_id, 0)),
-            "backoff_active": bool(next_due and datetime.now(timezone.utc) < next_due),
-            "next_due_override_at": next_due.isoformat() if next_due else None,
+            "no_change_streak": 0,
+            "backoff_active": False,
+            "next_due_override_at": None,
         }
 
     operation_ledger = _operation_ledger_volume_summary(window_hours=24)

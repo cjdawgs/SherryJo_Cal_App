@@ -81,7 +81,7 @@ export async function runManualCalendarSync(adapter, env, userId, accountKey, de
     const configuredRange = selected.length
         ? Math.max(...selected.map((account) => Number(account.sync_range_days) || 30))
         : 30;
-    const rangeDays = Math.max(1, Math.min(365, configuredRange));
+    const rangeDays = Math.max(1, Math.min(3650, configuredRange));
     const now = Date.now();
     const message = formatSyncFailureMessage(selected, results);
     return {

@@ -14,6 +14,8 @@ NOW = datetime(2026, 1, 10, 12, 0, tzinfo=timezone.utc)
 
 def make_account(**kwargs):
     defaults = {
+        "id": 1,
+        "account_email": "account@example.test",
         "access_token": "healthy-token",
         "provider": "google",
         "sync_frequency_minutes": 5,
@@ -75,16 +77,12 @@ def reset_sync_state():
     sync_scheduler.last_global_sync_started_at = None
     sync_scheduler.last_global_sync_finished_at = None
     sync_scheduler.last_global_sync_error = None
-    sync_scheduler._no_change_streak_by_user.clear()
-    sync_scheduler._next_due_override_by_user.clear()
     sync_scheduler._sync_efficiency_counters["changes"] = 0
     sync_scheduler._sync_efficiency_counters["no_changes"] = 0
     yield
     sync_scheduler.last_global_sync_started_at = None
     sync_scheduler.last_global_sync_finished_at = None
     sync_scheduler.last_global_sync_error = None
-    sync_scheduler._no_change_streak_by_user.clear()
-    sync_scheduler._next_due_override_by_user.clear()
     sync_scheduler._sync_efficiency_counters["changes"] = 0
     sync_scheduler._sync_efficiency_counters["no_changes"] = 0
 
@@ -147,13 +145,50 @@ def test_sync_not_due_without_accounts():
     assert sync_scheduler._is_user_sync_due(1, [], NOW) == (False, None)
 
 
+def test_four_hour_slot_ignores_startup_jitter_and_preserves_longer_cadence():
+    at_eight = datetime(2026, 1, 10, 8, tzinfo=timezone.utc)
+    last = datetime(2026, 1, 10, 4, 0, 20, tzinfo=timezone.utc)
+    assert sync_scheduler._is_account_sync_due(make_account(last_sync=last), at_eight)
+    assert not sync_scheduler._is_account_sync_due(make_account(last_sync=last, sync_frequency_minutes=360), at_eight)
+    assert sync_scheduler._is_account_sync_due(make_account(last_sync=last, sync_frequency_minutes=360), at_eight + timedelta(hours=4))
+    assert not sync_scheduler._is_account_sync_due(make_account(last_sync=at_eight + timedelta(minutes=5)), at_eight + timedelta(minutes=10))
+
+
+def test_scheduler_only_syncs_accounts_individually_due(monkeypatch, reset_sync_state):
+    user = SimpleNamespace(id=1)
+    account_due = make_account(id=11, account_email="due@example.test", last_sync=None)
+    account_waiting = make_account(id=12, account_email="waiting@example.test", sync_frequency_minutes=1440,
+                                   last_sync=datetime.now(timezone.utc))
+    session = RoutingSession(users=[user], accounts_by_user_id={1: [account_due, account_waiting]})
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
+    sync_all = MagicMock(return_value={"created": 0, "updated": 0, "deleted": 0, "deduped": 0})
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", sync_all)
+    sync_scheduler.run_event_sync()
+    sync_all.assert_called_once()
+    assert sync_all.call_args.kwargs["account_key"] == "google:due@example.test"
+
+
+def test_scheduler_marks_provider_failure_as_failed_for_retry(monkeypatch, reset_sync_state):
+    user = SimpleNamespace(id=1)
+    session = RoutingSession(users=[user], accounts_by_user_id={1: [make_account()]})
+    monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
+    monkeypatch.setattr(sync_scheduler, "begin_sync_operation", lambda *_args, **_kwargs: "op")
+    completed = MagicMock()
+    monkeypatch.setattr(sync_scheduler, "complete_sync_operation", completed)
+    monkeypatch.setattr(sync_scheduler.calendar_service, "sync_all", lambda *_args, **_kwargs: {
+        "account_sync_totals": [{"status": "error", "error": "provider unavailable"}],
+    })
+    sync_scheduler.run_event_sync()
+    assert completed.call_args.kwargs["status"] == "failed"
+
+
 def test_sync_due_when_never_synced():
     due, cadence = sync_scheduler._is_user_sync_due(1, [make_account()], NOW)
 
-    assert (due, cadence) == (True, 5)
+    assert (due, cadence) == (True, 240)
 
 
-def test_sync_uses_shortest_cadence_and_floors_at_one_minute():
+def test_sync_floors_all_providers_at_four_hours():
     accounts = [
         make_account(sync_frequency_minutes=15, last_sync=NOW - timedelta(minutes=3)),
         make_account(sync_frequency_minutes=-10, last_sync=NOW - timedelta(minutes=3)),
@@ -161,7 +196,7 @@ def test_sync_uses_shortest_cadence_and_floors_at_one_minute():
 
     due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
-    assert (due, cadence) == (True, 1)
+    assert (due, cadence) == (False, 240)
 
 
 def test_sync_cadence_falls_back_to_five_minutes_when_unset():
@@ -169,7 +204,7 @@ def test_sync_cadence_falls_back_to_five_minutes_when_unset():
 
     due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
-    assert (due, cadence) == (False, 5)
+    assert (due, cadence) == (False, 240)
 
 
 def test_sync_not_due_before_cadence_elapses():
@@ -177,11 +212,11 @@ def test_sync_not_due_before_cadence_elapses():
 
     due, cadence = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
-    assert (due, cadence) == (False, 30)
+    assert (due, cadence) == (False, 240)
 
 
 def test_sync_due_once_cadence_elapsed():
-    accounts = [make_account(sync_frequency_minutes=10, last_sync=NOW - timedelta(minutes=10))]
+    accounts = [make_account(sync_frequency_minutes=10, last_sync=NOW - timedelta(hours=4))]
 
     due, _ = sync_scheduler._is_user_sync_due(1, accounts, NOW)
 
@@ -349,7 +384,7 @@ def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_sta
     )
     monkeypatch.setattr(sync_scheduler, "SessionLocal", lambda: session)
 
-    def sync_all(db, user, start_date=None, end_date=None):
+    def sync_all(db, user, start_date=None, end_date=None, account_key=None):
         if user is failing_user:
             raise RuntimeError("provider down")
         return {"created": 0, "updated": 1, "deleted": 0, "deduped": 0}
@@ -359,7 +394,7 @@ def test_run_event_sync_continues_after_user_failure(monkeypatch, reset_sync_sta
     with caplog.at_level("ERROR", logger="app.services.sync_scheduler"):
         sync_scheduler.run_event_sync()
 
-    assert "user=1 FAILED: provider down" in caplog.text
+    assert "user=1 account=1 FAILED: provider down" in caplog.text
     assert sync_scheduler.last_global_sync_error is None
 
 
