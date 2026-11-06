@@ -753,6 +753,7 @@
               <span class="hyperdrive-live-dot" aria-hidden="true"></span>
               <span id="hyperdriveLiveBadgeText">Checking live database connection...</span>
             </div>
+            <p id="databaseProviderEvidence" class="database-field-help" aria-live="polite">Checking the configured database host and provider evidence...</p>
             <div id="hyperdriveSetupBanner" class="hyperdrive-setup-banner" hidden>
               <strong>Cloudflare Hyperdrive is not live</strong>
               <p id="hyperdriveSetupMessage">The Worker is not connected to the intended database yet.</p>
@@ -787,19 +788,19 @@
             <div class="git-confirm-row" style="margin-top:10px;">
               <label style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
                 <span style="font-size:12px;opacity:0.75;min-width:72px;">Provider title</span>
-                <input id="databaseProviderTitleInput" type="text" placeholder="Neon - Postgres" autocomplete="off" style="flex:1;min-width:0;background:var(--accent);color:var(--accent-ink);border:1px solid #0c5f58;border-radius:8px;padding:8px 12px;font-weight:600;">
+                <input id="databaseProviderTitleInput" type="text" placeholder="PostgreSQL provider name" autocomplete="off" style="flex:1;min-width:0;background:var(--accent);color:var(--accent-ink);border:1px solid #0c5f58;border-radius:8px;padding:8px 12px;font-weight:600;">
               </label>
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
-              <input id="databaseHostInput" type="text" placeholder="Host from Neon" aria-label="Database host" autocomplete="off" style="flex:2;min-width:0;">
+              <input id="databaseHostInput" type="text" placeholder="PostgreSQL host" aria-label="Database host" autocomplete="off" style="flex:2;min-width:0;">
               <input id="databasePortInput" type="text" placeholder="Port, usually 5432" aria-label="Database port" value="5432" autocomplete="off" style="flex:1;min-width:110px;">
               <input id="databaseNameInput" type="text" placeholder="Database name, usually neondb" aria-label="Database name" autocomplete="off" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
-              <input id="databaseUserInput" type="text" placeholder="Neon username" aria-label="Database username" autocomplete="username" style="flex:1;min-width:0;">
+              <input id="databaseUserInput" type="text" placeholder="Database username" aria-label="Database username" autocomplete="username" style="flex:1;min-width:0;">
               <input id="databasePasswordInput" type="password" placeholder="Database password" aria-label="Database password" autocomplete="new-password" style="flex:1;min-width:0;">
               <select id="databaseSslModeSelect" style="flex:1;min-width:120px;">
-                <option value="require">SSL required (Neon recommended)</option>
+                <option value="require">SSL required (recommended)</option>
                 <option value="off">SSL off (local only)</option>
               </select>
             </div>
@@ -814,8 +815,8 @@
               <input id="cloudflareApiTokenInput" type="password" placeholder="Cloudflare API token for this update only" aria-label="Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
             </div>
             <div class="deployment-sync-actions" style="margin-top:12px;">
-              <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect Supabase / Neon</button>
-              <button id="databaseTestBtn" class="ghost-btn" type="button">Test Neon connection</button>
+              <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect selected provider</button>
+              <button id="databaseTestBtn" class="ghost-btn" type="button">Test database connection</button>
               <button id="databaseProfileSaveBtn" class="ghost-btn" type="button" disabled>Save Profile Only</button>
               <button id="databaseSaveBtn" type="button">Save &amp; Connect</button>
               <button id="databaseDisconnectBtn" class="ghost-btn" type="button">Disconnect to SQLite</button>
@@ -834,10 +835,10 @@
           </div>
           <div>
             <h3>Live test notes</h3>
-            <p>Use Neon or Supabase for a live test database. The local origin validates before saving credentials to the repository-root .env file and switching its runtime connection. Hosted origins use provider-managed environment secrets; the Cloudflare Worker uses Hyperdrive.</p>
+            <p>Neon and Supabase are both supported PostgreSQL providers. The local origin validates before saving credentials to the repository-root .env file and switching its runtime connection. Hosted origins use provider-managed environment secrets; the Cloudflare Worker uses Hyperdrive.</p>
             <ul style="margin:10px 0 0 18px; padding:0; font-size:12px; line-height:1.6; opacity:0.8;">
               <li>SQLite is best for quick local testing.</li>
-              <li>Neon/Postgres is recommended for production-like live validation.</li>
+              <li>Use either Neon or Supabase for production-like PostgreSQL validation.</li>
               <li>Save + restart when you want a full engine reload.</li>
             </ul>
           </div>

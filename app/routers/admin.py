@@ -649,10 +649,16 @@ def _database_provider_label(url: str | None) -> str:
 
 
 def _configured_database_provider(url: str | None) -> str:
-    configured = str(os.getenv("DATABASE_PROVIDER") or "").strip().lower()
-    if configured in {"neon", "supabase"}:
-        return configured
     return _database_provider_label(url)
+
+
+def _database_provider_source(url: str | None) -> str:
+    detected = _database_provider_label(url)
+    if detected in {"supabase", "neon"}:
+        return "connection hostname"
+    if detected == "sqlite":
+        return "SQLite connection URL"
+    return "provider is not identifiable from the PostgreSQL connection hostname"
 
 
 def _credential_encryption_health(db: Session, tables: list[str]) -> dict:
@@ -1676,6 +1682,7 @@ def admin_database_config(
         "summary": _safe_database_summary(active_url),
         "provider": provider_label,
         "provider_label": "Supabase - Postgres" if provider_label == "supabase" else "Neon - Postgres" if provider_label == "neon" else "SQLite" if provider_label == "sqlite" else "Postgres provider not identified",
+        "provider_source": _database_provider_source(active_url),
         "profiles": _public_database_profiles(),
         "active_database_copy_source": active_copy_source,
         "active_provider_title": active_profile.get("title") if active_profile else provider_label,

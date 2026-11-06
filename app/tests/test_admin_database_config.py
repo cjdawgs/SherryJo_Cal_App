@@ -81,6 +81,41 @@ def test_database_config_hides_saved_connection_secrets(client, monkeypatch):
     assert "active_database_source" not in body
 
 
+def test_connection_hostname_overrides_stale_provider_label(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    connection_url = "postgresql://app:secret@project.supabase.co/calendar"
+    monkeypatch.setattr(admin_router.database_module, "DATABASE_URL", connection_url)
+    monkeypatch.setenv("DATABASE_URL", connection_url)
+    monkeypatch.setenv("DATABASE_PROVIDER", "neon")
+    monkeypatch.setenv("REQUIRE_DB_KIND", "postgres")
+    monkeypatch.setattr(
+        admin_router,
+        "_active_database_connection_status",
+        lambda: {"connected": True, "message": "Active database connection verified."},
+    )
+
+    response = client.get("/admin/system/database-config", headers=_admin_headers(client))
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["provider"] == "supabase"
+    assert body["provider_source"] == "connection hostname"
+    assert body["summary"]["host"] == "project.supabase.co"
+    assert body["live_database_confirmed"] is True
+
+
+def test_provider_override_does_not_claim_identity_for_unrecognized_hostname(monkeypatch):
+    from app.routers.admin import _configured_database_provider, _database_provider_source
+
+    monkeypatch.setenv("DATABASE_PROVIDER", "neon")
+
+    assert _configured_database_provider("postgresql://app:secret@db.example.test/calendar") == "postgres"
+    assert _database_provider_source("postgresql://app:secret@db.example.test/calendar") == (
+        "provider is not identifiable from the PostgreSQL connection hostname"
+    )
+
+
 def test_database_test_does_not_echo_candidate_url_or_credentials(client, monkeypatch):
     from app.routers import admin as admin_router
 

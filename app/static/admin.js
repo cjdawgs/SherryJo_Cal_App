@@ -2272,7 +2272,7 @@ async function loadDatabaseConfig() {
     if (workerRuntime) {
       if (el.databaseTestBtn) {
         el.databaseTestBtn.disabled = true;
-        el.databaseTestBtn.textContent = "Neon test requires origin runtime";
+        el.databaseTestBtn.textContent = "Test requires origin runtime";
         el.databaseTestBtn.title = "The Worker can test only its configured Hyperdrive database.";
       }
       if (el.databaseSaveBtn) {
@@ -2307,7 +2307,7 @@ async function loadDatabaseConfig() {
     el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
     el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
     if (el.hyperdriveLiveBadgeText) el.hyperdriveLiveBadgeText.textContent = live
-      ? `LIVE and connected: ${provider}`
+      ? `LIVE: Hyperdrive query succeeded; configured provider label: ${provider}`
       : `NOT LIVE: ${provider} is not connected`;
   }
   if (el.hyperdriveLiveBadge && data.runtime !== "cloudflare-worker") {
@@ -2317,8 +2317,20 @@ async function loadDatabaseConfig() {
     el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
     if (el.hyperdriveLiveBadgeText) {
       el.hyperdriveLiveBadgeText.textContent = live
-        ? `LIVE and connected: ${provider}`
+        ? `LIVE: database query succeeded; configured provider: ${provider}`
         : `NOT CONNECTED: ${provider} is not reachable`;
+    }
+  }
+  const providerEvidence = document.getElementById("databaseProviderEvidence");
+  if (providerEvidence) {
+    if (data.runtime === "cloudflare-worker") {
+      providerEvidence.textContent = data.hyperdrive_reachable
+        ? `${data.provider_source || "Provider label comes from Worker configuration."} The live query confirms reachability, not the upstream provider's identity.`
+        : `${data.provider_source || "Provider label comes from Worker configuration."} Hyperdrive is currently unreachable.`;
+    } else {
+      const source = data.provider_source || "provider not identified";
+      const host = data.summary?.host || "unknown";
+      providerEvidence.textContent = `${data.live_database_confirmed ? "Live query succeeded." : "Live query failed."} Configured database host: ${host}. Provider identification: ${source}.`;
     }
   }
   if (el.databaseConfigStatus) {
@@ -2368,7 +2380,7 @@ async function testDatabaseConfig(options = {}) {
 
   if (!res) {
     setStatus("Database test request failed.", true);
-    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
+    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test database connection"; }
     return;
   }
   const data = await res.json().catch(() => ({}));
@@ -2380,7 +2392,7 @@ async function testDatabaseConfig(options = {}) {
       el.databaseConfigStatus.textContent = data.detail || "Database connection test failed.";
       el.databaseConfigStatus.classList.add("error");
     }
-    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
+    if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test database connection"; }
     return;
   }
 
@@ -2391,7 +2403,7 @@ async function testDatabaseConfig(options = {}) {
     el.databaseConfigStatus.textContent = message || "Database connection test passed.";
     el.databaseConfigStatus.classList.toggle("error", data.ok === false);
   }
-  if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test Neon connection"; }
+  if (el.databaseTestBtn) { el.databaseTestBtn.disabled = false; el.databaseTestBtn.textContent = "Test database connection"; }
 }
 
 async function saveDatabaseConfig(options = {}) {

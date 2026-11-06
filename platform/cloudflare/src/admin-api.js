@@ -305,6 +305,7 @@ async function systemRoute(client, request, parts, url, env, body = {}, adapter)
                 requires_restart: true,
                 runtime: "cloudflare-worker",
                 provider_label: hyperdriveProvider,
+                provider_source: "HYPERDRIVE_PROVIDER setting; the upstream hostname is not independently exposed by Hyperdrive",
                 active_provider_title: `${hyperdriveProvider} (active)`,
                 active_database_source: "cloudflare-hyperdrive",
                 live_database_confirmed: live,

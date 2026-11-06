@@ -335,6 +335,31 @@ test("reports an inactive Hyperdrive binding with setup instructions", async () 
     assert.match(body.next_steps.join(" "), /npm run deploy/);
 });
 
+test("labels the Worker provider as configuration, not independently verified identity", async () => {
+    let queries = 0;
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [queries++ === 0 ? { allowed: true } : { connected: 1 }] }),
+        })
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/database-config"),
+        {
+            HYPERDRIVE_RLS_NO_CACHE: { connectionString: "managed-by-cloudflare" },
+            HYPERDRIVE_PROVIDER: "supabase",
+        },
+        adapter,
+        1,
+    );
+
+    assert.equal(result.status, 200);
+    const body = await result.json();
+    assert.equal(body.live_database_confirmed, true);
+    assert.equal(body.provider_label, "Supabase - Postgres");
+    assert.match(body.provider_source, /HYPERDRIVE_PROVIDER setting/);
+    assert.match(body.provider_source, /not independently exposed/);
+});
+
 test("explains the required Cloudflare credentials for Hyperdrive editing", async () => {
     const adapter = {
         runWithIdentity: async (_userId, operation) => operation({
