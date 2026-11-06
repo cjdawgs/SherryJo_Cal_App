@@ -85,6 +85,9 @@ const el = {
   cloudflareReleaseMessage: document.getElementById("cloudflareReleaseMessage"),
   cloudflareReleasePauseBtn: document.getElementById("cloudflareReleasePauseBtn"),
   cloudflareReleaseResumeBtn: document.getElementById("cloudflareReleaseResumeBtn"),
+  cloudflareReleaseActionResult: document.getElementById("cloudflareReleaseActionResult"),
+  renderSyncStatus: document.getElementById("renderSyncStatus"),
+  workerSyncStatus: document.getElementById("workerSyncStatus"),
   masterAdminCodeForm: document.getElementById("masterAdminCodeForm"),
   masterAdminCodeInput: document.getElementById("masterAdminCodeInput"),
   masterAdminCodeSaveBtn: document.getElementById("masterAdminCodeSaveBtn"),
@@ -183,6 +186,12 @@ function normalizeCommit(value) {
   return /^[0-9a-f]{7,40}$/.test(commit) ? commit : null;
 }
 
+function platformSyncStatus(commit, githubCommit) {
+  const deployed = normalizeCommit(commit);
+  const latest = normalizeCommit(githubCommit);
+  return !deployed || !latest ? "unknown" : deployed === latest ? "synced" : "out-of-sync";
+}
+
 function applyWorkerDeploymentStatus(data, workerStatus) {
   if (workerStatus?.platform !== "cloudflare-worker" || !data?.deployment) {
     return data;
@@ -194,8 +203,10 @@ function applyWorkerDeploymentStatus(data, workerStatus) {
   }
   const workerCommit = normalizeCommit(workerStatus.deploymentCommit);
   const githubCommit = normalizeCommit(deployment.github_latest_commit);
-  deployment.origin_commit = deployment.current_commit;
-  deployment.origin_commit_source = deployment.current_commit_source;
+  if (deployment.active_platform !== "cloudflare" || deployment.current_commit_source !== "Cloudflare Worker build") {
+    deployment.origin_commit = deployment.current_commit;
+    deployment.origin_commit_source = deployment.current_commit_source;
+  }
   deployment.current_commit = workerCommit;
   deployment.current_commit_source = "Cloudflare Worker build";
   deployment.active_platform = "cloudflare";
@@ -465,6 +476,21 @@ function renderSystemOverview(data) {
   const hasDeployedCommit = Boolean(normalizeCommit(deployment?.current_commit));
   const isDeployedKnown = isUnknown && hasDeployedCommit;
   const previousDeploymentStatus = state.deploymentSyncStatus;
+  const githubCommit = normalizeCommit(deployment.github_latest_commit);
+  const renderCommit = normalizeCommit(deployment.active_platform === "render"
+    ? deployment.current_commit : deployment.origin_commit);
+  const workerCommit = normalizeCommit(deployment.active_platform === "cloudflare"
+    ? deployment.current_commit : null);
+  for (const [node, commit] of [[el.renderSyncStatus, renderCommit], [el.workerSyncStatus, workerCommit]]) {
+    if (!node) continue;
+    const status = platformSyncStatus(commit, githubCommit);
+    node.textContent = status === "synced" ? `In sync (${shortCommit(commit)})`
+      : status === "out-of-sync" ? `Out of sync (${shortCommit(commit)})`
+        : "Unknown: not independently verified";
+    node.classList.toggle("is-synced", status === "synced");
+    node.classList.toggle("is-out-of-sync", status === "out-of-sync");
+    node.classList.toggle("is-unknown", status === "unknown");
+  }
 
   if (el.dbTypeText) {
     el.dbTypeText.textContent = `${db.label || "Unknown"} (${db.engine || "unknown"})`;
@@ -925,7 +951,7 @@ function renderCloudflareReleaseControl(data) {
 
   if (el.cloudflareReleaseStatus) {
     el.cloudflareReleaseStatus.textContent = !configured
-      ? "UNKNOWN: GitHub control is not configured"
+      ? (data?.configured === false ? "UNKNOWN: GitHub control is not configured" : "UNKNOWN: Cannot verify GitHub control")
       : (paused ? "PAUSED: Worker releases are gated" : "ACTIVE: Worker releases are enabled");
     el.cloudflareReleaseStatus.classList.toggle("is-paused", configured && paused);
     el.cloudflareReleaseStatus.classList.toggle("is-active", configured && !paused);
@@ -959,10 +985,10 @@ function renderCloudflareReleaseControl(data) {
   }
 
   if (el.cloudflareReleasePauseBtn) {
-    el.cloudflareReleasePauseBtn.disabled = !configured || paused;
+    el.cloudflareReleasePauseBtn.disabled = configured && paused;
   }
   if (el.cloudflareReleaseResumeBtn) {
-    el.cloudflareReleaseResumeBtn.disabled = !configured || !paused;
+    el.cloudflareReleaseResumeBtn.disabled = configured && !paused;
   }
 
   if (paused && !cloudflareReleaseReminderTimer) {
@@ -977,7 +1003,7 @@ function renderCloudflareReleaseControl(data) {
 async function loadCloudflareReleaseControl() {
   const res = await apiRequest("/admin/system/cloudflare/release-control", { method: "GET" });
   if (!res) {
-    renderCloudflareReleaseControl({ configured: false });
+    renderCloudflareReleaseControl({ configured: null });
     if (el.cloudflareReleaseMessage) {
       el.cloudflareReleaseMessage.textContent = "Unable to load the Cloudflare release pause state. Refresh the Admin page and check the Render logs if the problem persists.";
     }
@@ -987,7 +1013,7 @@ async function loadCloudflareReleaseControl() {
   const data = await res.json();
   if (handleAdminForbidden(res, data)) return;
   if (!res.ok) {
-    renderCloudflareReleaseControl({ configured: false });
+    renderCloudflareReleaseControl({ configured: null });
     if (el.cloudflareReleaseMessage) {
       el.cloudflareReleaseMessage.textContent = data.detail || "Unable to load the Cloudflare release pause state.";
     }
@@ -997,31 +1023,49 @@ async function loadCloudflareReleaseControl() {
 }
 
 async function updateCloudflareReleaseControl(paused) {
+  const result = el.cloudflareReleaseActionResult;
+  const showResult = (message, kind = "") => {
+    if (!result) return;
+    result.textContent = message;
+    result.classList.toggle("is-error", kind === "error");
+    result.classList.toggle("is-success", kind === "success");
+  };
+  if (!state.cloudflareReleaseControl?.configured) {
+    showResult(state.cloudflareReleaseControl?.configured === false
+      ? "No change made. Configure GITHUB_TOKEN (or GH_TOKEN) in Render with Actions variables read/write access, then refresh this page."
+      : "No change made. The release control state is unavailable; refresh this page and check the connection.", "error");
+    return;
+  }
   [el.cloudflareReleasePauseBtn, el.cloudflareReleaseResumeBtn].forEach((button) => {
     if (button) button.disabled = true;
   });
+  showResult(paused ? "Requesting pause from GitHub..." : "Requesting resume from GitHub...");
   const res = await apiRequest("/admin/system/cloudflare/release-control", {
     method: "POST",
     body: JSON.stringify({ paused }),
   });
   if (!res) {
-    setStatus("Unable to update the Cloudflare release pause state.", true);
     await loadCloudflareReleaseControl();
+    showResult("Unable to confirm the change. Check the connection and the current GitHub Actions variable.", "error");
     return;
   }
 
   const data = await res.json();
   if (handleAdminForbidden(res, data)) return;
   if (!res.ok) {
-    setStatus(data.detail || "Unable to update the Cloudflare release pause state.", true);
     await loadCloudflareReleaseControl();
+    showResult(data.detail || "Unable to update the Cloudflare release pause state.", "error");
     return;
   }
 
   renderCloudflareReleaseControl(data);
-  setStatus(paused
-    ? "Cloudflare Worker release jobs are paused. Live traffic and Hyperdrive queries are unchanged."
-    : "Cloudflare Worker release jobs are resumed.");
+  if (data.paused !== paused) {
+    showResult("GitHub did not confirm the requested state. No successful change can be reported.", "error");
+    return;
+  }
+  showResult(paused
+    ? "Confirmed: Worker releases are paused. Live traffic and Hyperdrive queries are unchanged."
+    : "Confirmed: Worker releases are resumed.", "success");
 }
 
 async function loadMasterAdminCodeStatus() {

@@ -24,6 +24,17 @@ Before retiring an old Cloudflare application:
 
 On another development desktop, use `git pull origin main` rather than copying individual files. Then run `npm ci --prefix platform/cloudflare` and both dry-run scripts. Local Wrangler authentication and secrets are intentionally not synchronized by Git.
 
+### Admin deployment indicators and release control
+
+The Deployment Sync header describes the currently active route. The Render and
+Cloudflare badges compare each independently observed build against GitHub;
+when a runtime's build cannot be observed its badge is unknown, not assumed
+synced or out of sync. The Cloudflare release-control card is separate from
+either deployment's color and reports confirmation or errors next to its buttons.
+It requires a Render `GITHUB_TOKEN` (or `GH_TOKEN`) with repository Actions
+variables read/write access. Pausing gates future Worker release jobs only; it
+does not stop live traffic or Hyperdrive queries.
+
 ## Environment compatibility
 
 | Variable | Render/FastAPI | Cloudflare phase 0 | Compatibility rule |

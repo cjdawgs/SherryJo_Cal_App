@@ -855,7 +855,7 @@ def _github_actions_variable_request(repo: str, method: str, value: str | None =
             return 404, {}
         if exc.code == 403:
             raise HTTPException(
-                status_code=403,
+                status_code=502,
                 detail="GitHub denied access. Give the Render GITHUB_TOKEN Actions variables read/write access to this repository.",
             ) from exc
         logger.warning("GitHub Actions variable request failed with HTTP %s.", exc.code)
@@ -915,6 +915,8 @@ def _set_cloudflare_release_pause(paused: bool) -> dict:
     refreshed_status, refreshed_payload = _github_actions_variable_request(repo, "GET")
     if refreshed_status == 404:
         raise HTTPException(status_code=502, detail="GitHub did not persist the release pause setting.")
+    if str(refreshed_payload.get("value", "")).lower() != value:
+        raise HTTPException(status_code=502, detail="GitHub did not confirm the requested release pause setting. Refresh and retry.")
     return {
         "configured": True,
         "paused": str(refreshed_payload.get("value", "")).lower() == "true",

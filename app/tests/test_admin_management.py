@@ -781,6 +781,43 @@ def test_cloudflare_release_control_cannot_change_without_github_token(client, m
     assert "GITHUB_TOKEN" in response.json()["detail"]
 
 
+def test_cloudflare_release_control_rejects_unconfirmed_github_state(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    responses = iter([
+        _GitHubApiResponse(200, {"value": "false"}),
+        _GitHubApiResponse(204),
+        _GitHubApiResponse(200, {"value": "false"}),
+    ])
+    monkeypatch.setattr(admin_router, "urlopen", lambda request, timeout: next(responses))
+
+    response = client.post(
+        "/admin/system/cloudflare/release-control",
+        headers=headers,
+        json={"paused": True},
+    )
+    assert response.status_code == 502
+    assert "did not confirm" in response.json()["detail"]
+
+
+def test_github_permission_failure_is_not_an_admin_authorization_failure(client, monkeypatch):
+    from urllib.error import HTTPError
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+
+    def denied(request, timeout):
+        raise HTTPError(request.full_url, 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(admin_router, "urlopen", denied)
+    response = client.get("/admin/system/cloudflare/release-control", headers=headers)
+    assert response.status_code == 502
+    assert "GitHub denied access" in response.json()["detail"]
+
+
 def test_admin_tv_verification_requires_matching_device_acknowledgment(client, db):
     admin = _register_user(client, role="admin")
     headers = _login_headers(client, admin["email"], admin["password"])

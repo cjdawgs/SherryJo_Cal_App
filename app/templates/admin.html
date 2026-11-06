@@ -425,9 +425,7 @@
       color: #ffffff;
     }
 
-    .deployment-sync-panel.is-synced .muted-line,
-    .deployment-sync-panel.is-synced p,
-    .deployment-sync-panel.is-synced strong {
+    .deployment-sync-panel.is-synced > details > summary p {
       color: #ffffff;
     }
 
@@ -438,9 +436,7 @@
       box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.14) inset;
     }
 
-    .deployment-sync-panel.is-out-of-sync .muted-line,
-    .deployment-sync-panel.is-out-of-sync p,
-    .deployment-sync-panel.is-out-of-sync strong {
+    .deployment-sync-panel.is-out-of-sync > details > summary p {
       color: #9f1239;
     }
 
@@ -450,11 +446,27 @@
       color: #475569;
     }
 
-    .deployment-sync-panel.is-unknown .muted-line,
-    .deployment-sync-panel.is-unknown p,
-    .deployment-sync-panel.is-unknown strong {
+    .deployment-sync-panel.is-unknown > details > summary p {
       color: #475569;
     }
+
+    .cloudflare-release-control {
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #334155;
+    }
+
+    .cloudflare-release-action-result {
+      margin: 8px 0;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    .cloudflare-release-action-result.is-error { color: #b91c1c; }
+    .cloudflare-release-action-result.is-success { color: #166534; }
 
     .deployment-sync-header {
       display: flex;
@@ -685,6 +697,7 @@
       border-radius: 10px;
       padding: 12px;
       background: rgba(255, 255, 255, 0.72);
+      color: #334155;
     }
 
     .deployment-sync-lines {
@@ -723,6 +736,7 @@
       border-radius: 10px;
       padding: 12px;
       background: rgba(255, 255, 255, 0.72);
+      color: #334155;
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -855,13 +869,29 @@
       </div>
     </header>
 
+    <section class="panel" id="masterAdminCodePanel">
+      <details>
+        <summary>Master Admin Code</summary>
+        <p class="muted-line">This shared code authorizes new Admin enrollment in both Render and Cloudflare. It does not change any user's login password. Emergency recovery uses the separate ADMIN_RECOVERY_CODE environment secret.</p>
+        <form id="masterAdminCodeForm">
+          <label for="masterAdminCodeInput">New Master Admin Code (16–256 characters)</label>
+          <input id="masterAdminCodeInput" type="password" minlength="16" maxlength="256" autocomplete="new-password" required>
+          <div class="button-row">
+            <button id="masterAdminCodeSaveBtn" type="submit">Set / Rotate Master Admin Code</button>
+            <button id="masterAdminCodeRefreshBtn" class="ghost-btn" type="button">Refresh Status</button>
+          </div>
+          <div id="masterAdminCodeStatus" class="status-line" role="status" aria-live="polite">Checking Master Admin Code status...</div>
+        </form>
+      </details>
+    </section>
+
     <section class="panel deployment-sync-panel is-unknown" id="deploymentSyncPanel">
       <details id="deploymentSyncDetails" open>
         <summary>
           <div class="deployment-sync-header">
             <div>
               <h2>Deployment Sync</h2>
-              <p>Confirms whether the active Cloudflare or Render delivery path matches the latest GitHub commit before you trust the TV dashboard.</p>
+              <p>The header reflects the active route only. Render and Cloudflare badges below are compared independently; an unverified runtime remains unknown.</p>
             </div>
             <span id="deploymentSyncStatusPill" class="deployment-sync-pill is-unknown">Checking sync...</span>
           </div>
@@ -869,6 +899,8 @@
         <div class="deployment-sync-grid">
           <div class="deployment-sync-card">
             <div class="deployment-sync-lines">
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Render sync</span><span id="renderSyncStatus" class="deployment-sync-pill is-unknown">Unknown</span></div>
+              <div class="deployment-sync-row"><span class="deployment-sync-label">Cloudflare sync</span><span id="workerSyncStatus" class="deployment-sync-pill is-unknown">Unknown</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Active route</span><span id="deploymentSyncPlatform" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span id="deploymentSyncCurrentLabel" class="deployment-sync-label">Current build</span><span id="deploymentSyncCurrentCommit" class="deployment-sync-code">Loading...</span></div>
               <div class="deployment-sync-row"><span class="deployment-sync-label">Proxied admin origin</span><span id="deploymentSyncOriginCommit" class="deployment-sync-code">Loading...</span></div>
@@ -882,7 +914,7 @@
             <p id="deploymentSyncMessage" class="deployment-sync-message">Loading deployment sync status...</p>
           </div>
           <div class="deployment-sync-actions-card">
-            <p id="deploymentSyncHint">This card turns bright red when Render is behind GitHub, and stays grey/green when the deployment is current.</p>
+            <p id="deploymentSyncHint">Checking the active route against GitHub...</p>
             <div class="deployment-sync-actions">
               <button id="deploymentSyncRefreshBtn" class="ghost-btn" type="button">Recheck Sync</button>
               <button id="deploymentSyncGithubBtn" class="ghost-btn" type="button">Open GitHub</button>
@@ -891,7 +923,10 @@
             </div>
           </div>
         </div>
-        <div id="cloudflareReleaseControl" class="cloudflare-release-control" hidden>
+      </details>
+    </section>
+
+    <section id="cloudflareReleaseControl" class="panel cloudflare-release-control" hidden>
           <div class="cloudflare-release-header">
             <div>
               <h3>Cloudflare Worker Release Control</h3>
@@ -910,12 +945,11 @@
             This pause is a release safeguard, not a fix for the Hyperdrive query quota.
           </p>
           <p id="cloudflareReleaseMessage" class="cloudflare-release-message">Checking GitHub Actions variable...</p>
+          <p id="cloudflareReleaseActionResult" class="cloudflare-release-action-result" role="status" aria-live="polite"></p>
           <div class="cloudflare-release-actions">
             <button id="cloudflareReleasePauseBtn" class="btn-danger" type="button" disabled>Pause Worker Releases</button>
             <button id="cloudflareReleaseResumeBtn" class="ghost-btn" type="button" disabled>Resume Worker Releases</button>
           </div>
-        </div>
-      </details>
     </section>
 
     <section class="panel database-config-panel is-unknown" id="databaseConfigPanel">
@@ -1441,22 +1475,6 @@
             <ul id="providerOpsList"></ul>
           </article>
         </div>
-      </details>
-    </section>
-
-    <section class="panel" id="masterAdminCodePanel">
-      <details>
-        <summary>Master Admin Code</summary>
-        <p class="muted-line">This shared code authorizes new Admin enrollment in both Render and Cloudflare. It does not change any user's login password. Emergency recovery uses the separate ADMIN_RECOVERY_CODE environment secret.</p>
-        <form id="masterAdminCodeForm">
-          <label for="masterAdminCodeInput">New Master Admin Code (16–256 characters)</label>
-          <input id="masterAdminCodeInput" type="password" minlength="16" maxlength="256" autocomplete="new-password" required>
-          <div class="button-row">
-            <button id="masterAdminCodeSaveBtn" type="submit">Set / Rotate Master Admin Code</button>
-            <button id="masterAdminCodeRefreshBtn" class="ghost-btn" type="button">Refresh Status</button>
-          </div>
-          <div id="masterAdminCodeStatus" class="status-line" role="status" aria-live="polite">Checking Master Admin Code status...</div>
-        </form>
       </details>
     </section>
 
