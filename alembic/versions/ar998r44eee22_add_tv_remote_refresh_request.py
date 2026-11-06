@@ -17,7 +17,8 @@ def _is_postgres() -> bool:
 
 def upgrade_statements() -> tuple[str, ...]:
     return (
-        "ALTER TABLE public.tv_user_state ADD COLUMN remote_refresh_requested_at timestamp with time zone, ADD COLUMN remote_refresh_device_id varchar(64)",
+        "ALTER TABLE public.tv_user_state ADD COLUMN IF NOT EXISTS remote_refresh_requested_at timestamp with time zone, ADD COLUMN IF NOT EXISTS remote_refresh_device_id varchar(64)",
+        "DROP POLICY IF EXISTS worker_tv_state_admin ON public.tv_user_state",
         f"""CREATE POLICY worker_tv_state_admin ON public.tv_user_state
             FOR ALL TO {WORKER_ROLE}
             USING (public.worker_app_is_admin())

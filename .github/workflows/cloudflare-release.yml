@@ -82,7 +82,7 @@ jobs:
 
             - name: Create isolated migration validation database
               run: |
-                  python -c 'import psycopg2; connection = psycopg2.connect("dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432"); connection.autocommit = True; connection.cursor().execute("CREATE DATABASE sherryjo_migration_test"); connection.close()'
+                  python -c 'import psycopg2; connection = psycopg2.connect("dbname=postgres user=postgres password=postgres host=127.0.0.1 port=5432"); connection.autocommit = True; cursor = connection.cursor(); cursor.execute("CREATE DATABASE sherryjo_migration_test"); cursor.execute("CREATE DATABASE sherryjo_migration_drift_test"); connection.close()'
 
             - name: Apply Alembic migrations to PostgreSQL test database
               env:
@@ -90,7 +90,19 @@ jobs:
                   ALEMBIC_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_migration_test
               run: alembic upgrade head
 
+            - name: Validate migrations with pre-existing TV refresh schema
+              env:
+                  DATABASE_URL: sqlite://
+                  ALEMBIC_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_migration_drift_test
+                  PGPASSWORD: postgres
+              run: |
+                  alembic upgrade aq997l22ddd11
+                  psql -h 127.0.0.1 -U postgres -d sherryjo_migration_drift_test -v ON_ERROR_STOP=1 -c "ALTER TABLE public.tv_user_state ADD COLUMN remote_refresh_requested_at timestamptz, ADD COLUMN remote_refresh_device_id varchar(64); CREATE POLICY worker_tv_state_admin ON public.tv_user_state FOR ALL TO worker_calendar_reader USING (public.worker_app_is_admin()) WITH CHECK (public.worker_app_is_admin());"
+                  alembic upgrade head
+
             - name: Run Python suite
+              env:
+                  TEST_MIGRATION_DATABASE_URL: postgresql+psycopg2://postgres:postgres@127.0.0.1:5432/sherryjo_migration_test
               run: pytest app/tests -q
 
             - name: Test Cloudflare edge

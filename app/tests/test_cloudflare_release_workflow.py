@@ -79,6 +79,16 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
 
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
+    drift_step = next(
+        step for step in jobs["verify"]["steps"]
+        if step.get("name") == "Validate migrations with pre-existing TV refresh schema"
+    )
+    assert "alembic upgrade aq997l22ddd11" in drift_step["run"]
+    assert "CREATE POLICY worker_tv_state_admin" in drift_step["run"]
+    assert "alembic upgrade head" in drift_step["run"]
+    assert drift_step["env"]["ALEMBIC_DATABASE_URL"].endswith("/sherryjo_migration_drift_test")
+    python_suite = next(step for step in jobs["verify"]["steps"] if step.get("name") == "Run Python suite")
+    assert python_suite["env"]["TEST_MIGRATION_DATABASE_URL"].endswith("/sherryjo_migration_test")
     assert set(jobs["deploy-canary"]["needs"]) == {"verify", "migrate-supabase"}
     assert jobs["migrate-supabase"]["needs"] == "verify"
     assert jobs["migrate-supabase"]["env"]["ALEMBIC_DATABASE_URL"] == "${{ secrets.ALEMBIC_DATABASE_URL }}"
