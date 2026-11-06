@@ -69,6 +69,9 @@ in response to a user.
   The Cloudflare release requires the `ALEMBIC_DATABASE_URL` Actions secret:
   the migration must succeed before the Worker is deployed. The release
   stops rather than deploying with an old claim function if it is missing.
+  The migration process also receives non-secret OAuth and JWT placeholders
+  because application settings are imported during Alembic startup; these
+  placeholders are not deployed or used to authenticate users.
 - **Range changes.** Changing an account's range clears its provider cursors
   and assigns a new range generation. An in-flight sync cannot write a cursor
   from the previous generation; the next scheduled or manual sync starts a

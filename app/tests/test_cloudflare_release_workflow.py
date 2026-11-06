@@ -1,11 +1,46 @@
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import tomllib
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_migration_job_bootstraps_alembic_without_application_secrets(tmp_path):
+    workflow = yaml.load(
+        (ROOT / ".github" / "workflows" / "cloudflare-release.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    migration_step = next(
+        step for step in workflow["jobs"]["migrate-supabase"]["steps"]
+        if step.get("name") == "Apply Supabase migrations"
+    )
+    env = os.environ.copy()
+    for name in (
+        "MS_CLIENT_ID", "MS_CLIENT_SECRET", "MS_TENANT_ID", "MS_REDIRECT_URI",
+        "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REDIRECT_URI", "JWT_SECRET_KEY",
+        "TOKEN_ENCRYPTION_KEY",
+    ):
+        env.pop(name, None)
+    env.update({key: value for key, value in migration_step["env"].items() if not value.startswith("${{")})
+    env["DISABLE_DOTENV"] = "true"
+    env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'migration.db'}"
+    env["ALEMBIC_DATABASE_URL"] = env["DATABASE_URL"]
+    env.pop("PYTHONPATH", None)
+    shutil.copytree(ROOT / "app", tmp_path / "app", ignore=shutil.ignore_patterns(
+        "__pycache__", "tests", "static", "templates",
+    ))
+    shutil.copytree(ROOT / "alembic", tmp_path / "alembic", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copyfile(ROOT / "alembic.ini", tmp_path / "alembic.ini")
+    result = subprocess.run(
+        ["alembic", "current"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():

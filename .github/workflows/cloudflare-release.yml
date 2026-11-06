@@ -119,6 +119,15 @@ jobs:
               env:
                   DATABASE_URL: ${{ secrets.ALEMBIC_DATABASE_URL }}
                   ALEMBIC_DATABASE_URL: ${{ secrets.ALEMBIC_DATABASE_URL }}
+                  DISABLE_DOTENV: "true"
+                  MS_CLIENT_ID: migration-placeholder
+                  MS_CLIENT_SECRET: migration-placeholder
+                  MS_TENANT_ID: migration-placeholder
+                  MS_REDIRECT_URI: http://127.0.0.1:8000/ms/callback
+                  GOOGLE_CLIENT_ID: migration-placeholder
+                  GOOGLE_CLIENT_SECRET: migration-placeholder
+                  GOOGLE_REDIRECT_URI: http://127.0.0.1:8000/auth/google/callback
+                  JWT_SECRET_KEY: migration-placeholder-not-used-for-authentication
               run: |
                   python -m pip install --upgrade pip
                   pip install -r requirements.txt
