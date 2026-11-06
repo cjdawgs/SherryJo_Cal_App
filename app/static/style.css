@@ -69,6 +69,35 @@ select.database-provider-live option {
   padding: 8px 10px;
 }
 
+.database-connection-card {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+}
+
+.database-connection-card h4 {
+  margin: 0 0 8px;
+}
+
+.database-connection-details {
+  display: grid;
+  gap: 6px 12px;
+  grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr);
+  margin: 0;
+}
+
+.database-connection-details dt {
+  color: #475569;
+  font-weight: 600;
+}
+
+.database-connection-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .hyperdrive-setup-banner {
   background: #fff7ed;
   border: 1px solid #fdba74;

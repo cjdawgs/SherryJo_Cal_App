@@ -6,7 +6,7 @@ import subprocess
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
 
@@ -593,6 +593,10 @@ def _safe_database_summary(url: str) -> dict:
             "label": "Local SQLite",
             "database": value.replace("sqlite:///", ""),
             "host": "local-file",
+            "port": None,
+            "username": None,
+            "ssl_mode": "not applicable",
+            "credentials_configured": False,
         }
 
     if value.startswith("postgresql"):
@@ -603,11 +607,24 @@ def _safe_database_summary(url: str) -> dict:
             label = "Neon Postgres"
         else:
             label = "PostgreSQL"
+        try:
+            port = parsed.port or 5432
+        except ValueError:
+            port = "invalid"
+        username = unquote(parsed.username) if parsed.username else None
+        ssl_mode = parse_qs(parsed.query).get("sslmode", [None])[0] or "not specified"
         return {
             "engine": "postgresql",
             "label": label,
             "database": parsed.path.lstrip("/") or "postgres",
             "host": parsed.hostname or "unknown",
+            "port": port,
+            "username": username,
+            "ssl_mode": ssl_mode,
+            "credentials_configured": bool(
+                (username and parsed.password)
+                or os.getenv("DB_PASSWORD")
+            ),
         }
 
     return {
@@ -615,6 +632,10 @@ def _safe_database_summary(url: str) -> dict:
         "label": "Unknown",
         "database": parsed.path.lstrip("/") or "unknown",
         "host": parsed.hostname or "unknown",
+        "port": None,
+        "username": unquote(parsed.username) if parsed.username else None,
+        "ssl_mode": "unknown",
+        "credentials_configured": False,
     }
 
 

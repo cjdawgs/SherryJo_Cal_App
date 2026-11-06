@@ -80,6 +80,9 @@ const el = {
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
+  databaseConnectionDetails: document.getElementById("databaseConnectionDetails"),
+  databaseManagedCredentialsHelp: document.getElementById("databaseManagedCredentialsHelp"),
+  databaseHyperdriveCredentialsHelp: document.getElementById("databaseHyperdriveCredentialsHelp"),
   hyperdriveLiveBadge: document.getElementById("hyperdriveLiveBadge"),
   hyperdriveLiveBadgeText: document.getElementById("hyperdriveLiveBadgeText"),
   hyperdriveSetupBanner: document.getElementById("hyperdriveSetupBanner"),
@@ -101,6 +104,7 @@ const el = {
   databaseConnectBtn: document.getElementById("databaseConnectBtn"),
   databaseTestBtn: document.getElementById("databaseTestBtn"),
   databaseSaveBtn: document.getElementById("databaseSaveBtn"),
+  databaseInspectBtn: document.getElementById("databaseInspectBtn"),
   databaseDisconnectBtn: document.getElementById("databaseDisconnectBtn"),
   databaseConfigStatus: document.getElementById("databaseConfigStatus"),
   databaseCopySourceSelect: document.getElementById("databaseCopySourceSelect"),
@@ -2062,13 +2066,14 @@ function bindEvents() {
   el.databaseConnectBtn?.addEventListener("click", connectPreferredDatabase);
   el.databaseTestBtn?.addEventListener("click", testDatabaseConfig);
   el.databaseSaveBtn?.addEventListener("click", saveDatabaseConfig);
+  el.databaseInspectBtn?.addEventListener("click", inspectHyperdriveConfig);
   el.databaseProfileSaveBtn?.addEventListener("click", saveDatabaseProfile);
   el.databaseDisconnectBtn?.addEventListener("click", disconnectDatabase);
   el.databaseProfileSelect?.addEventListener("change", selectDatabaseProfile);
   el.databaseProviderTitleInput?.addEventListener("input", updateDatabaseProfileSaveButtonState);
   el.databaseModeSelect?.addEventListener("change", updateDatabaseProfileSaveButtonState);
   el.databaseCopyBtn?.addEventListener("click", copyCriticalDatabaseData);
-  [el.cloudflareAccountIdInput, el.cloudflareApiTokenInput].forEach((input) => input?.addEventListener("input", updateHyperdriveButtonState));
+  [el.cloudflareAccountIdInput, el.hyperdriveConfigIdInput, el.cloudflareApiTokenInput].forEach((input) => input?.addEventListener("input", updateHyperdriveButtonState));
   if (el.databaseConfigDetails) {
     el.databaseConfigDetails.open = localStorage.getItem("databaseConfigOpen") !== "false";
     el.databaseConfigDetails.addEventListener("toggle", () => localStorage.setItem("databaseConfigOpen", String(el.databaseConfigDetails.open)));
@@ -2171,13 +2176,58 @@ function hasRequestScopedCloudflareCredentials() {
 }
 
 function updateHyperdriveButtonState() {
-  if (window.__databaseRuntime !== "cloudflare-worker" || !el.databaseSaveBtn) return;
+  if (window.__databaseRuntime !== "cloudflare-worker") return;
   const canEditHyperdrive = window.__hyperdriveEditAvailable === true || hasRequestScopedCloudflareCredentials();
-  el.databaseSaveBtn.disabled = !canEditHyperdrive;
-  el.databaseSaveBtn.textContent = canEditHyperdrive ? "Update Hyperdrive" : "Configure DB in Cloudflare";
-  el.databaseSaveBtn.title = canEditHyperdrive
-    ? "Update the active Hyperdrive configuration from these fields."
-    : "Enter Cloudflare account ID and API token, or configure them as Worker secrets.";
+  if (el.databaseSaveBtn) {
+    el.databaseSaveBtn.disabled = !canEditHyperdrive;
+    el.databaseSaveBtn.textContent = canEditHyperdrive ? "Update Hyperdrive" : "Configure DB in Cloudflare";
+    el.databaseSaveBtn.title = canEditHyperdrive
+      ? "Update the active Hyperdrive configuration from these fields."
+      : "Enter Cloudflare account ID and API token, or configure them as Worker secrets.";
+  }
+  if (el.databaseInspectBtn) {
+    const canInspectHyperdrive = window.__hyperdriveInspectAvailable === true || hasRequestScopedCloudflareCredentials();
+    el.databaseInspectBtn.disabled = !canInspectHyperdrive;
+    el.databaseInspectBtn.title = canInspectHyperdrive
+      ? "Inspect safe origin metadata using a one-time Hyperdrive Read token."
+      : "Enter the Cloudflare account ID and a scoped Hyperdrive Read token.";
+  }
+}
+
+function renderDatabaseConnectionDetails(data) {
+  if (!el.databaseConnectionDetails) return;
+  const isWorker = data.runtime === "cloudflare-worker";
+  const details = data.database_details || data.summary || {};
+  const host = details.host || (isWorker ? "Not exposed by the Worker binding; inspect Hyperdrive" : "Not reported");
+  const rows = [
+    ["Runtime", isWorker ? "Cloudflare Worker" : data.runtime === "managed-origin" ? "Render-managed origin" : "Origin"],
+    ["Provider", data.provider_label || details.label || "Not identified"],
+    ["Provider evidence", details.source || data.provider_source || "Not reported"],
+    ["Host", host],
+    ["Port", details.port ?? (isWorker ? "Inspect Hyperdrive configuration" : "Not reported")],
+    ["Database", details.database || (isWorker ? "Inspect Hyperdrive configuration" : "Not reported")],
+    ["Username", details.username || (isWorker ? "Inspect Hyperdrive configuration" : "Not reported")],
+    ["SSL mode", details.ssl_mode || (isWorker ? "Managed by Hyperdrive" : "Not reported")],
+    ["Credential status", details.password_status || (
+      isWorker
+        ? "Managed by Hyperdrive; password is not readable"
+        : details.credentials_configured === true
+          ? "Configured; value hidden"
+          : details.credentials_configured === false
+            ? "Not detected in the active connection settings"
+            : "Not reported"
+    )],
+    ["Live query", data.live_database_confirmed ? "Succeeded" : "Failed or not confirmed"],
+  ];
+  const fragment = document.createDocumentFragment();
+  rows.forEach(([label, value]) => {
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = String(value);
+    fragment.append(term, description);
+  });
+  el.databaseConnectionDetails.replaceChildren(fragment);
 }
 
 async function connectPreferredDatabase() {
@@ -2224,6 +2274,8 @@ async function loadDatabaseConfig() {
     return;
   }
 
+  window.__databaseConfigData = data;
+  renderDatabaseConnectionDetails(data);
   const mode = (data.database_mode || "postgres").toLowerCase();
   window.__databaseProfiles = data.profiles || [];
   if (data.runtime === "cloudflare-worker" && data.provider_label) {
@@ -2259,6 +2311,24 @@ async function loadDatabaseConfig() {
   window.__databaseMode = mode;
   window.__databaseRuntime = data.runtime || "origin";
   window.__hyperdriveEditAvailable = data.hyperdrive_edit_available === true;
+  window.__hyperdriveInspectAvailable = data.hyperdrive_inspect_available === true;
+  if (data.runtime === "cloudflare-worker") {
+    if (el.cloudflareAccountIdInput && !el.cloudflareAccountIdInput.value) {
+      el.cloudflareAccountIdInput.value = data.cloudflare_account_id || "";
+    }
+    if (el.hyperdriveConfigIdInput && !el.hyperdriveConfigIdInput.value) {
+      el.hyperdriveConfigIdInput.value = data.hyperdrive_config_id || "";
+    }
+    if (el.databaseInspectBtn) el.databaseInspectBtn.hidden = false;
+  } else if (el.databaseInspectBtn) {
+    el.databaseInspectBtn.hidden = true;
+  }
+  if (el.databaseManagedCredentialsHelp) {
+    el.databaseManagedCredentialsHelp.hidden = !data.configuration_managed_by_host;
+  }
+  if (el.databaseHyperdriveCredentialsHelp) {
+    el.databaseHyperdriveCredentialsHelp.hidden = data.runtime !== "cloudflare-worker";
+  }
   if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
   updateDatabaseProfileSaveButtonState();
   if (el.databaseConnectBtn) {
@@ -2356,6 +2426,59 @@ async function loadDatabaseConfig() {
   if (el.databaseCopyBtn && data.copy_supported === false) {
     el.databaseCopyBtn.disabled = true;
     if (el.databaseCopyStatus) el.databaseCopyStatus.textContent = "Data copy is unavailable in the single-binding Worker runtime. Configure a second database binding or use the origin runtime with two saved providers.";
+  }
+}
+
+async function inspectHyperdriveConfig() {
+  if (el.databaseInspectBtn) {
+    el.databaseInspectBtn.disabled = true;
+    el.databaseInspectBtn.textContent = "Inspecting Hyperdrive...";
+  }
+  const payload = {
+    cloudflare_account_id: el.cloudflareAccountIdInput?.value.trim() || null,
+    hyperdrive_config_id: el.hyperdriveConfigIdInput?.value.trim() || null,
+    cloudflare_api_token: el.cloudflareApiTokenInput?.value || null,
+  };
+  const res = await apiRequest("/admin/system/database-config/inspect", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = res ? await res.json().catch(() => ({})) : {};
+  if (handleAdminForbidden(res, data)) return;
+  if (!res?.ok || data.ok !== true) {
+    const message = data.detail || data.error || "Unable to inspect the Hyperdrive configuration.";
+    if (el.databaseConfigStatus) {
+      el.databaseConfigStatus.textContent = message;
+      el.databaseConfigStatus.classList.add("error");
+    }
+    if (el.databaseInspectBtn) {
+      el.databaseInspectBtn.disabled = false;
+      el.databaseInspectBtn.textContent = "Inspect Hyperdrive";
+      updateHyperdriveButtonState();
+    }
+    return;
+  }
+
+  const details = data.database_details || {};
+  if (el.databaseHostInput && details.host) el.databaseHostInput.value = details.host;
+  if (el.databasePortInput && details.port) el.databasePortInput.value = String(details.port);
+  if (el.databaseNameInput && details.database) el.databaseNameInput.value = details.database;
+  if (el.databaseUserInput && details.username) el.databaseUserInput.value = details.username;
+  window.__databaseConfigData = { ...(window.__databaseConfigData || {}), database_details: details };
+  renderDatabaseConnectionDetails(window.__databaseConfigData);
+  if (data.cloudflare_token_accepted && el.cloudflareApiTokenInput) {
+    el.cloudflareApiTokenInput.value = "";
+    el.cloudflareApiTokenInput.placeholder = "Cloudflare token accepted for inspection (not stored)";
+  }
+  if (el.databaseConfigStatus) {
+    el.databaseConfigStatus.textContent = "Hyperdrive origin metadata inspected. The password is write-only and was not returned.";
+    el.databaseConfigStatus.classList.remove("error");
+  }
+  if (el.databaseInspectBtn) {
+    el.databaseInspectBtn.disabled = false;
+    el.databaseInspectBtn.textContent = "Inspect Hyperdrive";
+    updateHyperdriveButtonState();
   }
 }
 
@@ -2457,6 +2580,10 @@ async function saveDatabaseConfig(options = {}) {
   if (el.databasePasswordInput) el.databasePasswordInput.value = "";
   if (el.databaseUrlInput) el.databaseUrlInput.value = "";
   await loadDatabaseConfig();
+  if (updateHyperdrive && data.database_details) {
+    window.__databaseConfigData = { ...(window.__databaseConfigData || {}), database_details: data.database_details };
+    renderDatabaseConnectionDetails(window.__databaseConfigData);
+  }
 }
 
 async function saveDatabaseProfile() {

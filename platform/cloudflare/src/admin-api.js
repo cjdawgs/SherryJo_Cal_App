@@ -2,6 +2,7 @@ import { hashPassword } from "./native-auth.js";
 
 const MANAGED_TABLES = new Set(["users", "oauth_accounts", "events", "notes", "tasks", "date_sticky_notes", "tv_diag_log"]);
 const REDACTED = new Set(["access_token", "refresh_token", "hashed_password", "password", "sync_token", "google_access_token", "google_refresh_token", "ms_access_token", "ms_refresh_token"]);
+const DEFAULT_HYPERDRIVE_CONFIG_ID = "2bb6bc680a594a15aa12991869cbb590";
 
 function response(body, status = 200) {
     return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
@@ -106,7 +107,7 @@ async function providersRoute(client, request, parts, body) {
 
 async function updateHyperdriveConfig(body, env) {
     const accountId = String(body.cloudflare_account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
-    const configId = String(body.hyperdrive_config_id || env.HYPERDRIVE_CONFIG_ID || "2bb6bc680a594a15aa12991869cbb590").trim();
+    const configId = String(body.hyperdrive_config_id || env.HYPERDRIVE_CONFIG_ID || DEFAULT_HYPERDRIVE_CONFIG_ID).trim();
     const apiToken = String(body.cloudflare_api_token || env.CLOUDFLARE_API_TOKEN || "").trim();
     if (!accountId || !apiToken) return {
         error: "Hyperdrive editing is not configured for this Worker.",
@@ -131,7 +132,7 @@ async function updateHyperdriveConfig(body, env) {
         }
     }
     if (!host || !database || !user || !password || !Number.isInteger(port) || port < 1 || port > 65535) return {
-        error: "Enter the Neon or Supabase host, port, database name, username, and password before updating Hyperdrive.",
+        error: "Enter the PostgreSQL host, port, database name, username, and password before updating Hyperdrive.",
         status: 422,
     };
     const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs/${encodeURIComponent(configId)}`;
@@ -144,9 +145,77 @@ async function updateHyperdriveConfig(body, env) {
     if (!response.ok || result.success === false) return {
         error: "Cloudflare rejected the Hyperdrive update. Check the API token permission and database fields.",
         status: response.status === 403 ? 403 : 502,
-        next_steps: ["Confirm the API token can edit Hyperdrive configurations.", "Confirm the Neon or Supabase credentials are correct.", "Run Test active Worker DB after the update completes."],
+        next_steps: ["Confirm the API token can edit Hyperdrive configurations.", "Confirm the PostgreSQL credentials are correct.", "Run Test active Worker DB after the update completes."],
     };
-    return { ok: true, message: "Hyperdrive configuration updated. Test the active Worker database to confirm the new datasource is live.", provider_title: body.provider_title || "SherryJo Postgres", hyperdrive_config_id: configId, cloudflare_token_accepted: Boolean(body.cloudflare_api_token), requires_redeploy: true };
+    return {
+        ok: true,
+        message: "Hyperdrive configuration updated. Test the active Worker database to confirm the new datasource is live.",
+        provider_title: body.provider_title || "SherryJo Postgres",
+        hyperdrive_config_id: configId,
+        database_details: {
+            configuration_id: configId,
+            configuration_name: body.provider_title || "SherryJo Postgres",
+            host,
+            port,
+            database,
+            username: user,
+            scheme: "postgres",
+            ssl_mode: "managed by Hyperdrive",
+            password_status: "Updated; value is not returned",
+            source: "Hyperdrive update request",
+        },
+        cloudflare_token_accepted: Boolean(body.cloudflare_api_token),
+        requires_redeploy: true,
+    };
+}
+
+async function inspectHyperdriveConfig(body, env) {
+    const accountId = String(body.cloudflare_account_id || env.CLOUDFLARE_ACCOUNT_ID || "").trim();
+    const configId = String(body.hyperdrive_config_id || env.HYPERDRIVE_CONFIG_ID || DEFAULT_HYPERDRIVE_CONFIG_ID).trim();
+    const apiToken = String(body.cloudflare_api_token || env.CLOUDFLARE_API_TOKEN || "").trim();
+    if (!accountId || !apiToken) return {
+        error: "Cloudflare account ID and a scoped Hyperdrive Read token are required to inspect this configuration.",
+        status: 422,
+    };
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(accountId) || !/^[a-zA-Z0-9_-]{1,64}$/.test(configId)) return {
+        error: "The Cloudflare account ID or Hyperdrive configuration ID is invalid.",
+        status: 422,
+    };
+
+    const endpoint = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(accountId)}/hyperdrive/configs/${encodeURIComponent(configId)}`;
+    let response;
+    try {
+        response = await fetch(endpoint, {
+            headers: { Authorization: `Bearer ${apiToken}`, Accept: "application/json" },
+        });
+    } catch {
+        return { error: "Cloudflare could not be reached to inspect the Hyperdrive configuration.", status: 502 };
+    }
+
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success === false || !result.result) return {
+        error: "Cloudflare could not return the Hyperdrive configuration. Check the token's Hyperdrive Read permission and configuration ID.",
+        status: response.status === 403 ? 403 : 502,
+    };
+
+    const origin = result.result.origin && typeof result.result.origin === "object" ? result.result.origin : {};
+    const portValue = Number(origin.port || 5432);
+    return {
+        ok: true,
+        database_details: {
+            configuration_id: String(result.result.id || configId),
+            configuration_name: typeof result.result.name === "string" ? result.result.name : null,
+            host: typeof origin.host === "string" ? origin.host : null,
+            port: Number.isInteger(portValue) && portValue >= 1 && portValue <= 65535 ? portValue : null,
+            database: typeof origin.database === "string" ? origin.database : null,
+            username: typeof origin.user === "string" ? origin.user : null,
+            scheme: typeof origin.scheme === "string" ? origin.scheme : null,
+            ssl_mode: "managed by Hyperdrive",
+            password_status: "Write-only in Cloudflare; value is not returned",
+            source: "Cloudflare Hyperdrive configuration API",
+        },
+        cloudflare_token_accepted: Boolean(body.cloudflare_api_token),
+    };
 }
 
 const DEFAULT_GITHUB_REPOSITORY = "cjdawgs/SherryJo_Cal_App";
@@ -313,8 +382,11 @@ async function systemRoute(client, request, parts, url, env, body = {}, adapter)
                 profiles: [],
                 copy_supported: false,
                 hyperdrive_binding: "HYPERDRIVE_RLS_NO_CACHE",
+                cloudflare_account_id: String(env.CLOUDFLARE_ACCOUNT_ID || ""),
+                hyperdrive_config_id: String(env.HYPERDRIVE_CONFIG_ID || DEFAULT_HYPERDRIVE_CONFIG_ID),
                 hyperdrive_configured: hyperdriveConfigured,
                 hyperdrive_edit_available: Boolean(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
+                hyperdrive_inspect_available: Boolean(env.CLOUDFLARE_ACCOUNT_ID && env.CLOUDFLARE_API_TOKEN),
                 hyperdrive_reachable: hyperdriveReachable,
                 message: live
                     ? "The Worker is live on its configured Hyperdrive Postgres connection."
@@ -350,6 +422,7 @@ async function systemRoute(client, request, parts, url, env, body = {}, adapter)
                 };
             }
         }
+        if (request.method === "POST" && parts[3] === "inspect") return inspectHyperdriveConfig(body, env);
         if (request.method === "PUT" && parts[3] === "update") return updateHyperdriveConfig(body, env);
         if (request.method === "POST") return {
             error: "Database settings cannot be changed from the Worker admin page.",

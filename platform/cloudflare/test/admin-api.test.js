@@ -360,6 +360,68 @@ test("labels the Worker provider as configuration, not independently verified id
     assert.match(body.provider_source, /not independently exposed/);
 });
 
+test("inspects safe Hyperdrive origin metadata without returning its password", async () => {
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async () => ({ rows: [{ allowed: true }] }),
+        })
+    };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+        assert.match(url, /accounts\/acct\/hyperdrive\/configs\/config/);
+        assert.equal(init.headers.Authorization, "Bearer read-token");
+        return new Response(JSON.stringify({
+            success: true,
+            result: {
+                id: "config",
+                name: "Production database",
+                origin: {
+                    host: "db.example.test",
+                    port: 6543,
+                    database: "calendar",
+                    user: "calendar_user",
+                    password: "must-not-return",
+                    scheme: "postgres",
+                },
+            },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    try {
+        const result = await handleAdminApi(
+            new Request("https://calendar.test/admin/system/database-config/inspect", {
+                method: "POST",
+                body: JSON.stringify({
+                    cloudflare_account_id: "acct",
+                    hyperdrive_config_id: "config",
+                    cloudflare_api_token: "read-token",
+                }),
+                headers: { "Content-Type": "application/json" },
+            }),
+            {},
+            adapter,
+            1,
+        );
+        assert.equal(result.status, 200);
+        const body = await result.json();
+        assert.deepEqual(body.database_details, {
+            configuration_id: "config",
+            configuration_name: "Production database",
+            host: "db.example.test",
+            port: 6543,
+            database: "calendar",
+            username: "calendar_user",
+            scheme: "postgres",
+            ssl_mode: "managed by Hyperdrive",
+            password_status: "Write-only in Cloudflare; value is not returned",
+            source: "Cloudflare Hyperdrive configuration API",
+        });
+        assert.equal(body.cloudflare_token_accepted, true);
+        assert.doesNotMatch(JSON.stringify(body), /must-not-return|read-token/);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("explains the required Cloudflare credentials for Hyperdrive editing", async () => {
     const adapter = {
         runWithIdentity: async (_userId, operation) => operation({
@@ -411,6 +473,9 @@ test("uses request-scoped Cloudflare credentials without echoing secrets", async
         assert.equal(captured.body.origin.host, "ep-example.neon.tech");
         const responseBody = await result.json();
         assert.equal(responseBody.cloudflare_token_accepted, true);
+        assert.equal(responseBody.database_details.host, "ep-example.neon.tech");
+        assert.equal(responseBody.database_details.username, "neon-user");
+        assert.doesNotMatch(JSON.stringify(responseBody.database_details), /db-pass/);
         assert.doesNotMatch(JSON.stringify(responseBody), /cf-token|db-pass/);
     } finally {
         globalThis.fetch = originalFetch;

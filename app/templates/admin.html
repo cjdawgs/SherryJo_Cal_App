@@ -754,6 +754,18 @@
               <span id="hyperdriveLiveBadgeText">Checking live database connection...</span>
             </div>
             <p id="databaseProviderEvidence" class="database-field-help" aria-live="polite">Checking the configured database host and provider evidence...</p>
+            <section class="database-connection-card" aria-labelledby="databaseConnectionHeading">
+              <h4 id="databaseConnectionHeading">Connection details (secrets hidden)</h4>
+              <dl id="databaseConnectionDetails" class="database-connection-details" aria-live="polite"></dl>
+            </section>
+            <p id="databaseManagedCredentialsHelp" class="database-field-help" hidden>
+              Render controls the production <code>DATABASE_URL</code>. Replace it in the
+              <a href="https://dashboard.render.com/" target="_blank" rel="noopener">Render Dashboard</a>
+              service environment settings, then restart or redeploy the service. This page never reads back stored secrets.
+            </p>
+            <p id="databaseHyperdriveCredentialsHelp" class="database-field-help" hidden>
+              Hyperdrive's origin password is write-only and is never displayed. To inspect the current host, database, and username, use a one-time Cloudflare API token with Hyperdrive Read permission. To replace credentials, use a token with Hyperdrive Write permission; the token is not stored.
+            </p>
             <div id="hyperdriveSetupBanner" class="hyperdrive-setup-banner" hidden>
               <strong>Cloudflare Hyperdrive is not live</strong>
               <p id="hyperdriveSetupMessage">The Worker is not connected to the intended database yet.</p>
@@ -812,9 +824,10 @@
               <input id="hyperdriveConfigIdInput" type="text" placeholder="Hyperdrive config ID" aria-label="Hyperdrive config ID" autocomplete="off" style="flex:1;min-width:0;">
             </div>
             <div class="git-confirm-row" style="margin-top:10px;">
-              <input id="cloudflareApiTokenInput" type="password" placeholder="Cloudflare API token for this update only" aria-label="Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
+              <input id="cloudflareApiTokenInput" type="password" placeholder="One-time Cloudflare API token (not stored)" aria-label="One-time Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
             </div>
             <div class="deployment-sync-actions" style="margin-top:12px;">
+              <button id="databaseInspectBtn" class="ghost-btn" type="button" hidden>Inspect Hyperdrive</button>
               <button id="databaseConnectBtn" class="ghost-btn" type="button">Connect selected provider</button>
               <button id="databaseTestBtn" class="ghost-btn" type="button">Test database connection</button>
               <button id="databaseProfileSaveBtn" class="ghost-btn" type="button" disabled>Save Profile Only</button>

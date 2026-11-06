@@ -74,6 +74,13 @@ def test_database_config_hides_saved_connection_secrets(client, monkeypatch):
     assert "database_url" not in body["profiles"][0]
     assert "database_password" not in body["profiles"][0]
     assert body["profiles"][0]["has_saved_credentials"] is True
+    assert body["summary"]["host"] == "db.example.test"
+    assert body["summary"]["port"] == 5432
+    assert body["summary"]["username"] == "saved_user"
+    assert body["summary"]["ssl_mode"] == "require"
+    assert body["summary"]["credentials_configured"] is True
+    assert "password" not in body["summary"]
+    assert "top-secret-password" not in json.dumps(body["summary"])
     assert body["live_database_confirmed"] is True
     assert body["is_connected_to_postgres"] is True
     assert body["active_database_copy_source"]["key"] == "__active_database__"
@@ -102,6 +109,8 @@ def test_connection_hostname_overrides_stale_provider_label(client, monkeypatch)
     assert body["provider"] == "supabase"
     assert body["provider_source"] == "connection hostname"
     assert body["summary"]["host"] == "project.supabase.co"
+    assert body["summary"]["port"] == 5432
+    assert body["summary"]["ssl_mode"] == "not specified"
     assert body["live_database_confirmed"] is True
 
 
