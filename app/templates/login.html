@@ -145,6 +145,19 @@
       <div id="adminCodeWrap" style="display:none;">
         <input id="masterAdminCode" type="password" placeholder="Master Admin Code" autocomplete="off"><br>
         <div class="hint">This shared code is only for enrolling a new Admin. It is not an account login password. An existing Admin can set or rotate it on the Admin page.</div>
+        <details id="adminRecoveryForm">
+          <summary>Lost the Master Admin Code? Reset it</summary>
+          <p class="hint">This resets only the shared code used to enroll Admin accounts; it does not change any user's login password. It requires the separate ADMIN_RECOVERY_CODE secret to be configured in both Render and the Cloudflare Worker.</p>
+          <form id="masterAdminRecoveryForm">
+            <input id="adminRecoveryCode" type="password" placeholder="Master Admin Recovery Code" autocomplete="off" required>
+            <input id="newMasterAdminCode" type="password" placeholder="New Master Admin Code (at least 16 characters)" minlength="16" maxlength="256" autocomplete="new-password" required>
+            <input id="newMasterAdminCodeConfirm" type="password" placeholder="Confirm new Master Admin Code" minlength="16" maxlength="256" autocomplete="new-password" required>
+            <div class="button-row">
+              <button id="adminRecoverySubmit" class="primary-btn" type="submit">Reset Master Admin Code</button>
+            </div>
+            <div id="adminRecoveryStatus" class="small-text" role="status" aria-live="polite"></div>
+          </form>
+        </details>
       </div>
 
       <div class="button-row">
@@ -154,19 +167,6 @@
       <div id="registerStatus" class="small-text"></div>
     </div>
 
-    <details id="adminRecoveryForm">
-      <summary>Lost the Master Admin Code? Reset it</summary>
-      <p class="hint">This resets only the shared code used to enroll Admin accounts; it does not change any user's login password. It requires the separate ADMIN_RECOVERY_CODE secret to be configured in both Render and the Cloudflare Worker.</p>
-      <form id="masterAdminRecoveryForm">
-        <input id="adminRecoveryCode" type="password" placeholder="Master Admin Recovery Code" autocomplete="off" required>
-        <input id="newMasterAdminCode" type="password" placeholder="New Master Admin Code (at least 16 characters)" minlength="16" maxlength="256" autocomplete="new-password" required>
-        <input id="newMasterAdminCodeConfirm" type="password" placeholder="Confirm new Master Admin Code" minlength="16" maxlength="256" autocomplete="new-password" required>
-        <div class="button-row">
-          <button id="adminRecoverySubmit" class="primary-btn" type="submit">Reset Master Admin Code</button>
-        </div>
-        <div id="adminRecoveryStatus" class="small-text" role="status" aria-live="polite"></div>
-      </form>
-    </details>
   </div>
 
   <script type="module">

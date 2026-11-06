@@ -36,8 +36,9 @@ shared PostgreSQL table; the raw code is never returned by an API.
 3. If an Admin can sign in, open **Admin → Master Admin Code**, enter a new
    code of 16–256 characters, and choose **Set / Rotate Master Admin Code**.
    The change is immediately shared by Render and Cloudflare.
-4. If every Admin is locked out, open **Login → Lost the Master Admin Code?
-   Reset it**, enter `ADMIN_RECOVERY_CODE`, then enter and confirm the new
+4. If every Admin is locked out, open **Login → Create Account**, select
+   **Admin** for the account type, then expand **Lost the Master Admin Code?
+   Reset it**. Enter `ADMIN_RECOVERY_CODE`, then enter and confirm the new
    Master Admin Code. This resets only Admin enrollment; it does not change any
    existing account's login password.
 5. Use the new Master Admin Code to enroll a replacement Admin account. After

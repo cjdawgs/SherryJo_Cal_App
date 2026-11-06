@@ -187,13 +187,39 @@ def test_admin_recovery_fails_closed_when_recovery_secret_is_unset(client, monke
     assert response.status_code == 503
 
 
-def test_master_admin_code_recovery_instructions_are_visible_on_login_page(client):
+def test_master_admin_code_recovery_is_nested_in_admin_registration(client):
+    from html.parser import HTMLParser
+
+    class RecoveryLocationParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.stack = []
+            self.recovery_ancestors = None
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            if attributes.get("id") == "adminRecoveryForm":
+                self.recovery_ancestors = list(self.stack)
+            if tag not in {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}:
+                self.stack.append((tag, attributes))
+
+        def handle_endtag(self, tag):
+            for index in range(len(self.stack) - 1, -1, -1):
+                if self.stack[index][0] == tag:
+                    del self.stack[index:]
+                    break
+
     response = client.get("/login")
 
     assert response.status_code == 200
     assert "Lost the Master Admin Code?" in response.text
     assert "ADMIN_RECOVERY_CODE" in response.text
     assert "/auth/admin-recovery/master-code" in response.text
+    parser = RecoveryLocationParser()
+    parser.feed(response.text)
+    ancestors = {attrs.get("id"): attrs for _, attrs in parser.recovery_ancestors}
+    assert "display:none" in ancestors["registerForm"]["style"].replace(" ", "")
+    assert "display:none" in ancestors["adminCodeWrap"]["style"].replace(" ", "")
 
 
 def test_runtime_token_encryption_key_endpoint_rejects_staff(client, auth_headers):
