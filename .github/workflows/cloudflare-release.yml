@@ -1,9 +1,7 @@
 name: Cloudflare Release
 
-# Fully automated release pipeline: every push to main runs verify -> deploy
-# canary -> canary smoke tests -> auto-promote to the production root Worker
-# -> production smoke tests. There is no manual approval step; a failing
-# job at any stage blocks everything after it (automated tests are the gate).
+# Every push to main verifies and migrates; Worker release jobs can be paused
+# with the CLOUDFLARE_RELEASE_PAUSED repository Actions variable.
 # workflow_dispatch remains available for an on-demand re-run against a
 # specific set of URLs (for example, re-checking after a monitor alert).
 on:
@@ -151,7 +149,20 @@ jobs:
                   echo "::error::ALEMBIC_DATABASE_URL is required to apply database migrations before deployment."
                   exit 1
 
+    release-paused:
+        if: ${{ vars.CLOUDFLARE_RELEASE_PAUSED == 'true' }}
+        needs:
+            - verify
+            - migrate-supabase
+        runs-on: ubuntu-latest
+        steps:
+            - name: Report paused Cloudflare Worker release
+              run: |
+                  echo "Cloudflare Worker deploy, promotion, and smoke jobs are paused by CLOUDFLARE_RELEASE_PAUSED."
+                  echo "Verification and database migrations still ran. Live Worker traffic and Hyperdrive queries are not affected."
+
     deploy-canary:
+        if: ${{ vars.CLOUDFLARE_RELEASE_PAUSED != 'true' }}
         needs:
             - verify
             - migrate-supabase

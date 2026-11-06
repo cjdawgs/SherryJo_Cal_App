@@ -59,6 +59,7 @@ DEFAULT_CLOUDFLARE_DASHBOARD_URL = "https://dash.cloudflare.com/"
 RENDER_DEPLOY_HOOK_ENV = "RENDER_DEPLOY_HOOK_URL"
 CLOUDFLARE_DEPLOY_HOOK_ENV = "CLOUDFLARE_DEPLOY_HOOK_URL"
 GIT_COMMIT_SCRIPT_ENV = "ADMIN_GIT_COMMIT_SCRIPT"
+CLOUDFLARE_RELEASE_PAUSE_VARIABLE = "CLOUDFLARE_RELEASE_PAUSED"
 
 
 class RuntimeTokenEncryptionKeyUpdate(BaseModel):
@@ -67,6 +68,10 @@ class RuntimeTokenEncryptionKeyUpdate(BaseModel):
 
 class GitCommitPushRequest(BaseModel):
     password: str
+
+
+class CloudflareReleasePauseUpdate(BaseModel):
+    paused: bool
 
 
 class TVRefreshRequest(BaseModel):
@@ -797,6 +802,112 @@ def _fetch_github_latest_commit_probe(repo: str, branch: str) -> dict:
     except Exception as exc:
         logger.warning("Deployment sync GitHub lookup failed: %s", exc)
         return {"commit": None, "error": f"Unexpected GitHub verification error: {exc}", "error_code": "unexpected_error", "http_status": None}
+
+
+def _github_actions_variable_request(repo: str, method: str, value: str | None = None) -> tuple[int, dict]:
+    token = str(os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=503,
+            detail="Configure GITHUB_TOKEN in Render with repository Actions variables read/write access.",
+        )
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+        raise HTTPException(status_code=400, detail="GITHUB_REPOSITORY must use the owner/repository format.")
+
+    variable_path = "actions/variables" if method == "POST" else f"actions/variables/{CLOUDFLARE_RELEASE_PAUSE_VARIABLE}"
+    url = f"https://api.github.com/repos/{repo}/{variable_path}"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "SherryJo-Cal-App",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    data = json.dumps({
+        "name": CLOUDFLARE_RELEASE_PAUSE_VARIABLE,
+        "value": value,
+    }).encode("utf-8") if method in {"POST", "PATCH"} and value is not None else None
+    request = UrlRequest(url, data=data, headers=headers, method=method)
+    if data is not None:
+        request.add_header("Content-Type", "application/json")
+
+    try:
+        with urlopen(request, timeout=10) as response:
+            body = response.read().decode("utf-8", errors="ignore")
+            status_code = getattr(response, "status", None) or response.getcode() or 200
+        payload = json.loads(body) if body else {}
+        return int(status_code), payload if isinstance(payload, dict) else {}
+    except HTTPError as exc:
+        if exc.code == 404 and method == "GET":
+            return 404, {}
+        if exc.code == 403:
+            raise HTTPException(
+                status_code=403,
+                detail="GitHub denied access. Give the Render GITHUB_TOKEN Actions variables read/write access to this repository.",
+            ) from exc
+        logger.warning("GitHub Actions variable request failed with HTTP %s.", exc.code)
+        raise HTTPException(
+            status_code=502,
+            detail=f"GitHub Actions variable request failed with HTTP {exc.code}.",
+        ) from exc
+    except URLError as exc:
+        logger.warning("GitHub Actions variable request failed: %s", exc.reason)
+        raise HTTPException(status_code=502, detail="Could not reach the GitHub API.") from exc
+    except TimeoutError as exc:
+        logger.warning("GitHub Actions variable request timed out.")
+        raise HTTPException(status_code=504, detail="Timed out contacting the GitHub API.") from exc
+    except (ValueError, json.JSONDecodeError) as exc:
+        logger.warning("GitHub Actions variable response could not be parsed.")
+        raise HTTPException(status_code=502, detail="GitHub returned an invalid Actions variable response.") from exc
+
+
+def _cloudflare_release_pause_state() -> dict:
+    if not str(os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN") or "").strip():
+        return {
+            "configured": False,
+            "paused": None,
+            "updated_at": None,
+            "repository": _github_repo_settings()[0],
+        }
+
+    repo, _ = _github_repo_settings()
+    status_code, payload = _github_actions_variable_request(repo, "GET")
+    return {
+        "configured": True,
+        "paused": str(payload.get("value", "")).lower() == "true" if status_code != 404 else False,
+        "updated_at": payload.get("updated_at"),
+        "repository": repo,
+    }
+
+
+def _set_cloudflare_release_pause(paused: bool) -> dict:
+    repo, _ = _github_repo_settings()
+    status_code, payload = _github_actions_variable_request(repo, "GET")
+    current_paused = str(payload.get("value", "")).lower() == "true" if status_code != 404 else False
+    if current_paused == paused:
+        return {
+            "configured": True,
+            "paused": paused,
+            "updated_at": payload.get("updated_at"),
+            "repository": repo,
+            "changed": False,
+        }
+
+    value = "true" if paused else "false"
+    if status_code == 404:
+        _github_actions_variable_request(repo, "POST", value)
+    else:
+        _github_actions_variable_request(repo, "PATCH", value)
+
+    refreshed_status, refreshed_payload = _github_actions_variable_request(repo, "GET")
+    if refreshed_status == 404:
+        raise HTTPException(status_code=502, detail="GitHub did not persist the release pause setting.")
+    return {
+        "configured": True,
+        "paused": str(refreshed_payload.get("value", "")).lower() == "true",
+        "updated_at": refreshed_payload.get("updated_at"),
+        "repository": repo,
+        "changed": True,
+    }
 
 
 def _render_dashboard_url() -> str:
@@ -1924,6 +2035,21 @@ def admin_trigger_cloudflare_redeploy(
     admin_user: User = Depends(require_admin),
 ):
     return _trigger_cloudflare_deploy_hook()
+
+
+@router.get("/system/cloudflare/release-control")
+def admin_cloudflare_release_control(
+    admin_user: User = Depends(require_admin),
+):
+    return _cloudflare_release_pause_state()
+
+
+@router.post("/system/cloudflare/release-control")
+def admin_update_cloudflare_release_control(
+    payload: CloudflareReleasePauseUpdate,
+    admin_user: User = Depends(require_admin),
+):
+    return _set_cloudflare_release_pause(payload.paused)
 
 
 @router.post("/system/github/commit-push")

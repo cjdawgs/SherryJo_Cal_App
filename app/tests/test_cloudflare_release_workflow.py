@@ -78,6 +78,7 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
     assert {step["uses"] for step in setup_node_steps} == {"actions/setup-node@v7"}
 
     assert jobs["verify"]["services"]["postgres"]["image"] == "postgres:16"
+    assert "if" not in jobs["verify"]
     assert jobs["verify"]["env"]["TEST_DATABASE_URL"].startswith("postgresql+psycopg2://")
     drift_step = next(
         step for step in jobs["verify"]["steps"]
@@ -91,6 +92,11 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
     assert python_suite["env"]["TEST_MIGRATION_DATABASE_URL"].endswith("/sherryjo_migration_test")
     assert set(jobs["deploy-canary"]["needs"]) == {"verify", "migrate-supabase"}
     assert jobs["migrate-supabase"]["needs"] == "verify"
+    assert "if" not in jobs["migrate-supabase"]
+    assert jobs["release-paused"]["if"] == "${{ vars.CLOUDFLARE_RELEASE_PAUSED == 'true' }}"
+    assert set(jobs["release-paused"]["needs"]) == {"verify", "migrate-supabase"}
+    assert "CLOUDFLARE_RELEASE_PAUSED" in jobs["release-paused"]["steps"][0]["run"]
+    assert jobs["deploy-canary"]["if"] == "${{ vars.CLOUDFLARE_RELEASE_PAUSED != 'true' }}"
     assert jobs["migrate-supabase"]["env"]["ALEMBIC_DATABASE_URL"] == "${{ secrets.ALEMBIC_DATABASE_URL }}"
     migration_step = next(
         step for step in jobs["migrate-supabase"]["steps"]

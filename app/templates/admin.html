@@ -891,6 +891,30 @@
             </div>
           </div>
         </div>
+        <div id="cloudflareReleaseControl" class="cloudflare-release-control" hidden>
+          <div class="cloudflare-release-header">
+            <div>
+              <h3>Cloudflare Worker Release Control</h3>
+              <p>Temporarily gates future Worker deploy, promotion, and Worker smoke jobs in GitHub Actions.</p>
+            </div>
+            <span id="cloudflareReleaseStatus" class="cloudflare-release-status is-unknown" role="status" aria-live="polite">UNKNOWN: Checking pause state...</span>
+          </div>
+          <div class="cloudflare-release-notice" role="note">
+            <strong>Important:</strong> Pausing only gates future Worker release runs. It does not cancel an already-running Actions workflow, stop or change the live Worker, reduce user traffic, or reduce Hyperdrive queries. Verification and direct database migrations continue to run.
+          </div>
+          <p class="cloudflare-release-history">
+            Previously observed failure:
+            <a href="https://github.com/cjdawgs/SherryJo_Cal_App/actions/runs/42254679797" target="_blank" rel="noopener noreferrer">canary smoke run 42254679797</a>
+            rejected different Render/Worker JavaScript bodies. That parity check was corrected in
+            <a href="https://github.com/cjdawgs/SherryJo_Cal_App/commit/2ed65d8" target="_blank" rel="noopener noreferrer">2ed65d8</a>.
+            This pause is a release safeguard, not a fix for the Hyperdrive query quota.
+          </p>
+          <p id="cloudflareReleaseMessage" class="cloudflare-release-message">Checking GitHub Actions variable...</p>
+          <div class="cloudflare-release-actions">
+            <button id="cloudflareReleasePauseBtn" class="btn-danger" type="button" disabled>Pause Worker Releases</button>
+            <button id="cloudflareReleaseResumeBtn" class="ghost-btn" type="button" disabled>Resume Worker Releases</button>
+          </div>
+        </div>
       </details>
     </section>
 

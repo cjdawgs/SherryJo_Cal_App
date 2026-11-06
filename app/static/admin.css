@@ -75,6 +75,80 @@ body {
   margin-bottom: 10px;
 }
 
+.cloudflare-release-control {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid #d5dee8;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.cloudflare-release-header,
+.cloudflare-release-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cloudflare-release-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.cloudflare-release-header p,
+.cloudflare-release-message {
+  margin: 6px 0;
+  color: var(--muted);
+}
+
+.cloudflare-release-history {
+  margin: 10px 0;
+  color: #475569;
+  font-size: 13px;
+}
+
+.cloudflare-release-history a {
+  color: #0e4e78;
+  font-weight: 700;
+}
+
+.cloudflare-release-status {
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cloudflare-release-status.is-active {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.cloudflare-release-status.is-paused {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.cloudflare-release-status.is-unknown {
+  color: #475569;
+  background: #e2e8f0;
+}
+
+.cloudflare-release-notice {
+  margin-top: 10px;
+  padding: 10px;
+  border-left: 4px solid #d97706;
+  background: #fffbeb;
+  color: #713f12;
+}
+
+.cloudflare-release-actions {
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
 .overview-meta-row {
   display: flex;
   justify-content: space-between;

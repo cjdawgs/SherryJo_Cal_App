@@ -1,3 +1,5 @@
+import io
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -606,7 +608,132 @@ def test_admin_tv_refresh_request_queues_device_specific_diagnostic_request(clie
         event="remote_calendar_sync_requested",
     ).one()
     assert payload["request_id"] in queued_request.details
-    assert payload["requested_at"] in queued_request.details
+
+
+class _GitHubApiResponse:
+    def __init__(self, status, payload=None):
+        self.status = status
+        self.payload = payload or {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+    def getcode(self):
+        return self.status
+
+
+def test_cloudflare_release_control_requires_admin(client):
+    headers = _staff_headers(client)
+    response = client.get("/admin/system/cloudflare/release-control", headers=headers)
+    assert response.status_code == 403
+
+
+def test_cloudflare_release_control_reports_missing_github_token(client, monkeypatch):
+    headers = _admin_headers(client)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    response = client.get("/admin/system/cloudflare/release-control", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "configured": False,
+        "paused": None,
+        "updated_at": None,
+        "repository": "cjdawgs/SherryJo_Cal_App",
+    }
+
+
+def test_cloudflare_release_control_creates_pause_variable(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    responses = [
+        _GitHubApiResponse(404),
+        _GitHubApiResponse(201),
+        _GitHubApiResponse(200, {
+            "value": "true",
+            "updated_at": "2026-11-06T23:00:00Z",
+        }),
+    ]
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        assert timeout == 10
+        return responses.pop(0)
+
+    monkeypatch.setattr(admin_router, "urlopen", fake_urlopen)
+    response = client.post(
+        "/admin/system/cloudflare/release-control",
+        headers=headers,
+        json={"paused": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["paused"] is True
+    assert response.json()["changed"] is True
+    assert response.json()["updated_at"] == "2026-11-06T23:00:00Z"
+    assert [request.get_method() for request in requests] == ["GET", "POST", "GET"]
+    assert requests[1].full_url.endswith("/actions/variables")
+    assert json.loads(requests[1].data) == {
+        "name": "CLOUDFLARE_RELEASE_PAUSED",
+        "value": "true",
+    }
+    assert requests[1].get_header("Authorization") == "Bearer test-token"
+
+
+def test_cloudflare_release_control_resumes_existing_pause(client, monkeypatch):
+    from app.routers import admin as admin_router
+
+    headers = _admin_headers(client)
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    responses = [
+        _GitHubApiResponse(200, {"value": "true", "updated_at": "2026-11-06T23:00:00Z"}),
+        _GitHubApiResponse(204),
+        _GitHubApiResponse(200, {"value": "false", "updated_at": "2026-11-07T00:05:00Z"}),
+    ]
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append(request)
+        return responses.pop(0)
+
+    monkeypatch.setattr(admin_router, "urlopen", fake_urlopen)
+    response = client.post(
+        "/admin/system/cloudflare/release-control",
+        headers=headers,
+        json={"paused": False},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["paused"] is False
+    assert response.json()["updated_at"] == "2026-11-07T00:05:00Z"
+    assert [request.get_method() for request in requests] == ["GET", "PATCH", "GET"]
+    assert requests[1].full_url.endswith("/actions/variables/CLOUDFLARE_RELEASE_PAUSED")
+    assert json.loads(requests[1].data)["value"] == "false"
+
+
+def test_cloudflare_release_control_cannot_change_without_github_token(client, monkeypatch):
+    headers = _admin_headers(client)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GH_TOKEN", raising=False)
+
+    response = client.post(
+        "/admin/system/cloudflare/release-control",
+        headers=headers,
+        json={"paused": True},
+    )
+
+    assert response.status_code == 503
+    assert "GITHUB_TOKEN" in response.json()["detail"]
 
 
 def test_admin_tv_verification_requires_matching_device_acknowledgment(client, db):

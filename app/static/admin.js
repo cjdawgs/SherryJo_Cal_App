@@ -11,6 +11,7 @@ const state = {
   failureHistory: null,
   tokenKeyRepairStatus: null,
   deploymentSyncStatus: null,
+  cloudflareReleaseControl: null,
   tableQuery: null,
   purgeMeta: {
     users: {},
@@ -79,6 +80,11 @@ const el = {
   deploymentSyncPlatform: document.getElementById("deploymentSyncPlatform"),
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
+  cloudflareReleaseControl: document.getElementById("cloudflareReleaseControl"),
+  cloudflareReleaseStatus: document.getElementById("cloudflareReleaseStatus"),
+  cloudflareReleaseMessage: document.getElementById("cloudflareReleaseMessage"),
+  cloudflareReleasePauseBtn: document.getElementById("cloudflareReleasePauseBtn"),
+  cloudflareReleaseResumeBtn: document.getElementById("cloudflareReleaseResumeBtn"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
   databaseConfigPanel: document.getElementById("databaseConfigPanel"),
   databaseConnectionDetails: document.getElementById("databaseConnectionDetails"),
@@ -405,6 +411,7 @@ function initAdminWindowControls() {
 }
 
 initAdminWindowControls();
+let cloudflareReleaseReminderTimer = null;
 
 function setStatus(message, isError = false) {
   [el.controlStatusLine, el.statusLine].forEach((node) => {
@@ -438,6 +445,11 @@ function renderSystemOverview(data) {
   const db = data?.database || {};
   const security = data?.security || {};
   const deployment = data?.deployment || {};
+  if (el.cloudflareReleaseControl) {
+    const showReleaseControl = deployment.active_platform === "render";
+    el.cloudflareReleaseControl.hidden = !showReleaseControl;
+    if (showReleaseControl) loadCloudflareReleaseControl();
+  }
   const tables = Array.isArray(data?.tables) ? data.tables : [];
   const userOps = Array.isArray(data?.admin_operations?.users) ? data.admin_operations.users : [];
   const providerOps = Array.isArray(data?.admin_operations?.providers) ? data.admin_operations.providers : [];
@@ -898,6 +910,113 @@ async function loadSystemOverview() {
     workerStatus = await workerStatusRes.json().catch(() => null);
   }
   renderSystemOverview(applyWorkerDeploymentStatus(data, workerStatus));
+}
+
+function renderCloudflareReleaseControl(data) {
+  state.cloudflareReleaseControl = data;
+  const configured = Boolean(data?.configured);
+  const paused = data?.paused === true;
+  const pausedAt = data?.updated_at ? new Date(data.updated_at) : null;
+
+  if (el.cloudflareReleaseStatus) {
+    el.cloudflareReleaseStatus.textContent = !configured
+      ? "UNKNOWN: GitHub control is not configured"
+      : (paused ? "PAUSED: Worker releases are gated" : "ACTIVE: Worker releases are enabled");
+    el.cloudflareReleaseStatus.classList.toggle("is-paused", configured && paused);
+    el.cloudflareReleaseStatus.classList.toggle("is-active", configured && !paused);
+    el.cloudflareReleaseStatus.classList.toggle("is-unknown", !configured);
+  }
+
+  if (el.cloudflareReleaseMessage) {
+    if (!configured) {
+      el.cloudflareReleaseMessage.textContent =
+        "Add GITHUB_TOKEN (or GH_TOKEN) to the Render service environment with repository Actions variables read/write access. Then refresh this Admin page. Never paste the token here.";
+    } else if (paused) {
+      const validPauseDate = pausedAt && !Number.isNaN(pausedAt.getTime());
+      const resetAt = validPauseDate
+        ? new Date(Date.UTC(pausedAt.getUTCFullYear(), pausedAt.getUTCMonth(), pausedAt.getUTCDate() + 1))
+        : null;
+      const resetPassed = resetAt && Date.now() >= resetAt.getTime();
+      if (resetPassed) {
+        el.cloudflareReleaseMessage.textContent =
+          `The pause has crossed a daily Hyperdrive reset (${resetAt.toLocaleString()} local / 00:00 UTC). Reminder: click Resume after confirming the Cloudflare quota reset. This pause does not expire automatically.`;
+      } else if (resetAt) {
+        el.cloudflareReleaseMessage.textContent =
+          `Paused ${pausedAt.toLocaleString()}. Keep releases paused through the next daily reset at ${resetAt.toLocaleString()} local / 00:00 UTC, then click Resume. This pause does not expire automatically.`;
+      } else {
+        el.cloudflareReleaseMessage.textContent =
+          "Worker releases are paused. After the next daily Hyperdrive reset at 00:00 UTC, confirm the quota reset and click Resume. This pause does not expire automatically.";
+      }
+    } else {
+      el.cloudflareReleaseMessage.textContent =
+        `New Worker deployments, promotions, and Worker smoke jobs are enabled for ${data?.repository || "the repository"}. Verification and database migrations run regardless of the pause setting.`;
+    }
+  }
+
+  if (el.cloudflareReleasePauseBtn) {
+    el.cloudflareReleasePauseBtn.disabled = !configured || paused;
+  }
+  if (el.cloudflareReleaseResumeBtn) {
+    el.cloudflareReleaseResumeBtn.disabled = !configured || !paused;
+  }
+
+  if (paused && !cloudflareReleaseReminderTimer) {
+    cloudflareReleaseReminderTimer = window.setInterval(() => {
+      if (state.cloudflareReleaseControl?.paused) {
+        renderCloudflareReleaseControl(state.cloudflareReleaseControl);
+      }
+    }, 60_000);
+  }
+}
+
+async function loadCloudflareReleaseControl() {
+  const res = await apiRequest("/admin/system/cloudflare/release-control", { method: "GET" });
+  if (!res) {
+    renderCloudflareReleaseControl({ configured: false });
+    if (el.cloudflareReleaseMessage) {
+      el.cloudflareReleaseMessage.textContent = "Unable to load the Cloudflare release pause state. Refresh the Admin page and check the Render logs if the problem persists.";
+    }
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) return;
+  if (!res.ok) {
+    renderCloudflareReleaseControl({ configured: false });
+    if (el.cloudflareReleaseMessage) {
+      el.cloudflareReleaseMessage.textContent = data.detail || "Unable to load the Cloudflare release pause state.";
+    }
+    return;
+  }
+  renderCloudflareReleaseControl(data);
+}
+
+async function updateCloudflareReleaseControl(paused) {
+  [el.cloudflareReleasePauseBtn, el.cloudflareReleaseResumeBtn].forEach((button) => {
+    if (button) button.disabled = true;
+  });
+  const res = await apiRequest("/admin/system/cloudflare/release-control", {
+    method: "POST",
+    body: JSON.stringify({ paused }),
+  });
+  if (!res) {
+    setStatus("Unable to update the Cloudflare release pause state.", true);
+    await loadCloudflareReleaseControl();
+    return;
+  }
+
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) return;
+  if (!res.ok) {
+    setStatus(data.detail || "Unable to update the Cloudflare release pause state.", true);
+    await loadCloudflareReleaseControl();
+    return;
+  }
+
+  renderCloudflareReleaseControl(data);
+  setStatus(paused
+    ? "Cloudflare Worker release jobs are paused. Live traffic and Hyperdrive queries are unchanged."
+    : "Cloudflare Worker release jobs are resumed.");
 }
 
 function activeConfig() {
@@ -2058,6 +2177,8 @@ function bindEvents() {
   el.deploymentSyncGithubBtn?.addEventListener("click", openDeploymentGithub);
   el.deploymentSyncCompareBtn?.addEventListener("click", openDeploymentCompare);
   el.deploymentSyncResolveBtn?.addEventListener("click", resolveDeploymentSync);
+  el.cloudflareReleasePauseBtn?.addEventListener("click", () => updateCloudflareReleaseControl(true));
+  el.cloudflareReleaseResumeBtn?.addEventListener("click", () => updateCloudflareReleaseControl(false));
   el.gitCommitPushBtn?.addEventListener("click", launchGitCommitPush);
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
