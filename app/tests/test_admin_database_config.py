@@ -79,6 +79,7 @@ def test_database_config_hides_saved_connection_secrets(client, monkeypatch):
     assert body["summary"]["username"] == "saved_user"
     assert body["summary"]["ssl_mode"] == "require"
     assert body["summary"]["credentials_configured"] is True
+    assert body["summary"]["database"] == "appdb"
     assert "password" not in body["summary"]
     assert "top-secret-password" not in json.dumps(body["summary"])
     assert body["live_database_confirmed"] is True
@@ -86,6 +87,18 @@ def test_database_config_hides_saved_connection_secrets(client, monkeypatch):
     assert body["active_database_copy_source"]["key"] == "__active_database__"
     assert connection_url not in json.dumps(body["active_database_copy_source"])
     assert "active_database_source" not in body
+
+
+def test_admin_database_page_explains_external_runtime_changes(client):
+    response = client.get("/admin/ui")
+
+    assert response.status_code == 200
+    assert "Change the Render application database" in response.text
+    assert "Replace" in response.text and "DATABASE_URL" in response.text
+    assert "This Admin page cannot write Render's production environment variables." in response.text
+    assert "Change the Cloudflare Worker database (Hyperdrive)" in response.text
+    assert "HYPERDRIVE_RLS_NO_CACHE" in response.text
+    assert "Changing one does not change the other or copy database records." in response.text
 
 
 def test_connection_hostname_overrides_stale_provider_label(client, monkeypatch):

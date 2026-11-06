@@ -98,6 +98,46 @@ select.database-provider-live option {
   overflow-wrap: anywhere;
 }
 
+.database-change-guide {
+  background: #f0f9ff;
+  border: 1px solid #7dd3fc;
+  border-left: 4px solid #0284c7;
+  border-radius: 8px;
+  color: #0c4a6e;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 12px 0;
+  padding: 10px 12px;
+}
+
+.database-change-guide h3 {
+  margin: 0 0 6px;
+}
+
+.database-change-guide details {
+  border-top: 1px solid #bae6fd;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.database-change-guide summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.database-change-guide ol {
+  margin: 8px 0 8px 20px;
+  padding: 0;
+}
+
+.database-change-guide li {
+  margin: 4px 0;
+}
+
+.database-change-guide p {
+  margin: 8px 0 0;
+}
+
 .hyperdrive-setup-banner {
   background: #fff7ed;
   border: 1px solid #fdba74;

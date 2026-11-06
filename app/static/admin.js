@@ -81,8 +81,6 @@ const el = {
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
   databaseConnectionDetails: document.getElementById("databaseConnectionDetails"),
-  databaseManagedCredentialsHelp: document.getElementById("databaseManagedCredentialsHelp"),
-  databaseHyperdriveCredentialsHelp: document.getElementById("databaseHyperdriveCredentialsHelp"),
   hyperdriveLiveBadge: document.getElementById("hyperdriveLiveBadge"),
   hyperdriveLiveBadgeText: document.getElementById("hyperdriveLiveBadgeText"),
   hyperdriveSetupBanner: document.getElementById("hyperdriveSetupBanner"),
@@ -98,6 +96,7 @@ const el = {
   databasePasswordInput: document.getElementById("databasePasswordInput"),
   databaseSslModeSelect: document.getElementById("databaseSslModeSelect"),
   databaseUrlInput: document.getElementById("databaseUrlInput"),
+  databaseWorkerControls: document.getElementById("databaseWorkerControls"),
   cloudflareAccountIdInput: document.getElementById("cloudflareAccountIdInput"),
   hyperdriveConfigIdInput: document.getElementById("hyperdriveConfigIdInput"),
   cloudflareApiTokenInput: document.getElementById("cloudflareApiTokenInput"),
@@ -2217,6 +2216,7 @@ function renderDatabaseConnectionDetails(data) {
             ? "Not detected in the active connection settings"
             : "Not reported"
     )],
+    ["Metadata status", data.message || "Connection metadata loaded from active runtime configuration"],
     ["Live query", data.live_database_confirmed ? "Succeeded" : "Failed or not confirmed"],
   ];
   const fragment = document.createDocumentFragment();
@@ -2228,6 +2228,22 @@ function renderDatabaseConnectionDetails(data) {
     fragment.append(term, description);
   });
   el.databaseConnectionDetails.replaceChildren(fragment);
+}
+
+function populateActiveDatabaseFields(summary) {
+  const fields = {
+    databaseProviderTitleInput: summary.label,
+    databaseHostInput: summary.host,
+    databasePortInput: summary.port,
+    databaseNameInput: summary.database,
+    databaseUserInput: summary.username,
+    databaseSslModeSelect: summary.ssl_mode === "not specified" ? "require" : summary.ssl_mode,
+  };
+  Object.entries(fields).forEach(([key, value]) => {
+    if (el[key] && !el[key].value && value != null && value !== "") {
+      el[key].value = String(value);
+    }
+  });
 }
 
 async function connectPreferredDatabase() {
@@ -2258,6 +2274,7 @@ async function loadDatabaseConfig() {
       el.databaseConfigStatus.textContent = "Unable to load database settings right now.";
       el.databaseConfigStatus.classList.add("error");
     }
+    renderDatabaseConnectionDetails({ runtime: "managed-origin", message: "Database metadata could not be loaded from the Admin API." });
     return;
   }
 
@@ -2271,11 +2288,15 @@ async function loadDatabaseConfig() {
       el.databaseConfigStatus.textContent = data.detail || "Database settings could not be loaded.";
       el.databaseConfigStatus.classList.add("error");
     }
+    renderDatabaseConnectionDetails({ runtime: "managed-origin", message: data.detail || "Database metadata could not be loaded from the Admin API." });
     return;
   }
 
   window.__databaseConfigData = data;
   renderDatabaseConnectionDetails(data);
+  if (data.runtime === "managed-origin" && data.summary) {
+    populateActiveDatabaseFields(data.summary);
+  }
   const mode = (data.database_mode || "postgres").toLowerCase();
   window.__databaseProfiles = data.profiles || [];
   if (data.runtime === "cloudflare-worker" && data.provider_label) {
@@ -2323,11 +2344,8 @@ async function loadDatabaseConfig() {
   } else if (el.databaseInspectBtn) {
     el.databaseInspectBtn.hidden = true;
   }
-  if (el.databaseManagedCredentialsHelp) {
-    el.databaseManagedCredentialsHelp.hidden = !data.configuration_managed_by_host;
-  }
-  if (el.databaseHyperdriveCredentialsHelp) {
-    el.databaseHyperdriveCredentialsHelp.hidden = data.runtime !== "cloudflare-worker";
+  if (el.databaseWorkerControls) {
+    el.databaseWorkerControls.hidden = data.runtime !== "cloudflare-worker";
   }
   if (el.databaseModeSelect) el.databaseModeSelect.value = mode === "sqlite" ? "sqlite" : "postgres";
   updateDatabaseProfileSaveButtonState();

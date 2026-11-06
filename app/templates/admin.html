@@ -758,14 +758,32 @@
               <h4 id="databaseConnectionHeading">Connection details (secrets hidden)</h4>
               <dl id="databaseConnectionDetails" class="database-connection-details" aria-live="polite"></dl>
             </section>
-            <p id="databaseManagedCredentialsHelp" class="database-field-help" hidden>
-              Render controls the production <code>DATABASE_URL</code>. Replace it in the
-              <a href="https://dashboard.render.com/" target="_blank" rel="noopener">Render Dashboard</a>
-              service environment settings, then restart or redeploy the service. This page never reads back stored secrets.
-            </p>
-            <p id="databaseHyperdriveCredentialsHelp" class="database-field-help" hidden>
-              Hyperdrive's origin password is write-only and is never displayed. To inspect the current host, database, and username, use a one-time Cloudflare API token with Hyperdrive Read permission. To replace credentials, use a token with Hyperdrive Write permission; the token is not stored.
-            </p>
+            <section class="database-change-guide" aria-labelledby="databaseChangeGuideHeading">
+              <h3 id="databaseChangeGuideHeading">How to change the database source</h3>
+              <p><strong>Important:</strong> Render and Cloudflare Worker use separate database settings. Changing one does not change the other or copy database records. Confirm/migrate the destination data before switching either runtime.</p>
+              <details open>
+                <summary>Change the Render application database</summary>
+                <ol>
+                  <li>Use this page's Host, Port, Database, Username, and SSL fields to check a candidate with <strong>Test database connection</strong>. This only tests it; it does not switch Render.</li>
+                  <li>In the <a href="https://dashboard.render.com/" target="_blank" rel="noopener">Render Dashboard</a>, open service <code>sherryjo-cal-app</code>, then <strong>Environment</strong>.</li>
+                  <li>Replace <code>DATABASE_URL</code> with the destination provider's PostgreSQL connection string. Keep <code>REQUIRE_DB_KIND=postgres</code> and <code>DISABLE_SQLITE_FALLBACK=1</code>.</li>
+                  <li>Save the environment change and wait for Render to finish restarting/redeploying.</li>
+                  <li>Return here and confirm the displayed host/provider and live query. Then verify login and calendar data.</li>
+                </ol>
+                <p><strong>This Admin page cannot write Render's production environment variables.</strong> The <strong>Save &amp; Connect</strong> button is disabled for this reason. Never paste the full connection string or password into chat or a support ticket.</p>
+              </details>
+              <details>
+                <summary>Change the Cloudflare Worker database (Hyperdrive)</summary>
+                <ol>
+                  <li>Open the <a href="https://dash.cloudflare.com/" target="_blank" rel="noopener">Cloudflare Dashboard</a> and select the account and Worker serving the Cloudflare app.</li>
+                  <li>In the Worker settings, check that the database binding is <code>HYPERDRIVE_RLS_NO_CACHE</code>. Note the Hyperdrive configuration ID.</li>
+                  <li>Open <strong>Storage &amp; databases &gt; Hyperdrive</strong>, select that configuration, and update its PostgreSQL origin host, port, database, username, and password.</li>
+                  <li>If the origin changes to a different provider, update the Worker variable <code>HYPERDRIVE_PROVIDER</code> to <code>neon</code> or <code>supabase</code>. This variable is only a label, not proof of the origin.</li>
+                  <li>Save the Hyperdrive change. If you changed Worker bindings or variables, deploy the Worker too. Test the active Worker database from the Cloudflare-served Admin page.</li>
+                </ol>
+                <p>Hyperdrive passwords are write-only. This Render-hosted Admin page cannot inspect or edit the Cloudflare Worker binding; use Cloudflare directly. Do not put database passwords or API tokens into chat.</p>
+              </details>
+            </section>
             <div id="hyperdriveSetupBanner" class="hyperdrive-setup-banner" hidden>
               <strong>Cloudflare Hyperdrive is not live</strong>
               <p id="hyperdriveSetupMessage">The Worker is not connected to the intended database yet.</p>
@@ -819,12 +837,15 @@
             <div class="git-confirm-row" style="margin-top:10px;">
               <input id="databaseUrlInput" type="password" placeholder="Optional full PostgreSQL connection string; use this OR the fields above" aria-label="Full PostgreSQL connection string" autocomplete="new-password" style="flex:1;min-width:0;">
             </div>
-            <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
-              <input id="cloudflareAccountIdInput" type="text" placeholder="Cloudflare account ID" aria-label="Cloudflare account ID" autocomplete="off" style="flex:1;min-width:0;">
-              <input id="hyperdriveConfigIdInput" type="text" placeholder="Hyperdrive config ID" aria-label="Hyperdrive config ID" autocomplete="off" style="flex:1;min-width:0;">
-            </div>
-            <div class="git-confirm-row" style="margin-top:10px;">
-              <input id="cloudflareApiTokenInput" type="password" placeholder="One-time Cloudflare API token (not stored)" aria-label="One-time Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
+            <div id="databaseWorkerControls" hidden>
+              <p class="database-field-help">These controls apply only when this Admin page is served by the Cloudflare Worker. On Render, use the external-dashboard instructions above.</p>
+              <div class="git-confirm-row" style="margin-top:10px;gap:8px;">
+                <input id="cloudflareAccountIdInput" type="text" placeholder="Cloudflare account ID" aria-label="Cloudflare account ID" autocomplete="off" style="flex:1;min-width:0;">
+                <input id="hyperdriveConfigIdInput" type="text" placeholder="Hyperdrive config ID" aria-label="Hyperdrive config ID" autocomplete="off" style="flex:1;min-width:0;">
+              </div>
+              <div class="git-confirm-row" style="margin-top:10px;">
+                <input id="cloudflareApiTokenInput" type="password" placeholder="One-time Cloudflare API token (not stored)" aria-label="One-time Cloudflare API token" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" style="flex:1;min-width:0;">
+              </div>
             </div>
             <div class="deployment-sync-actions" style="margin-top:12px;">
               <button id="databaseInspectBtn" class="ghost-btn" type="button" hidden>Inspect Hyperdrive</button>
