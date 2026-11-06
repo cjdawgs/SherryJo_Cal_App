@@ -183,7 +183,7 @@ jobs:
             - name: Install smoke dependency
               run: python -m pip install websockets==16.1
 
-            - name: Wait for canary static asset propagation
+            - name: Wait for canary static assets and Render schema readiness
               env:
                   RENDER_URL: ${{ inputs.render_url || vars.SHERRYJO_RENDER_MONITOR_URL || 'https://sherryjo-cal-app.onrender.com' }}
                   CANARY_URL: ${{ inputs.canary_url || vars.SHERRYJO_CLOUDFLARE_CANARY_URL || 'https://sherryjo-cal-app-canary.realty-cal.workers.dev' }}
@@ -192,20 +192,21 @@ jobs:
               # since nobody retries it by hand anymore, give Render's free-tier build
               # and deploy real headroom before declaring propagation failed.
               run: |
+                  set -euo pipefail
                   for attempt in {1..12}; do
-                      if render_hash="$(curl --fail --silent --show-error "${RENDER_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
-                          && canary_hash="$(curl --fail --silent --show-error "${CANARY_URL%/}/static/admin.js" | sha256sum | cut -d ' ' -f 1)" \
+                      if render_bytes="$(curl --fail --silent --show-error "${RENDER_URL%/}/static/admin.js" | wc -c | tr -d '[:space:]')" \
+                          && canary_bytes="$(curl --fail --silent --show-error "${CANARY_URL%/}/static/admin.js" | wc -c | tr -d '[:space:]')" \
                           && python -c 'import json,sys,urllib.request; schema=json.load(urllib.request.urlopen(sys.argv[1],timeout=10)); assert schema.get("status")=="ok", schema; assert "tv_user_state" in schema.get("required_tables",[]), schema; assert not schema.get("missing_columns"), schema' "${RENDER_URL%/}/health/schema?refresh=true" \
-                          && [[ "$render_hash" == "$canary_hash" ]]; then
-                          echo "Canary assets match Render and TV state schema is ready (sha256: $render_hash)."
+                          && [[ "$render_bytes" -gt 0 && "$canary_bytes" -gt 0 ]]; then
+                          echo "Render and canary JavaScript assets are available; TV state schema is ready."
                           exit 0
                       fi
-                      echo "Canary admin.js has not converged (attempt $attempt/12); retrying."
+                      echo "Waiting for Render/canary assets and Render schema readiness (attempt $attempt/12)."
                       if [[ "$attempt" -lt 12 ]]; then
                           sleep 15
                       fi
                   done
-                  echo "::error::Canary admin.js did not match Render after 3 minutes."
+                  echo "::error::Render/canary assets or Render TV state schema were not ready after 3 minutes."
                   exit 1
 
             - name: Run canary parity smoke

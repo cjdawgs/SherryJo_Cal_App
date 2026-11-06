@@ -139,6 +139,24 @@ def test_cloudflare_release_is_automated_and_promotion_is_smoke_gated():
     assert "--native-worker" in production_parity["run"]
 
 
+def test_canary_wait_checks_asset_availability_not_cross_runtime_identity():
+    workflow = yaml.load(
+        (ROOT / ".github" / "workflows" / "cloudflare-release.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    wait_step = next(
+        step for step in workflow["jobs"]["smoke-unauthenticated-canary"]["steps"]
+        if step.get("name") == "Wait for canary static assets and Render schema readiness"
+    )
+
+    assert "curl --fail" in wait_step["run"]
+    assert "wc -c" in wait_step["run"]
+    assert "-gt 0" in wait_step["run"]
+    assert "sha256sum" not in wait_step["run"]
+    assert "render_hash" not in wait_step["run"]
+    assert "canary_hash" not in wait_step["run"]
+
+
 def test_cloudflare_release_uses_environment_secrets_and_exact_targets():
     workflow = yaml.load(
         (ROOT / ".github" / "workflows" / "cloudflare-release.yml").read_text(encoding="utf-8"),

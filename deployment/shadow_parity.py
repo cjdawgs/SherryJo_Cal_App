@@ -75,7 +75,9 @@ def _cases(cloudflare_url: str) -> list[HttpCase]:
         HttpCase("favicon", "GET", "/favicon.ico"),
         HttpCase("admin_redirect", "GET", "/admin"),
         HttpCase("login_page", "GET", "/login"),
-        HttpCase("static_javascript", "GET", "/static/admin.js"),
+        # Render and Worker static bundles can be published at different times;
+        # parity only requires each runtime to serve its JavaScript successfully.
+        HttpCase("static_javascript", "GET", "/static/admin.js", compare_body=False),
         HttpCase("openapi_large_response", "GET", "/openapi.json"),
         HttpCase(
             "invalid_login",

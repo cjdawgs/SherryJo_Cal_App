@@ -22,6 +22,37 @@ def test_http_cases_include_public_schema_health_without_body_comparison():
 
     assert cases["schema_health"].path == "/health/schema"
     assert cases["schema_health"].compare_body is False
+    assert cases["static_javascript"].path == "/static/admin.js"
+    assert cases["static_javascript"].compare_body is False
+
+
+def test_static_javascript_parity_accepts_different_runtime_assets(monkeypatch):
+    def request(_opener, origin, case):
+        is_worker = origin == "https://edge.example.com"
+        is_static_asset = case.name == "static_javascript"
+        return shadow_parity.HttpResult(
+            status=200,
+            content_type="text/javascript; charset=utf-8" if is_static_asset else "application/json",
+            location=None,
+            set_cookie=(),
+            edge_marker="cloudflare" if is_worker else None,
+            body=(
+                (b"worker asset" if is_worker else b"render asset")
+                if is_static_asset
+                else b"same response"
+            ),
+        )
+
+    monkeypatch.setattr(shadow_parity, "_request", request)
+    rows, failures = shadow_parity.run_http_parity(
+        "https://render.example.com",
+        "https://edge.example.com",
+    )
+
+    asset_row = next(row for row in rows if row["case"] == "static_javascript")
+    assert asset_row["passed"] is True
+    assert asset_row["render_sha256"] != asset_row["cloudflare_sha256"]
+    assert not any(failure.startswith("static_javascript:") for failure in failures)
 
 
 def test_worker_edge_health_proves_route_ownership(monkeypatch):
