@@ -517,6 +517,157 @@
       border-color: #cbd5e1;
     }
 
+    .database-config-panel {
+      border-width: 2px;
+      transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+    }
+
+    .database-config-panel > details > summary {
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .database-config-panel > details > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .database-config-panel.is-connected {
+      border-color: #7abf8f;
+      background: #ffffff;
+    }
+
+    .database-config-panel.is-unknown {
+      border-color: #facc15;
+      background: #ffffff;
+    }
+
+    .database-config-panel.is-disconnected {
+      border-color: #ef4444;
+      background: #ffffff;
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.14) inset;
+    }
+
+    .database-config-panel.is-connected > details > summary .database-config-header {
+      background: #1f8f57;
+      color: #ffffff;
+    }
+
+    .database-config-panel.is-unknown > details > summary .database-config-header {
+      background: #fef9c3;
+      color: #713f12;
+    }
+
+    .database-config-panel.is-disconnected > details > summary .database-config-header {
+      background: #fff1f2;
+      color: #9f1239;
+    }
+
+    .database-config-header {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      padding: 10px 12px;
+    }
+
+    .database-config-header-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .database-config-status-pill {
+      align-items: center;
+      border: 1px solid;
+      border-radius: 999px;
+      display: inline-flex;
+      font-size: 12px;
+      font-weight: 700;
+      justify-content: center;
+      min-height: 28px;
+      padding: 4px 10px;
+      white-space: nowrap;
+    }
+
+    .database-config-panel.is-connected .database-config-status-pill {
+      background: #1f8f57;
+      border-color: #166534;
+      color: #ffffff;
+    }
+
+    .database-config-panel.is-unknown .database-config-status-pill {
+      background: #fef08a;
+      border-color: #eab308;
+      color: #713f12;
+    }
+
+    .database-config-panel.is-disconnected .database-config-status-pill {
+      background: #fee2e2;
+      border-color: #ef4444;
+      color: #991b1b;
+    }
+
+    .database-connection-card {
+      background: #ffffff;
+      border: 2px solid #22c55e;
+      border-radius: 14px;
+      color: #152031;
+      margin: 10px 0 12px;
+      padding: 10px 12px;
+    }
+
+    .database-connection-card > summary {
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      list-style: none;
+    }
+
+    .database-connection-card > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .database-connection-card > summary::before {
+      content: "▶";
+      display: inline-block;
+      font-size: 10px;
+      margin-right: 8px;
+      transition: transform 120ms ease;
+    }
+
+    .database-connection-card[open] > summary::before {
+      transform: rotate(90deg);
+    }
+
+    .database-connection-card .database-connection-details {
+      display: grid;
+      gap: 7px 14px;
+      grid-template-columns: minmax(110px, 0.32fr) minmax(0, 1fr);
+      margin: 12px 0 2px;
+    }
+
+    .database-connection-card .database-connection-details dt {
+      color: #475569;
+      font-weight: 600;
+    }
+
+    .database-connection-card .database-connection-details dd {
+      color: #152031;
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 560px) {
+      .database-connection-card .database-connection-details {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+      }
+
+      .database-connection-card .database-connection-details dd {
+        margin: 0 0 7px 10px;
+      }
+    }
+
     .deployment-sync-grid {
       display: grid;
       grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr);
@@ -743,21 +894,22 @@
       </details>
     </section>
 
-    <section class="panel database-config-panel" id="databaseConfigPanel">
+    <section class="panel database-config-panel is-unknown" id="databaseConfigPanel">
       <details id="databaseConfigDetails" open>
-        <summary>Database Runtime Control <span class="database-collapse-hint">Select to expand or collapse</span></summary>
+        <summary>
+          <div class="database-config-header">
+            <span class="database-config-header-title">Database Runtime Control</span>
+            <span id="hyperdriveLiveBadge" class="database-config-status-pill" role="status" aria-live="polite">UNKNOWN: Checking database connection...</span>
+          </div>
+        </summary>
         <div class="repository-control-body">
           <div>
             <h3>Active database</h3>
-            <div id="hyperdriveLiveBadge" class="hyperdrive-live-badge hyperdrive-live-badge-inactive" role="status" aria-live="polite">
-              <span class="hyperdrive-live-dot" aria-hidden="true"></span>
-              <span id="hyperdriveLiveBadgeText">Checking live database connection...</span>
-            </div>
             <p id="databaseProviderEvidence" class="database-field-help" aria-live="polite">Checking the configured database host and provider evidence...</p>
-            <section class="database-connection-card" aria-labelledby="databaseConnectionHeading">
-              <h4 id="databaseConnectionHeading">Connection details (secrets hidden)</h4>
+            <details id="databaseConnectionDetailsPanel" class="database-connection-card">
+              <summary>Connection details (secrets hidden)</summary>
               <dl id="databaseConnectionDetails" class="database-connection-details" aria-live="polite"></dl>
-            </section>
+            </details>
             <section class="database-change-guide" aria-labelledby="databaseChangeGuideHeading">
               <h3 id="databaseChangeGuideHeading">How to change the database source</h3>
               <p><strong>Important:</strong> Render and Cloudflare Worker use separate database settings. Changing one does not change the other or copy database records. Confirm/migrate the destination data before switching either runtime.</p>

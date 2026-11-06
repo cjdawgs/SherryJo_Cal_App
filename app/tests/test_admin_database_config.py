@@ -93,6 +93,13 @@ def test_admin_database_page_explains_external_runtime_changes(client):
     response = client.get("/admin/ui")
 
     assert response.status_code == 200
+    assert '<section class="panel database-config-panel is-unknown" id="databaseConfigPanel">' in response.text
+    assert "UNKNOWN: Checking database connection..." in response.text
+    assert '<details id="databaseConnectionDetailsPanel" class="database-connection-card">' in response.text
+    assert "Connection details (secrets hidden)" in response.text
+    assert ".database-config-panel.is-connected" in response.text
+    assert ".database-config-panel.is-unknown" in response.text
+    assert ".database-config-panel.is-disconnected" in response.text
     assert "Change the Render application database" in response.text
     assert "Replace" in response.text and "DATABASE_URL" in response.text
     assert "This Admin page cannot write Render's production environment variables." in response.text

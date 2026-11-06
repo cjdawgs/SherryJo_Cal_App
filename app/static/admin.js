@@ -80,9 +80,10 @@ const el = {
   deploymentSyncCurrentLabel: document.getElementById("deploymentSyncCurrentLabel"),
   deploymentSyncPlatformSummary: document.getElementById("deploymentSyncPlatformSummary"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
+  databaseConfigPanel: document.getElementById("databaseConfigPanel"),
   databaseConnectionDetails: document.getElementById("databaseConnectionDetails"),
+  databaseConnectionDetailsPanel: document.getElementById("databaseConnectionDetailsPanel"),
   hyperdriveLiveBadge: document.getElementById("hyperdriveLiveBadge"),
-  hyperdriveLiveBadgeText: document.getElementById("hyperdriveLiveBadgeText"),
   hyperdriveSetupBanner: document.getElementById("hyperdriveSetupBanner"),
   hyperdriveSetupMessage: document.getElementById("hyperdriveSetupMessage"),
   databaseModeSelect: document.getElementById("databaseModeSelect"),
@@ -2075,7 +2076,15 @@ function bindEvents() {
   [el.cloudflareAccountIdInput, el.hyperdriveConfigIdInput, el.cloudflareApiTokenInput].forEach((input) => input?.addEventListener("input", updateHyperdriveButtonState));
   if (el.databaseConfigDetails) {
     el.databaseConfigDetails.open = localStorage.getItem("databaseConfigOpen") !== "false";
-    el.databaseConfigDetails.addEventListener("toggle", () => localStorage.setItem("databaseConfigOpen", String(el.databaseConfigDetails.open)));
+    if (el.databaseConfigDetails.open && el.databaseConnectionDetailsPanel) {
+      el.databaseConnectionDetailsPanel.open = false;
+    }
+    el.databaseConfigDetails.addEventListener("toggle", () => {
+      localStorage.setItem("databaseConfigOpen", String(el.databaseConfigDetails.open));
+      if (el.databaseConfigDetails.open && el.databaseConnectionDetailsPanel) {
+        el.databaseConnectionDetailsPanel.open = false;
+      }
+    });
   }
 }
 
@@ -2230,6 +2239,22 @@ function renderDatabaseConnectionDetails(data) {
   el.databaseConnectionDetails.replaceChildren(fragment);
 }
 
+function updateDatabaseHeaderStatus(data, connected) {
+  const provider = data.provider_label || data.summary?.label || "provider unknown";
+  const statusText = connected === true
+    ? `LIVE: Database query succeeded; provider: ${provider}`
+    : connected === false
+      ? `DISCONNECTED: Database query failed; provider: ${provider}`
+      : `UNKNOWN: Database connection status unavailable; provider: ${provider}`;
+
+  if (el.databaseConfigPanel) {
+    el.databaseConfigPanel.classList.toggle("is-connected", connected === true);
+    el.databaseConfigPanel.classList.toggle("is-disconnected", connected === false);
+    el.databaseConfigPanel.classList.toggle("is-unknown", connected === null || connected === undefined);
+  }
+  if (el.hyperdriveLiveBadge) el.hyperdriveLiveBadge.textContent = statusText;
+}
+
 function populateActiveDatabaseFields(summary) {
   const fields = {
     databaseProviderTitleInput: summary.label,
@@ -2275,6 +2300,7 @@ async function loadDatabaseConfig() {
       el.databaseConfigStatus.classList.add("error");
     }
     renderDatabaseConnectionDetails({ runtime: "managed-origin", message: "Database metadata could not be loaded from the Admin API." });
+    updateDatabaseHeaderStatus({}, null);
     return;
   }
 
@@ -2289,11 +2315,24 @@ async function loadDatabaseConfig() {
       el.databaseConfigStatus.classList.add("error");
     }
     renderDatabaseConnectionDetails({ runtime: "managed-origin", message: data.detail || "Database metadata could not be loaded from the Admin API." });
+    updateDatabaseHeaderStatus({}, null);
     return;
   }
 
   window.__databaseConfigData = data;
   renderDatabaseConnectionDetails(data);
+  const activeConnection = data.runtime === "cloudflare-worker"
+    ? data.hyperdrive_configured === true
+      ? data.hyperdrive_reachable === true
+      : data.hyperdrive_configured === false || data.hyperdrive_reachable === false
+        ? false
+        : null
+    : data.live_database_confirmed === true
+      ? true
+      : data.live_database_confirmed === false
+        ? false
+        : null;
+  updateDatabaseHeaderStatus(data, activeConnection);
   if (data.runtime === "managed-origin" && data.summary) {
     populateActiveDatabaseFields(data.summary);
   }
@@ -2388,26 +2427,6 @@ async function loadDatabaseConfig() {
     const hyperdriveLive = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
     el.hyperdriveSetupBanner.hidden = hyperdriveLive;
     if (el.hyperdriveSetupMessage) el.hyperdriveSetupMessage.textContent = data.message || "Configure and redeploy the Hyperdrive binding before testing again.";
-  }
-  if (el.hyperdriveLiveBadge && data.runtime === "cloudflare-worker") {
-    const live = data.hyperdrive_configured === true && data.hyperdrive_reachable === true;
-    const provider = data.provider_label || "Postgres provider not identified";
-    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
-    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
-    if (el.hyperdriveLiveBadgeText) el.hyperdriveLiveBadgeText.textContent = live
-      ? `LIVE: Hyperdrive query succeeded; configured provider label: ${provider}`
-      : `NOT LIVE: ${provider} is not connected`;
-  }
-  if (el.hyperdriveLiveBadge && data.runtime !== "cloudflare-worker") {
-    const live = Boolean(data.live_database_confirmed);
-    const provider = data.provider_label || data.summary?.label || "Database";
-    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-active", live);
-    el.hyperdriveLiveBadge.classList.toggle("hyperdrive-live-badge-inactive", !live);
-    if (el.hyperdriveLiveBadgeText) {
-      el.hyperdriveLiveBadgeText.textContent = live
-        ? `LIVE: database query succeeded; configured provider: ${provider}`
-        : `NOT CONNECTED: ${provider} is not reachable`;
-    }
   }
   const providerEvidence = document.getElementById("databaseProviderEvidence");
   if (providerEvidence) {
