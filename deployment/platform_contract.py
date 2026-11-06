@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 RENDER_REQUIRED = (
-    "ADMIN_SETUP_CODE",
+    "ADMIN_RECOVERY_CODE",
     "BASE_URL",
     "DATABASE_URL",
     "DB_TYPE",
@@ -50,6 +50,10 @@ def validate_repository() -> list[str]:
 
 def validate_render(environment: dict[str, str]) -> list[str]:
     errors = [f"Missing Render variable: {name}" for name in RENDER_REQUIRED if not environment.get(name, "").strip()]
+
+    recovery_code = environment.get("ADMIN_RECOVERY_CODE", "")
+    if recovery_code and len(recovery_code) < 32:
+        errors.append("ADMIN_RECOVERY_CODE must contain at least 32 characters")
 
     for name in ("BASE_URL", "GOOGLE_REDIRECT_URI", "MS_REDIRECT_URI"):
         value = environment.get(name, "").strip()

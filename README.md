@@ -51,7 +51,7 @@ See [docs/quick_launch_firetv.md](docs/quick_launch_firetv.md) for the FireTV re
 
 ## Configuration Safety Rules
 
-- `ADMIN_SETUP_CODE` must be set (host env or secret store) before any admin account can be registered via `POST /auth/register`. Admin registration is rejected when it is unset.
+- `ADMIN_RECOVERY_CODE` must be set in Render and Cloudflare for emergency recovery of the shared database-backed Master Admin Code. Set the Master Admin Code from the Admin page before registering additional Admin accounts.
 - `/ws` requires a JWT: connect to `/ws?token=<access_token>`.
 
 - Local development can use .env.

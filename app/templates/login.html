@@ -89,6 +89,29 @@
       border-radius: 10px;
       padding: 12px;
     }
+
+    #adminRecoveryForm {
+      margin-top: 16px;
+      padding: 12px;
+      border: 1px solid #f3d59b;
+      border-radius: 10px;
+      background: #fffcf5;
+      text-align: left;
+    }
+
+    #adminRecoveryForm input {
+      display: block;
+      margin: 10px auto;
+    }
+
+    #adminRecoveryForm summary {
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    #adminRecoveryStatus {
+      text-align: center;
+    }
   </style>
 </head>
 
@@ -120,8 +143,8 @@
       </select>
 
       <div id="adminCodeWrap" style="display:none;">
-        <input id="adminSetupCode" type="password" placeholder="Admin Setup Code" autocomplete="off"><br>
-        <div class="hint">Admin mode requires setup code.</div>
+        <input id="masterAdminCode" type="password" placeholder="Master Admin Code" autocomplete="off"><br>
+        <div class="hint">This shared code is only for enrolling a new Admin. It is not an account login password. An existing Admin can set or rotate it on the Admin page.</div>
       </div>
 
       <div class="button-row">
@@ -130,6 +153,20 @@
       </div>
       <div id="registerStatus" class="small-text"></div>
     </div>
+
+    <details id="adminRecoveryForm">
+      <summary>Lost the Master Admin Code? Reset it</summary>
+      <p class="hint">This resets only the shared code used to enroll Admin accounts; it does not change any user's login password. It requires the separate ADMIN_RECOVERY_CODE secret to be configured in both Render and the Cloudflare Worker.</p>
+      <form id="masterAdminRecoveryForm">
+        <input id="adminRecoveryCode" type="password" placeholder="Master Admin Recovery Code" autocomplete="off" required>
+        <input id="newMasterAdminCode" type="password" placeholder="New Master Admin Code (at least 16 characters)" minlength="16" maxlength="256" autocomplete="new-password" required>
+        <input id="newMasterAdminCodeConfirm" type="password" placeholder="Confirm new Master Admin Code" minlength="16" maxlength="256" autocomplete="new-password" required>
+        <div class="button-row">
+          <button id="adminRecoverySubmit" class="primary-btn" type="submit">Reset Master Admin Code</button>
+        </div>
+        <div id="adminRecoveryStatus" class="small-text" role="status" aria-live="polite"></div>
+      </form>
+    </details>
   </div>
 
   <script type="module">
@@ -248,6 +285,53 @@
 
     document.getElementById("loginForm").addEventListener("submit", login);
 
+    async function recoverMasterAdminCode(event) {
+      event.preventDefault();
+      const status = document.getElementById("adminRecoveryStatus");
+      const submit = document.getElementById("adminRecoverySubmit");
+      const newCode = document.getElementById("newMasterAdminCode").value;
+      const confirmCode = document.getElementById("newMasterAdminCodeConfirm").value;
+      if (newCode !== confirmCode) {
+        status.textContent = "The new Master Admin Code entries do not match.";
+        return;
+      }
+
+      submit.disabled = true;
+      status.textContent = "Verifying the recovery code and resetting the Master Admin Code...";
+      try {
+        const response = await apiRequest("/auth/admin-recovery/master-code", {
+          method: "POST",
+          auth: false,
+          body: {
+            recovery_code: document.getElementById("adminRecoveryCode").value,
+            new_master_admin_code: newCode
+          }
+        });
+        if (!response) {
+          status.textContent = "Unable to reach the server. The Master Admin Code was not confirmed as changed.";
+          return;
+        }
+
+        const data = await response.json();
+        if (!response.ok) {
+          status.textContent = data.detail || "Master Admin Code reset failed.";
+          return;
+        }
+
+        document.getElementById("adminRecoveryCode").value = "";
+        document.getElementById("newMasterAdminCode").value = "";
+        document.getElementById("newMasterAdminCodeConfirm").value = "";
+        status.textContent = "Master Admin Code reset. Use the new code only when enrolling an Admin.";
+      } catch (error) {
+        console.error("Master Admin Code recovery failed:", error);
+        status.textContent = "Master Admin Code recovery failed. Check your connection and try again.";
+      } finally {
+        submit.disabled = false;
+      }
+    }
+
+    document.getElementById("masterAdminRecoveryForm").addEventListener("submit", recoverMasterAdminCode);
+
     function showRegisterForm() {
       document.getElementById('registerForm').style.display = 'block';
       document.getElementById('registerStatus').textContent = '';
@@ -271,7 +355,7 @@
         const username = document.getElementById('registerUsername').value;
         const password = document.getElementById('registerPassword').value;
         const role = document.getElementById('registerRole').value;
-        const adminSetupCode = document.getElementById('adminSetupCode').value;
+        const masterAdminCode = document.getElementById('masterAdminCode').value;
 
         if (!email || !username || !password) {
           alert('Please enter email, username, and password.');
@@ -286,7 +370,7 @@
             username,
             password,
             role,
-            admin_setup_code: adminSetupCode || null
+            master_admin_code: masterAdminCode || null
           })
         });
 

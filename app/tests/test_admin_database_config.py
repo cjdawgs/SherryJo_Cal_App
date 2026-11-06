@@ -32,6 +32,7 @@ def _admin_headers(client):
         "email": email,
         "password": password,
         "role": "admin",
+        "master_admin_code": "test-master-admin-code",
     })
     assert registered.status_code == 200
     logged_in = client.post("/auth/login", json={"email": email, "password": password})

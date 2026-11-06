@@ -7,7 +7,7 @@ from deployment.platform_contract import validate_cloudflare_edge, validate_rend
 
 def _render_environment():
     return {
-        "ADMIN_SETUP_CODE": "test-admin-code",
+        "ADMIN_RECOVERY_CODE": "test-admin-recovery-code-0123456789",
         "BASE_URL": "https://calendar.example.com",
         "DATABASE_URL": "postgresql+psycopg2://user:pass@db.example.com/app",
         "DB_TYPE": "postgres",
@@ -42,6 +42,13 @@ def test_render_contract_rejects_sqlite_and_token_algorithm_drift():
 
     assert "DATABASE_URL must use PostgreSQL in production" in errors
     assert "JWT_ALGORITHM must remain HS256 until a coordinated token migration" in errors
+
+
+def test_render_contract_rejects_a_short_master_admin_recovery_secret():
+    environment = _render_environment()
+    environment["ADMIN_RECOVERY_CODE"] = "too-short"
+
+    assert "ADMIN_RECOVERY_CODE must contain at least 32 characters" in validate_render(environment)
 
 
 def test_cloudflare_edge_contract_requires_https_origin():

@@ -7,6 +7,8 @@ import { issueUserToken } from "./auth-token-issue.js";
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ARGON2_PATTERN = /^\$argon2id\$v=19\$([^$]+)\$([A-Za-z0-9+/]+)\$([A-Za-z0-9+/]+)$/;
 const ARGON2_OPTIONS = Object.freeze({ t: 3, m: 65536, p: 4, dkLen: 32, maxmem: 128 * 1024 * 1024 });
+const MIN_MASTER_ADMIN_CODE_LENGTH = 16;
+const MAX_MASTER_ADMIN_CODE_LENGTH = 256;
 
 async function argon2Digest(password, salt, options) {
     if (globalThis.navigator?.userAgent === "Cloudflare-Workers") {
@@ -149,16 +151,25 @@ export async function handleNativeRegistration(request, env, adapter, dependenci
     const email = String(body.email || "").trim().toLowerCase();
     const password = typeof body.password === "string" ? body.password : "";
     const role = String(body.role || "staff").trim().toLowerCase();
+    const providedAdminCode = typeof body.master_admin_code === "string" && body.master_admin_code
+        ? body.master_admin_code
+        : typeof body.admin_setup_code === "string" ? body.admin_setup_code : "";
     if (!username || username.length > 100 || !EMAIL_PATTERN.test(email) || email.length > 320
-        || !password || password.length > 256 || !["admin", "staff"].includes(role)) {
+        || !password || password.length > 256 || !["admin", "staff"].includes(role)
+        || Array.from(providedAdminCode).length > MAX_MASTER_ADMIN_CODE_LENGTH) {
         return response({ detail: "Invalid registration fields" }, 422);
     }
 
     if (role === "admin") {
-        const expected = String(env.ADMIN_SETUP_CODE || "").trim();
-        const provided = String(body.admin_setup_code || "").trim();
-        if (!expected || !await secretsEqual(provided, expected)) {
-            return response({ detail: "Invalid admin setup code" }, 403);
+        const storedHash = await adapter.getMasterAdminCodeHash();
+        if (!storedHash) {
+            return response({
+                detail: "Master Admin Code is not configured. An Admin must set it, or use emergency recovery.",
+            }, 503);
+        }
+        const passwordVerifier = dependencies.verifyPassword || verifyPassword;
+        if (!await passwordVerifier(providedAdminCode, storedHash)) {
+            return response({ detail: "Invalid Master Admin Code." }, 403);
         }
     }
 
@@ -176,4 +187,38 @@ export async function handleNativeRegistration(request, env, adapter, dependenci
         }
         throw error;
     }
+}
+
+export async function handleNativeMasterAdminCodeRecovery(request, env, adapter, dependencies = {}) {
+    let body;
+    try {
+        body = await requestBody(request);
+    } catch {
+        return response({ detail: "Invalid Master Admin Code recovery request" }, 422);
+    }
+
+    const expected = typeof env.ADMIN_RECOVERY_CODE === "string" ? env.ADMIN_RECOVERY_CODE : "";
+    const provided = typeof body.recovery_code === "string" ? body.recovery_code : "";
+    const newCode = typeof body.new_master_admin_code === "string" ? body.new_master_admin_code : "";
+    if (provided.length > 256) {
+        return response({ detail: "Invalid Master Admin Recovery Code." }, 403);
+    }
+    if (Array.from(expected).length < 32) {
+        return response({
+            detail: "Master Admin Code recovery is unavailable because ADMIN_RECOVERY_CODE is missing or too short.",
+        }, 503);
+    }
+    if (!await secretsEqual(provided, expected)) {
+        return response({ detail: "Invalid Master Admin Recovery Code." }, 403);
+    }
+    const newCodeLength = Array.from(newCode).length;
+    if (newCodeLength < MIN_MASTER_ADMIN_CODE_LENGTH || newCodeLength > MAX_MASTER_ADMIN_CODE_LENGTH) {
+        return response({
+            detail: `Master Admin Code must be between ${MIN_MASTER_ADMIN_CODE_LENGTH} and ${MAX_MASTER_ADMIN_CODE_LENGTH} characters.`,
+        }, 422);
+    }
+
+    const passwordHasher = dependencies.hashPassword || hashPassword;
+    await adapter.setMasterAdminCodeHash(await passwordHasher(newCode));
+    return response({ reset: true, configured: true }, 200);
 }

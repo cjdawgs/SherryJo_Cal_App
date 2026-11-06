@@ -3,6 +3,63 @@ import test from "node:test";
 
 import { handleAdminApi } from "../src/admin-api.js";
 
+test("returns only Master Admin Code status, never its stored hash", async () => {
+    let queries = 0;
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql) => {
+                queries += 1;
+                if (queries === 1) return { rows: [{ allowed: true }] };
+                assert.match(sql, /worker_get_master_admin_code_hash/);
+                return { rows: [{ secret_hash: "$argon2id$private-hash", updated_at: new Date("2026-09-11T00:00:00.000Z") }] };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/master-admin-code"),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    assert.deepEqual(await result.json(), {
+        configured: true,
+        updated_at: "2026-09-11T00:00:00.000Z",
+    });
+});
+
+test("sets a shared Master Admin Code through the restricted database function", async () => {
+    let queries = 0;
+    let storedHash;
+    const adapter = {
+        runWithIdentity: async (_userId, operation) => operation({
+            query: async (sql, params = []) => {
+                queries += 1;
+                if (queries === 1) return { rows: [{ allowed: true }] };
+                if (queries === 2) {
+                    assert.match(sql, /worker_set_master_admin_code_hash/);
+                    storedHash = params[0];
+                    return { rows: [{ worker_set_master_admin_code_hash: true }] };
+                }
+                return { rows: [{ secret_hash: storedHash, updated_at: new Date("2026-09-11T00:00:00.000Z") }] };
+            },
+        }),
+    };
+    const result = await handleAdminApi(
+        new Request("https://calendar.test/admin/system/master-admin-code", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ master_admin_code: "new-master-admin-code-123" }),
+        }),
+        {},
+        adapter,
+        1,
+    );
+    assert.equal(result.status, 200);
+    assert.match(storedHash, /^\$argon2id\$/);
+    assert.equal((await result.json()).configured, true);
+});
+
 test("rejects a signed-in non-admin before executing an admin route", async () => {
     const adapter = { runWithIdentity: async (userId, operation) => operation({ query: async () => ({ rows: [{ allowed: false }] }) }) };
     const result = await handleAdminApi(new Request("https://calendar.test/admin/users"), {}, adapter, 4);

@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     hashPassword,
     handleNativeLogin,
+    handleNativeMasterAdminCodeRecovery,
     handleNativeRegistration,
     verifyPassword,
 } from "../src/native-auth.js";
@@ -73,8 +74,14 @@ test("registers staff with a compatible hash and protects admin registration", a
             registrations.push(values);
             return { id: 7, username: values.username, email: values.email, role: values.role };
         },
+        async getMasterAdminCodeHash() {
+            return "stored-hash";
+        },
     };
-    const dependencies = { hashPassword: async () => "$argon2id$test" };
+    const dependencies = {
+        hashPassword: async () => "$argon2id$test",
+        verifyPassword: async (password, hash) => password === "correct" && hash === "stored-hash",
+    };
 
     const staffResponse = await handleNativeRegistration(
         jsonRequest("/auth/register", {
@@ -89,10 +96,39 @@ test("registers staff with a compatible hash and protects admin registration", a
     const adminResponse = await handleNativeRegistration(
         jsonRequest("/auth/register", {
             username: "admin-user", email: "admin@example.com", password: "secret",
-            role: "admin", admin_setup_code: "wrong",
+            role: "admin", master_admin_code: "wrong",
         }),
-        { ADMIN_SETUP_CODE: "correct" }, adapter, dependencies,
+        {}, adapter, dependencies,
     );
     assert.equal(adminResponse.status, 403);
     assert.equal(registrations.length, 1);
+});
+
+test("refuses Admin registration until a shared Master Admin Code is configured", async () => {
+    const response = await handleNativeRegistration(
+        jsonRequest("/auth/register", {
+            username: "admin-user", email: "admin@example.com", password: "secret",
+            role: "admin", master_admin_code: "any-code",
+        }),
+        {},
+        { getMasterAdminCodeHash: async () => null },
+        { hashPassword: async () => "$argon2id$test" },
+    );
+    assert.equal(response.status, 503);
+});
+
+test("emergency recovery updates only the shared Master Admin Code hash", async () => {
+    let updatedHash = null;
+    const response = await handleNativeMasterAdminCodeRecovery(
+        jsonRequest("/auth/admin-recovery/master-code", {
+            recovery_code: "recovery-secret-for-tests-0123456789",
+            new_master_admin_code: "new-master-admin-code-123",
+        }),
+        { ADMIN_RECOVERY_CODE: "recovery-secret-for-tests-0123456789" },
+        { setMasterAdminCodeHash: async (hash) => { updatedHash = hash; } },
+        { hashPassword: async (code) => `$argon2id$${code}` },
+    );
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { reset: true, configured: true });
+    assert.equal(updatedHash, "$argon2id$new-master-admin-code-123");
 });

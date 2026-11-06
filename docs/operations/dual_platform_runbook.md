@@ -28,7 +28,7 @@ On another development desktop, use `git pull origin main` rather than copying i
 
 | Variable | Render/FastAPI | Cloudflare phase 0 | Compatibility rule |
 | --- | --- | --- | --- |
-| `ADMIN_SETUP_CODE` | Secret, required | Not copied | Render remains auth authority |
+| `ADMIN_RECOVERY_CODE` | Secret, required | Secret, required | Configure the same emergency recovery value in Render and both Worker environments; the Master Admin Code hash is shared in PostgreSQL |
 | `BASE_URL` | Public Cloudflare URL after cutover | N/A | Must be HTTPS; controls generated callbacks |
 | `DATABASE_URL` | Supabase PostgreSQL secret | Not copied in phase 0 | Never expose a direct database credential to client code |
 | `DB_TYPE` | `postgres` | N/A | Production must not auto-fallback |

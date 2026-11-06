@@ -22,6 +22,7 @@ def _register_user(client, role="staff", password="pass12345"):
         "email": email,
         "password": password,
         "role": role,
+        **({"master_admin_code": "test-master-admin-code"} if role == "admin" else {}),
     })
     assert res.status_code == 200
 
@@ -109,6 +110,19 @@ def test_admin_users_crud_and_reset_flow(client):
     assert missing_res.status_code == 404
 
 
+def test_admin_can_create_admin_account_directly(client):
+    headers = _admin_headers(client)
+    response = client.post("/admin/users", headers=headers, json={
+        "email": "new.admin@test.com",
+        "username": "new_admin",
+        "role": "admin",
+        "password": "StrongAdminPass123",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["role"] == "admin"
+
+
 def test_admin_providers_requires_admin_role(client):
     staff_headers = _staff_headers(client)
 
@@ -121,6 +135,37 @@ def test_admin_system_overview_requires_admin_role(client):
 
     denied = client.get("/admin/system/overview", headers=staff_headers)
     assert denied.status_code == 403
+
+
+def test_admin_can_set_and_check_shared_master_admin_code(client, admin_headers, db):
+    from app.models import MasterAdminCode
+
+    status = client.get("/admin/system/master-admin-code", headers=admin_headers)
+    assert status.status_code == 200
+    assert status.json()["configured"] is True
+
+    updated = client.post(
+        "/admin/system/master-admin-code",
+        headers=admin_headers,
+        json={"master_admin_code": "new-master-admin-code-123"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["configured"] is True
+    assert updated.json()["updated_at"]
+    assert "secret_hash" not in updated.text
+
+    stored = db.get(MasterAdminCode, "master_admin_code")
+    assert stored.secret_hash.startswith("$argon2id$")
+    assert stored.secret_hash != "new-master-admin-code-123"
+
+
+def test_staff_cannot_change_shared_master_admin_code(client, auth_headers):
+    response = client.post(
+        "/admin/system/master-admin-code",
+        headers=auth_headers,
+        json={"master_admin_code": "new-master-admin-code-123"},
+    )
+    assert response.status_code == 403
 
 
 def test_admin_system_overview_payload(client, monkeypatch):

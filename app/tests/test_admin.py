@@ -2,17 +2,11 @@
 # IMPORTS
 # --------------------------------------------------
 
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-
 # --------------------------------------------------
 # HELPER: CREATE ADMIN USER
 # --------------------------------------------------
 
-def create_admin_headers():
+def create_admin_headers(client):
     """
     ✅ Creates and logs in an admin user
     ✅ Returns Authorization header
@@ -22,7 +16,8 @@ def create_admin_headers():
         "username": "admin_user",
         "email": "admin_user@test.com",
         "password": "password",
-        "role": "admin"
+        "role": "admin",
+        "master_admin_code": "test-master-admin-code",
     })
 
     response = client.post("/auth/login", json={
@@ -39,7 +34,7 @@ def create_admin_headers():
 # HELPER: CREATE STAFF USER
 # --------------------------------------------------
 
-def create_staff_headers():
+def create_staff_headers(client):
     """
     ✅ Creates and logs in a normal (non-admin) user
     """
@@ -64,8 +59,8 @@ def create_staff_headers():
 # TEST: ADMIN CAN ACCESS /users ✅
 # --------------------------------------------------
 
-def test_admin_can_access_users():
-    headers = create_admin_headers()
+def test_admin_can_access_users(client):
+    headers = create_admin_headers(client)
 
     response = client.get("/users/", headers=headers)
 
@@ -77,8 +72,8 @@ def test_admin_can_access_users():
 # TEST: STAFF CANNOT ACCESS /users ✅
 # --------------------------------------------------
 
-def test_staff_cannot_access_users():
-    headers = create_staff_headers()
+def test_staff_cannot_access_users(client):
+    headers = create_staff_headers(client)
 
     response = client.get("/users/", headers=headers)
 
@@ -89,7 +84,7 @@ def test_staff_cannot_access_users():
 # TEST: NO TOKEN BLOCKED ✅
 # --------------------------------------------------
 
-def test_users_requires_authentication():
+def test_users_requires_authentication(client):
     response = client.get("/users/")
 
     assert response.status_code == 403 or response.status_code == 401

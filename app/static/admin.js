@@ -85,6 +85,11 @@ const el = {
   cloudflareReleaseMessage: document.getElementById("cloudflareReleaseMessage"),
   cloudflareReleasePauseBtn: document.getElementById("cloudflareReleasePauseBtn"),
   cloudflareReleaseResumeBtn: document.getElementById("cloudflareReleaseResumeBtn"),
+  masterAdminCodeForm: document.getElementById("masterAdminCodeForm"),
+  masterAdminCodeInput: document.getElementById("masterAdminCodeInput"),
+  masterAdminCodeSaveBtn: document.getElementById("masterAdminCodeSaveBtn"),
+  masterAdminCodeRefreshBtn: document.getElementById("masterAdminCodeRefreshBtn"),
+  masterAdminCodeStatus: document.getElementById("masterAdminCodeStatus"),
   databaseConfigSummary: document.getElementById("databaseConfigSummary"),
   databaseConfigPanel: document.getElementById("databaseConfigPanel"),
   databaseConnectionDetails: document.getElementById("databaseConnectionDetails"),
@@ -1017,6 +1022,61 @@ async function updateCloudflareReleaseControl(paused) {
   setStatus(paused
     ? "Cloudflare Worker release jobs are paused. Live traffic and Hyperdrive queries are unchanged."
     : "Cloudflare Worker release jobs are resumed.");
+}
+
+async function loadMasterAdminCodeStatus() {
+  const res = await apiRequest("/admin/system/master-admin-code", { method: "GET" });
+  if (!res) {
+    if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Unable to load Master Admin Code status.";
+    return;
+  }
+  const data = await res.json();
+  if (handleAdminForbidden(res, data)) return;
+  if (!res.ok) {
+    if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = data.detail || "Unable to load Master Admin Code status.";
+    return;
+  }
+  if (el.masterAdminCodeStatus) {
+    el.masterAdminCodeStatus.textContent = data.configured
+      ? `Configured${data.updated_at ? `; last changed ${new Date(data.updated_at).toLocaleString()}` : ""}. The code itself is never displayed.`
+      : "Not configured. Set a code here before creating Admin accounts.";
+  }
+}
+
+async function saveMasterAdminCode(event) {
+  event.preventDefault();
+  const code = el.masterAdminCodeInput?.value || "";
+  const codeLength = Array.from(code).length;
+  if (codeLength < 16 || codeLength > 256) {
+    if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Master Admin Code must be between 16 and 256 characters.";
+    return;
+  }
+  if (el.masterAdminCodeSaveBtn) el.masterAdminCodeSaveBtn.disabled = true;
+  if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Saving the shared Master Admin Code...";
+  try {
+    const res = await apiRequest("/admin/system/master-admin-code", {
+      method: "POST",
+      body: JSON.stringify({ master_admin_code: code }),
+    });
+    if (!res) {
+      if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Unable to reach the server. The code was not confirmed as changed.";
+      return;
+    }
+    const data = await res.json();
+    if (handleAdminForbidden(res, data)) return;
+    if (!res.ok) {
+      if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = data.detail || "Master Admin Code update failed.";
+      return;
+    }
+    if (el.masterAdminCodeInput) el.masterAdminCodeInput.value = "";
+    if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Master Admin Code updated. The shared code now applies to Render and Cloudflare.";
+    await loadMasterAdminCodeStatus();
+  } catch (error) {
+    console.error("Master Admin Code update failed:", error);
+    if (el.masterAdminCodeStatus) el.masterAdminCodeStatus.textContent = "Master Admin Code update failed. Check the connection and try again.";
+  } finally {
+    if (el.masterAdminCodeSaveBtn) el.masterAdminCodeSaveBtn.disabled = false;
+  }
 }
 
 function activeConfig() {
@@ -2179,6 +2239,8 @@ function bindEvents() {
   el.deploymentSyncResolveBtn?.addEventListener("click", resolveDeploymentSync);
   el.cloudflareReleasePauseBtn?.addEventListener("click", () => updateCloudflareReleaseControl(true));
   el.cloudflareReleaseResumeBtn?.addEventListener("click", () => updateCloudflareReleaseControl(false));
+  el.masterAdminCodeForm?.addEventListener("submit", saveMasterAdminCode);
+  el.masterAdminCodeRefreshBtn?.addEventListener("click", loadMasterAdminCodeStatus);
   el.gitCommitPushBtn?.addEventListener("click", launchGitCommitPush);
 
   el.runCurrentUserFailureCheckBtn?.addEventListener("click", loadCurrentUserFailureCheck);
@@ -2838,4 +2900,5 @@ if (el.historyEndDate && !el.historyEndDate.value) {
 bindEvents();
 loadDatabaseConfig();
 loadSystemOverview();
+loadMasterAdminCodeStatus();
 loadData();

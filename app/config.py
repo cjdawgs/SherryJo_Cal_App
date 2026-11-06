@@ -233,8 +233,8 @@ REQUIRED_PRODUCTION_SETTINGS = [
 ]
 
 REQUIRED_PRODUCTION_ENV_VARS = [
-    # Blocks self-service admin registration.
-    "ADMIN_SETUP_CODE",
+    # Enables lockout recovery for the shared database-backed Admin enrollment code.
+    "ADMIN_RECOVERY_CODE",
 ]
 
 REQUIRED_PRODUCTION_ENV_VALUES = {
@@ -277,6 +277,9 @@ def missing_production_configuration() -> list:
     missing.extend(
         name for name in REQUIRED_PRODUCTION_ENV_VARS if not (os.getenv(name) or "").strip()
     )
+    recovery_code = os.getenv("ADMIN_RECOVERY_CODE") or ""
+    if recovery_code and len(recovery_code) < 32:
+        missing.append("ADMIN_RECOVERY_CODE (must be at least 32 characters)")
 
     for name, allowed in REQUIRED_PRODUCTION_ENV_VALUES.items():
         value = (os.getenv(name) or "").strip().lower()

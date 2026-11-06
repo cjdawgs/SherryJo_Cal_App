@@ -13,7 +13,7 @@ from urllib.request import Request as UrlRequest, urlopen
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import inspect, text, create_engine
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import Session, sessionmaker
@@ -24,6 +24,12 @@ from app.config import is_production_environment, is_trusted_edge_request, mask_
 from app.deps import require_admin
 from app.models import OAuthAccount, TVDiagLog, TVUserState, User
 from app.security import verify_password
+from app.services.master_admin_code import (
+    MAX_MASTER_ADMIN_CODE_LENGTH,
+    MIN_MASTER_ADMIN_CODE_LENGTH,
+    master_admin_code_status,
+    set_master_admin_code,
+)
 from app.services.asset_urls import asset_url
 from app.utils.crypto import TokenEncryptionError, reset_cipher_cache, unseal
 from app.utils.runtime_token_key_store import persist_token_encryption_key
@@ -38,6 +44,7 @@ REDACTED_COLUMNS = frozenset(
         "access_token",
         "refresh_token",
         "hashed_password",
+        "secret_hash",
         "password",
         "app_password",
         "sync_token",
@@ -72,6 +79,13 @@ class GitCommitPushRequest(BaseModel):
 
 class CloudflareReleasePauseUpdate(BaseModel):
     paused: bool
+
+
+class MasterAdminCodeUpdate(BaseModel):
+    master_admin_code: str = Field(
+        min_length=MIN_MASTER_ADMIN_CODE_LENGTH,
+        max_length=MAX_MASTER_ADMIN_CODE_LENGTH,
+    )
 
 
 class TVRefreshRequest(BaseModel):
@@ -1184,6 +1198,24 @@ def admin_apply_runtime_token_encryption_key(
     admin_user: User = Depends(require_admin),
 ):
     return _apply_runtime_token_encryption_key(payload.token_encryption_key, db)
+
+
+@router.get("/system/master-admin-code")
+def admin_master_admin_code_status(
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    return master_admin_code_status(db)
+
+
+@router.post("/system/master-admin-code")
+def admin_set_master_admin_code(
+    payload: MasterAdminCodeUpdate,
+    db: Session = Depends(get_db),
+    admin_user: User = Depends(require_admin),
+):
+    set_master_admin_code(db, payload.master_admin_code)
+    return master_admin_code_status(db)
 
 
 @router.get("/system/current-user-failures-today")

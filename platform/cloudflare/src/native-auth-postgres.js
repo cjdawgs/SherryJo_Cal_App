@@ -2,6 +2,8 @@ import { Client } from "pg";
 
 export const LOGIN_USER_SQL = "SELECT * FROM public.worker_find_login_user($1)";
 export const REGISTER_USER_SQL = "SELECT * FROM public.worker_register_user($1, $2, $3, $4)";
+export const GET_MASTER_ADMIN_CODE_HASH_SQL = "SELECT * FROM public.worker_get_master_admin_code_hash()";
+export const SET_MASTER_ADMIN_CODE_HASH_SQL = "SELECT public.worker_set_master_admin_code_hash($1)";
 
 export class NativeAuthPostgresAdapter {
     constructor({ createClient, connectionString }) {
@@ -30,6 +32,15 @@ export class NativeAuthPostgresAdapter {
             [username, email, hashedPassword, role],
         ));
         return result.rows[0];
+    }
+
+    async getMasterAdminCodeHash() {
+        const result = await this.run((client) => client.query(GET_MASTER_ADMIN_CODE_HASH_SQL));
+        return result.rows[0]?.secret_hash || null;
+    }
+
+    async setMasterAdminCodeHash(secretHash) {
+        await this.run((client) => client.query(SET_MASTER_ADMIN_CODE_HASH_SQL, [secretHash]));
     }
 }
 

@@ -1444,9 +1444,26 @@
       </details>
     </section>
 
+    <section class="panel" id="masterAdminCodePanel">
+      <details>
+        <summary>Master Admin Code</summary>
+        <p class="muted-line">This shared code authorizes new Admin enrollment in both Render and Cloudflare. It does not change any user's login password. Emergency recovery uses the separate ADMIN_RECOVERY_CODE environment secret.</p>
+        <form id="masterAdminCodeForm">
+          <label for="masterAdminCodeInput">New Master Admin Code (16–256 characters)</label>
+          <input id="masterAdminCodeInput" type="password" minlength="16" maxlength="256" autocomplete="new-password" required>
+          <div class="button-row">
+            <button id="masterAdminCodeSaveBtn" type="submit">Set / Rotate Master Admin Code</button>
+            <button id="masterAdminCodeRefreshBtn" class="ghost-btn" type="button">Refresh Status</button>
+          </div>
+          <div id="masterAdminCodeStatus" class="status-line" role="status" aria-live="polite">Checking Master Admin Code status...</div>
+        </form>
+      </details>
+    </section>
+
     <section class="panel">
       <details id="accountsDetails" open>
         <summary id="accountsSummary">User Login Accounts</summary>
+        <p class="muted-line">To grant Admin access, choose <strong>Create</strong> and set Role to <strong>admin</strong>, or use <strong>Edit</strong> on an existing account. Individual account login-password actions are separate from the shared Master Admin Code above. These controls are available only while signed in as an Admin.</p>
         <div id="statusLine" class="status-line"></div>
         <div id="desktopGrid" class="table-wrap"></div>
         <div id="mobileCards" class="cards-wrap"></div>

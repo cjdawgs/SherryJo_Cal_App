@@ -1,7 +1,7 @@
 import { hashPassword } from "./native-auth.js";
 
 const MANAGED_TABLES = new Set(["users", "oauth_accounts", "events", "notes", "tasks", "date_sticky_notes", "tv_diag_log"]);
-const REDACTED = new Set(["access_token", "refresh_token", "hashed_password", "password", "sync_token", "google_access_token", "google_refresh_token", "ms_access_token", "ms_refresh_token"]);
+const REDACTED = new Set(["access_token", "refresh_token", "hashed_password", "secret_hash", "password", "sync_token", "google_access_token", "google_refresh_token", "ms_access_token", "ms_refresh_token"]);
 const DEFAULT_HYPERDRIVE_CONFIG_ID = "2bb6bc680a594a15aa12991869cbb590";
 
 function response(body, status = 200) {
@@ -272,6 +272,29 @@ async function queueTvDeviceDiagnostic(adapter, { userId, deviceId, event, detai
 
 async function systemRoute(client, request, parts, url, env, body = {}, adapter) {
     const action = parts[2];
+    if (action === "master-admin-code") {
+        if (request.method === "GET") {
+            const result = await client.query("SELECT * FROM public.worker_get_master_admin_code_hash()");
+            return {
+                configured: Boolean(result.rows[0]),
+                updated_at: result.rows[0]?.updated_at || null,
+            };
+        }
+        if (request.method === "POST") {
+            const masterAdminCode = typeof body.master_admin_code === "string" ? body.master_admin_code : "";
+            const masterAdminCodeLength = Array.from(masterAdminCode).length;
+            if (masterAdminCodeLength < 16 || masterAdminCodeLength > 256) {
+                return { error: "Master Admin Code must be between 16 and 256 characters.", status: 422 };
+            }
+            await client.query("SELECT public.worker_set_master_admin_code_hash($1)", [await hashPassword(masterAdminCode)]);
+            const result = await client.query("SELECT * FROM public.worker_get_master_admin_code_hash()");
+            return {
+                configured: Boolean(result.rows[0]),
+                updated_at: result.rows[0]?.updated_at || null,
+            };
+        }
+        return { error: "Method not allowed", status: 405 };
+    }
     if (action === "tv-refresh-request") {
         if (request.method !== "POST") return { error: "Method not allowed", status: 405 };
         const deviceId = String(body.device_id || "").trim();

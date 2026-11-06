@@ -2,19 +2,12 @@
 # IMPORTS
 # --------------------------------------------------
 
-import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-
 # --------------------------------------------------
 # HELPER: CREATE ADMIN USER + TOKEN
 # --------------------------------------------------
 import uuid
 
-def create_admin_headers():
+def create_admin_headers(client):
     unique_email = f"admin_{uuid.uuid4()}@test.com"
     unique_username = f"admin_{uuid.uuid4()}"   # ✅ ADD THIS
 
@@ -23,7 +16,7 @@ def create_admin_headers():
         "email": unique_email,
         "password": "password",
         "role": "admin",
-        "admin_setup_code": "mintmule99999"
+        "master_admin_code": "test-master-admin-code"
     })
 
     response = client.post("/auth/login", json={
@@ -39,7 +32,7 @@ def create_admin_headers():
 # HELPER: CREATE NORMAL USER
 # --------------------------------------------------
 import uuid
-def create_user_headers():
+def create_user_headers(client):
     unique_email = f"user_{uuid.uuid4()}@test.com"
     unique_username = f"user_{uuid.uuid4()}"   # ✅ ADD THIS
 
@@ -63,8 +56,8 @@ def create_user_headers():
 # TEST: ADMIN CAN ACCESS USERS LIST ✅
 # --------------------------------------------------
 
-def test_get_users_admin_success():
-    headers = create_admin_headers()
+def test_get_users_admin_success(client):
+    headers = create_admin_headers(client)
 
     response = client.get("/users/", headers=headers)
 
@@ -76,8 +69,8 @@ def test_get_users_admin_success():
 # TEST: NON-ADMIN IS FORBIDDEN ✅
 # --------------------------------------------------
 
-def test_get_users_forbidden_for_staff():
-    headers = create_user_headers()
+def test_get_users_forbidden_for_staff(client):
+    headers = create_user_headers(client)
 
     response = client.get("/users/", headers=headers)
 
@@ -88,8 +81,8 @@ def test_get_users_forbidden_for_staff():
 # TEST: GET CURRENT USER ✅
 # --------------------------------------------------
 
-def test_get_current_user():
-    headers = create_user_headers()
+def test_get_current_user(client):
+    headers = create_user_headers(client)
 
     response = client.get("/users/me", headers=headers)
 

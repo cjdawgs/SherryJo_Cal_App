@@ -16,7 +16,7 @@ services:
         value: postgres
       - key: JWT_ALGORITHM
         value: HS256
-      - key: ADMIN_SETUP_CODE
+      - key: ADMIN_RECOVERY_CODE
         sync: false
       - key: BASE_URL
         sync: false

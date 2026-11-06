@@ -13,6 +13,11 @@ from sqlalchemy.pool import StaticPool
 # ✅ Import your app + DB base
 from app.main import app
 from app.database import Base, get_db
+from app.models import MasterAdminCode
+from app.security import hash_password
+
+
+TEST_MASTER_ADMIN_CODE = "test-master-admin-code"
 
 
 # ==================================================
@@ -51,6 +56,12 @@ def setup_database():
     ✅ No Alembic needed → MUCH faster
     """
     Base.metadata.create_all(bind=engine)
+    with TestingSessionLocal() as session:
+        session.add(MasterAdminCode(
+            key_name="master_admin_code",
+            secret_hash=hash_password(TEST_MASTER_ADMIN_CODE),
+        ))
+        session.commit()
     yield
     Base.metadata.drop_all(bind=engine)
 
@@ -127,6 +138,8 @@ def register_and_login(client, role="staff"):
         "password": "pass123",
         "role": role,
     }
+    if role == "admin":
+        register_data["master_admin_code"] = TEST_MASTER_ADMIN_CODE
 
     registered = client.post("/auth/register", json=register_data).json()
 

@@ -43,7 +43,7 @@ jobs:
   deployment-contract:
     runs-on: ubuntu-latest
     env:
-      ADMIN_SETUP_CODE: test-admin-code
+      ADMIN_RECOVERY_CODE: test-admin-recovery-code-0123456789
       BASE_URL: https://calendar.example.com
       DATABASE_URL: postgresql+psycopg2://user:pass@db.example.com/app
       DB_TYPE: postgres

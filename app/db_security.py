@@ -30,6 +30,7 @@ RLS_TABLES = (
     "worker_tv_pairing_codes",
     "tv_user_state",
     "app_runtime_secrets",
+    "app_master_admin_code",
     "websocket_tickets",
     "worker_write_receipts",
 )

@@ -2,24 +2,18 @@
 # IMPORTS
 # --------------------------------------------------
 
-from fastapi.testclient import TestClient
-from app.main import app
-
-client = TestClient(app)
-
-
 # --------------------------------------------------
 # TEST: HEALTH CHECK ✅
 # --------------------------------------------------
 
-def test_health():
+def test_health(client):
     response = client.get("/health")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
 
 
-def test_login_page_supports_username_or_email_recovery():
+def test_login_page_supports_username_or_email_recovery(client):
     response = client.get("/login")
 
     assert response.status_code == 200
@@ -33,7 +27,7 @@ def test_login_page_supports_username_or_email_recovery():
 # --------------------------------------------------
 import uuid
 
-def test_register_user():
+def test_register_user(client):
     unique_email = f"user_{uuid.uuid4()}@test.com"
     unique_username = f"user_{uuid.uuid4()}"
 
@@ -49,7 +43,7 @@ def test_register_user():
 # TEST: LOGIN USER ✅
 # --------------------------------------------------
 
-def test_login_user():
+def test_login_user(client):
     # ✅ Ensure user exists first
     client.post("/auth/register", json={
         "username": "loginuser",
@@ -72,7 +66,7 @@ def test_login_user():
     assert data["token_type"] == "bearer"
 
 
-def test_login_user_by_username():
+def test_login_user_by_username(client):
     client.post("/auth/register", json={
         "username": "username_login_user",
         "email": "username-login@example.com",
@@ -92,7 +86,7 @@ def test_login_user_by_username():
 # TEST: INVALID LOGIN ✅
 # --------------------------------------------------
 
-def test_login_invalid_credentials():
+def test_login_invalid_credentials(client):
     response = client.post("/auth/login", json={
         "email": "wrong@example.com",
         "password": "wrongpassword"
@@ -104,7 +98,7 @@ def test_login_invalid_credentials():
 # --------------------------------------------------
 # TEST: REGISTER ADMIN USER ✅ (NEW)
 # --------------------------------------------------
-def test_register_admin_user():
+def test_register_admin_user(client):
     import uuid
     unique_email = f"admin_{uuid.uuid4()}@test.com"
     unique_username = f"admin_{uuid.uuid4()}"
@@ -114,9 +108,8 @@ def test_register_admin_user():
         "email": unique_email,
         "password": "password",
         "role": "admin",
-        "admin_setup_code": "mintmule99999"
+        "master_admin_code": "test-master-admin-code"
     })
 
     assert response.status_code == 200   # ✅ FIX (was 20 typo)
     
-

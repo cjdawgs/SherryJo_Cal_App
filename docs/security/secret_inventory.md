@@ -10,7 +10,8 @@ Rule: This inventory records names and handling requirements only. Never add val
 | Future JWT private signing key | Application owner | Render signer only | Render secret environment or managed signer | Add new `kid`, publish public key, overlap, switch signer, retire old key | Offline owner backup or managed-key recovery | No |
 | Future JWT public verification keys | Application owner | Render and Worker verifiers | Nonsecret configuration/JWKS | Publish new key before signing; retire after token lifetime plus skew | Rebuild from retained public key | Yes; public material only |
 | `TOKEN_ENCRYPTION_KEY` keyring | Application owner | Render | Render secret environment; encrypted bootstrap persistence where documented | Set new key first and old keys after it, redeploy/reseal, verify, remove old key next deploy | Durable owner backup; otherwise reconnect every provider account | No unless Worker later owns encrypted provider credentials |
-| `ADMIN_SETUP_CODE` | Application owner | Render | Render secret environment | Replace immediately after suspected disclosure; verify admin registration behavior | Generate a new high-entropy value | No while Render owns admin registration |
+| `ADMIN_RECOVERY_CODE` | Application owner | Render and Cloudflare production/canary | Provider secret environments; same value in all active runtimes, at least 32 characters | Replace immediately after suspected disclosure in every runtime | Generate a new high-entropy value; use it to reset the database-backed Master Admin Code | Yes, recovery endpoint only |
+| Master Admin Code hash | Application owner | Shared PostgreSQL | `app_master_admin_code.secret_hash` as an Argon2id hash | Rotate from Admin → Master Admin Code; change applies to Render and Cloudflare | Use `ADMIN_RECOVERY_CODE` through the public Master Admin Code recovery form | Never expose the hash or raw code |
 | `GOOGLE_CLIENT_SECRET` | Google Cloud project owner | Render | Render secret environment | Create replacement, update Render, test callback/refresh, revoke old secret | Google Cloud Console | Only if a reviewed Worker-native Google callback is approved |
 | `MS_CLIENT_SECRET` | Microsoft Entra application owner | Render | Render secret environment | Add replacement, update Render, test callback/refresh, remove old credential | Entra admin center | Only if a reviewed Worker-native Microsoft callback is approved |
 | Google/Microsoft client IDs and tenant ID | Provider application owner | Render/browser configuration | Environment/configuration | Update only with provider-app migration | Provider dashboards | Yes when required; identifiers are not authentication secrets |
@@ -35,7 +36,7 @@ Rule: This inventory records names and handling requirements only. Never add val
 
 ## Current placement decision
 
-Cloudflare currently receives only `ORIGIN_BASE_URL`, which is not secret. No JWT signing key, provider client secret, provider token, database owner credential, setup code, or encryption key may be copied to Cloudflare during the proxy-only phase.
+Cloudflare receives only the explicitly declared Worker secrets and bindings in `wrangler.toml`. The raw Master Admin Code is never deployed; both runtimes use the shared database hash. `ADMIN_RECOVERY_CODE` is a separately configured emergency credential and must be set to the same value in each active runtime.
 
 ## Open credential response
 

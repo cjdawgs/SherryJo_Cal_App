@@ -482,6 +482,22 @@ class AppRuntimeSecret(Base):
     )
 
 
+class MasterAdminCode(Base):
+    """Shared Argon2 hash for Admin enrollment across application runtimes."""
+
+    __tablename__ = "app_master_admin_code"
+
+    key_name = Column(String(64), primary_key=True)
+    secret_hash = Column(String(512), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class WebSocketTicket(Base):
     """Short-lived, single-use credential for a WebSocket handshake."""
 

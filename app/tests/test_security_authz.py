@@ -11,8 +11,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.main import app
-from app.models import Event, Note, OAuthAccount, TVDiagLog
+from app.models import Event, MasterAdminCode, Note, OAuthAccount, TVDiagLog
 from app.routers.admin import REDACTED_COLUMNS, REDACTED_PLACEHOLDER, redact_row
+from app.services.master_admin_code import set_master_admin_code
 from app.utils.crypto import (
     TokenEncryptionError,
     reset_cipher_cache,
@@ -32,6 +33,7 @@ PUBLIC_PATHS = {
     "/redoc",
     "/auth/register",
     "/auth/login",
+    "/auth/admin-recovery/master-code",
     "/tv/dashboard",
     "/login",          # HTML shell; the API behind it is authenticated
     "/about",          # public app description required for the Google OAuth consent screen
@@ -53,6 +55,7 @@ PUBLIC_PATHS = {
 
 ADMIN_PATHS = [
     ("GET", "/admin/system/overview"),
+    ("GET", "/admin/system/master-admin-code"),
     ("GET", "/admin/system/current-user-failures-today"),
     ("GET", "/admin/system/current-user-failure-history?start_date=2026-07-01&end_date=2026-07-02"),
     ("GET", "/admin/system/tv-stale-refresh-summary?hours=24&limit=50"),
@@ -108,15 +111,10 @@ def test_admin_routes_accept_admin(client, admin_headers, method, path):
 
 
 # --------------------------------------------------
-# 3. Admin registration requires the setup code
+# 3. Admin registration requires the shared Master Admin Code
 # --------------------------------------------------
 
-def test_admin_registration_requires_setup_code(client, monkeypatch):
-    # The router waives the check while pytest is running; drop the marker so
-    # the production path is what gets exercised.
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.setenv("ADMIN_SETUP_CODE", "correct-horse")
-
+def test_admin_registration_requires_shared_master_code(client, db):
     payload = {
         "username": "escalate",
         "email": "escalate@test.com",
@@ -126,29 +124,76 @@ def test_admin_registration_requires_setup_code(client, monkeypatch):
 
     assert client.post("/auth/register", json=payload).status_code == 403
     assert client.post(
-        "/auth/register", json={**payload, "admin_setup_code": "wrong"}
+        "/auth/register", json={**payload, "master_admin_code": "wrong"}
     ).status_code == 403
-
+    set_master_admin_code(db, "correct-horse-master-admin-code")
     accepted = client.post(
-        "/auth/register", json={**payload, "admin_setup_code": "correct-horse"}
+        "/auth/register", json={**payload, "master_admin_code": "correct-horse-master-admin-code"}
     )
     assert accepted.status_code == 200
     assert accepted.json()["role"] == "admin"
 
 
-def test_admin_registration_blocked_when_setup_code_unset(client, monkeypatch):
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("ADMIN_SETUP_CODE", raising=False)
-
+def test_admin_registration_fails_when_master_code_is_not_configured(client, db):
+    db.query(MasterAdminCode).delete()
+    db.commit()
     response = client.post("/auth/register", json={
+        "username": "unconfigured-admin",
+        "email": "unconfigured-admin@test.com",
+        "password": "pass123",
+        "role": "admin",
+        "master_admin_code": "anything",
+    })
+    assert response.status_code == 503
+
+
+def test_admin_recovery_resets_only_the_shared_master_code(client, monkeypatch):
+    monkeypatch.setenv("ADMIN_RECOVERY_CODE", "recovery-secret-for-tests-0123456789")
+    response = client.post("/auth/admin-recovery/master-code", json={
+        "recovery_code": "recovery-secret-for-tests-0123456789",
+        "new_master_admin_code": "new-master-admin-code-123",
+    })
+    assert response.status_code == 200
+    assert response.json() == {"reset": True, "configured": True}
+
+    registered = client.post("/auth/register", json={
         "username": "escalate2",
         "email": "escalate2@test.com",
         "password": "pass123",
         "role": "admin",
-        "admin_setup_code": "anything",
+        "master_admin_code": "new-master-admin-code-123",
     })
+    assert registered.status_code == 200
 
-    assert response.status_code == 403
+    assert client.post("/auth/register", json={
+        "username": "escalate3",
+        "email": "escalate3@test.com",
+        "password": "pass123",
+        "role": "admin",
+        "master_admin_code": "old-master-admin-code",
+    }).status_code == 403
+    assert client.post("/auth/admin-recovery/master-code", json={
+        "recovery_code": "wrong-recovery-secret",
+        "new_master_admin_code": "another-master-admin-code-1",
+    }).status_code == 403
+
+
+def test_admin_recovery_fails_closed_when_recovery_secret_is_unset(client, monkeypatch):
+    monkeypatch.delenv("ADMIN_RECOVERY_CODE", raising=False)
+    response = client.post("/auth/admin-recovery/master-code", json={
+        "recovery_code": "anything",
+        "new_master_admin_code": "a-valid-new-master-admin-code",
+    })
+    assert response.status_code == 503
+
+
+def test_master_admin_code_recovery_instructions_are_visible_on_login_page(client):
+    response = client.get("/login")
+
+    assert response.status_code == 200
+    assert "Lost the Master Admin Code?" in response.text
+    assert "ADMIN_RECOVERY_CODE" in response.text
+    assert "/auth/admin-recovery/master-code" in response.text
 
 
 def test_runtime_token_encryption_key_endpoint_rejects_staff(client, auth_headers):
@@ -410,6 +455,7 @@ def test_admin_table_browser_redacts_password_hashes(client, admin_headers):
 
     assert "hashed_password" in payload["redacted_columns"]
     assert all(row["hashed_password"] == REDACTED_PLACEHOLDER for row in payload["rows"])
+    assert "secret_hash" in REDACTED_COLUMNS
 
 
 def test_redact_row_covers_every_sensitive_column():
@@ -575,19 +621,19 @@ def test_production_configuration_requires_security_env_vars(monkeypatch):
         "https://calendar.example.com/ms/callback",
     )
     monkeypatch.setattr(config.settings, "token_encryption_key", None, raising=False)
-    monkeypatch.delenv("ADMIN_SETUP_CODE", raising=False)
+    monkeypatch.delenv("ADMIN_RECOVERY_CODE", raising=False)
     monkeypatch.delenv("DISABLE_SQLITE_FALLBACK", raising=False)
     monkeypatch.delenv("REQUIRE_DB_KIND", raising=False)
 
     missing = config.missing_production_configuration()
 
     assert "token_encryption_key" in missing
-    assert "ADMIN_SETUP_CODE" in missing
+    assert "ADMIN_RECOVERY_CODE" in missing
     assert any(item.startswith("DISABLE_SQLITE_FALLBACK") for item in missing)
     assert any(item.startswith("REQUIRE_DB_KIND") for item in missing)
 
     monkeypatch.setattr(config.settings, "token_encryption_key", "key", raising=False)
-    monkeypatch.setenv("ADMIN_SETUP_CODE", "code")
+    monkeypatch.setenv("ADMIN_RECOVERY_CODE", "test-admin-recovery-code-0123456789")
     monkeypatch.setenv("DISABLE_SQLITE_FALLBACK", "1")
     monkeypatch.setenv("REQUIRE_DB_KIND", "postgres")
 
@@ -609,7 +655,7 @@ def test_production_configuration_rejects_oauth_callback_drift(monkeypatch):
         "https://canary.example.com/wrong-callback",
     )
     monkeypatch.setattr(config.settings, "token_encryption_key", "key", raising=False)
-    monkeypatch.setenv("ADMIN_SETUP_CODE", "code")
+    monkeypatch.setenv("ADMIN_RECOVERY_CODE", "test-admin-recovery-code-0123456789")
     monkeypatch.setenv("DISABLE_SQLITE_FALLBACK", "1")
     monkeypatch.setenv("REQUIRE_DB_KIND", "postgres")
 

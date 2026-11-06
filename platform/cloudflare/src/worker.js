@@ -43,7 +43,11 @@ import { handleGoogleLogin, handleGoogleCallback } from "./google-oauth.js";
 import { handleMsLogin, handleMsCallback } from "./ms-oauth.js";
 import { runAccountSyncNow, runScheduledCalendarSync } from "./scheduled-calendar-sync.js";
 import { createNativeAuthPostgresAdapter } from "./native-auth-postgres.js";
-import { handleNativeLogin, handleNativeRegistration } from "./native-auth.js";
+import {
+    handleNativeLogin,
+    handleNativeMasterAdminCodeRecovery,
+    handleNativeRegistration,
+} from "./native-auth.js";
 import { executeAccountRead, executeSyncRollupRead } from "./account-read-postgres.js";
 import { handleAppleAccountRequest } from "./apple-account.js";
 import {
@@ -92,6 +96,7 @@ const MS_LOGIN_PATH = "/ms/login";
 const MS_CALLBACK_PATH = "/ms/callback";
 const AUTH_LOGIN_PATH = "/auth/login";
 const AUTH_REGISTER_PATH = "/auth/register";
+const AUTH_MASTER_ADMIN_CODE_RECOVERY_PATH = "/auth/admin-recovery/master-code";
 const ACCOUNT_LIST_PATH = "/accounts";
 const ACCOUNT_SYNC_STATUS_PATH = "/accounts/sync-status";
 const ACCOUNT_SYNC_ROLLUPS_PATH = "/accounts/sync-rollups";
@@ -1319,6 +1324,13 @@ export default {
             }
             if (request.method === "POST" && incomingUrl.pathname === AUTH_REGISTER_PATH && authenticationMode === "native") {
                 return withEdgeMarker(await handleNativeRegistration(request, env, createNativeAuthPostgresAdapter(env)));
+            }
+            if (request.method === "POST" && incomingUrl.pathname === AUTH_MASTER_ADMIN_CODE_RECOVERY_PATH && authenticationMode === "native") {
+                return withEdgeMarker(await handleNativeMasterAdminCodeRecovery(
+                    request,
+                    env,
+                    createNativeAuthPostgresAdapter(env),
+                ));
             }
             if (request.method === "GET" && accountsReadMode === "native") {
                 if (incomingUrl.pathname === ACCOUNT_LIST_PATH) return await nativeAccountRead(request, env);

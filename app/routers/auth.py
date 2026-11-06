@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from jose import jwt
 from jose.exceptions import JWTError
 
@@ -17,6 +17,12 @@ from app.config import is_trusted_edge_request, settings
 from app.database import get_db
 from app.models import User, Roles
 from app.security import hash_password, verify_password, create_token
+from app.services.master_admin_code import (
+    MAX_MASTER_ADMIN_CODE_LENGTH,
+    MIN_MASTER_ADMIN_CODE_LENGTH,
+    set_master_admin_code,
+    verify_master_admin_code,
+)
 
 
 # --------------------------------------------------
@@ -50,12 +56,21 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     role: str = Roles.STAFF
-    admin_setup_code: str | None = None
+    master_admin_code: str | None = Field(default=None, max_length=MAX_MASTER_ADMIN_CODE_LENGTH)
+    admin_setup_code: str | None = Field(default=None, max_length=MAX_MASTER_ADMIN_CODE_LENGTH)
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class MasterAdminCodeRecoveryRequest(BaseModel):
+    recovery_code: str = Field(min_length=1, max_length=256)
+    new_master_admin_code: str = Field(
+        min_length=MIN_MASTER_ADMIN_CODE_LENGTH,
+        max_length=MAX_MASTER_ADMIN_CODE_LENGTH,
+    )
 
 
 # --------------------------------------------------
@@ -77,14 +92,16 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if role not in {Roles.ADMIN, Roles.STAFF}:
         raise HTTPException(status_code=400, detail="Role must be 'admin' or 'staff'")
 
-    # ✅ Admin accounts require the setup passphrase configured for the deployment.
     if role == Roles.ADMIN:
-        is_pytest_run = bool(os.getenv("PYTEST_CURRENT_TEST"))
-        if not is_pytest_run:
-            expected_code = (os.getenv("ADMIN_SETUP_CODE") or "").strip()
-            provided_code = (user.admin_setup_code or "").strip()
-            if not expected_code or not secrets.compare_digest(provided_code, expected_code):
-                raise HTTPException(status_code=403, detail="Invalid admin setup code")
+        provided_code = user.master_admin_code or user.admin_setup_code or ""
+        code_valid = verify_master_admin_code(db, provided_code)
+        if code_valid is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Master Admin Code is not configured. An Admin must set it, or use emergency recovery.",
+            )
+        if not code_valid:
+            raise HTTPException(status_code=403, detail="Invalid Master Admin Code.")
 
     new_user = User(
         username=user.username,
@@ -104,6 +121,21 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         "email": new_user.email,
         "role": new_user.role
     }
+
+
+@router.post("/admin-recovery/master-code")
+def recover_master_admin_code(payload: MasterAdminCodeRecoveryRequest, db: Session = Depends(get_db)):
+    expected_code = str(os.getenv("ADMIN_RECOVERY_CODE") or "")
+    provided_code = payload.recovery_code
+    if len(expected_code) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail="Master Admin Code recovery is unavailable because ADMIN_RECOVERY_CODE is missing or too short.",
+        )
+    if not secrets.compare_digest(provided_code.encode("utf-8"), expected_code.encode("utf-8")):
+        raise HTTPException(status_code=403, detail="Invalid Master Admin Recovery Code.")
+    set_master_admin_code(db, payload.new_master_admin_code)
+    return {"reset": True, "configured": True}
 
 
 # --------------------------------------------------
