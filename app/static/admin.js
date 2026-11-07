@@ -455,6 +455,10 @@ function escapeHtml(value) {
     .split("'").join("&#039;");
 }
 
+function supportsCloudflareReleaseControl(platform) {
+  return ["render", "cloudflare"].includes(platform);
+}
+
 function renderSystemOverview(data) {
   state.overview = data;
 
@@ -462,7 +466,7 @@ function renderSystemOverview(data) {
   const security = data?.security || {};
   const deployment = data?.deployment || {};
   if (el.cloudflareReleaseControl) {
-    const showReleaseControl = deployment.active_platform === "render";
+    const showReleaseControl = supportsCloudflareReleaseControl(deployment.active_platform);
     el.cloudflareReleaseControl.hidden = !showReleaseControl;
     if (showReleaseControl) loadCloudflareReleaseControl();
   }
@@ -960,8 +964,11 @@ function renderCloudflareReleaseControl(data) {
 
   if (el.cloudflareReleaseMessage) {
     if (!configured) {
+      const location = state.overview?.deployment?.active_platform === "cloudflare"
+        ? "the active Cloudflare Worker as a secret"
+        : "the Render service environment";
       el.cloudflareReleaseMessage.textContent =
-        "Add GITHUB_TOKEN (or GH_TOKEN) to the Render service environment with repository Actions variables read/write access. Then refresh this Admin page. Never paste the token here.";
+        `Add GITHUB_TOKEN (or GH_TOKEN) to ${location} with repository Actions variables read/write access. Then refresh this Admin page. Never paste the token here.`;
     } else if (paused) {
       const validPauseDate = pausedAt && !Number.isNaN(pausedAt.getTime());
       const resetAt = validPauseDate
@@ -1032,7 +1039,7 @@ async function updateCloudflareReleaseControl(paused) {
   };
   if (!state.cloudflareReleaseControl?.configured) {
     showResult(state.cloudflareReleaseControl?.configured === false
-      ? "No change made. Configure GITHUB_TOKEN (or GH_TOKEN) in Render with Actions variables read/write access, then refresh this page."
+      ? "No change made. Configure GITHUB_TOKEN (or GH_TOKEN) for this runtime with Actions variables read/write access, then refresh this page."
       : "No change made. The release control state is unavailable; refresh this page and check the connection.", "error");
     return;
   }

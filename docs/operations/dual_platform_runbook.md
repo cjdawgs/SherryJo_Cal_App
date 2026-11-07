@@ -31,9 +31,16 @@ Cloudflare badges compare each independently observed build against GitHub;
 when a runtime's build cannot be observed its badge is unknown, not assumed
 synced or out of sync. The Cloudflare release-control card is separate from
 either deployment's color and reports confirmation or errors next to its buttons.
-It requires a Render `GITHUB_TOKEN` (or `GH_TOKEN`) with repository Actions
-variables read/write access. Pausing gates future Worker release jobs only; it
-does not stop live traffic or Hyperdrive queries.
+The controls are available on both runtimes. Configure a fine-grained GitHub
+token with repository Actions variables read/write access as `GITHUB_TOKEN`
+(or `GH_TOKEN`) in Render, and configure a separately issued token with the
+same permissions as a Cloudflare Worker secret for production and canary.
+The Worker secret is optional for deployment; without it the Worker displays
+an unconfigured status. Rotate expired tokens in each secret store. Never
+paste tokens into the Admin page or commit them to the repository.
+Both runtimes control the same `CLOUDFLARE_RELEASE_PAUSED` repository variable.
+Pausing gates future Worker release jobs only; it does not stop live traffic
+or Hyperdrive queries.
 
 ## Environment compatibility
 

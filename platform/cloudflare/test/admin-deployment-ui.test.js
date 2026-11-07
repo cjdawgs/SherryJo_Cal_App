@@ -30,6 +30,27 @@ function resultElement() {
     };
 }
 
+test("release control is available on both Render and native Cloudflare", () => {
+    const context = vm.createContext({});
+    vm.runInContext(extract("function supportsCloudflareReleaseControl(", "function renderSystemOverview("), context);
+    assert.equal(context.supportsCloudflareReleaseControl("render"), true);
+    assert.equal(context.supportsCloudflareReleaseControl("cloudflare"), true);
+    assert.equal(context.supportsCloudflareReleaseControl("unknown"), false);
+});
+
+test("unconfigured release control points to the active runtime's secret store", () => {
+    for (const [platform, expected] of [["render", "Render service environment"], ["cloudflare", "Cloudflare Worker as a secret"]]) {
+        const message = { textContent: "" };
+        const context = vm.createContext({
+            state: { overview: { deployment: { active_platform: platform } } },
+            el: { cloudflareReleaseMessage: message },
+        });
+        vm.runInContext(extract("function renderCloudflareReleaseControl(", "async function loadCloudflareReleaseControl("), context);
+        context.renderCloudflareReleaseControl({ configured: false });
+        assert.ok(message.textContent.includes(expected));
+    }
+});
+
 test("Render and Cloudflare commit comparisons are independent and unknown stays unknown", () => {
     const context = vm.createContext({});
     vm.runInContext(

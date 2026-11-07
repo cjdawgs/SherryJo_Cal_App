@@ -220,6 +220,101 @@ async function inspectHyperdriveConfig(body, env) {
 
 const DEFAULT_GITHUB_REPOSITORY = "cjdawgs/SherryJo_Cal_App";
 const DEFAULT_GITHUB_BRANCH = "main";
+const RELEASE_PAUSE_VARIABLE = "CLOUDFLARE_RELEASE_PAUSED";
+
+async function githubReleaseRequest(repo, token, path, method = "GET", value = null) {
+    let result;
+    try {
+        result = await fetch(`https://api.github.com/repos/${repo}/actions/variables${path}`, {
+            method,
+            headers: {
+                accept: "application/vnd.github+json",
+                authorization: `Bearer ${token}`,
+                "user-agent": "SherryJo-Cal-App",
+                "x-github-api-version": "2022-11-28",
+                ...(value !== null ? { "content-type": "application/json" } : {}),
+            },
+            ...(value !== null ? { body: JSON.stringify({ name: RELEASE_PAUSE_VARIABLE, value }) } : {}),
+            signal: AbortSignal.timeout(10000),
+            redirect: "error",
+        });
+    } catch (error) {
+        console.error(JSON.stringify({ event: "github_release_request_failed", errorType: error instanceof Error ? error.name : "UnknownError" }));
+        return { error: "Could not reach GitHub to verify Worker release control.", status: 502 };
+    }
+    if (result.status === 404 && method === "GET" && path === `/${RELEASE_PAUSE_VARIABLE}`) {
+        return { missing: true };
+    }
+    if (!result.ok) {
+        if ([401, 403, 404].includes(result.status)) {
+            return { error: "GitHub denied access. Give this runtime's GITHUB_TOKEN repository Actions variables read/write access.", status: 502 };
+        }
+        return { error: `GitHub Actions variable request failed with HTTP ${result.status}.`, status: 502 };
+    }
+    if (result.status === 204 || method === "POST") return {};
+    try {
+        const payload = await result.json();
+        if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Invalid response");
+        return { payload };
+    } catch {
+        return { error: "GitHub returned an invalid Actions variable response.", status: 502 };
+    }
+}
+
+async function releasePauseState(repo, token) {
+    const result = await githubReleaseRequest(repo, token, `/${RELEASE_PAUSE_VARIABLE}`);
+    if (result.error) return result;
+    if (result.missing) {
+        // A 404 can also mean the token cannot access the repository.
+        const access = await githubReleaseRequest(repo, token, "?per_page=1");
+        if (access.error) return access;
+        if (!Array.isArray(access.payload?.variables)) {
+            return { error: "GitHub returned an invalid Actions variable list.", status: 502 };
+        }
+        return { configured: true, paused: false, updated_at: null, repository: repo, missing: true };
+    }
+    if (!["true", "false"].includes(String(result.payload?.value).toLowerCase())) {
+        return { error: "GitHub returned an invalid Worker release pause value.", status: 502 };
+    }
+    return {
+        configured: true,
+        paused: String(result.payload.value).toLowerCase() === "true",
+        updated_at: result.payload.updated_at || null,
+        repository: repo,
+        missing: false,
+    };
+}
+
+async function cloudflareReleaseControl(request, env, body) {
+    const repo = String(env.GITHUB_REPOSITORY || DEFAULT_GITHUB_REPOSITORY).trim();
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
+        return { error: "GITHUB_REPOSITORY must use the owner/repository format.", status: 400 };
+    }
+    const token = String(env.GITHUB_TOKEN || env.GH_TOKEN || "").trim();
+    if (!token) {
+        if (request.method === "GET") return { configured: false, paused: null, updated_at: null, repository: repo };
+        return { error: "Configure GITHUB_TOKEN as a Worker secret with repository Actions variables read/write access.", status: 503 };
+    }
+    if (!["GET", "POST"].includes(request.method)) return { error: "Method not allowed", status: 405 };
+    if (request.method === "POST" && typeof body?.paused !== "boolean") {
+        return { error: "paused must be a boolean.", status: 422 };
+    }
+    const current = await releasePauseState(repo, token);
+    if (current.error) return current;
+    const { missing, ...state } = current;
+    if (request.method === "GET") return state;
+    if (state.paused === body.paused) return { ...state, changed: false };
+    const value = body.paused ? "true" : "false";
+    const update = await githubReleaseRequest(repo, token, missing ? "" : `/${RELEASE_PAUSE_VARIABLE}`, missing ? "POST" : "PATCH", value);
+    if (update.error) return update;
+    const confirmed = await releasePauseState(repo, token);
+    if (confirmed.error) return confirmed;
+    if (confirmed.missing || confirmed.paused !== body.paused) {
+        return { error: "GitHub did not confirm the requested release pause setting. Refresh and retry.", status: 502 };
+    }
+    const { missing: _missing, ...confirmedState } = confirmed;
+    return { ...confirmedState, changed: true };
+}
 
 // Mirrors app/routers/admin.py::_fetch_github_latest_commit_probe so the native Worker
 // admin overview can compare its own build against GitHub without proxying to Render.
@@ -633,15 +728,17 @@ export async function handleAdminApi(request, env, adapter, userId) {
     let body = {}; if (!["GET", "DELETE"].includes(request.method)) { try { body = await request.json(); } catch { return response({ detail: "Invalid JSON body" }, 400); } }
     const url = new URL(request.url); const parts = url.pathname.split("/").filter(Boolean);
     try {
-        const result = await adapter.runWithIdentity(userId, async (client) => {
+        let result = await adapter.runWithIdentity(userId, async (client) => {
             const admin = await client.query("SELECT public.worker_app_is_admin() AS allowed");
             if (!admin.rows[0]?.allowed) return { error: "Admin only", status: 403 };
+            if (parts.join("/") === "admin/system/cloudflare/release-control") return { releaseControlAuthorized: true };
             if (parts[1] === "users") return usersRoute(client, request, parts, body);
             if (parts[1] === "providers") return providersRoute(client, request, parts, body);
             if (parts[1] === "system") return systemRoute(client, request, parts, url, env, body, adapter);
             if (parts[1] === "maintenance") return maintenanceRoute(client, request, parts);
             return { error: "Admin route not found", status: 404 };
         });
+        if (result?.releaseControlAuthorized) result = await cloudflareReleaseControl(request, env, body);
         if (result?.error) return response({ detail: result.error, ...(result.next_steps ? { next_steps: result.next_steps } : {}) }, result.status || 400);
         return response(result);
     } catch (error) {
