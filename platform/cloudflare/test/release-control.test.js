@@ -47,7 +47,7 @@ test("release control creates, verifies, resumes, and reads the shared variable"
     const writes = [];
     await withGithub(async (url, options) => {
         assert.equal(options.headers.authorization, "Bearer test-token");
-        assert.equal(options.redirect, "error");
+        assert.equal(options.redirect, "manual");
         const method = options.method;
         if (method === "POST" || method === "PATCH") {
             writes.push(method);
@@ -116,7 +116,22 @@ test("GitHub network failures are surfaced without exposing the token", async ()
             assert.match(body, /Could not reach GitHub/);
             assert.doesNotMatch(body, /test-token/);
         });
+
     } finally {
         console.error = originalError;
     }
+});
+
+test("GitHub redirects are rejected without forwarding the token", async () => {
+    let calls = 0;
+    await withGithub(async (_url, options) => {
+        calls += 1;
+        assert.equal(options.redirect, "manual");
+        return new Response(null, { status: 302, headers: { location: "https://other.example/" } });
+    }, async () => {
+        const result = await handleAdminApi(request(), env, adapter(), 1);
+        assert.equal(result.status, 502);
+        assert.match((await result.json()).detail, /redirect was not followed/);
+        assert.equal(calls, 1);
+    });
 });

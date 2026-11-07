@@ -236,11 +236,14 @@ async function githubReleaseRequest(repo, token, path, method = "GET", value = n
             },
             ...(value !== null ? { body: JSON.stringify({ name: RELEASE_PAUSE_VARIABLE, value }) } : {}),
             signal: AbortSignal.timeout(10000),
-            redirect: "error",
+            redirect: "manual",
         });
     } catch (error) {
         console.error(JSON.stringify({ event: "github_release_request_failed", errorType: error instanceof Error ? error.name : "UnknownError" }));
         return { error: "Could not reach GitHub to verify Worker release control.", status: 502 };
+    }
+    if (result.status >= 300 && result.status < 400) {
+        return { error: "GitHub redirected the release control request; the redirect was not followed. Check the configured repository.", status: 502 };
     }
     if (result.status === 404 && method === "GET" && path === `/${RELEASE_PAUSE_VARIABLE}`) {
         return { missing: true };
