@@ -56,6 +56,27 @@ test("manual account sync uses the durable pipeline even when Cron is disabled",
     assert.equal(result.created, 1);
 });
 
+test("manual sync starts a fresh operation even if the scheduled operation is dead-lettered", async () => {
+    let key;
+    const adapter = {
+        claimOwnedAccount: async () => account(),
+        beginAccountSync: async (_account, id, operationKey) => {
+            key = operationKey;
+            return operationKey.includes(":manual:") ? { id, attempt_count: 1 } : null;
+        },
+        releaseAccountClaim: async () => {},
+        decryptClaim: async (value) => value,
+        applyAccountSync: async () => ({ created: 0, updated: 0, deleted: 0 }),
+    };
+    const result = await runAccountSyncNow({ TOKEN_ENCRYPTION_KEY: "unused" }, 42, 8, {
+        adapter, uuid: () => "manual-operation",
+        now: new Date("2026-08-16T12:00:00Z"),
+        fetchImpl: async () => new Response(JSON.stringify({ items: [] }), { status: 200 }),
+    });
+    assert.equal(result.status, "succeeded");
+    assert.match(key, /:manual:/);
+});
+
 test("publish replay failure does not fail a completed account sync", async () => {
     let syncFailed = false;
     const adapter = {

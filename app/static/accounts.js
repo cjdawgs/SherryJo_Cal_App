@@ -430,12 +430,15 @@ function getHealthStatus(acc) {
   return `<span style="color:#64748b;">Unknown</span>`;
 }
 
-// Single rule for "this OAuth account needs the user to reconnect" (card button + Reconnect All).
-function isReconnectCandidate(acc) {
+function isReconnectAvailable(acc) {
   const provider = normalizeProvider(acc?.provider);
   return acc?.status === "error"
     && !Boolean(acc?.token_issue?.requires_admin)
     && ["google", "microsoft", "apple"].includes(provider);
+}
+
+function isReconnectCandidate(acc) {
+  return isReconnectAvailable(acc) && acc?.token_issue?.recommended_action === "reconnect";
 }
 
 // ---------- Reconnect-all queue (survives the provider consent redirects) ----------
@@ -794,7 +797,7 @@ function renderProviderAccounts(provider, list) {
       ? "Checks both read access and publish/create access for this Microsoft calendar account."
       : "Runs an immediate sync health check for this account using saved credentials.";
 
-    const reconnectVisible = isReconnectCandidate(acc);
+    const reconnectVisible = isReconnectAvailable(acc);
     const issueMessage = String(acc?.token_issue?.message || "").trim();
     const issueCode = String(acc?.token_issue?.code || "").trim();
     const issueGuidance = buildIssueGuidance(acc);

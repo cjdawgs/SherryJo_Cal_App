@@ -88,7 +88,13 @@ in response to a user.
   missing next sync tokens; they never contain token values. A high full-sync
   count or missing token count warrants investigation and does not by itself
   establish why Google returned that result. An expired Google cursor is not
-  retained if the replacement response has no cursor.
+  retained if the replacement response has no cursor. Cursor updates support
+  PostgreSQL `json` and `jsonb` columns. An explicit account retry starts a new
+  operation even if a previous scheduled operation was dead-lettered; automatic
+  retries remain bounded. After deploying a sync fix, retry an affected account
+  once and confirm it returns to OK; reconnect only when authorization requires
+  it. A reconnect also updates the account's success timestamp, so that
+  timestamp alone does not prove a provider sync completed.
 - **Full-sync reconciliation.** Both runtimes limit stale-event deletion to
   the fetched date window. FastAPI reconciles only accounts with successful
   full responses, while the Worker skips Google stale reconciliation when

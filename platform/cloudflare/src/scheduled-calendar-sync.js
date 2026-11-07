@@ -40,10 +40,11 @@ export function createScheduledSyncAdapter(env, ClientClass = Client) {
     });
 }
 
-export async function syncClaimedAccount(account, env, dependencies, now) {
+export async function syncClaimedAccount(account, env, dependencies, now, manual = false) {
     const { adapter, fetchImpl, uuid } = dependencies;
     const operationId = uuid();
-    const ledger = await adapter.beginAccountSync(account, operationId, operationKey(account), now);
+    const key = manual ? `worker-sync:manual:account:${account.id}:${operationId}` : operationKey(account);
+    const ledger = await adapter.beginAccountSync(account, operationId, key, now);
     if (!ledger) {
         await adapter.releaseAccountClaim(account, now);
         return { accountId: account.id, status: "skipped_terminal" };
@@ -122,7 +123,7 @@ export async function runAccountSyncNow(env, userId, accountId, overrides = {}) 
     const claimSeconds = positiveInteger(env.SCHEDULED_SYNC_CLAIM_SECONDS, 240, 900);
     const account = await dependencies.adapter.claimOwnedAccount(userId, accountId, claimSeconds);
     if (!account) return { accountId, status: "not_available" };
-    return syncClaimedAccount(account, env, dependencies, now);
+    return syncClaimedAccount(account, env, dependencies, now, true);
 }
 
 export async function runScheduledCalendarSync(env, overrides = {}) {

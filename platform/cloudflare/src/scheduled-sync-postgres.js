@@ -115,7 +115,7 @@ export const COMPLETE_ACCOUNT_SYNC_SQL = `
         token_expires_at = $4::timestamptz,
         sync_token = CASE
             WHEN (sync_token ->> '_range_generation') IS NOT DISTINCT FROM $7::text
-            THEN $5::json ELSE sync_token
+            THEN $5::jsonb ELSE sync_token::jsonb
         END,
         last_sync = $6::timestamptz,
         last_sync_success = $6::timestamptz,

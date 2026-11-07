@@ -30,8 +30,8 @@ export async function executeAccountSettingsUpdate(adapter, { userId, accountId,
             END,
             sync_token = CASE
                 WHEN $3::integer IS NOT NULL AND sync_range_days IS DISTINCT FROM $3
-                THEN json_build_object('_range_generation', $5::text)
-                ELSE sync_token
+                THEN jsonb_build_object('_range_generation', $5::text)
+                ELSE sync_token::jsonb
             END,
             sync_range_days = COALESCE($3::integer, sync_range_days),
             sync_enabled = COALESCE($4::boolean, sync_enabled)
